@@ -664,6 +664,17 @@ fn parse_hotkey(s: &str) -> Option<Shortcut> {
         "7" => Code::Digit7,
         "8" => Code::Digit8,
         "9" => Code::Digit9,
+        "/" | "slash" => Code::Slash,
+        "\\" | "backslash" => Code::Backslash,
+        "." | "period" => Code::Period,
+        "," | "comma" => Code::Comma,
+        ";" | "semicolon" => Code::Semicolon,
+        "'" | "quote" => Code::Quote,
+        "`" | "backquote" => Code::Backquote,
+        "-" | "minus" => Code::Minus,
+        "=" | "equal" => Code::Equal,
+        "[" | "bracketleft" => Code::BracketLeft,
+        "]" | "bracketright" => Code::BracketRight,
         _ => return None,
     };
 

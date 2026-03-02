@@ -1,24 +1,22 @@
 use super::AppType;
 
-const BASE_PROMPT: &str = r#"You are a voice-to-text assistant. Transform raw speech transcription into clean, well-formatted written text.
+const BASE_PROMPT: &str = r#"You are a voice-to-text assistant. Transform raw speech transcription into clean, polished text that reads as if it were typed — not transcribed.
 
 Rules:
 1. PUNCTUATION: Add appropriate punctuation (commas, periods, colons, question marks) where the speech pauses or clauses naturally end. This is the most important rule — raw transcription has no punctuation.
 2. CLEANUP: Remove filler words (um, uh, 嗯, 那个, 就是说, like, you know), false starts, and repetitions.
 3. LISTS: When the user enumerates items (signaled by words like 第一/第二, 首先/然后/最后, 一是/二是, first/second/third, etc.), format as a numbered list. CRITICAL: each list item MUST be on its own line.
 4. PARAGRAPHS: When the speech covers multiple distinct topics, separate them with a blank line. Do NOT split a single flowing thought into multiple paragraphs.
-5. COMMANDS: If the entire input is an instruction (e.g. "翻译成英语", "summarize this"), execute it. If the instruction is embedded in content (e.g. "告诉他翻译成英语"), preserve it as content.
-6. CODE: Only output code if the user explicitly asks to write code.
-7. Preserve the user's language (including mixed languages), all substantive content, technical terms, and proper nouns exactly.
-8. Output ONLY the processed text. No explanations, no quotes around output.
+5. Preserve the user's language (including mixed languages), all substantive content, technical terms, and proper nouns exactly. Do NOT add any words, phrases, or content that were not present in the original speech.
+6. Output ONLY the processed text. No explanations, no quotes around output. Do not end the output with a terminal period (. or 。). Be consistent: do not mix formatting styles or punctuation conventions.
 
 Examples:
 
 Input: "我觉得这个方案还不错就是价格有点贵"
-Output: 我觉得这个方案还不错，就是价格有点贵。
+Output: 我觉得这个方案还不错，就是价格有点贵
 
 Input: "today I had a meeting with the team we discussed the project timeline and the budget"
-Output: Today I had a meeting with the team. We discussed the project timeline and the budget.
+Output: Today I had a meeting with the team. We discussed the project timeline and the budget
 
 Input: "首先我们需要买牛奶然后要去洗衣服最后记得写代码"
 Output:
@@ -34,14 +32,13 @@ Output:
 3. 人员安排
 
 Input: "嗯那个就是说我们这个项目的话进展还是比较顺利的然后预算方面的话也没有超支"
-Output: 我们这个项目进展比较顺利，预算方面也没有超支。"#;
+Output: 我们这个项目进展比较顺利，预算方面也没有超支"#;
 
 const EMAIL_ADDON: &str = "\nContext: Email. Use formal tone, complete sentences. Preserve salutations and sign-offs if present.";
 const CHAT_ADDON: &str = "\nContext: Chat/IM. Keep it casual and concise. Short sentences. For lists, use simple line breaks instead of Markdown. No over-formatting.";
-const CODE_ADDON: &str = "\nContext: Code editor. Be technically precise. Preserve code terminology exactly. If generating code, use proper syntax. If the input is a comment or documentation, format accordingly.";
 const DOCUMENT_ADDON: &str = "\nContext: Document editor. Use clear paragraph structure. Markdown headings and lists are encouraged for organization.";
 
-const SELECTED_TEXT_ADDON: &str = "\nSELECTED TEXT MODE: The user has selected existing text in their application. Their voice input is an INSTRUCTION about what to do with the selected text. Common operations include: summarize, translate, fix typos/errors, rewrite, expand, shorten, change tone, etc. Apply the instruction to the selected text and output the result. The selected text will be provided as a separate message.";
+const SELECTED_TEXT_ADDON: &str = "\nSELECTED TEXT MODE: The user has selected existing text in their application. Their voice input is an INSTRUCTION about what to do with the selected text. Common operations include: summarize, translate, fix typos/errors, rewrite, expand, shorten, change tone, etc. Apply the instruction to the selected text and output the result. The selected text will be provided as a separate message. In this mode, generating new content is expected.";
 
 pub fn build_system_prompt(
     app_type: AppType,
@@ -55,9 +52,8 @@ pub fn build_system_prompt(
     match app_type {
         AppType::Email => prompt.push_str(EMAIL_ADDON),
         AppType::Chat => prompt.push_str(CHAT_ADDON),
-        AppType::Code => prompt.push_str(CODE_ADDON),
+        AppType::Code | AppType::General => {}
         AppType::Document => prompt.push_str(DOCUMENT_ADDON),
-        AppType::General => {}
     }
 
     if !dictionary.is_empty() {
@@ -220,19 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prompt_has_command_recognition() {
-        let prompt = build_system_prompt(AppType::General, &[], false, "", false);
-        assert!(prompt.contains("COMMANDS"));
-        assert!(prompt.contains("翻译成英语"));
-    }
-
-    #[test]
-    fn test_prompt_has_code_rule() {
-        let prompt = build_system_prompt(AppType::General, &[], false, "", false);
-        assert!(prompt.contains("CODE"));
-    }
-
-    #[test]
     fn test_prompt_has_long_dictation_rule() {
         let prompt = build_system_prompt(AppType::General, &[], false, "", false);
         assert!(prompt.contains("PARAGRAPHS"));
@@ -307,5 +290,18 @@ mod tests {
         let prompt = build_system_prompt(AppType::General, &[], true, "zh", false);
         assert!(prompt.contains("AFTER cleaning the text"));
         assert!(!prompt.contains("applying the user's instruction"));
+    }
+
+    #[test]
+    fn test_prompt_reads_as_typed() {
+        let prompt = build_system_prompt(AppType::General, &[], false, "", false);
+        assert!(prompt.contains("typed — not transcribed"));
+    }
+
+    #[test]
+    fn test_prompt_has_consistency_rule() {
+        let prompt = build_system_prompt(AppType::General, &[], false, "", false);
+        assert!(prompt.contains("Be consistent"));
+        assert!(prompt.contains("do not mix formatting styles"));
     }
 }
