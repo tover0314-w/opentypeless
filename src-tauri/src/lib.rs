@@ -522,7 +522,10 @@ async fn resume_hotkey(
 // ─── Hotkey parsing ───
 
 fn default_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::CONTROL), Code::Slash)
+    #[cfg(target_os = "macos")]
+    return Shortcut::new(Some(Modifiers::META), Code::Slash);
+    #[cfg(not(target_os = "macos"))]
+    return Shortcut::new(Some(Modifiers::CONTROL), Code::Slash);
 }
 
 fn build_shortcut_handler(
