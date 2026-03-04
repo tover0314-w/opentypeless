@@ -54,11 +54,13 @@ jobs:
 
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'OpenTypeless ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install.'
           releaseDraft: true
           prerelease: false
+          owner: tover0314-w
+          repo: opentypeless
           args: ${{ matrix.args }}
