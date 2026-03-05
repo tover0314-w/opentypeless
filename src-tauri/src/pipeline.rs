@@ -16,6 +16,25 @@ use crate::SessionTokenStore;
 
 // ─── Timing constants ───
 
+/// On macOS, verify whether the process has been granted Accessibility (Assistive Access)
+/// permission. enigo uses CGEventPost under the hood, which requires this permission;
+/// without it all synthesised key events are silently dropped by the OS.
+/// Returns true on all non-macOS platforms (no permission needed).
+fn is_accessibility_trusted() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXIsProcessTrusted() -> u8;
+        }
+        unsafe { AXIsProcessTrusted() != 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 /// Wrapper to allow Enigo to be shared across threads via Arc<Mutex<>>.
 /// On macOS, Enigo contains CGEventSource (a NonNull pointer) which is not Send/Sync.
 /// Safety: We only access Enigo through a Mutex, ensuring exclusive access.
@@ -158,8 +177,18 @@ impl PipelineHandle {
             selected.as_deref().map(|s| s.len()).unwrap_or(0)
         );
 
+        // On macOS, if Cmd+C had no effect (e.g., no Accessibility permission),
+        // the clipboard is unchanged, so selected == backup — return None to avoid
+        // passing stale clipboard content to the LLM as if it were selected text.
         match &selected {
-            Some(s) if !s.trim().is_empty() => Some(s.clone()),
+            Some(s) if !s.trim().is_empty() => {
+                if backup.as_deref() == Some(s.as_str()) {
+                    tracing::debug!("Selected text equals clipboard backup — Cmd+C had no effect, ignoring");
+                    None
+                } else {
+                    Some(s.clone())
+                }
+            }
             _ => None,
         }
     }
@@ -501,6 +530,13 @@ impl PipelineHandle {
         let is_keyboard = config.output_mode == "keyboard";
         let mut is_keyboard_streaming = is_keyboard;
 
+        // On macOS, all keyboard/clipboard output requires Accessibility permission.
+        // Check early so we can fall through to batch output_text() which also checks
+        // and surfaces a clear user-facing error instead of silently dropping events.
+        if is_keyboard && !is_accessibility_trusted() {
+            is_keyboard_streaming = false;
+        }
+
         // Pre-build LLM provider and Enigo while STT is still processing
         let pre_llm = if config.polish_enabled
             && (!config.llm_api_key.is_empty() || config.llm_provider == "cloud")
@@ -529,7 +565,15 @@ impl PipelineHandle {
             } else {
                 None
             };
-            Some((llm_config, provider, enigo_result))
+            // Pre-build clipboard once alongside Enigo to avoid re-opening the system
+            // clipboard on every streaming chunk (Windows: OpenClipboard is exclusive,
+            // high-frequency re-creation causes lock contention and silent chunk drops).
+            let clipboard_result = if is_keyboard {
+                Some(arboard::Clipboard::new())
+            } else {
+                None
+            };
+            Some((llm_config, provider, enigo_result, clipboard_result))
         } else {
             None
         };
@@ -571,7 +615,7 @@ impl PipelineHandle {
         let llm_elapsed;
 
         // Polish with LLM (resources already pre-built)
-        if let Some((llm_config, provider, enigo_result)) = pre_llm {
+        if let Some((llm_config, provider, enigo_result, clipboard_result)) = pre_llm {
             self.set_state(PipelineState::Polishing);
             let llm_start = std::time::Instant::now();
 
@@ -579,6 +623,12 @@ impl PipelineHandle {
                 match enigo_result.expect("enigo_result should be Some when is_keyboard is true") {
                     Ok(enigo_instance) => {
                         let enigo = Arc::new(Mutex::new(enigo_instance));
+                        // Reuse the pre-built clipboard instance; fall back to per-chunk
+                        // creation only if pre-build failed (e.g. clipboard daemon not running).
+                        let clipboard = clipboard_result
+                            .expect("clipboard_result should be Some when is_keyboard is true")
+                            .ok()
+                            .map(|cb| Arc::new(Mutex::new(cb)));
                         let app_handle = self.app_handle.clone();
                         let state = self.state.clone();
                         let transitioned = Arc::new(AtomicBool::new(false));
@@ -591,21 +641,37 @@ impl PipelineHandle {
                             }
                             let _ = app_handle.emit("llm:chunk", chunk);
                             // Paste each chunk via clipboard to avoid dropped CJK characters
-                            // that occur with enigo's SendInput-based text() on Windows
-                            if let Ok(mut cb) = arboard::Clipboard::new() {
-                                if cb.set_text(chunk).is_ok() {
-                                    if let Ok(mut e) = enigo.lock() {
-                                        #[cfg(target_os = "macos")]
-                                        let modifier = Key::Meta;
-                                        #[cfg(not(target_os = "macos"))]
-                                        let modifier = Key::Control;
-                                        let _ = e.0.key(modifier, Direction::Press);
-                                        let _ = e.0.key(Key::Unicode('v'), Direction::Click);
-                                        let _ = e.0.key(modifier, Direction::Release);
+                            // that occur with enigo's SendInput-based text() on Windows.
+                            // Use the pre-built clipboard to avoid re-opening the system
+                            // clipboard handle on every chunk (prevents lock contention on Windows).
+                            let pasted = if let Some(ref cb_arc) = clipboard {
+                                if let Ok(mut cb) = cb_arc.lock() {
+                                    cb.set_text(chunk).is_ok()
+                                } else {
+                                    false
+                                }
+                            } else {
+                                // Pre-build failed; fall back to per-chunk creation
+                                arboard::Clipboard::new()
+                                    .map(|mut cb| cb.set_text(chunk).is_ok())
+                                    .unwrap_or(false)
+                            };
+                            if pasted {
+                                if let Ok(mut e) = enigo.lock() {
+                                    #[cfg(target_os = "macos")]
+                                    let modifier = Key::Meta;
+                                    #[cfg(not(target_os = "macos"))]
+                                    let modifier = Key::Control;
+                                    let _ = e.0.key(modifier, Direction::Press);
+                                    let _ = e.0.key(Key::Unicode('v'), Direction::Click);
+                                    let _ = e.0.key(modifier, Direction::Release);
+                                    // Use block_in_place so tokio knows this thread is
+                                    // blocking; prevents starving the async executor.
+                                    tokio::task::block_in_place(|| {
                                         std::thread::sleep(std::time::Duration::from_millis(
                                             STREAM_PASTE_DELAY_MS,
-                                        ));
-                                    }
+                                        ))
+                                    });
                                 }
                             }
                         })
@@ -665,6 +731,8 @@ impl PipelineHandle {
                             "pipeline:error",
                             format!("LLM polishing failed mid-stream: {e}"),
                         );
+                        // raw_text is NOT output here because partial polished text has
+                        // already been typed — appending raw_text would produce garbled output.
                         let _ = self
                             .app_handle
                             .emit("pipeline:target_app", &app_ctx.app_name);
@@ -764,6 +832,17 @@ impl PipelineHandle {
         config: &storage::AppConfig,
     ) -> Result<()> {
         self.set_state(PipelineState::Outputting);
+
+        // On macOS, keyboard and clipboard-paste output both rely on CGEventPost
+        // (enigo). Without Accessibility permission the OS silently drops all
+        // synthetic events. Detect early and surface a clear error instead.
+        if !is_accessibility_trusted() {
+            anyhow::bail!(
+                "Accessibility permission is required to type text. \
+                 Please go to System Settings → Privacy & Security → Accessibility \
+                 and enable OpenTypeless."
+            );
+        }
 
         let mode = if config.output_mode == "keyboard" {
             OutputMode::Keyboard

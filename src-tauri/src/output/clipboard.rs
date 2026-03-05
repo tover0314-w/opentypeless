@@ -1,6 +1,5 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 use super::{OutputMode, TextOutput};
 
@@ -35,23 +34,39 @@ impl TextOutput for ClipboardOutput {
 
             std::thread::sleep(std::time::Duration::from_millis(CLIPBOARD_SETTLE_MS));
 
-            let mut enigo = Enigo::new(&Settings::default())
-                .map_err(|e| anyhow::anyhow!("Failed to create Enigo: {:?}", e))?;
-
+            // On macOS: trigger Cmd+V via osascript (AppleScript).
+            // This avoids the Accessibility permission requirement that enigo's
+            // CGEventPost needs. The apple-events entitlement is already declared.
+            // On Windows/Linux: use enigo's SendInput which needs no special permissions.
             #[cfg(target_os = "macos")]
-            let modifier = Key::Meta;
-            #[cfg(not(target_os = "macos"))]
-            let modifier = Key::Control;
+            {
+                let status = std::process::Command::new("osascript")
+                    .args([
+                        "-e",
+                        r#"tell application "System Events" to keystroke "v" using command down"#,
+                    ])
+                    .status();
+                if let Err(e) = status {
+                    anyhow::bail!("osascript paste failed: {}", e);
+                }
+            }
 
-            enigo
-                .key(modifier, Direction::Press)
-                .map_err(|e| anyhow::anyhow!("Key press error: {:?}", e))?;
-            enigo
-                .key(Key::Unicode('v'), Direction::Click)
-                .map_err(|e| anyhow::anyhow!("Key click error: {:?}", e))?;
-            enigo
-                .key(modifier, Direction::Release)
-                .map_err(|e| anyhow::anyhow!("Key release error: {:?}", e))?;
+            #[cfg(not(target_os = "macos"))]
+            {
+                use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+                let mut enigo = Enigo::new(&Settings::default())
+                    .map_err(|e| anyhow::anyhow!("Failed to create Enigo: {:?}", e))?;
+
+                enigo
+                    .key(Key::Control, Direction::Press)
+                    .map_err(|e| anyhow::anyhow!("Key press error: {:?}", e))?;
+                enigo
+                    .key(Key::Unicode('v'), Direction::Click)
+                    .map_err(|e| anyhow::anyhow!("Key click error: {:?}", e))?;
+                enigo
+                    .key(Key::Control, Direction::Release)
+                    .map_err(|e| anyhow::anyhow!("Key release error: {:?}", e))?;
+            }
 
             Ok(())
         })
