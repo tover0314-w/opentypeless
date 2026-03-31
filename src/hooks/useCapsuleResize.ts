@@ -6,7 +6,12 @@ interface CapsuleSize {
   height: number
 }
 
-function getSizeForState(state: PipelineState, expanded: boolean, hasError: boolean, contextMenuOpen: boolean): CapsuleSize {
+function getSizeForState(
+  state: PipelineState,
+  expanded: boolean,
+  hasError: boolean,
+  contextMenuOpen: boolean,
+): CapsuleSize {
   if (contextMenuOpen) return { width: 220, height: 220 }
   if (hasError) return { width: 200, height: 36 }
   if (expanded) return { width: 220, height: 90 }
@@ -128,7 +133,14 @@ export function useCapsuleResize() {
         }
       })
       .catch(() => {})
-  }, [pipelineState, capsuleExpanded, hasError, contextMenuOpen, capsuleAutoHide, setContextMenuReady])
+  }, [
+    pipelineState,
+    capsuleExpanded,
+    hasError,
+    contextMenuOpen,
+    capsuleAutoHide,
+    setContextMenuReady,
+  ])
 
   return getSizeForState(pipelineState, capsuleExpanded, hasError, contextMenuOpen)
 }

@@ -25,19 +25,22 @@ export function LlmPane() {
   const [fetchingModels, setFetchingModels] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const doFetchModels = useCallback(async (apiKey: string, baseUrl: string) => {
-    if (!baseUrl) return
-    setFetchingModels(true)
-    try {
-      const list = await fetchLlmModels(apiKey, baseUrl)
-      setModels(list)
-    } catch {
-      // Do not clear existing cache on failure — avoids infinite retry loop
-      // (clearing would re-trigger the useEffect that checks models.length > 0)
-    } finally {
-      setFetchingModels(false)
-    }
-  }, [setModels])
+  const doFetchModels = useCallback(
+    async (apiKey: string, baseUrl: string) => {
+      if (!baseUrl) return
+      setFetchingModels(true)
+      try {
+        const list = await fetchLlmModels(apiKey, baseUrl)
+        setModels(list)
+      } catch {
+        // Do not clear existing cache on failure — avoids infinite retry loop
+        // (clearing would re-trigger the useEffect that checks models.length > 0)
+      } finally {
+        setFetchingModels(false)
+      }
+    },
+    [setModels],
+  )
 
   // Auto-fetch when API key or base URL changes (debounced); skips if models already cached
   useEffect(() => {
@@ -142,7 +145,8 @@ export function LlmPane() {
             </div>
             {llmTestStatus === 'success' && (
               <p className="flex items-center gap-1 text-[12px] text-success mt-2">
-                <CheckCircle2 size={13} /> {llmLatencyMs !== null ? `${llmLatencyMs}ms` : t('settings.connectionSuccess')}
+                <CheckCircle2 size={13} />{' '}
+                {llmLatencyMs !== null ? `${llmLatencyMs}ms` : t('settings.connectionSuccess')}
               </p>
             )}
             {llmTestStatus === 'error' && (
@@ -159,7 +163,10 @@ export function LlmPane() {
                 <input
                   list="llm-model-list"
                   value={config.llm_model}
-                  onChange={(e) => { updateConfig({ llm_model: e.target.value }); setLlmLatencyMs(null) }}
+                  onChange={(e) => {
+                    updateConfig({ llm_model: e.target.value })
+                    setLlmLatencyMs(null)
+                  }}
                   placeholder="e.g. gpt-4o-mini"
                   className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
                 />

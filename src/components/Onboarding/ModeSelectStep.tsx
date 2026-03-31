@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Cloud, Key, Mic, Bot, Sparkles, Infinity, Layers } from 'lucide-react'
+import { Cloud, Key, Mic, Bot, Sparkles, Infinity as InfinityIcon, Layers } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import { spring } from '../../lib/animations'
 
@@ -22,9 +22,13 @@ export function ModeSelectStep() {
         }`}
       >
         <div className="flex items-start gap-3">
-          <div className={`mt-0.5 p-1.5 rounded-[8px] shrink-0 ${
-            onboardingMode === 'cloud' ? 'bg-accent/15 text-accent' : 'bg-bg-tertiary text-text-tertiary'
-          }`}>
+          <div
+            className={`mt-0.5 p-1.5 rounded-[8px] shrink-0 ${
+              onboardingMode === 'cloud'
+                ? 'bg-accent/15 text-accent'
+                : 'bg-bg-tertiary text-text-tertiary'
+            }`}
+          >
             <Cloud size={18} />
           </div>
           <div className="space-y-1.5">
@@ -57,16 +61,20 @@ export function ModeSelectStep() {
         }`}
       >
         <div className="flex items-start gap-3">
-          <div className={`mt-0.5 p-1.5 rounded-[8px] shrink-0 ${
-            onboardingMode === 'byok' ? 'bg-accent/15 text-accent' : 'bg-bg-tertiary text-text-tertiary'
-          }`}>
+          <div
+            className={`mt-0.5 p-1.5 rounded-[8px] shrink-0 ${
+              onboardingMode === 'byok'
+                ? 'bg-accent/15 text-accent'
+                : 'bg-bg-tertiary text-text-tertiary'
+            }`}
+          >
             <Key size={18} />
           </div>
           <div className="space-y-1.5">
             <span className="text-[14px] font-medium text-text-primary">Bring Your Own Key</span>
             <p className="text-[13px] text-text-secondary">Use your own API keys</p>
             <div className="flex flex-col gap-0.5">
-              <Detail icon={Infinity} text="Unlimited usage" />
+              <Detail icon={InfinityIcon} text="Unlimited usage" />
               <Detail icon={Layers} text="12+ providers supported" />
             </div>
           </div>
@@ -76,7 +84,13 @@ export function ModeSelectStep() {
   )
 }
 
-function Detail({ icon: Icon, text }: { icon: React.ComponentType<{ size?: number }>; text: string }) {
+function Detail({
+  icon: Icon,
+  text,
+}: {
+  icon: React.ComponentType<{ size?: number }>
+  text: string
+}) {
   return (
     <p className="flex items-center gap-1.5 text-[12px] text-text-tertiary">
       <Icon size={12} />

@@ -749,7 +749,7 @@ fn default_shortcut() -> Shortcut {
             Shortcut::new(Some(Modifiers::CONTROL), Code::Slash)
         }
     };
-    parse_hotkey(&default_hotkey).unwrap_or_else(|| fallback)
+    parse_hotkey(&default_hotkey).unwrap_or(fallback)
 }
 
 fn build_shortcut_handler(

@@ -33,7 +33,8 @@ function AuthForm() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
-  const { signIn, signUp, loading, error, emailVerificationPending, resendVerification } = useAuthStore()
+  const { signIn, signUp, loading, error, emailVerificationPending, resendVerification } =
+    useAuthStore()
   const [localError, setLocalError] = useState<string | null>(null)
   const [resent, setResent] = useState(false)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
@@ -42,11 +43,14 @@ function AuthForm() {
   // Auto-timeout OAuth pending state after 2 minutes
   useEffect(() => {
     if (!oauthPending) return
-    const timer = setTimeout(() => {
-      setOauthPending(null)
-      clearOAuthState()
-      setLocalError(t('account.oauthTimeout', 'Sign in timed out. Please try again.'))
-    }, 2 * 60 * 1000)
+    const timer = setTimeout(
+      () => {
+        setOauthPending(null)
+        clearOAuthState()
+        setLocalError(t('account.oauthTimeout', 'Sign in timed out. Please try again.'))
+      },
+      2 * 60 * 1000,
+    )
     return () => clearTimeout(timer)
   }, [oauthPending, t])
 
@@ -109,9 +113,7 @@ function AuthForm() {
               {t('account.verificationResent', 'Verification email sent!')}
             </p>
           )}
-          {error && (
-            <p className="text-red-500 text-[12px]">{error}</p>
-          )}
+          {error && <p className="text-red-500 text-[12px]">{error}</p>}
           <button
             onClick={() => {
               useAuthStore.setState({ emailVerificationPending: false, pendingEmail: null })
@@ -166,15 +168,28 @@ function AuthForm() {
               className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[jelly-breathe_2s_ease-in-out_infinite]"
               style={{
                 background: 'var(--bg-secondary)',
-                boxShadow: 'inset 0 1px 3px rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.04)',
+                boxShadow:
+                  'inset 0 1px 3px rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.04)',
               }}
             >
               {oauthPending === 'google' ? (
                 <svg width="24" height="24" viewBox="0 0 24 24">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                  <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                    fill="#EA4335"
+                  />
                 </svg>
               ) : (
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -189,7 +204,10 @@ function AuthForm() {
               {t('account.oauthPendingTitle', 'Completing sign in...')}
             </p>
             <p className="text-text-secondary text-[12px]">
-              {t('account.oauthPendingDesc', "Finish signing in with your browser. You'll be redirected back automatically.")}
+              {t(
+                'account.oauthPendingDesc',
+                "Finish signing in with your browser. You'll be redirected back automatically.",
+              )}
             </p>
           </div>
 
@@ -197,13 +215,19 @@ function AuthForm() {
           <div className="h-1 rounded-full overflow-hidden bg-bg-secondary mx-8">
             <div
               className="h-full rounded-full animate-[shimmer-sweep_1.5s_ease-in-out_infinite]"
-              style={{ background: 'linear-gradient(90deg, transparent, var(--accent), transparent)', width: '40%' }}
+              style={{
+                background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
+                width: '40%',
+              }}
             />
           </div>
 
           {/* Cancel button */}
           <button
-            onClick={() => { setOauthPending(null); clearOAuthState() }}
+            onClick={() => {
+              setOauthPending(null)
+              clearOAuthState()
+            }}
             className="px-4 py-2 rounded-[10px] border border-border bg-transparent text-text-secondary text-[12px] cursor-pointer hover:bg-bg-secondary transition-colors"
           >
             {t('account.cancel', 'Cancel')}
@@ -363,6 +387,7 @@ function AccountDetails() {
     setBackupLoading(true)
     setBackupMsg(null)
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { stt_api_key, llm_api_key, ...safeConfig } = config
       await uploadBackup({ history, dictionary, settings: safeConfig })
       setBackupMsg('Backup uploaded successfully')

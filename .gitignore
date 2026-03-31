@@ -47,3 +47,17 @@ jelly-reference*.png
 
 # Internal design docs (not for public distribution)
 docs/superpowers/
+
+# Project management & internal docs
+AGENTS.md
+IMPROVEMENTS.md
+bugs.md
+docs/LLM_BUG_REPRODUCTION_REPORT.md
+docs/PROMPT_VERSIONS.md
+docs/SELECTED_TEXT_EVOLUTION.md
+docs/output-mode-impl-plan.md
+docs/output-mode-ui-design.md
+docs/plans/
+
+# Binary artifacts
+rustup-init.exe

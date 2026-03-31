@@ -1,3 +1,5 @@
+pub mod anomaly_detector;
+
 pub mod cloud;
 pub mod openai;
 pub mod prompt;
@@ -67,7 +69,10 @@ pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
 }
 
-pub fn create_provider(provider_name: &str, client: Option<reqwest::Client>) -> Box<dyn LlmProvider> {
+pub fn create_provider(
+    provider_name: &str,
+    client: Option<reqwest::Client>,
+) -> Box<dyn LlmProvider> {
     match (provider_name, client) {
         ("cloud", Some(c)) => Box::new(cloud::CloudLlmProvider::with_client(c)),
         ("cloud", None) => Box::new(cloud::CloudLlmProvider::new()),
@@ -75,3 +80,6 @@ pub fn create_provider(provider_name: &str, client: Option<reqwest::Client>) -> 
         (_, None) => Box::new(openai::OpenAiProvider::new()),
     }
 }
+
+#[cfg(test)]
+pub mod test_support;

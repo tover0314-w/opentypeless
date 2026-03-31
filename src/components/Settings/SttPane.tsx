@@ -91,7 +91,8 @@ export function SttPane() {
           </div>
           {sttTestStatus === 'success' && (
             <p className="flex items-center gap-1 text-[12px] text-success mt-2">
-              <CheckCircle2 size={13} /> {sttLatencyMs !== null ? `${sttLatencyMs}ms` : t('settings.connectionSuccess')}
+              <CheckCircle2 size={13} />{' '}
+              {sttLatencyMs !== null ? `${sttLatencyMs}ms` : t('settings.connectionSuccess')}
             </p>
           )}
           {sttTestStatus === 'error' && (

@@ -24,9 +24,21 @@ afterEach(() => {
 // ─── Mock framer-motion ───────────────────────────────────────────────────────
 // 过滤掉所有 framer-motion 专有 prop，避免 React DOM 警告和 getByText 多元素问题
 const MOTION_PROPS = new Set([
-  'initial', 'animate', 'exit', 'transition', 'variants',
-  'whileHover', 'whileTap', 'whileFocus', 'whileDrag', 'whileInView',
-  'layoutId', 'layout', 'drag', 'dragConstraints', 'onAnimationComplete',
+  'initial',
+  'animate',
+  'exit',
+  'transition',
+  'variants',
+  'whileHover',
+  'whileTap',
+  'whileFocus',
+  'whileDrag',
+  'whileInView',
+  'layoutId',
+  'layout',
+  'drag',
+  'dragConstraints',
+  'onAnimationComplete',
 ])
 
 vi.mock('framer-motion', () => ({
@@ -36,14 +48,14 @@ vi.mock('framer-motion', () => ({
     {
       get:
         (_t, tag: string) =>
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ({ children, ...rest }: any) => {
-            const domProps: Record<string, unknown> = {}
-            for (const [k, v] of Object.entries(rest)) {
-              if (!MOTION_PROPS.has(k)) domProps[k] = v
-            }
-            return React.createElement(tag as string, { 'data-motion': tag, ...domProps }, children)
-          },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ({ children, ...rest }: any) => {
+          const domProps: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(rest)) {
+            if (!MOTION_PROPS.has(k)) domProps[k] = v
+          }
+          return React.createElement(tag as string, { 'data-motion': tag, ...domProps }, children)
+        },
     },
   ),
 }))

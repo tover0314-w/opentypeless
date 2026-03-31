@@ -58,21 +58,24 @@ export function Capsule() {
     }
   }, [])
 
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0) return
-    if (isDragging.current) {
-      isDragging.current = false
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 0) return
+      if (isDragging.current) {
+        isDragging.current = false
+        dragStart.current = null
+        return
+      }
       dragStart.current = null
-      return
-    }
-    dragStart.current = null
 
-    if (isRecording) {
-      stopRecording()
-    } else if (!isProcessing && !hasError && pipelineState === 'idle') {
-      startRecording()
-    }
-  }, [isRecording, isProcessing, hasError, pipelineState, startRecording, stopRecording])
+      if (isRecording) {
+        stopRecording()
+      } else if (!isProcessing && !hasError && pipelineState === 'idle') {
+        startRecording()
+      }
+    },
+    [isRecording, isProcessing, hasError, pipelineState, startRecording, stopRecording],
+  )
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()

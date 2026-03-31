@@ -202,11 +202,7 @@ export function QuickTestStep() {
             <div key={stage.key} className="flex items-center">
               <motion.div
                 className={`flex flex-col items-center gap-1 px-2.5 py-1.5 rounded-[8px] transition-colors ${
-                  isCurrent
-                    ? 'bg-accent/10'
-                    : isDone
-                      ? 'bg-success/10'
-                      : 'bg-bg-secondary'
+                  isCurrent ? 'bg-accent/10' : isDone ? 'bg-success/10' : 'bg-bg-secondary'
                 }`}
                 animate={isCurrent ? { scale: [1, 1.05, 1] } : {}}
                 transition={isCurrent ? { repeat: Infinity, duration: 1.5 } : {}}
@@ -214,29 +210,19 @@ export function QuickTestStep() {
                 <Icon
                   size={14}
                   className={
-                    isCurrent
-                      ? 'text-accent'
-                      : isDone
-                        ? 'text-success'
-                        : 'text-text-tertiary'
+                    isCurrent ? 'text-accent' : isDone ? 'text-success' : 'text-text-tertiary'
                   }
                 />
                 <span
                   className={`text-[10px] ${
-                    isCurrent
-                      ? 'text-accent'
-                      : isDone
-                        ? 'text-success'
-                        : 'text-text-tertiary'
+                    isCurrent ? 'text-accent' : isDone ? 'text-success' : 'text-text-tertiary'
                   }`}
                 >
                   {stage.label}
                 </span>
               </motion.div>
               {i < STAGES.length - 1 && (
-                <div
-                  className={`w-3 h-[1px] ${isDone ? 'bg-success/40' : 'bg-border'}`}
-                />
+                <div className={`w-3 h-[1px] ${isDone ? 'bg-success/40' : 'bg-border'}`} />
               )}
             </div>
           )

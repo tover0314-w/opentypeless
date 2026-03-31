@@ -150,7 +150,8 @@ interface AppState {
   resetConfig: () => void
 }
 
-const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
+const isMac =
+  typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
 
 const defaultConfig: AppConfig = {
   stt_provider: 'glm-asr',

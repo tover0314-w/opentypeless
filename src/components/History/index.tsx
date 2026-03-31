@@ -14,6 +14,9 @@ export function History() {
   const [search, setSearch] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
 
+  // Track expanded state for each entry
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
+
   const filtered = useMemo(
     () =>
       search
@@ -37,6 +40,18 @@ export function History() {
       .catch(() => {
         toast.error(t('history.failedToCopy'))
       })
+  }
+
+  const toggleExpand = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
 
   const handleClear = async () => {
@@ -111,37 +126,92 @@ export function History() {
                   {label}
                 </h3>
                 <div className="space-y-0.5">
-                  {entries.map((entry) => (
-                    <motion.div
-                      key={entry.id}
-                      whileHover={{ scale: 1.01 }}
-                      transition={spring.jellyGentle}
-                      className="group flex items-start gap-3 px-3 py-2.5 rounded-[10px] hover:bg-bg-secondary transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] text-text-primary leading-relaxed">
-                          {entry.polished_text}
-                        </p>
-                        <p className="text-[11px] text-text-tertiary mt-1">
-                          {entry.created_at.split('T')[1]?.slice(0, 5) || ''} · {entry.app_name}
-                        </p>
-                      </div>
-                      <motion.button
-                        onClick={() => handleCopy(entry.id, entry.polished_text)}
-                        whileTap={{ scaleX: 1.1, scaleY: 0.9 }}
-                        transition={spring.jelly}
-                        className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 p-1.5 rounded-[6px] hover:bg-bg-tertiary transition-all duration-200 bg-transparent border-none cursor-pointer text-text-tertiary hover:text-accent flex-shrink-0"
-                        aria-label={`Copy text: ${entry.polished_text.slice(0, 30)}`}
+                  {entries.map((entry) => {
+                    const isExpanded = expandedIds.has(entry.id)
+
+                    return (
+                      <motion.div
+                        key={entry.id}
+                        whileHover={{ scale: 1.01 }}
+                        transition={spring.jellyGentle}
+                        className="group px-3 py-2.5 rounded-[10px] hover:bg-bg-secondary transition-colors"
                       >
-                        <Copy size={13} />
-                      </motion.button>
-                      {copiedId === entry.id && (
-                        <span className="text-[11px] text-success flex-shrink-0 self-center">
-                          {t('history.copied')}
-                        </span>
-                      )}
-                    </motion.div>
-                  ))}
+                        {/* Row 1: Polished text + Toggle + Copy Polished */}
+                        <div className="flex items-start gap-1">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] text-text-primary leading-relaxed">
+                              {entry.polished_text}
+                            </p>
+                          </div>
+                          {/* Toggle button */}
+                          <motion.button
+                            onClick={() => toggleExpand(entry.id)}
+                            whileTap={{ scaleX: 1.1, scaleY: 0.9 }}
+                            transition={spring.jelly}
+                            className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 px-2 py-1.5 rounded-[6px] hover:bg-bg-tertiary transition-all duration-200 bg-transparent border-none cursor-pointer text-[11px] text-text-tertiary hover:text-accent whitespace-nowrap flex-shrink-0"
+                          >
+                            {isExpanded ? 'Hide Original' : 'View Original'}
+                          </motion.button>
+                          {/* Copy Polished button */}
+                          <motion.button
+                            onClick={() => handleCopy(entry.id, entry.polished_text)}
+                            whileTap={{ scaleX: 1.1, scaleY: 0.9 }}
+                            transition={spring.jelly}
+                            className="opacity-0 scale-95 group-hover:opacity-100 group-hover:scale-100 p-1.5 rounded-[6px] hover:bg-bg-tertiary transition-all duration-200 bg-transparent border-none cursor-pointer text-text-tertiary hover:text-accent flex-shrink-0"
+                            aria-label={`Copy polished: ${entry.polished_text.slice(0, 30)}`}
+                            title="Copy polished text"
+                          >
+                            <Copy size={13} />
+                          </motion.button>
+                        </div>
+
+                        {/* Row 2: Raw text + Copy Original (when expanded) */}
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-2 pt-2 border-t border-border/50 flex items-start gap-1">
+                                <p className="flex-1 text-[12px] text-text-tertiary leading-relaxed min-w-0">
+                                  {entry.raw_text}
+                                </p>
+                                {/* Spacer for alignment with Toggle column */}
+                                <div className="px-2 py-1.5 text-[11px] whitespace-nowrap opacity-0 flex-shrink-0">
+                                  Hide Original
+                                </div>
+                                {/* Copy Original button - aligned with Copy Polished */}
+                                <motion.button
+                                  onClick={() => handleCopy(entry.id, entry.raw_text)}
+                                  whileTap={{ scaleX: 1.1, scaleY: 0.9 }}
+                                  transition={spring.jelly}
+                                  className="p-1.5 rounded-[6px] hover:bg-bg-tertiary transition-all duration-200 bg-transparent border-none cursor-pointer text-text-tertiary hover:text-accent flex-shrink-0"
+                                  aria-label={`Copy original: ${entry.raw_text.slice(0, 30)}`}
+                                  title="Copy original text"
+                                >
+                                  <Copy size={13} />
+                                </motion.button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Row 3: Metadata */}
+                        <div className="flex items-center gap-1 mt-1">
+                          <p className="text-[11px] text-text-tertiary">
+                            {entry.created_at.split('T')[1]?.slice(0, 5) || ''} · {entry.app_name}
+                          </p>
+                          {/* Copied indicator */}
+                          {copiedId === entry.id && (
+                            <span className="text-[11px] text-success">{t('history.copied')}</span>
+                          )}
+                        </div>
+                      </motion.div>
+                    )
+                  })}
                 </div>
               </div>
             ))}

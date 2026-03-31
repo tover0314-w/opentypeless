@@ -35,6 +35,16 @@ fn is_accessibility_trusted() -> bool {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn output_mode_requires_accessibility(mode: OutputMode) -> bool {
+    matches!(mode, OutputMode::Keyboard)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn output_mode_requires_accessibility(_mode: OutputMode) -> bool {
+    false
+}
+
 /// Delay before capturing selected text to ensure hotkey modifiers are released.
 const SELECTED_TEXT_CAPTURE_DELAY_MS: u64 = 60;
 /// Delay after simulating Ctrl+C to let the clipboard update.
@@ -174,7 +184,9 @@ impl PipelineHandle {
         match &selected {
             Some(s) if !s.trim().is_empty() => {
                 if backup.as_deref() == Some(s.as_str()) {
-                    tracing::debug!("Selected text equals clipboard backup — Cmd+C had no effect, ignoring");
+                    tracing::debug!(
+                        "Selected text equals clipboard backup — Cmd+C had no effect, ignoring"
+                    );
                     None
                 } else {
                     Some(s.clone())
@@ -546,7 +558,8 @@ impl PipelineHandle {
                 max_tokens: 4096,
                 temperature: 0.3,
             };
-            let provider = llm::create_provider(&config.llm_provider, Some(self.shared_client.clone()));
+            let provider =
+                llm::create_provider(&config.llm_provider, Some(self.shared_client.clone()));
             Some((llm_config, provider))
         } else {
             None
@@ -724,22 +737,22 @@ impl PipelineHandle {
     ) -> Result<()> {
         self.set_state(PipelineState::Outputting);
 
-        // On macOS, keyboard and clipboard-paste output both rely on CGEventPost
-        // (enigo). Without Accessibility permission the OS silently drops all
-        // synthetic events. Detect early and surface a clear error instead.
-        if !is_accessibility_trusted() {
+        let mode = if config.output_mode == "keyboard" {
+            OutputMode::Keyboard
+        } else {
+            OutputMode::Clipboard
+        };
+
+        // On macOS, only direct keyboard simulation relies on CGEventPost.
+        // Clipboard mode uses osascript paste and should remain available
+        // without Accessibility permission.
+        if output_mode_requires_accessibility(mode) && !is_accessibility_trusted() {
             anyhow::bail!(
                 "Accessibility permission is required to type text. \
                  Please go to System Settings → Privacy & Security → Accessibility \
                  and enable OpenTypeless."
             );
         }
-
-        let mode = if config.output_mode == "keyboard" {
-            OutputMode::Keyboard
-        } else {
-            OutputMode::Clipboard
-        };
 
         let output = output::create_output(mode);
         output.type_text(text).await?;
@@ -767,7 +780,10 @@ impl PipelineHandle {
             "deepgram" => "https://api.deepgram.com/v1/listen".to_string(),
             "assemblyai" => "https://api.assemblyai.com/v2/transcript".to_string(),
             _ => {
-                tracing::debug!("Unknown STT provider '{}', skipping pre-warm", config.stt_provider);
+                tracing::debug!(
+                    "Unknown STT provider '{}', skipping pre-warm",
+                    config.stt_provider
+                );
                 return;
             }
         };
@@ -797,5 +813,24 @@ impl PipelineHandle {
                 .await;
             tracing::debug!("LLM connection pre-warm complete");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clipboard_output_accessibility_requirement_matches_platform_rules() {
+        assert!(!output_mode_requires_accessibility(OutputMode::Clipboard));
+    }
+
+    #[test]
+    fn keyboard_output_accessibility_requirement_matches_platform_rules() {
+        #[cfg(target_os = "macos")]
+        assert!(output_mode_requires_accessibility(OutputMode::Keyboard));
+
+        #[cfg(not(target_os = "macos"))]
+        assert!(!output_mode_requires_accessibility(OutputMode::Keyboard));
     }
 }

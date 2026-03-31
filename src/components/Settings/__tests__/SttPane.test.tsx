@@ -44,12 +44,12 @@ const mockAppStore = {
 }
 
 const mockAuthStore = {
-  user: null as any,
-  plan: null as any,
+  user: null as unknown,
+  plan: null as unknown,
 }
 
 vi.mock('../../../stores/appStore', () => ({
-  useAppStore: (selector: any) => {
+  useAppStore: (selector: (store: typeof mockAppStore) => unknown) => {
     if (typeof selector === 'function') {
       return selector(mockAppStore)
     }
@@ -58,7 +58,7 @@ vi.mock('../../../stores/appStore', () => ({
 }))
 
 vi.mock('../../../stores/authStore', () => ({
-  useAuthStore: (selector: any) => {
+  useAuthStore: (selector: (store: typeof mockAuthStore) => unknown) => {
     if (typeof selector === 'function') {
       return selector(mockAuthStore)
     }
@@ -147,14 +147,18 @@ describe('SttPane', () => {
     it('renders API key input with current value', () => {
       mockAppStore.config.stt_api_key = 'sk-test123'
       const { container } = render(<SttPane />)
-      const input = container.querySelector('input[placeholder="Enter API Key"]') as HTMLInputElement
+      const input = container.querySelector(
+        'input[placeholder="Enter API Key"]',
+      ) as HTMLInputElement
       expect(input.value).toBe('sk-test123')
       expect(input.type).toBe('password')
     })
 
     it('updates config and resets test state when API key changes', () => {
       const { container } = render(<SttPane />)
-      const input = container.querySelector('input[placeholder="Enter API Key"]') as HTMLInputElement
+      const input = container.querySelector(
+        'input[placeholder="Enter API Key"]',
+      ) as HTMLInputElement
 
       fireEvent.change(input, { target: { value: 'sk-new-key' } })
 
@@ -278,7 +282,9 @@ describe('SttPane', () => {
       expect(screen.getByText('234ms')).toBeInTheDocument()
 
       // Change API key
-      const input = container.querySelector('input[placeholder="Enter API Key"]') as HTMLInputElement
+      const input = container.querySelector(
+        'input[placeholder="Enter API Key"]',
+      ) as HTMLInputElement
       fireEvent.change(input, { target: { value: 'sk-new-key' } })
 
       // Verify state was reset

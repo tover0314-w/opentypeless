@@ -47,10 +47,7 @@ impl TextOutput for ClipboardOutput {
                     ])
                     .status()?;
                 if !status.success() {
-                    anyhow::bail!(
-                        "osascript paste failed with exit code: {:?}",
-                        status.code()
-                    );
+                    anyhow::bail!("osascript paste failed with exit code: {:?}", status.code());
                 }
             }
 

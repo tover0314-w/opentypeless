@@ -49,9 +49,7 @@ export function WelcomeStep() {
             </button>
           ))}
         </div>
-        <p className="text-[12px] text-text-tertiary mt-3">
-          {t('onboarding.selectLanguageDesc')}
-        </p>
+        <p className="text-[12px] text-text-tertiary mt-3">{t('onboarding.selectLanguageDesc')}</p>
       </div>
     </div>
   )
