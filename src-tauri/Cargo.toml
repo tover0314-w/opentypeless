@@ -1,6 +1,6 @@
 [package]
 name = "opentypeless"
-version = "0.1.0"
+version = "2.0.0"
 description = "AI-powered speech-to-text and text polishing desktop app"
 authors = ["OpenTypeless Contributors"]
 license = "MIT"
@@ -49,6 +49,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_LibraryLoader",
 ] }
 
 [profile.release]

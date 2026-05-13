@@ -1,10 +1,11 @@
 use anyhow::Result;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings as EnigoSettings};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tauri::Manager;
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 
 use crate::app_detector;
 use crate::audio::{AudioCaptureHandle, AudioConfig};
@@ -159,6 +160,21 @@ pub struct PipelineHandle {
     /// Without this, a quick press-release in hold mode causes stop() to run
     /// while start() is still connecting to STT, finding empty fields.
     pipeline_lock: tokio::sync::Mutex<()>,
+
+    // ─── Streaming segment processing ───
+
+    /// Text of the most recent Final event from STT — used as segment text when
+    /// SpeechEnded fires (streaming providers only).
+    last_segment_text: Arc<Mutex<String>>,
+    /// Running handles for per-segment LLM + Output background tasks.
+    segment_handles: Arc<Mutex<Vec<JoinHandle<Result<String>>>>>,
+    /// Count of completed segments (incremented atomically for frontend events).
+    segment_count: Arc<AtomicU32>,
+    /// Accumulator of polished segment texts for combined history entry.
+    segment_polished_texts: Arc<Mutex<Vec<String>>>,
+    /// True when the current recording uses a streaming WebSocket provider
+    /// (Deepgram / AssemblyAI) that fires SpeechEnded events.
+    is_streaming_provider: Arc<AtomicBool>,
 }
 
 impl PipelineHandle {
@@ -178,6 +194,11 @@ impl PipelineHandle {
             recording_start: Arc::new(Mutex::new(None)),
             shared_client: reqwest::Client::new(),
             pipeline_lock: tokio::sync::Mutex::new(()),
+            last_segment_text: Arc::new(Mutex::new(String::new())),
+            segment_handles: Arc::new(Mutex::new(Vec::new())),
+            segment_count: Arc::new(AtomicU32::new(0)),
+            segment_polished_texts: Arc::new(Mutex::new(Vec::new())),
+            is_streaming_provider: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -211,7 +232,7 @@ impl PipelineHandle {
     pub fn abort(&self) {
         tracing::info!("Pipeline abort requested (current state: {:?})", self.current_state());
 
-        // Set abort flag so any running stop() exits early
+        // Set abort flag so any running stop() or segment tasks exit early
         self.abort_flag.store(true, Ordering::SeqCst);
 
         // Stop audio capture (closes channel → STT task terminates naturally)
@@ -223,11 +244,23 @@ impl PipelineHandle {
             *handle = None;
         }
 
+        // Cancel any running segment processing tasks
+        {
+            let mut handles = self.segment_handles.lock().unwrap_or_else(|e| e.into_inner());
+            for h in handles.drain(..) {
+                h.abort();
+            }
+        }
+
         // Unblock stop() if it's waiting on stt_done.notified()
         self.stt_done.notify_one();
 
-        // Clear accumulated text
+        // Clear accumulated text and segment state
         self.accumulated_text.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.last_segment_text.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.segment_polished_texts.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.segment_count.store(0, Ordering::SeqCst);
+        self.is_streaming_provider.store(false, Ordering::SeqCst);
 
         // Force state to Idle — emits pipeline:state event to sync frontend
         self.set_state(PipelineState::Idle);
@@ -500,12 +533,95 @@ impl PipelineHandle {
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = None;
 
-        // STT streaming task — provider is already connected
+        // Reset segment tracking state for new recording
+        self.last_segment_text.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.segment_handles.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.segment_polished_texts.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.segment_count.store(0, Ordering::SeqCst);
+
+        // ─── STT streaming task with streaming segment support ───
         let app_handle = self.app_handle.clone();
         let accumulated = self.accumulated_text.clone();
         let stt_done = self.stt_done.clone();
 
+        // Clone segment-processing shared state
+        let segment_handles = self.segment_handles.clone();
+        let segment_count = self.segment_count.clone();
+        let segment_polished_texts = self.segment_polished_texts.clone();
+        let last_seg_text_shared = self.last_segment_text.clone();
+        let is_streaming_provider = self.is_streaming_provider.clone();
+        let abort_flag = self.abort_flag.clone();
+
+        // Clone config data for per-segment LLM+Output processing
+        let cfg = self
+            .preloaded_config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
+        let app_ctx = self
+            .preloaded_app_ctx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(app_detector::detect_current_app);
+        let dictionary_words = self
+            .preloaded_dictionary
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
+        let shared_client = self.shared_client.clone();
+
+        let polish_enabled = cfg.polish_enabled
+            && (!cfg.llm_api_key.is_empty() || cfg.llm_provider == "cloud");
+        let llm_provider_name = cfg.llm_provider.clone();
+        let llm_api_key = if cfg.llm_provider == "cloud" {
+            self.app_handle
+                .state::<SessionTokenStore>()
+                .0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        } else {
+            cfg.llm_api_key.clone()
+        };
+        let llm_config = if polish_enabled {
+            Some(crate::llm::LlmConfig {
+                api_key: llm_api_key,
+                model: cfg.llm_model.clone(),
+                base_url: cfg.llm_base_url.clone(),
+                max_tokens: 4096,
+                temperature: 0.3,
+            })
+        } else {
+            None
+        };
+        let output_mode_str = cfg.output_mode.clone();
+
+        // Determine if provider supports streaming (SpeechEnded events)
+        let is_streaming = matches!(cfg.stt_provider.as_str(), "deepgram" | "assemblyai");
+        is_streaming_provider.store(is_streaming, Ordering::SeqCst);
+
+        let seg_config = SegProcessorConfig {
+            app_handle: app_handle.clone(),
+            abort_flag: abort_flag.clone(),
+            segment_polished_texts: segment_polished_texts.clone(),
+            polish_enabled,
+            llm_config,
+            llm_provider_name,
+            shared_client,
+            app_ctx,
+            dictionary_words,
+            translate_enabled: cfg.translate_enabled,
+            target_lang: cfg.target_lang.clone(),
+            output_mode_str,
+        };
+
         tokio::spawn(async move {
+            let mut last_seg_text = String::new();
+            let mut has_streamed = false;
+
             // Forward audio to STT and receive transcripts
             loop {
                 tokio::select! {
@@ -515,19 +631,40 @@ impl PipelineHandle {
                                 let _ = provider.send_audio(&data).await;
                             }
                             None => {
-                                // Audio channel closed — disconnect and capture final transcript
-                                match provider.disconnect().await {
-                                    Ok(Some(text)) => {
-                                        let mut acc = accumulated.lock().unwrap_or_else(|e| e.into_inner());
-                                        acc.push_str(&text);
-                                        let current = acc.clone();
-                                        drop(acc);
-                                        let _ = app_handle.emit("stt:final", &current);
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => {
-                                        tracing::error!("STT disconnect error: {}", e);
-                                        let _ = app_handle.emit("pipeline:error", format!("STT error: {e}"));
+                                // Audio channel closed — flush last segment
+                                let seg_text = std::mem::take(&mut last_seg_text);
+                                if !seg_text.trim().is_empty() {
+                                    segment_count.fetch_add(1, Ordering::SeqCst);
+                                    let _ = app_handle.emit("pipeline:segment_count", segment_count.load(Ordering::SeqCst));
+                                    let cfg = seg_config.clone_for_task();
+                                    let h = tokio::spawn(async move {
+                                        process_segment_text(seg_text, cfg).await
+                                    });
+                                    segment_handles.lock().unwrap_or_else(|e| e.into_inner()).push(h);
+                                }
+
+                                // For non-streaming providers: disconnect to get final transcript
+                                if !has_streamed {
+                                    match provider.disconnect().await {
+                                        Ok(Some(text)) => {
+                                            let mut acc = accumulated.lock().unwrap_or_else(|e| e.into_inner());
+                                            acc.push_str(&text);
+                                            let current = acc.clone();
+                                            drop(acc);
+                                            let _ = app_handle.emit("stt:final", &current);
+                                            // Process as single batch segment
+                                            segment_count.fetch_add(1, Ordering::SeqCst);
+                                            let cfg = seg_config.clone_for_task();
+                                            let h = tokio::spawn(async move {
+                                                process_segment_text(text, cfg).await
+                                            });
+                                            segment_handles.lock().unwrap_or_else(|e| e.into_inner()).push(h);
+                                        }
+                                        Ok(None) => {}
+                                        Err(e) => {
+                                            tracing::error!("STT disconnect error: {}", e);
+                                            let _ = app_handle.emit("pipeline:error", format!("STT error: {e}"));
+                                        }
                                     }
                                 }
                                 break;
@@ -537,9 +674,11 @@ impl PipelineHandle {
                     transcript = provider.recv_transcript() => {
                         match transcript {
                             Ok(Some(TranscriptEvent::Partial { text })) => {
+                                *last_seg_text_shared.lock().unwrap_or_else(|e| e.into_inner()) = text.clone();
                                 let _ = app_handle.emit("stt:partial", &text);
                             }
                             Ok(Some(TranscriptEvent::Final { text, .. })) => {
+                                last_seg_text = text.clone();
                                 let mut acc = accumulated.lock().unwrap_or_else(|e| e.into_inner());
                                 acc.push_str(&text);
                                 acc.push(' ');
@@ -547,12 +686,23 @@ impl PipelineHandle {
                                 drop(acc);
                                 let _ = app_handle.emit("stt:final", &current);
                             }
+                            Ok(Some(TranscriptEvent::SpeechEnded)) => {
+                                has_streamed = true;
+                                let seg_text = std::mem::take(&mut last_seg_text);
+                                if seg_text.trim().is_empty() { continue; }
+
+                                segment_count.fetch_add(1, Ordering::SeqCst);
+                                let _ = app_handle.emit("pipeline:segment_count", segment_count.load(Ordering::SeqCst));
+
+                                let cfg = seg_config.clone_for_task();
+                                let h = tokio::spawn(async move {
+                                    process_segment_text(seg_text, cfg).await
+                                });
+                                segment_handles.lock().unwrap_or_else(|e| e.into_inner()).push(h);
+                            }
                             Ok(Some(TranscriptEvent::Error { message })) => {
                                 tracing::error!("STT error: {}", message);
                                 let _ = app_handle.emit("pipeline:error", format!("STT error: {message}"));
-                                // Break out of the loop — STT has failed, no point
-                                // continuing. Without break, the loop keeps running
-                                // and the pipeline stays stuck in Recording forever.
                                 break;
                             }
                             Err(e) => {
@@ -565,7 +715,24 @@ impl PipelineHandle {
                 }
             }
 
-            // Signal that STT processing is complete
+            // Wait for all segment processing tasks to complete
+            let handles = std::mem::take(&mut *segment_handles.lock().unwrap_or_else(|e| e.into_inner()));
+            for h in handles {
+                match h.await {
+                    Ok(Ok(polished)) => {
+                        segment_polished_texts.lock().unwrap_or_else(|e| e.into_inner()).push(polished);
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!("Segment processing error: {}", e);
+                        let _ = app_handle.emit("pipeline:error", format!("Output error: {e}"));
+                    }
+                    Err(_) => {
+                        // Task was cancelled by abort() — ignore
+                    }
+                }
+            }
+
+            // Signal that all processing is done
             stt_done.notify_one();
         });
 
@@ -603,6 +770,37 @@ impl PipelineHandle {
         crate::refresh_tray(&self.app_handle);
 
         let stop_start = std::time::Instant::now();
+
+        // PTT guard: if recording was too short, treat as accidental press and bail.
+        let should_discard = {
+            let rec_start = self
+                .recording_start
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let elapsed = rec_start.as_ref().map(|s| s.elapsed().as_millis() as u32);
+            let min_ms = {
+                let cfg = self
+                    .preloaded_config
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                cfg.as_ref().map(|c| c.min_recording_ms).unwrap_or(200)
+            };
+            elapsed.map(|e| e < min_ms).unwrap_or(false)
+        };
+
+        if should_discard {
+            tracing::info!("Recording too short (< min_recording_ms), discarding");
+            // Stop audio capture to unblock the STT task
+            {
+                let mut handle = self.audio_handle.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(ref mut h) = *handle {
+                    h.stop();
+                }
+                *handle = None;
+            }
+            self.set_state(PipelineState::Idle);
+            return Ok(());
+        }
 
         // Capture selected text now — hotkey is released so Ctrl+C won't conflict.
         // Small delay to ensure hotkey modifiers are fully released (especially in toggle mode).
@@ -671,14 +869,12 @@ impl PipelineHandle {
         // isn't blocked by the long stt_done wait that follows.
         drop(guard);
 
-        // Always use batch output: keyboard mode uses output_text() after full LLM
-        // response arrives. Streaming chunk-by-chunk clipboard paste was unreliable
-        // on Windows — each Ctrl+V is async and the next set_text() could overwrite
-        // the clipboard before the target app processed the previous paste, producing
-        // garbled output that differed from what History recorded.
+        // Check if we're using streaming (segment-based) processing
+        let is_streaming = self.is_streaming_provider.load(Ordering::SeqCst);
 
-        // Pre-build LLM provider and Enigo while STT is still processing
-        let pre_llm = if config.polish_enabled
+        // Pre-build LLM provider for non-streaming path (streaming does per-segment LLM)
+        let pre_llm = if !is_streaming
+            && config.polish_enabled
             && (!config.llm_api_key.is_empty() || config.llm_provider == "cloud")
         {
             let llm_api_key = if config.llm_provider == "cloud" {
@@ -737,104 +933,117 @@ impl PipelineHandle {
             .trim()
             .to_string();
 
-        if raw_text.is_empty() {
-            let _ = self
-                .app_handle
-                .emit("pipeline:error", "No speech detected. Please try again.");
-            self.set_state(PipelineState::Idle);
-            return Ok(());
-        }
-
-        let final_text;
+        // Handle streaming mode differently from batch mode
+        let final_text: String;
         let llm_elapsed;
 
-        // Polish with LLM (resources already pre-built)
-        // Check abort before entering LLM polish and output
-        if self.abort_flag.load(Ordering::SeqCst) {
-            tracing::info!("Pipeline aborted before LLM/output");
-            return Ok(());
-        }
-
-        if let Some((llm_config, provider)) = pre_llm {
-            self.set_state(PipelineState::Polishing);
-            let llm_start = std::time::Instant::now();
-
-            // on_chunk only drives the UI transcript display; actual output happens
-            // in batch after the full response arrives (see output_text below).
-            let app_handle = self.app_handle.clone();
-            let on_chunk: llm::ChunkCallback = Box::new(move |chunk: &str| {
-                let _ = app_handle.emit("llm:chunk", chunk);
-            });
-
-            let req = PolishRequest {
-                raw_text: raw_text.clone(),
-                app_type: app_ctx.app_type,
-                dictionary: dictionary_words,
-                translate_enabled: config.translate_enabled,
-                target_lang: config.target_lang.clone(),
-                selected_text,
-            };
-
-            match provider.polish(&llm_config, &req, Some(&on_chunk)).await {
-                Ok(response) => {
-                    // Check abort after LLM returns — skip output if cancelled during polish
-                    if self.abort_flag.load(Ordering::SeqCst) {
-                        tracing::info!("Pipeline aborted after LLM polish, skipping output");
-                        return Ok(());
-                    }
-                    final_text = response.polished_text;
-                    llm_elapsed = llm_start.elapsed();
-
-                    if let Err(e) = self
-                        .output_text(&final_text, &app_ctx.app_name, &config)
-                        .await
-                    {
-                        tracing::error!("Output failed: {}", e);
-                        let _ = self
-                            .app_handle
-                            .emit("pipeline:error", format!("Output failed: {e}"));
-                    }
-                }
-                Err(e) => {
-                    // Check abort after LLM error — skip fallback output if cancelled
-                    if self.abort_flag.load(Ordering::SeqCst) {
-                        tracing::info!("Pipeline aborted after LLM error, skipping output");
-                        return Ok(());
-                    }
-                    tracing::error!("LLM polish failed: {}, outputting raw text", e);
-                    final_text = raw_text.clone();
-                    llm_elapsed = llm_start.elapsed();
-
-                    let _ = self
-                        .app_handle
-                        .emit("pipeline:error", format!("LLM polishing failed: {e}"));
-                    if let Err(e) = self
-                        .output_text(&final_text, &app_ctx.app_name, &config)
-                        .await
-                    {
-                        tracing::error!("Output failed: {}", e);
-                        let _ = self
-                            .app_handle
-                            .emit("pipeline:error", format!("Output failed: {e}"));
-                    }
-                }
-            }
-
-            tracing::info!(
-                "[Pipeline Timing] LLM polish: {}ms",
-                llm_elapsed.as_millis()
+        if is_streaming {
+            // For streaming: segments were already polished + output in background.
+            // Collect polished results for history.
+            let seg_results = std::mem::take(
+                &mut *self.segment_polished_texts.lock().unwrap_or_else(|e| e.into_inner()),
             );
-        } else {
+            final_text = if seg_results.is_empty() {
+                raw_text.clone()
+            } else {
+                seg_results.join(" ")
+            };
             llm_elapsed = std::time::Duration::ZERO;
-            final_text = raw_text.clone();
-            if let Err(e) = self
-                .output_text(&final_text, &app_ctx.app_name, &config)
-                .await
-            {
-                tracing::error!("Output failed: {}", e);
+        } else {
+            // Non-streaming (file-upload providers): process everything as one batch
+            // ── Current behavior: LLM + output ──
+
+            if raw_text.is_empty() {
                 let _ = self
                     .app_handle
-                    .emit("pipeline:error", format!("Output failed: {e}"));
+                    .emit("pipeline:error", "No speech detected. Please try again.");
+                self.set_state(PipelineState::Idle);
+                return Ok(());
+            }
+
+            // Check abort before entering LLM polish and output
+            if self.abort_flag.load(Ordering::SeqCst) {
+                tracing::info!("Pipeline aborted before LLM/output");
+                return Ok(());
+            }
+
+            if let Some((llm_config, provider)) = pre_llm {
+                self.set_state(PipelineState::Polishing);
+                let llm_start = std::time::Instant::now();
+
+                let app_handle = self.app_handle.clone();
+                let on_chunk: llm::ChunkCallback = Box::new(move |chunk: &str| {
+                    let _ = app_handle.emit("llm:chunk", chunk);
+                });
+
+                let req = PolishRequest {
+                    raw_text: raw_text.clone(),
+                    app_type: app_ctx.app_type,
+                    dictionary: dictionary_words,
+                    translate_enabled: config.translate_enabled,
+                    target_lang: config.target_lang.clone(),
+                    selected_text,
+                };
+
+                match provider.polish(&llm_config, &req, Some(&on_chunk)).await {
+                    Ok(response) => {
+                        if self.abort_flag.load(Ordering::SeqCst) {
+                            tracing::info!("Pipeline aborted after LLM polish, skipping output");
+                            return Ok(());
+                        }
+                        final_text = response.polished_text;
+                        llm_elapsed = llm_start.elapsed();
+
+                        if let Err(e) = self
+                            .output_text(&final_text, &app_ctx.app_name, &config)
+                            .await
+                        {
+                            tracing::error!("Output failed: {}", e);
+                            let _ = self
+                                .app_handle
+                                .emit("pipeline:error", format!("Output failed: {e}"));
+                        }
+                    }
+                    Err(e) => {
+                        if self.abort_flag.load(Ordering::SeqCst) {
+                            tracing::info!("Pipeline aborted after LLM error, skipping output");
+                            return Ok(());
+                        }
+                        tracing::error!("LLM polish failed: {}, outputting raw text", e);
+                        final_text = raw_text.clone();
+                        llm_elapsed = llm_start.elapsed();
+
+                        let _ = self
+                            .app_handle
+                            .emit("pipeline:error", format!("LLM polishing failed: {e}"));
+                        if let Err(e) = self
+                            .output_text(&final_text, &app_ctx.app_name, &config)
+                            .await
+                        {
+                            tracing::error!("Output failed: {}", e);
+                            let _ = self
+                                .app_handle
+                                .emit("pipeline:error", format!("Output failed: {e}"));
+                        }
+                    }
+                }
+
+                tracing::info!(
+                    "[Pipeline Timing] LLM polish: {}ms",
+                    llm_elapsed.as_millis()
+                );
+            } else {
+                llm_elapsed = std::time::Duration::ZERO;
+                final_text = raw_text.clone();
+                if let Err(e) = self
+                    .output_text(&final_text, &app_ctx.app_name, &config)
+                    .await
+                {
+                    tracing::error!("Output failed: {}", e);
+                    let _ = self
+                        .app_handle
+                        .emit("pipeline:error", format!("Output failed: {e}"));
+                }
             }
         }
 
@@ -972,4 +1181,112 @@ impl PipelineHandle {
             tracing::debug!("LLM connection pre-warm complete");
         }
     }
+}
+
+// ─── Streaming segment processing ───
+
+/// Configuration that each segment-processing task needs to run LLM + Output.
+/// Created once in start() and cheaply cloned via clone_for_task() for each
+/// background task.
+struct SegProcessorConfig {
+    app_handle: tauri::AppHandle,
+    abort_flag: Arc<AtomicBool>,
+    segment_polished_texts: Arc<Mutex<Vec<String>>>,
+    polish_enabled: bool,
+    llm_config: Option<crate::llm::LlmConfig>,
+    llm_provider_name: String,
+    shared_client: reqwest::Client,
+    app_ctx: app_detector::AppContext,
+    dictionary_words: Vec<String>,
+    translate_enabled: bool,
+    target_lang: String,
+    output_mode_str: String,
+}
+
+impl SegProcessorConfig {
+    /// Clone the fields that the segment task needs, as a new owned copy.
+    /// Arc fields share the underlying allocation; String/Vec fields clone their data.
+    fn clone_for_task(&self) -> Self {
+        Self {
+            app_handle: self.app_handle.clone(),
+            abort_flag: self.abort_flag.clone(),
+            segment_polished_texts: self.segment_polished_texts.clone(),
+            polish_enabled: self.polish_enabled,
+            llm_config: self.llm_config.clone(),
+            llm_provider_name: self.llm_provider_name.clone(),
+            shared_client: self.shared_client.clone(),
+            app_ctx: self.app_ctx.clone(),
+            dictionary_words: self.dictionary_words.clone(),
+            translate_enabled: self.translate_enabled,
+            target_lang: self.target_lang.clone(),
+            output_mode_str: self.output_mode_str.clone(),
+        }
+    }
+}
+
+/// Process a single segment: LLM polish → keyboard/clipboard output.
+/// Runs in a background task, concurrent with recording of the next segment.
+async fn process_segment_text(text: String, cfg: SegProcessorConfig) -> Result<String> {
+    if cfg.abort_flag.load(Ordering::SeqCst) {
+        return Ok(text);
+    }
+
+    let polished: String;
+
+    if cfg.polish_enabled {
+        if let Some(ref llm_cfg) = cfg.llm_config {
+            let provider = crate::llm::create_provider(&cfg.llm_provider_name, Some(cfg.shared_client.clone()));
+            let app_handle = cfg.app_handle.clone();
+            let on_chunk: crate::llm::ChunkCallback = Box::new(move |chunk: &str| {
+                let _ = app_handle.emit("llm:chunk", chunk);
+            });
+
+            let req = crate::llm::PolishRequest {
+                raw_text: text.clone(),
+                app_type: cfg.app_ctx.app_type,
+                dictionary: cfg.dictionary_words,
+                translate_enabled: cfg.translate_enabled,
+                target_lang: cfg.target_lang,
+                selected_text: None, // selected text captured in stop(); not available per-segment
+            };
+
+            match provider.polish(llm_cfg, &req, Some(&on_chunk)).await {
+                Ok(response) => {
+                    polished = response.polished_text;
+                }
+                Err(e) => {
+                    tracing::error!("Segment LLM polish failed: {}, using raw text", e);
+                    let _ = cfg.app_handle.emit("pipeline:error", format!("LLM polish error: {e}"));
+                    polished = text;
+                }
+            }
+        } else {
+            polished = text;
+        }
+    } else {
+        polished = text;
+    }
+
+    // Output (sequential: each segment outputs independently)
+    if !cfg.abort_flag.load(Ordering::SeqCst) && !polished.trim().is_empty() {
+        let mode = if cfg.output_mode_str == "keyboard" {
+            crate::output::OutputMode::Keyboard
+        } else {
+            crate::output::OutputMode::Clipboard
+        };
+
+        // On macOS keyboard mode, check Accessibility permission
+        if mode == crate::output::OutputMode::Keyboard && !is_accessibility_trusted() {
+            let _ = cfg.app_handle.emit("pipeline:error", "ACCESSIBILITY_REQUIRED");
+            return Ok(polished); // don't bail — let other segments and history continue
+        }
+
+        let output = crate::output::create_output(mode);
+        if let Err(e) = output.type_text(&polished).await {
+            tracing::error!("Segment output failed: {}", e);
+            let _ = cfg.app_handle.emit("pipeline:error", format!("Output error: {e}"));
+        }
+    }
+
+    Ok(polished)
 }

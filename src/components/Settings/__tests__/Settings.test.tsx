@@ -436,7 +436,7 @@ describe('appStore getInitialState 包含 llmModels', () => {
 
   it('getInitialState 不改变 llmModels 以外的字段', () => {
     const initial = useAppStore.getInitialState()
-    expect(initial.config.hotkey).toBe('Ctrl+/')
+    expect(initial.config.hotkey).toBe('Ctrl+Win')
     expect(initial.pipelineState).toBe('idle')
     expect(initial.dictionary).toEqual([])
   })

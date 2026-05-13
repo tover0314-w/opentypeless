@@ -15,6 +15,7 @@ export function useTauriEvents() {
     setPipelineError,
     setAccessibilityTrusted,
     setHistory,
+    setSegmentCount,
   } = useAppStore()
 
   useEffect(() => {
@@ -76,6 +77,9 @@ export function useTauriEvents() {
     addListener<void>('tray:about', () => {
       window.location.hash = '#/settings'
     })
+    addListener<number>('pipeline:segment_count', (count) => {
+      setSegmentCount(count)
+    })
 
     return () => {
       cancelled = true
@@ -91,5 +95,6 @@ export function useTauriEvents() {
     setPipelineError,
     setAccessibilityTrusted,
     setHistory,
+    setSegmentCount,
   ])
 }

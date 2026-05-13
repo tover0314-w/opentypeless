@@ -2,7 +2,13 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../stores/appStore'
 import type { HotkeyMode, OutputMode } from '../../stores/appStore'
-import { updateHotkey, pauseHotkey, resumeHotkey, checkAccessibilityPermission, requestAccessibilityPermission } from '../../lib/tauri'
+import {
+  updateHotkey,
+  pauseHotkey,
+  resumeHotkey,
+  checkAccessibilityPermission,
+  requestAccessibilityPermission,
+} from '../../lib/tauri'
 import { SegmentedControl } from './shared/SegmentedControl'
 import { Toggle } from './shared/Toggle'
 
@@ -46,6 +52,11 @@ function HotkeyRecorder() {
   const [modifierHint, setModifierHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const autoConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const needsRestore = useRef(false)
+  const metaLabel =
+    typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
+      ? 'Cmd'
+      : 'Win'
 
   const confirmHotkey = useCallback(
     (hotkey: string) => {
@@ -54,6 +65,7 @@ function HotkeyRecorder() {
       setModifierHint(null)
       updateHotkey(hotkey)
         .then(() => {
+          needsRestore.current = false
           updateConfig({ hotkey })
           setPending(null)
         })
@@ -61,6 +73,7 @@ function HotkeyRecorder() {
           setError(String(e))
           setPending(null)
           resumeHotkey().catch(() => {})
+          needsRestore.current = false
         })
     },
     [updateConfig],
@@ -76,11 +89,22 @@ function HotkeyRecorder() {
       if (e.ctrlKey) parts.push('Ctrl')
       if (e.altKey) parts.push('Alt')
       if (e.shiftKey) parts.push('Shift')
-      if (e.metaKey) parts.push('Meta')
+      if (e.metaKey) parts.push(metaLabel)
 
-      // If only modifier keys are pressed, show hint like "Alt+..."
+      // If only modifier keys are pressed
       if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
-        setModifierHint(parts.length > 0 ? parts.join('+') + '+...' : null)
+        if (parts.length >= 2) {
+          // 2+ modifiers → valid pure-modifier combo (e.g. "Ctrl+Win")
+          setModifierHint(null)
+          const combo = parts.join('+')
+          setPending(combo)
+          if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
+          autoConfirmTimer.current = setTimeout(() => {
+            confirmHotkey(combo)
+          }, 1500)
+        } else {
+          setModifierHint(parts.length > 0 ? parts.join('+') + '+...' : null)
+        }
         return
       }
 
@@ -129,12 +153,16 @@ function HotkeyRecorder() {
 
   useEffect(() => {
     if (!recording) return
+    needsRestore.current = true
     window.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('keyup', handleKeyUp, true)
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('keyup', handleKeyUp, true)
       if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
+      if (needsRestore.current) {
+        resumeHotkey().catch(() => {})
+      }
     }
   }, [recording, handleKeyDown, handleKeyUp])
 
@@ -148,6 +176,7 @@ function HotkeyRecorder() {
       setRecording(false)
       setPending(null)
       setModifierHint(null)
+      needsRestore.current = false
       if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
       resumeHotkey().catch(() => {})
     } else {
@@ -183,7 +212,8 @@ export function GeneralPane() {
   const config = useAppStore((s) => s.config)
   const updateConfig = useAppStore((s) => s.updateConfig)
   const { t } = useTranslation()
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
+  const isMac =
+    typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
   const [a11yTrusted, setA11yTrusted] = useState<boolean | null>(null)
 
   useEffect(() => {

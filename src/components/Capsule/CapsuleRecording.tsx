@@ -3,9 +3,11 @@ import { X } from 'lucide-react'
 import { abortRecording } from '../../lib/tauri'
 import { Waveform } from './Waveform'
 import { DurationTimer } from './DurationTimer'
+import { useAppStore } from '../../stores/appStore'
 
 export function CapsuleRecording() {
   const reduced = useReducedMotion()
+  const segmentCount = useAppStore((s) => s.segmentCount)
 
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -25,6 +27,11 @@ export function CapsuleRecording() {
         transition={{ repeat: Infinity, duration: 1.5, ease: 'easeInOut' }}
       />
       <Waveform />
+      {segmentCount > 0 && (
+        <span className="text-[10px] text-white/50 font-mono flex-shrink-0">
+          +{segmentCount}
+        </span>
+      )}
       <div className="flex-1" />
       <DurationTimer />
       <button

@@ -27,6 +27,7 @@ pub struct AppConfig {
     pub close_to_tray: bool,
     pub start_minimized: bool,
     pub max_recording_seconds: u32,
+    pub min_recording_ms: u32,
     pub ui_language: String,
     pub capsule_auto_hide: bool,
 }
@@ -47,7 +48,7 @@ impl Default for AppConfig {
             #[cfg(target_os = "macos")]
             hotkey: "Alt+/".to_string(),
             #[cfg(not(target_os = "macos"))]
-            hotkey: "Ctrl+/".to_string(),
+            hotkey: "Ctrl+Win".to_string(),
             hotkey_mode: "hold".to_string(),
             output_mode: "keyboard".to_string(),
             selected_text_enabled: false,
@@ -56,6 +57,7 @@ impl Default for AppConfig {
             close_to_tray: true,
             start_minimized: false,
             max_recording_seconds: 30,
+            min_recording_ms: 200,
             ui_language: "en".to_string(),
             capsule_auto_hide: false,
         }
@@ -82,13 +84,19 @@ impl ConfigManager {
             return Ok(config);
         }
 
-        let config = match self.app_handle.store("settings.json") {
+        let mut config = match self.app_handle.store("settings.json") {
             Ok(store) => match store.get("app_config") {
                 Some(val) => serde_json::from_value::<AppConfig>(val.clone()).unwrap_or_default(),
                 None => AppConfig::default(),
             },
             Err(_) => AppConfig::default(),
         };
+
+        // Migrate old default hotkeys
+        let migrated = migrate_hotkey(&mut config);
+        if migrated {
+            self.save(&config).await.ok();
+        }
 
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(config.clone());
         Ok(config)
@@ -107,6 +115,18 @@ impl ConfigManager {
 
         Ok(())
     }
+}
+
+/// Migrate old default hotkeys to the new defaults.
+/// Returns `true` if the config was modified.
+fn migrate_hotkey(config: &mut AppConfig) -> bool {
+    let old_defaults: &[&str] = &["Ctrl+/", "Ctrl+Win+/"];
+    let new_default = AppConfig::default().hotkey;
+    if old_defaults.contains(&config.hotkey.as_str()) && config.hotkey != new_default {
+        config.hotkey = new_default;
+        return true;
+    }
+    false
 }
 
 // ─── HistoryStore (SQLite backed) ───

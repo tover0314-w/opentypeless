@@ -1,5 +1,6 @@
 pub mod app_detector;
 pub mod audio;
+pub mod hotkey;
 pub mod llm;
 pub mod output;
 pub mod pipeline;
@@ -39,6 +40,107 @@ pub struct SessionTokenStore(pub Arc<Mutex<String>>);
 /// Managed tray icon handle for dynamic menu/tooltip updates.
 pub struct TrayHandle {
     pub tray: Mutex<tauri::tray::TrayIcon>,
+}
+
+/// Routes hotkeys between the Windows keyboard hook (for `Ctrl+Win`) and the
+/// Tauri global-shortcut plugin (for all other combos).
+struct HotkeyDispatcher {
+    /// Holds the keyboard hook guard when the hook is active.
+    hook_guard: Mutex<Option<hotkey::HookGuard>>,
+}
+
+/// Return `true` when `s` is a `Ctrl+Win` (or `Win`↔`Meta`/`Super`/`Cmd`) combo
+/// that requires the Windows keyboard hook instead of the Tauri plugin.
+fn is_ctrl_win_combo(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    let has_ctrl = parts[..parts.len() - 1]
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case("ctrl") || p.eq_ignore_ascii_case("control"));
+    if !has_ctrl {
+        return false;
+    }
+    let last = parts.last().copied().unwrap_or("");
+    matches!(
+        last.to_ascii_lowercase().as_str(),
+        "meta" | "super" | "win" | "cmd"
+    )
+}
+
+/// Activate a hotkey by string.
+///
+/// - `Ctrl+Win` (or aliases) → installs the Windows keyboard hook.
+/// - Everything else → registers via the Tauri global-shortcut plugin.
+fn set_hotkey(
+    app: &tauri::AppHandle,
+    hotkey_str: &str,
+    dispatcher: &HotkeyDispatcher,
+) -> Result<(), String> {
+    // 1. Tear down existing mechanism
+    let _ = app.global_shortcut().unregister_all();
+    *dispatcher.hook_guard.lock().unwrap_or_else(|e| e.into_inner()) = None;
+
+    // 2. Choose mechanism
+    let use_hook = cfg!(target_os = "windows") && is_ctrl_win_combo(hotkey_str);
+
+    if use_hook {
+        #[cfg(target_os = "windows")]
+        {
+            let (guard, mut rx) = hotkey::install();
+
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        hotkey::HookEvent::ComboPressed => {
+                            let mode = app_handle
+                                .state::<HotkeyModeCache>()
+                                .0
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .clone();
+                            let pipeline = app_handle.state::<crate::pipeline::PipelineHandle>();
+                            if mode == "toggle" {
+                                if pipeline.current_state() == pipeline::PipelineState::Idle {
+                                    if let Err(e) = pipeline.start().await {
+                                        tracing::error!("Hook: start failed: {e}");
+                                    }
+                                } else if let Err(e) = pipeline.stop().await {
+                                    tracing::error!("Hook: stop failed: {e}");
+                                }
+                            } else if let Err(e) = pipeline.start().await {
+                                tracing::error!("Hook: start failed: {e}");
+                            }
+                        }
+                        hotkey::HookEvent::ComboReleased => {
+                            let mode = app_handle
+                                .state::<HotkeyModeCache>()
+                                .0
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .clone();
+                            if mode != "toggle" {
+                                let pipeline = app_handle.state::<crate::pipeline::PipelineHandle>();
+                                if let Err(e) = pipeline.stop().await {
+                                    tracing::error!("Hook: stop failed: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            *dispatcher.hook_guard.lock().unwrap_or_else(|e| e.into_inner()) = Some(guard);
+        }
+
+        Ok(())
+    } else {
+        // Use Tauri global-shortcut plugin
+        register_hotkey(app, hotkey_str)?;
+        Ok(())
+    }
 }
 
 /// Persisted window position and size.
@@ -703,21 +805,11 @@ async fn set_auto_start(
 async fn update_hotkey(
     app: tauri::AppHandle,
     config_state: tauri::State<'_, storage::ConfigManager>,
+    dispatcher: tauri::State<'_, HotkeyDispatcher>,
     hotkey: String,
 ) -> Result<(), String> {
-    let new_shortcut =
-        parse_hotkey(&hotkey).ok_or_else(|| format!("Invalid hotkey: {}", hotkey))?;
+    set_hotkey(&app, &hotkey, &dispatcher)?;
 
-    // Unregister all existing shortcuts, then register the new one
-    // (the global handler from with_handler is still active)
-    app.global_shortcut()
-        .unregister_all()
-        .map_err(|e| e.to_string())?;
-    app.global_shortcut()
-        .register(new_shortcut)
-        .map_err(|e| e.to_string())?;
-
-    // Save updated hotkey to config
     let mut config = config_state.load().await.map_err(|e| e.to_string())?;
     config.hotkey = hotkey;
     config_state
@@ -728,27 +820,25 @@ async fn update_hotkey(
     Ok(())
 }
 
-/// Temporarily unregister all global shortcuts so the webview can capture key events.
+/// Temporarily pause the hotkey so the webview can capture key events.
 #[tauri::command]
 fn pause_hotkey(app: tauri::AppHandle) -> Result<(), String> {
-    app.global_shortcut()
-        .unregister_all()
-        .map_err(|e| e.to_string())
+    let _ = app.global_shortcut().unregister_all();
+    hotkey::set_paused(true);
+    Ok(())
 }
 
-/// Re-register the current hotkey from config after recording is done.
+/// Re-register the current hotkey after recording is done.
 #[tauri::command]
 async fn resume_hotkey(
     app: tauri::AppHandle,
     config_state: tauri::State<'_, storage::ConfigManager>,
+    dispatcher: tauri::State<'_, HotkeyDispatcher>,
 ) -> Result<(), String> {
+    hotkey::set_paused(false);
     let config = config_state.load().await.map_err(|e| e.to_string())?;
-    let shortcut = parse_hotkey(&config.hotkey).unwrap_or_else(default_shortcut);
-    // Ensure clean state, then register
-    let _ = app.global_shortcut().unregister_all();
-    app.global_shortcut()
-        .register(shortcut)
-        .map_err(|e| e.to_string())
+    set_hotkey(&app, &config.hotkey, &dispatcher)
+        .or_else(|_| set_hotkey(&app, "Ctrl+Win", &dispatcher))
 }
 
 // ─── Hotkey parsing ───
@@ -762,7 +852,7 @@ fn default_shortcut() -> Shortcut {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            Shortcut::new(Some(Modifiers::CONTROL), Code::Slash)
+            Shortcut::new(Some(Modifiers::CONTROL), Code::MetaLeft)
         }
     };
     parse_hotkey(&default_hotkey).unwrap_or(fallback)
@@ -844,6 +934,9 @@ fn parse_hotkey(s: &str) -> Option<Shortcut> {
     }
 
     let code = match key_str.to_lowercase().as_str() {
+        // Modifier aliases as keys — allows "Ctrl+Win" (pure modifier-hotkey)
+        "meta" | "super" | "win" | "cmd" => Code::MetaLeft,
+        // ... rest of key matching
         "space" => Code::Space,
         "tab" => Code::Tab,
         "enter" | "return" => Code::Enter,
@@ -929,6 +1022,41 @@ fn parse_hotkey(s: &str) -> Option<Shortcut> {
     Some(Shortcut::new(mods, code))
 }
 
+/// Parse a hotkey string into one or more [`Shortcut`]s.
+///
+/// Regular shortcuts return a single-element vec.  Modifier-only combos
+/// like `"Ctrl+Win"` (where the "key" is a modifier alias) expand to
+/// both left and right Win-key variants so the hotkey works regardless
+/// of which Win key the user presses.
+fn parse_hotkey_expanded(s: &str) -> Option<Vec<Shortcut>> {
+    let primary = parse_hotkey(s)?;
+    #[cfg(not(target_os = "macos"))]
+    if primary.key == Code::MetaLeft || primary.key == Code::MetaRight {
+        let opposite = if primary.key == Code::MetaLeft {
+            Code::MetaRight
+        } else {
+            Code::MetaLeft
+        };
+        return Some(vec![primary, Shortcut::new(Some(primary.mods), opposite)]);
+    }
+    Some(vec![primary])
+}
+
+/// Unregister all current shortcuts, then register the full expanded set
+/// for the given hotkey string. Returns the primary [`Shortcut`] on success.
+fn register_hotkey(app: &tauri::AppHandle, s: &str) -> Result<Shortcut, String> {
+    let shortcuts = parse_hotkey_expanded(s).ok_or_else(|| format!("Invalid hotkey: {s}"))?;
+    let primary = shortcuts[0];
+
+    let _ = app.global_shortcut().unregister_all();
+    for (i, sc) in shortcuts.iter().enumerate() {
+        app.global_shortcut()
+            .register(*sc)
+            .map_err(|e| format!("Failed to register hotkey (variant {i}): {e}"))?;
+    }
+    Ok(primary)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,6 +1077,29 @@ mod tests {
         let s = s.unwrap();
         assert_eq!(s.mods, Modifiers::CONTROL | Modifiers::SHIFT);
         assert_eq!(s.key, Code::KeyA);
+    }
+
+    #[test]
+    fn test_parse_hotkey_ctrl_win() {
+        // Ctrl+Win is a pure modifier combo — Win is the "key" not a modifier
+        let s = parse_hotkey("Ctrl+Win");
+        assert!(s.is_some());
+        let s = s.unwrap();
+        assert_eq!(s.mods, Modifiers::CONTROL);
+        assert_eq!(s.key, Code::MetaLeft);
+    }
+
+    #[test]
+    fn test_parse_hotkey_ctrl_win_expanded() {
+        let shortcuts = parse_hotkey_expanded("Ctrl+Win");
+        assert!(shortcuts.is_some());
+        let shortcuts = shortcuts.unwrap();
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(shortcuts.len(), 2); // MetaLeft + MetaRight
+        assert_eq!(shortcuts[0].key, Code::MetaLeft);
+        let has_right = shortcuts.iter().any(|s| s.key == Code::MetaRight);
+        #[cfg(not(target_os = "macos"))]
+        assert!(has_right);
     }
 
     #[test]
@@ -1085,7 +1236,7 @@ pub fn run() {
             // Load initial config to get hotkey
             let initial_config =
                 tauri::async_runtime::block_on(config_manager.load()).unwrap_or_default();
-            let shortcut = parse_hotkey(&initial_config.hotkey).unwrap_or_else(default_shortcut);
+            let _shortcut = parse_hotkey(&initial_config.hotkey).unwrap_or_else(default_shortcut);
 
             app.manage(config_manager);
             app.manage(history_store);
@@ -1111,16 +1262,24 @@ pub fn run() {
                 }
             }
 
-            // Register global shortcut from config
+            // Hotkey dispatcher — routes between hook and Tauri plugin
+            let dispatcher = HotkeyDispatcher {
+                hook_guard: Mutex::new(None),
+            };
+            app.manage(dispatcher);
+
+            // Register global shortcut plugin (handler always available for non-hook hotkeys)
             let handler = build_shortcut_handler(app_handle.clone());
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(handler)
                     .build(),
             )?;
-            if let Err(e) = app.global_shortcut().register(shortcut) {
+
+            // Register initial hotkey
+            if let Err(e) = set_hotkey(app.handle(), &initial_config.hotkey, &app.state::<HotkeyDispatcher>()) {
                 tracing::warn!(
-                    "Failed to register shortcut '{}' (may be occupied): {e}",
+                    "Failed to set initial hotkey '{}': {e}",
                     initial_config.hotkey
                 );
             }

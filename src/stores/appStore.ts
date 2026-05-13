@@ -66,6 +66,7 @@ export interface AppConfig {
   max_recording_seconds: number
   ui_language: string
   capsule_auto_hide: boolean
+  min_recording_ms: number
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -145,6 +146,10 @@ interface AppState {
   contextMenuReady: boolean
   setContextMenuReady: (ready: boolean) => void
 
+  // Segment processing (streaming VAD)
+  segmentCount: number
+  setSegmentCount: (count: number) => void
+
   // Reset recording state
   resetRecording: () => void
 
@@ -168,7 +173,7 @@ const defaultConfig: AppConfig = {
   polish_enabled: true,
   translate_enabled: false,
   target_lang: 'en',
-  hotkey: isMac ? 'Alt+/' : 'Ctrl+/',
+  hotkey: isMac ? 'Alt+/' : 'Ctrl+Win',
   hotkey_mode: 'hold',
   output_mode: 'keyboard',
   selected_text_enabled: false,
@@ -179,6 +184,7 @@ const defaultConfig: AppConfig = {
   max_recording_seconds: 30,
   ui_language: 'en',
   capsule_auto_hide: false,
+  min_recording_ms: 200,
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -250,7 +256,11 @@ export const useAppStore = create<AppState>((set) => ({
       finalTranscript: '',
       polishedText: '',
       recordingDuration: 0,
+      segmentCount: 0,
     }),
+
+  segmentCount: 0,
+  setSegmentCount: (segmentCount) => set({ segmentCount }),
 
   savedConfig: null,
   setSavedConfig: (savedConfig) => set({ savedConfig }),
