@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { useTranslation } from 'react-i18next'
 import { spring } from '../../lib/animations'
 import { StepIndicator } from './StepIndicator'
 
@@ -24,12 +25,13 @@ export function OnboardingLayout({
   subtitle,
   canNext,
   canBack,
-  nextLabel = 'Next',
+  nextLabel,
   onNext,
   onBack,
   onSkip,
   children,
 }: Props) {
+  const { t } = useTranslation()
   const handleClose = () => {
     import('@tauri-apps/api/core')
       .then(({ invoke }) => invoke('plugin:process|exit', { code: 0 }))
@@ -43,7 +45,7 @@ export function OnboardingLayout({
         <button
           onClick={handleClose}
           className="p-1.5 rounded-[6px] hover:bg-bg-tertiary transition-colors bg-transparent border-none cursor-pointer text-text-tertiary hover:text-text-primary"
-          aria-label="Close"
+          aria-label={t('onboarding.layout.close')}
         >
           <X size={14} />
         </button>
@@ -58,7 +60,7 @@ export function OnboardingLayout({
             onClick={onSkip}
             className="w-16 text-right text-[12px] text-text-tertiary hover:text-text-primary bg-transparent border-none cursor-pointer transition-colors"
           >
-            Skip
+            {t('onboarding.layout.skip')}
           </button>
         ) : (
           <div className="w-16" />
@@ -86,7 +88,7 @@ export function OnboardingLayout({
           transition={spring.jellyGentle}
           className="px-4 py-2 text-[13px] text-text-secondary hover:text-text-primary bg-transparent border-none cursor-pointer disabled:opacity-0 disabled:cursor-default transition-colors"
         >
-          Back
+          {t('onboarding.layout.back')}
         </motion.button>
         <motion.button
           onClick={onNext}

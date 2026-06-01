@@ -5,7 +5,7 @@ import { Search, Copy, Trash2 } from 'lucide-react'
 import { spring } from '../../lib/animations'
 import { useAppStore } from '../../stores/appStore'
 import { clearHistory } from '../../lib/tauri'
-import { toast } from '../Toast'
+import { toast } from '../toastApi'
 
 export function History() {
   const history = useAppStore((s) => s.history)

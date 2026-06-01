@@ -35,7 +35,7 @@ export function MainLayout({ children }: Props) {
         </div>
 
         {/* Main Nav */}
-        <nav className="flex-1 px-3 space-y-0.5 relative" aria-label="Main navigation">
+        <nav className="flex-1 px-3 space-y-0.5 relative" aria-label={t('nav.mainNavigation')}>
           {baseNavItems.map(({ id, labelKey, icon: Icon }) => {
             const active = route === id
             const label = t(labelKey)

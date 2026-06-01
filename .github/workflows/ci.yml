@@ -76,7 +76,6 @@ jobs:
           cache: 'npm'
 
       - run: npm audit --audit-level=high
-        continue-on-error: true
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -84,4 +83,3 @@ jobs:
         run: cargo install cargo-audit
 
       - run: cargo audit --file src-tauri/Cargo.lock
-        continue-on-error: true

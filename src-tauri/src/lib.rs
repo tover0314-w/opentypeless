@@ -16,7 +16,6 @@ pub use tray::{refresh_tray, TrayHandle};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_store::StoreExt;
 use tracing_subscriber::EnvFilter;
 
@@ -78,11 +77,16 @@ fn apply_linux_workarounds() {
                 .map(|v| v.eq_ignore_ascii_case("nvidia"))
                 .unwrap_or(false);
 
-        if is_nvidia && session == "wayland" {
+        if should_disable_webkit_dmabuf(&session, is_nvidia) {
             tracing::info!("Detected NVIDIA + Wayland, disabling WebKit DMA-BUF renderer");
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
     }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn should_disable_webkit_dmabuf(session: &str, is_nvidia: bool) -> bool {
+    is_nvidia && session.eq_ignore_ascii_case("wayland")
 }
 
 pub fn run() {
@@ -99,7 +103,6 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
@@ -156,14 +159,13 @@ pub fn run() {
             // Load initial config to get hotkey
             let initial_config =
                 tauri::async_runtime::block_on(config_manager.load()).unwrap_or_default();
-            let shortcut =
-                parse_hotkey(&initial_config.hotkey).unwrap_or_else(hotkey::default_shortcut);
 
             app.manage(config_manager);
             app.manage(history_store);
             app.manage(dictionary_store);
             app.manage(shared_client);
             app.manage(pipeline_handle);
+            app.manage(hotkey::HotkeyRegistry::default());
             app.manage(HotkeyModeCache(Arc::new(Mutex::new(
                 initial_config.hotkey_mode.clone(),
             ))));
@@ -191,7 +193,7 @@ pub fn run() {
                     .with_handler(handler)
                     .build(),
             )?;
-            if let Err(e) = app.global_shortcut().register(shortcut) {
+            if let Err(e) = hotkey::register_hotkey(&app_handle, &initial_config.hotkey) {
                 tracing::warn!(
                     "Failed to register shortcut '{}' (may be occupied): {e}",
                     initial_config.hotkey
@@ -404,9 +406,23 @@ pub fn run() {
             commands::misc::update_hotkey,
             commands::misc::pause_hotkey,
             commands::misc::resume_hotkey,
+            commands::misc::refresh_tray_labels,
             commands::config::set_auto_start,
             commands::config::set_session_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disables_webkit_dmabuf_only_for_nvidia_wayland() {
+        assert!(should_disable_webkit_dmabuf("wayland", true));
+        assert!(should_disable_webkit_dmabuf("Wayland", true));
+        assert!(!should_disable_webkit_dmabuf("x11", true));
+        assert!(!should_disable_webkit_dmabuf("wayland", false));
+    }
 }

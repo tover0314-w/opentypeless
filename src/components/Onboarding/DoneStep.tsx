@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import {
   Check,
@@ -13,6 +14,7 @@ import { useAppStore } from '../../stores/appStore'
 import { checkAccessibilityPermission, requestAccessibilityPermission } from '../../lib/tauri'
 
 export function DoneStep() {
+  const { t } = useTranslation()
   const config = useAppStore((s) => s.config)
   const isMac =
     typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
@@ -53,20 +55,36 @@ export function DoneStep() {
       </motion.div>
 
       <div className="text-center">
-        <h2 className="text-[17px] font-semibold text-text-primary">All Set</h2>
-        <p className="text-[13px] text-text-secondary mt-1">The capsule is now on your desktop</p>
+        <h2 className="text-[17px] font-semibold text-text-primary">
+          {t('onboarding.done.title')}
+        </h2>
+        <p className="text-[13px] text-text-secondary mt-1">
+          {t('onboarding.done.capsuleOnDesktop')}
+        </p>
       </div>
 
       {/* Usage tips */}
       <div className="w-full space-y-2">
         <Tip
           icon={Keyboard}
-          title={`${config.hotkey_mode === 'hold' ? 'Hold' : 'Press'} ${config.hotkey}`}
-          desc={config.hotkey_mode === 'hold' ? 'to talk anywhere' : 'to start/stop recording'}
+          title={`${t('onboarding.done.holdPress')} ${config.hotkey}`}
+          desc={t('onboarding.done.holdPressSub')}
         />
-        <Tip icon={MousePointerClick} title="Click the capsule" desc="to start recording" />
-        <Tip icon={GripHorizontal} title="Drag to reposition" desc="place it anywhere on screen" />
-        <Tip icon={MousePointer} title="Right-click for menu" desc="settings, history, and more" />
+        <Tip
+          icon={MousePointerClick}
+          title={t('onboarding.done.clickCapsule')}
+          desc={t('onboarding.done.clickCapsuleSub')}
+        />
+        <Tip
+          icon={GripHorizontal}
+          title={t('onboarding.done.dragToReposition')}
+          desc={t('onboarding.done.dragToRepositionSub')}
+        />
+        <Tip
+          icon={MousePointer}
+          title={t('onboarding.done.rightClickMenu')}
+          desc={t('onboarding.done.rightClickMenuSub')}
+        />
       </div>
 
       {/* macOS Accessibility permission card */}
@@ -75,17 +93,17 @@ export function DoneStep() {
           <div className="flex items-center gap-2 mb-2">
             <ShieldAlert size={14} className="text-amber-500 shrink-0" />
             <span className="text-[12px] font-medium text-text-primary">
-              Keyboard output requires Accessibility permission
+              {t('onboarding.done.accessibilityRequired')}
             </span>
           </div>
           <button
             onClick={handleGrant}
             className="w-full py-1.5 text-[12px] font-medium text-white bg-accent rounded-[8px] border-none cursor-pointer hover:bg-accent-hover transition-colors"
           >
-            Grant Permission
+            {t('onboarding.done.grantPermission')}
           </button>
           <p className="text-[10px] text-text-tertiary mt-1.5 text-center">
-            You can also grant this later in Settings → General
+            {t('onboarding.done.grantLater')}
           </p>
         </div>
       )}
@@ -94,7 +112,7 @@ export function DoneStep() {
           <div className="flex items-center gap-2">
             <ShieldCheck size={14} className="text-green-500 shrink-0" />
             <span className="text-[12px] font-medium text-green-600">
-              Accessibility permission granted
+              {t('onboarding.done.accessibilityGranted')}
             </span>
           </div>
         </div>

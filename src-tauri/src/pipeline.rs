@@ -35,64 +35,20 @@ pub fn is_accessibility_trusted() -> bool {
     }
 }
 
-/// On macOS, request Accessibility permission by showing the system authorization dialog.
-/// Uses AXIsProcessTrustedWithOptions with kAXTrustedCheckOptionPrompt = true.
-/// Returns true if permission is already granted or on non-macOS platforms.
+/// On macOS, request Accessibility permission by opening System Settings to the
+/// Accessibility privacy pane. Returns true if permission is already granted or
+/// on non-macOS platforms.
 pub fn request_accessibility_permission() -> bool {
     #[cfg(target_os = "macos")]
     {
-        #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
-            fn AXIsProcessTrustedWithOptions(options: *mut std::ffi::c_void) -> u8;
+        if is_accessibility_trusted() {
+            return true;
         }
-        #[link(name = "CoreFoundation", kind = "framework")]
-        extern "C" {
-            fn CFDictionaryCreate(
-                allocator: *mut std::ffi::c_void,
-                keys: *const *mut std::ffi::c_void,
-                values: *const *mut std::ffi::c_void,
-                num_values: isize,
-                key_callbacks: *const std::ffi::c_void,
-                value_callbacks: *const std::ffi::c_void,
-            ) -> *mut std::ffi::c_void;
-            fn CFStringCreateWithCString(
-                allocator: *mut std::ffi::c_void,
-                c_str: *const i8,
-                encoding: u32,
-            ) -> *mut std::ffi::c_void;
-            static kCFTypeDictionaryKeyCallBacks: std::ffi::c_void;
-            static kCFTypeDictionaryValueCallBacks: std::ffi::c_void;
-        }
-        // kCFBooleanTrue — we link CoreFoundation and use the known address pattern
-        #[link(name = "CoreFoundation", kind = "framework")]
-        extern "C" {
-            static kCFBooleanTrue: *mut std::ffi::c_void;
-        }
-        // kCFStringEncodingUTF8 = 0x08000100
-        const K_CF_STRING_ENCODING_UTF8: u32 = 0x08000100;
 
-        #[allow(clippy::manual_c_str_literals)]
-        unsafe {
-            let key = CFStringCreateWithCString(
-                std::ptr::null_mut(),
-                b"kAXTrustedCheckOptionPrompt\0".as_ptr() as *const i8,
-                K_CF_STRING_ENCODING_UTF8,
-            );
-            let value = kCFBooleanTrue;
-
-            let options = CFDictionaryCreate(
-                std::ptr::null_mut(),
-                &[key] as *const *mut std::ffi::c_void,
-                &[value] as *const *mut std::ffi::c_void,
-                1,
-                &kCFTypeDictionaryKeyCallBacks as *const std::ffi::c_void,
-                &kCFTypeDictionaryValueCallBacks as *const std::ffi::c_void,
-            );
-
-            let trusted = AXIsProcessTrustedWithOptions(options);
-            // options is leaked (trivial — called at most a few times)
-            trusted != 0
-        }
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .status();
+        false
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -247,16 +203,29 @@ impl PipelineHandle {
         let mut clipboard = arboard::Clipboard::new().ok()?;
         let backup = clipboard.get_text().ok();
 
-        if let Ok(mut enigo) = Enigo::new(&EnigoSettings::default()) {
-            #[cfg(target_os = "macos")]
-            let modifier = Key::Meta;
-            #[cfg(not(target_os = "macos"))]
-            let modifier = Key::Control;
+        #[cfg(target_os = "macos")]
+        {
+            let status = std::process::Command::new("osascript")
+                .args([
+                    "-e",
+                    r#"tell application "System Events" to keystroke "c" using command down"#,
+                ])
+                .status();
 
-            let pressed = enigo.key(modifier, Direction::Press).is_ok();
-            if pressed {
-                let _ = enigo.key(Key::Unicode('c'), Direction::Click);
-                let _ = enigo.key(modifier, Direction::Release);
+            if !matches!(status, Ok(s) if s.success()) {
+                tracing::warn!("osascript Cmd+C failed, falling back to Enigo on main thread");
+                self.capture_selected_text_with_enigo_main_thread(Key::Meta);
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let Ok(mut enigo) = Enigo::new(&EnigoSettings::default()) {
+                let pressed = enigo.key(Key::Control, Direction::Press).is_ok();
+                if pressed {
+                    let _ = enigo.key(Key::Unicode('c'), Direction::Click);
+                    let _ = enigo.key(Key::Control, Direction::Release);
+                }
             }
         }
 
@@ -290,6 +259,25 @@ impl PipelineHandle {
                 }
             }
             _ => None,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn capture_selected_text_with_enigo_main_thread(&self, modifier: Key) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        if self
+            .app_handle
+            .run_on_main_thread(move || {
+                if let Ok(mut enigo) = Enigo::new(&EnigoSettings::default()) {
+                    let _ = enigo.key(modifier, Direction::Press);
+                    let _ = enigo.key(Key::Unicode('c'), Direction::Click);
+                    let _ = enigo.key(modifier, Direction::Release);
+                }
+                let _ = tx.send(());
+            })
+            .is_ok()
+        {
+            let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
         }
     }
 
@@ -974,7 +962,7 @@ impl PipelineHandle {
             mode
         };
 
-        match output::output_with_fallback(text, effective_mode).await {
+        match output::output_with_fallback(&self.app_handle, text, effective_mode).await {
             Ok(Some(user_error)) => {
                 tracing::info!("Output fell back to clipboard");
                 let _ = self.app_handle.emit("pipeline:warning", &user_error);

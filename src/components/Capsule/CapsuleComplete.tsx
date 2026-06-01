@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { useEffect } from 'react'
@@ -5,6 +6,7 @@ import { useAppStore } from '../../stores/appStore'
 import { spring } from '../../lib/animations'
 
 export function CapsuleComplete() {
+  const { t } = useTranslation()
   const resetRecording = useAppStore((s) => s.resetRecording)
   const setPipelineState = useAppStore((s) => s.setPipelineState)
 
@@ -25,7 +27,7 @@ export function CapsuleComplete() {
       >
         <Check size={14} className="text-white" />
       </motion.div>
-      <span className="text-[11px] text-white font-medium">Done</span>
+      <span className="text-[11px] text-white font-medium">{t('capsule.done')}</span>
     </motion.div>
   )
 }

@@ -9,7 +9,8 @@ import { LlmPane } from './LlmPane'
 import { DictionaryPane } from './DictionaryPane'
 import { ScenesPane } from './ScenesPane'
 import { AboutPane } from './AboutPane'
-import { DirtyBar, useDirtyConfig } from './shared/DirtyBar'
+import { DirtyBar } from './shared/DirtyBar'
+import { useDirtyConfig } from './shared/useDirtyConfig'
 
 const paneTitleKeys: Record<PaneId, string> = {
   general: 'settings.general',

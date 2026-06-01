@@ -48,8 +48,7 @@ vi.mock('framer-motion', () => ({
     {
       get:
         (_t, tag: string) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ({ children, ...rest }: any) => {
+        ({ children, ...rest }: React.PropsWithChildren<Record<string, unknown>>) => {
           const domProps: Record<string, unknown> = {}
           for (const [k, v] of Object.entries(rest)) {
             if (!MOTION_PROPS.has(k)) domProps[k] = v
@@ -378,7 +377,7 @@ describe('DirtyBar 行为', () => {
 
   it('初始状态下 DirtyBar 不显示', () => {
     renderSettings()
-    expect(screen.queryByText('Unsaved changes')).toBeNull()
+    expect(screen.queryByText('settings.unsavedChanges')).toBeNull()
   })
 
   it('修改 config 后 DirtyBar 出现', async () => {
@@ -387,7 +386,7 @@ describe('DirtyBar 行为', () => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
     await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
+      expect(screen.getByText('settings.unsavedChanges')).toBeDefined()
     })
   })
 
@@ -397,13 +396,13 @@ describe('DirtyBar 行为', () => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
     await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
+      expect(screen.getByText('settings.unsavedChanges')).toBeDefined()
     })
 
     fireEvent.click(screen.getByText('Reset'))
 
     await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      expect(screen.queryByText('settings.unsavedChanges')).toBeNull()
     })
   })
 
@@ -413,7 +412,7 @@ describe('DirtyBar 行为', () => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
     await waitFor(() => {
-      expect(screen.getByText('Save')).toBeDefined()
+      expect(screen.getByText('common.save')).toBeDefined()
       expect(screen.getByText('Reset')).toBeDefined()
     })
   })

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Trash2, Plus } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import { addDictionaryEntry, removeDictionaryEntry, getDictionary } from '../../lib/tauri'
-import { toast } from '../Toast'
+import { toast } from '../toastApi'
 
 export function DictionaryPane() {
   const dictionary = useAppStore((s) => s.dictionary)

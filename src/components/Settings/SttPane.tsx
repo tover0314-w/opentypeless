@@ -46,7 +46,7 @@ export function SttPane() {
         >
           {STT_PROVIDERS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(p.labelKey)}
             </option>
           ))}
         </select>
@@ -112,7 +112,7 @@ export function SttPane() {
         >
           {LANGUAGES.map((l) => (
             <option key={l.value} value={l.value}>
-              {l.label}
+              {l.labelKey ? t(l.labelKey) : l.label}
             </option>
           ))}
         </select>

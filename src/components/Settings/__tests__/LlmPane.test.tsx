@@ -22,6 +22,7 @@ vi.mock('react-i18next', () => ({
         'settings.storedLocally': 'Stored locally',
         'settings.fetchModels': 'Fetch models',
         'settings.modelsAvailable': `${params?.count || 0} models available`,
+        'settings.llmModelPlaceholder': 'e.g. gpt-4o-mini',
         'settings.enableAiPolish': 'Enable AI Polish',
         'settings.translationMode': 'Translation Mode',
         'settings.selectedTextContext': 'Selected Text Context',
@@ -271,7 +272,7 @@ describe('LlmPane', () => {
   describe('Base URL input', () => {
     it('updates config when base URL changes', () => {
       render(<LlmPane />)
-      const input = screen.getByPlaceholderText('https://open.bigmodel.cn/api/paas/v4')
+      const input = screen.getByPlaceholderText('https://api.openai.com/v1')
 
       fireEvent.change(input, { target: { value: 'https://custom.api.com/v1' } })
 

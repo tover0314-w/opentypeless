@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../stores/appStore'
 import { LLM_PROVIDERS, LLM_DEFAULT_CONFIG } from '../../lib/constants'
 import { testLlmConnection, fetchLlmModels } from '../../lib/tauri'
 import { CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react'
 
 export function LlmSetupStep() {
+  const { t } = useTranslation()
   const config = useAppStore((s) => s.config)
   const updateConfig = useAppStore((s) => s.updateConfig)
   const llmTestStatus = useAppStore((s) => s.llmTestStatus)
@@ -56,7 +58,7 @@ export function LlmSetupStep() {
 
   return (
     <div className="space-y-5">
-      <Field label="AI Polish Service">
+      <Field label={t('onboarding.llm.serviceLabel')}>
         <select
           value={config.llm_provider}
           onChange={(e) => {
@@ -74,13 +76,13 @@ export function LlmSetupStep() {
         >
           {LLM_PROVIDERS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(p.labelKey)}
             </option>
           ))}
         </select>
       </Field>
 
-      <Field label="API Key">
+      <Field label={t('onboarding.llm.apiKeyLabel')}>
         <div className="flex gap-2">
           <input
             type="password"
@@ -89,7 +91,7 @@ export function LlmSetupStep() {
               updateConfig({ llm_api_key: e.target.value })
               setLlmTestStatus('idle')
             }}
-            placeholder="Enter API Key..."
+            placeholder={t('onboarding.llm.apiKeyPlaceholder')}
             className="flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
           />
           <button
@@ -98,20 +100,20 @@ export function LlmSetupStep() {
             className="px-4 py-2.5 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
           >
             {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
-            Test
+            {t('onboarding.llm.testButton')}
           </button>
         </div>
         <TestStatusHint status={llmTestStatus} />
       </Field>
 
-      <Field label="Model">
+      <Field label={t('onboarding.llm.modelLabel')}>
         <div className="flex gap-2">
           <div className="relative flex-1">
             <input
               list="onboarding-llm-model-list"
               value={config.llm_model}
               onChange={(e) => updateConfig({ llm_model: e.target.value })}
-              placeholder="glm-4.7"
+              placeholder={t('onboarding.llm.modelPlaceholder')}
               className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
             />
             <datalist id="onboarding-llm-model-list">
@@ -124,21 +126,25 @@ export function LlmSetupStep() {
             onClick={() => doFetchModels(config.llm_api_key, config.llm_base_url)}
             disabled={fetchingModels || !config.llm_base_url}
             className="px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-secondary cursor-pointer hover:border-border-focus disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-            title="Fetch available models"
+            title={t('onboarding.llm.fetchModelsTitle')}
           >
             <RefreshCw size={14} className={fetchingModels ? 'animate-spin' : ''} />
           </button>
         </div>
         {models.length > 0 && (
-          <p className="text-[11px] text-text-tertiary mt-1">{models.length} models available</p>
+          <p className="text-[11px] text-text-tertiary mt-1">
+            {t('onboarding.llm.modelsAvailable', { count: models.length })}
+          </p>
         )}
       </Field>
 
-      <Field label="Base URL">
+      <Field label={t('onboarding.llm.baseUrlLabel')}>
         <input
           value={config.llm_base_url}
           onChange={(e) => updateConfig({ llm_base_url: e.target.value })}
-          placeholder="https://open.bigmodel.cn/api/paas/v4"
+          placeholder={
+            LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl ?? 'https://api.openai.com/v1'
+          }
           className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
         />
       </Field>
@@ -156,17 +162,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function TestStatusHint({ status }: { status: string }) {
+  const { t } = useTranslation()
   if (status === 'success') {
     return (
       <p className="flex items-center gap-1 text-[12px] text-success mt-2">
-        <CheckCircle2 size={13} /> Connection successful
+        <CheckCircle2 size={13} /> {t('onboarding.llm.connectionOk')}
       </p>
     )
   }
   if (status === 'error') {
     return (
       <p className="flex items-center gap-1 text-[12px] text-error mt-2">
-        <XCircle size={13} /> Connection failed, please check your config
+        <XCircle size={13} /> {t('onboarding.llm.connectionFail')}
       </p>
     )
   }

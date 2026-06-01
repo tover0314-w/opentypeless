@@ -17,6 +17,7 @@ export function ScenesPane() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [mergeMsg, setMergeMsg] = useState<string | null>(null)
+  const [mergeOk, setMergeOk] = useState(false)
 
   const setDictionary = useAppStore((s) => s.setDictionary)
 
@@ -92,17 +93,26 @@ export function ScenesPane() {
 
   const handleMergeDictionary = async (scene: ScenePack) => {
     setMergeMsg(null)
+    setMergeOk(false)
     try {
       for (const term of scene.dictionaryTerms) {
         await addDictionaryEntry(term.word, term.pronunciation ?? null)
       }
       const updated = await getDictionary()
       setDictionary(updated)
+      setMergeOk(true)
       setMergeMsg(t('scenes.addedTerms', { count: scene.dictionaryTerms.length }))
-      setTimeout(() => setMergeMsg(null), 3000)
+      setTimeout(() => {
+        setMergeMsg(null)
+        setMergeOk(false)
+      }, 3000)
     } catch {
+      setMergeOk(false)
       setMergeMsg(t('scenes.failedToMerge'))
-      setTimeout(() => setMergeMsg(null), 3000)
+      setTimeout(() => {
+        setMergeMsg(null)
+        setMergeOk(false)
+      }, 3000)
     }
   }
 
@@ -233,11 +243,7 @@ export function ScenesPane() {
 
       {/* Merge feedback */}
       {mergeMsg && (
-        <p
-          className={`text-[12px] ${mergeMsg.includes('Failed') ? 'text-red-500' : 'text-green-500'}`}
-        >
-          {mergeMsg}
-        </p>
+        <p className={`text-[12px] ${!mergeOk ? 'text-red-500' : 'text-green-500'}`}>{mergeMsg}</p>
       )}
     </div>
   )

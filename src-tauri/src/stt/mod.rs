@@ -65,7 +65,10 @@ pub fn create_provider(
             }
         }
         "assemblyai" => Box::new(assemblyai::AssemblyAiProvider::new()),
-        "deepgram" => Box::new(deepgram::DeepgramProvider::new()),
+        "deepgram" => match client {
+            Some(ref c) => Box::new(deepgram::DeepgramProvider::with_client(c.clone())),
+            None => Box::new(deepgram::DeepgramProvider::new()),
+        },
         name => {
             // All Whisper-compatible providers share the same HTTP upload logic.
             // Config is centralised in config::get_whisper_config.

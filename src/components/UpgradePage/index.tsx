@@ -23,7 +23,7 @@ export function UpgradePage() {
       useAuthStore.setState({ checkoutPending: true })
       await openUrl(url)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create checkout')
+      setError(e instanceof Error ? e.message : t('account.toast.subscriptionFail'))
     } finally {
       setLoading(false)
     }
@@ -58,22 +58,22 @@ export function UpgradePage() {
             {PRO_PLAN.price}
             <span className="text-[13px] font-normal text-text-secondary">
               {' '}
-              / {PRO_PLAN.period}
+              / {t('upgrade.month')}
             </span>
           </p>
         </div>
 
         {/* Features */}
         <div>
-          {PRO_PLAN.features.map((f) => (
+          {PRO_PLAN.features.map((f, i) => (
             <div
-              key={f.label}
+              key={i}
               className="flex items-start gap-2.5 px-4 py-2.5 border-b border-border last:border-b-0"
             >
               <Check size={14} className="text-green-500 mt-0.5 shrink-0" />
               <div>
-                <span className="text-text-primary">{f.label}</span>
-                <span className="text-text-tertiary ml-1.5 text-[12px]">{f.detail}</span>
+                <span className="text-text-primary">{t(f.labelKey)}</span>
+                <span className="text-text-tertiary ml-1.5 text-[12px]">{t(f.detailKey)}</span>
               </div>
             </div>
           ))}
@@ -93,14 +93,14 @@ export function UpgradePage() {
               label={t('upgrade.stt')}
               used={sttSecondsUsed}
               limit={sttSecondsLimit}
-              unit="hours"
+              unit={t('account.quotaHours')}
               divisor={3600}
             />
             <QuotaBar
               label={t('upgrade.llm')}
               used={llmTokensUsed}
               limit={llmTokensLimit}
-              unit="k tokens"
+              unit={t('account.quotaTokens')}
               divisor={1000}
             />
           </div>
@@ -150,6 +150,7 @@ function QuotaBar({
   unit: string
   divisor: number
 }) {
+  const { t } = useTranslation()
   const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0
   const usedDisplay = (used / divisor).toFixed(1)
   const limitDisplay = (limit / divisor).toFixed(1)
@@ -168,7 +169,12 @@ function QuotaBar({
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${label} usage: ${usedDisplay} of ${limitDisplay} ${unit}`}
+        aria-label={t('account.quotaUsage', {
+          label,
+          used: usedDisplay,
+          limit: limitDisplay,
+          unit,
+        })}
       >
         <div
           className={`h-full rounded-full transition-all ${pct > 90 ? 'bg-red-500' : 'bg-accent'}`}

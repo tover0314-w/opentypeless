@@ -1,10 +1,7 @@
 {
   "app": {
     "name": "OpenTypeless",
-    "tagline": "AI Voice Input",
-    "loading": "Loading...",
-    "failedToLoad": "Failed to load application data.",
-    "retry": "Retry"
+    "tagline": "AI Voice Input"
   },
   "nav": {
     "home": "Home",
@@ -12,7 +9,8 @@
     "history": "History",
     "account": "Account",
     "upgrade": "Upgrade",
-    "pro": "Pro"
+    "pro": "Pro",
+    "mainNavigation": "Main navigation"
   },
   "home": {
     "welcome": "Welcome to OpenTypeless",
@@ -31,49 +29,128 @@
     "outputMode": "Output Mode"
   },
   "onboarding": {
-    "welcomeTitle": "Welcome to OpenTypeless",
-    "welcomeSubtitle": "A few quick steps to get started with voice input",
-    "speechRecognition": "Speech Recognition",
-    "speechRecognitionDesc": "Configure your ASR service to convert speech to text",
-    "aiPolish": "AI Polish",
-    "aiPolishDesc": "Configure an LLM service to polish transcribed text",
-    "tryItOut": "Try It Out",
-    "tryItOutDesc": "Hold the button and say something to test the full pipeline",
-    "setupComplete": "Setup Complete",
-    "skip": "Skip",
-    "back": "Back",
-    "next": "Next",
-    "getStarted": "Get Started",
-    "close": "Close",
     "speakToWrite": "Speak to write — turn your voice into polished text in real time",
     "selectLanguage": "Choose your language",
     "selectLanguageDesc": "Select the language for the app interface. You can change it later in Settings.",
-    "allSet": "All Set",
-    "startUsing": "Start using voice input",
-    "hotkey": "Hotkey",
-    "hold": "Hold",
-    "press": "Press",
-    "toTalk": "to talk",
-    "toStartStop": "to start/stop",
-    "capsuleHint": "← This is your voice capsule",
-    "sttService": "Speech Recognition Service",
-    "aiPolishService": "AI Polish Service",
-    "apiKey": "API Key",
-    "enterApiKey": "Enter API Key...",
-    "test": "Test",
-    "connectionSuccess": "Connection successful",
-    "connectionFailed": "Connection failed, please check your API Key",
-    "connectionFailedConfig": "Connection failed, please check your config",
-    "model": "Model",
-    "fetchModels": "Fetch available models",
-    "modelsAvailable": "{{count}} models available",
-    "baseUrl": "Base URL",
-    "record": "Record",
-    "stt": "STT",
-    "llm": "LLM",
-    "output": "Output",
-    "releaseToStop": "Release to stop recording",
-    "holdAndSay": "Hold and say something"
+    "test": {
+      "stageRecord": "Record",
+      "stageStt": "Transcribe",
+      "stageLlm": "Polish",
+      "stageOutput": "Output",
+      "phaseIdle": "Press and hold to record",
+      "phaseRecording": "Recording...",
+      "phaseStt": "Transcribing...",
+      "phaseLlm": "Polishing...",
+      "phaseDone": "Done!",
+      "hold": "Hold",
+      "press": "Press",
+      "toTalk": "to talk",
+      "toStartStop": "to start/stop",
+      "transcribing": "Transcribing",
+      "raw": "Raw",
+      "polished": "Polished",
+      "result": "Result",
+      "demoRaw": "hello um can you help me with this",
+      "demoPolished": "Hello, can you help me with this?"
+    },
+    "stt": {
+      "serviceLabel": "Speech Recognition Service",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "testButton": "Test Connection",
+      "connectionOk": "Connection successful",
+      "connectionFail": "Connection failed"
+    },
+    "llm": {
+      "serviceLabel": "AI Polish Service",
+      "apiKeyLabel": "API Key",
+      "apiKeyPlaceholder": "Enter your API key",
+      "testButton": "Test Connection",
+      "modelLabel": "Model",
+      "modelPlaceholder": "Select a model",
+      "fetchModelsTitle": "Fetch Models",
+      "modelsAvailable": "models available",
+      "baseUrlLabel": "Base URL",
+      "connectionOk": "Connection successful",
+      "connectionFail": "Connection failed"
+    },
+    "steps": {
+      "welcome": "Welcome",
+      "welcomeSub": "Set up OpenTypeless in a few steps",
+      "signIn": "Sign In",
+      "signInSub": "Connect your account to get started",
+      "chooseMode": "Choose Mode",
+      "chooseModeSub": "Select how you want to use OpenTypeless",
+      "speechRecognition": "Speech Recognition",
+      "speechRecognitionSub": "Configure your STT service",
+      "aiPolish": "AI Polish",
+      "aiPolishSub": "Configure your LLM service",
+      "howItWorks": "How It Works",
+      "howItWorksSub": "Try a quick recording test",
+      "setupComplete": "Setup Complete",
+      "getStarted": "Get Started"
+    },
+    "account": {
+      "signIn": "Sign In",
+      "signUp": "Sign Up",
+      "name": "Name",
+      "namePlaceholder": "Your name",
+      "email": "Email",
+      "emailPlaceholder": "your@email.com",
+      "password": "Password",
+      "or": "or",
+      "signedInAs": "Signed in as",
+      "freePlan": "Free Plan",
+      "freePlanQuota": "quota remaining",
+      "checkEmail": "Check your email",
+      "verificationSent": "We sent a verification link to",
+      "resendVerification": "Resend verification",
+      "backToSignIn": "Back to sign in",
+      "completingSignIn": "Completing sign in...",
+      "finishSignIn": "Finish signing in",
+      "cancel": "Cancel",
+      "nameRequired": "Name is required",
+      "passwordTooShort": "Password must be at least 8 characters",
+      "signInTimedOut": "Sign in timed out",
+      "failedToStart": "Failed to start",
+      "verificationResent": "Verification email sent!",
+      "continueWithGoogle": "Continue with Google",
+      "continueWithGithub": "Continue with GitHub"
+    },
+    "done": {
+      "title": "You're all set!",
+      "capsuleOnDesktop": "Capsule on Desktop",
+      "holdPress": "Hold / Press",
+      "holdPressSub": "Use your hotkey to start and stop recording",
+      "clickCapsule": "Click Capsule",
+      "clickCapsuleSub": "Click the floating capsule to toggle recording",
+      "dragToReposition": "Drag to Reposition",
+      "dragToRepositionSub": "Drag the capsule anywhere on screen",
+      "rightClickMenu": "Right-click Menu",
+      "rightClickMenuSub": "Right-click the capsule for more options",
+      "accessibilityRequired": "Accessibility permission is required for text output",
+      "grantPermission": "Grant Permission",
+      "grantLater": "Grant Later",
+      "accessibilityGranted": "Accessibility permission granted"
+    },
+    "mode": {
+      "cloud": "Cloud",
+      "recommended": "Recommended",
+      "zeroConfig": "Zero configuration",
+      "cloudVoice": "Cloud voice recognition",
+      "cloudTokens": "Cloud AI tokens included",
+      "oneTimeCredit": "One-time credit on sign up",
+      "byok": "Bring Your Own Key",
+      "byokDesc": "Use your own API keys",
+      "unlimitedUsage": "Unlimited usage with your keys",
+      "providersSupported": "Multiple providers supported"
+    },
+    "layout": {
+      "skip": "Skip",
+      "back": "Back",
+      "next": "Next",
+      "close": "Close"
+    }
   },
   "capsule": {
     "cancelRecording": "Cancel recording",
@@ -83,13 +160,15 @@
     "cancelPolishing": "Cancel polishing",
     "done": "Done",
     "errorOccurred": "An error occurred",
-    "openMainWindow": "Open Main Window",
-    "settings": "Settings",
-    "history": "History",
-    "account": "Account",
-    "upgrade": "Upgrade",
-    "exit": "Exit",
-    "accessibilityRequired": "Accessibility needed — open Settings"
+    "accessibilityRequired": "Accessibility needed — open Settings",
+    "menu": {
+      "openMainWindow": "Open Main Window",
+      "settings": "Settings",
+      "history": "History",
+      "account": "Account",
+      "upgrade": "Upgrade",
+      "exit": "Exit"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -99,6 +178,7 @@
     "dictionary": "Dictionary",
     "scenes": "Scenes",
     "about": "About",
+    "autoDetect": "Auto Detect",
     "hotkey": "Hotkey",
     "pressKeyCombination": "Press a key combination...",
     "clickToConfirm": "Click again to confirm, or press another combination",
@@ -110,7 +190,6 @@
     "other": "Other",
     "launchAtStartup": "Launch at Startup",
     "startMinimized": "Start minimized to tray",
-    "closeToTray": "Close to system tray",
     "language": "Language",
     "provider": "Provider",
     "cloudSttPro": "Cloud STT (Pro)",
@@ -150,7 +229,9 @@
     "accessibilityPermission": "macOS Accessibility",
     "accessibilityGranted": "Permission granted",
     "accessibilityRequired": "Required for keyboard output",
-    "grantPermission": "Grant Permission"
+    "grantPermission": "Grant Permission",
+    "unsavedChanges": "You have unsaved changes",
+    "llmModelPlaceholder": "e.g. gpt-4o-mini"
   },
   "dictionary": {
     "word": "Word",
@@ -203,7 +284,20 @@
     "llm": "LLM",
     "thankYou": "You're on Pro — thank you for your support!",
     "signInFirst": "Sign in from the Account page first to subscribe.",
-    "subscribeToPro": "Subscribe to Pro"
+    "subscribeToPro": "Subscribe to Pro",
+    "month": "month",
+    "features": {
+      "sttTitle": "Cloud STT",
+      "sttDetail": "Premium speech recognition",
+      "llmTitle": "Cloud LLM",
+      "llmDetail": "AI text polishing",
+      "backupTitle": "Cloud Backup",
+      "backupDetail": "Sync your settings and history",
+      "scenesTitle": "Custom Scenes",
+      "scenesDetail": "Save and switch prompt templates",
+      "zeroConfigTitle": "Zero Configuration",
+      "zeroConfigDetail": "No API keys needed"
+    }
   },
   "account": {
     "title": "Account",
@@ -230,20 +324,61 @@
     "oauthPendingTitle": "Completing sign in...",
     "oauthPendingDesc": "Finish signing in with your browser. You'll be redirected back automatically.",
     "oauthTimeout": "Sign in timed out. Please try again.",
-    "cancel": "Cancel"
+    "oauthFailed": "Failed to start sign in",
+    "quotaHours": "hours",
+    "quotaTokens": "k tokens",
+    "quotaUsage": "{{label}}: {{used}} / {{limit}} {{unit}}",
+    "sttQuotaWarning": "STT usage has exceeded 90% of your monthly quota",
+    "llmQuotaWarning": "LLM usage has exceeded 90% of your monthly quota",
+    "backToSignIn": "Back to Sign In",
+    "freeCredit": "Free Credit",
+    "resendVerification": "Resend verification email",
+    "sending": "Sending...",
+    "verificationResent": "Verification email sent!",
+    "verifyEmailTitle": "Check your email",
+    "cancel": "Cancel",
+    "toast": {
+      "backupOk": "Backup successful",
+      "backupFail": "Backup failed",
+      "restoreOk": "Restore successful",
+      "restoreFail": "Restore failed",
+      "subscriptionFail": "Failed to load subscription"
+    },
+    "quotaMin": "min"
   },
   "error": {
     "somethingWentWrong": "Something went wrong",
     "unexpectedError": "An unexpected error occurred.",
     "reload": "Reload"
   },
-  "errors": {
-    "stt_invalid_key": "Invalid API Key, please check settings",
-    "stt_timeout": "Connection timeout, retrying...",
-    "stt_failed": "Speech recognition failed, please check your network",
-    "llm_failed": "Text polish failed, raw transcription saved",
-    "output_fallback_clipboard": "Copied to clipboard, paste manually",
-    "output_wayland_unsupported": "Keyboard output unsupported on Wayland, switched to clipboard mode",
-    "output_xdotool_missing": "xdotool not found, install it for keyboard output: sudo apt install xdotool"
+  "common": {
+    "save": "Save",
+    "saving": "Saving...",
+    "connectionFail": "Connection failed"
+  },
+  "providers": {
+    "stt": {
+      "deepgram": "Deepgram Nova-3",
+      "assemblyai": "AssemblyAI",
+      "glmAsr": "GLM-ASR (Zhipu)",
+      "openaiWhisper": "OpenAI Whisper",
+      "groqWhisper": "Groq Whisper",
+      "siliconflow": "SiliconFlow",
+      "cloud": "OpenTypeless Cloud"
+    },
+    "llm": {
+      "zhipu": "Zhipu",
+      "deepseek": "DeepSeek",
+      "siliconflow": "SiliconFlow",
+      "openai": "OpenAI",
+      "gemini": "Google Gemini",
+      "moonshot": "Moonshot (Kimi)",
+      "qwen": "Qwen",
+      "groq": "Groq",
+      "claude": "Claude",
+      "ollama": "Ollama (Local)",
+      "openrouter": "OpenRouter",
+      "cloud": "OpenTypeless Cloud"
+    }
   }
 }

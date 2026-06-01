@@ -52,9 +52,14 @@ function HotkeyRecorder() {
   const [modifierHint, setModifierHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const autoConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const needsRestore = useRef(false)
+  const platform = typeof navigator !== 'undefined' ? navigator.platform.toUpperCase() : ''
+  const isWindows = platform.includes('WIN')
+  const metaLabel = platform.includes('MAC') ? 'Cmd' : 'Win'
 
   const confirmHotkey = useCallback(
     (hotkey: string) => {
+      needsRestore.current = false
       setRecording(false)
       setError(null)
       setModifierHint(null)
@@ -82,10 +87,25 @@ function HotkeyRecorder() {
       if (e.ctrlKey) parts.push('Ctrl')
       if (e.altKey) parts.push('Alt')
       if (e.shiftKey) parts.push('Shift')
-      if (e.metaKey) parts.push('Meta')
+      if (e.metaKey) parts.push(metaLabel)
+
+      const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)
+      const hasCtrlMeta = parts.includes('Ctrl') && parts.includes(metaLabel)
+
+      // Windows Ctrl+Win is a valid pure-modifier hotkey handled by a native keyboard hook.
+      if (isModifierOnly && isWindows && hasCtrlMeta && parts.length === 2) {
+        setModifierHint(null)
+        const combo = parts.join('+')
+        setPending(combo)
+        if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
+        autoConfirmTimer.current = setTimeout(() => {
+          confirmHotkey(combo)
+        }, 1500)
+        return
+      }
 
       // If only modifier keys are pressed, show hint like "Alt+..."
-      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+      if (isModifierOnly) {
         setModifierHint(parts.length > 0 ? parts.join('+') + '+...' : null)
         return
       }
@@ -126,7 +146,7 @@ function HotkeyRecorder() {
         confirmHotkey(combo)
       }, 1500)
     },
-    [confirmHotkey],
+    [confirmHotkey, isWindows, metaLabel],
   )
 
   const handleKeyUp = useCallback(() => {
@@ -135,12 +155,16 @@ function HotkeyRecorder() {
 
   useEffect(() => {
     if (!recording) return
+    needsRestore.current = true
     window.addEventListener('keydown', handleKeyDown, true)
     window.addEventListener('keyup', handleKeyUp, true)
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('keyup', handleKeyUp, true)
       if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
+      if (needsRestore.current) {
+        resumeHotkey().catch(() => {})
+      }
     }
   }, [recording, handleKeyDown, handleKeyUp])
 
@@ -154,6 +178,7 @@ function HotkeyRecorder() {
       setRecording(false)
       setPending(null)
       setModifierHint(null)
+      needsRestore.current = false
       if (autoConfirmTimer.current) clearTimeout(autoConfirmTimer.current)
       resumeHotkey().catch(() => {})
     } else {

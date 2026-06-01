@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion } from 'framer-motion'
 import { X } from 'lucide-react'
 import { abortRecording } from '../../lib/tauri'
@@ -5,6 +6,7 @@ import { Waveform } from './Waveform'
 import { DurationTimer } from './DurationTimer'
 
 export function CapsuleRecording() {
+  const { t } = useTranslation()
   const reduced = useReducedMotion()
 
   const handleCancel = async (e: React.MouseEvent) => {
@@ -29,7 +31,7 @@ export function CapsuleRecording() {
       <DurationTimer />
       <button
         onClick={handleCancel}
-        aria-label="Cancel recording"
+        aria-label={t('capsule.cancelRecording')}
         className="flex-shrink-0 p-1 rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-colors bg-transparent border-none cursor-pointer"
       >
         <X size={12} />

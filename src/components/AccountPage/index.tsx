@@ -143,7 +143,7 @@ function AuthForm() {
       await openUrl(url)
     } catch {
       setOauthPending(null)
-      setLocalError(`Failed to start ${provider} sign in`)
+      setLocalError(t('account.oauthFailed'))
     }
   }
 
@@ -389,9 +389,9 @@ function AccountDetails() {
     try {
       const { stt_api_key: _stt_api_key, llm_api_key: _llm_api_key, ...safeConfig } = config
       await uploadBackup({ history, dictionary, settings: safeConfig })
-      setBackupMsg('Backup uploaded successfully')
+      setBackupMsg(t('account.toast.backupOk'))
     } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : 'Backup failed')
+      setBackupMsg(e instanceof Error ? e.message : t('account.toast.backupFail'))
     } finally {
       setBackupLoading(false)
     }
@@ -405,9 +405,9 @@ function AccountDetails() {
       if (data.history) setHistory(data.history as never)
       if (data.dictionary) setDictionary(data.dictionary as never)
       if (data.settings) setConfig(data.settings as never)
-      setBackupMsg('Restore completed')
+      setBackupMsg(t('account.toast.restoreOk'))
     } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : 'Restore failed')
+      setBackupMsg(e instanceof Error ? e.message : t('account.toast.restoreFail'))
     } finally {
       setBackupLoading(false)
     }
@@ -419,7 +419,7 @@ function AccountDetails() {
       const { url } = await createPortalSession()
       await openUrl(url)
     } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : 'Failed to open subscription management')
+      setBackupMsg(e instanceof Error ? e.message : t('account.toast.subscriptionFail'))
     } finally {
       setPortalLoading(false)
     }
@@ -457,14 +457,14 @@ function AccountDetails() {
               label={t('upgrade.stt')}
               used={sttSecondsUsed}
               limit={sttSecondsLimit}
-              unit={sttSecondsLimit >= 3600 ? 'hours' : 'min'}
+              unit={sttSecondsLimit >= 3600 ? t('account.quotaHours') : t('account.quotaMin')}
               divisor={sttSecondsLimit >= 3600 ? 3600 : 60}
             />
             <QuotaBar
               label={t('upgrade.llm')}
               used={llmTokensUsed}
               limit={llmTokensLimit}
-              unit="k tokens"
+              unit={t('account.quotaTokens')}
               divisor={1000}
             />
           </div>
@@ -558,6 +558,7 @@ function QuotaBar({
   unit: string
   divisor: number
 }) {
+  const { t } = useTranslation()
   const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0
   const usedDisplay = (used / divisor).toFixed(1)
   const limitDisplay = (limit / divisor).toFixed(1)
@@ -576,7 +577,12 @@ function QuotaBar({
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${label} usage: ${usedDisplay} of ${limitDisplay} ${unit}`}
+        aria-label={t('account.quotaUsage', {
+          label,
+          used: usedDisplay,
+          limit: limitDisplay,
+          unit,
+        })}
       >
         <div
           className={`h-full rounded-full transition-all ${pct > 90 ? 'bg-red-500' : 'bg-accent'}`}

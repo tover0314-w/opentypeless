@@ -1,6 +1,19 @@
 // App metadata
+export const UI_LANGUAGES = [
+  { value: 'en', label: 'English' },
+  { value: 'zh', label: '中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'es', label: 'Español' },
+  { value: 'pt', label: 'Português' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'it', label: 'Italiano' },
+] as const
+
 export const APP_NAME = 'OpenTypeless'
-export const APP_VERSION = 'v0.1.0'
+export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'v0.1.0'
 export const APP_REPO_URL = 'https://github.com/tover0314-w/opentypeless'
 export const APP_LICENSE_URL = 'https://github.com/tover0314-w/opentypeless/blob/main/LICENSE'
 // Cloud API base URL — defaults to www.opentypeless.com but can be overridden via VITE_API_BASE_URL env var.
@@ -16,37 +29,40 @@ export const PRO_PLAN = {
   price: '$4.99',
   period: 'month',
   features: [
-    { label: 'Millisecond STT', detail: '10h/month, 99 languages' },
-    { label: 'Instant AI Rewrite', detail: '~5M tokens/month' },
-    { label: 'Cloud Backup & Restore', detail: 'History, dictionary, settings' },
-    { label: 'Pro Scene Packs', detail: 'Professional prompt templates' },
-    { label: 'Zero-config', detail: 'No API key needed' },
+    { labelKey: 'upgrade.features.sttTitle', detailKey: 'upgrade.features.sttDetail' },
+    { labelKey: 'upgrade.features.llmTitle', detailKey: 'upgrade.features.llmDetail' },
+    { labelKey: 'upgrade.features.backupTitle', detailKey: 'upgrade.features.backupDetail' },
+    { labelKey: 'upgrade.features.scenesTitle', detailKey: 'upgrade.features.scenesDetail' },
+    {
+      labelKey: 'upgrade.features.zeroConfigTitle',
+      detailKey: 'upgrade.features.zeroConfigDetail',
+    },
   ],
-} as const
+}
 
-export const STT_PROVIDERS = [
-  { value: 'deepgram', label: 'Deepgram Nova-3' },
-  { value: 'assemblyai', label: 'AssemblyAI' },
-  { value: 'glm-asr', label: 'GLM-ASR (智谱)' },
-  { value: 'openai-whisper', label: 'OpenAI Whisper' },
-  { value: 'groq-whisper', label: 'Groq Whisper' },
-  { value: 'siliconflow', label: 'SiliconFlow (硅基流动)' },
-  { value: 'cloud', label: 'OpenTypeless Cloud' },
+export const STT_PROVIDERS: { value: string; labelKey: string }[] = [
+  { value: 'deepgram', labelKey: 'providers.stt.deepgram' },
+  { value: 'assemblyai', labelKey: 'providers.stt.assemblyai' },
+  { value: 'glm-asr', labelKey: 'providers.stt.glmAsr' },
+  { value: 'openai-whisper', labelKey: 'providers.stt.openaiWhisper' },
+  { value: 'groq-whisper', labelKey: 'providers.stt.groqWhisper' },
+  { value: 'siliconflow', labelKey: 'providers.stt.siliconflow' },
+  { value: 'cloud', labelKey: 'providers.stt.cloud' },
 ] as const
 
-export const LLM_PROVIDERS = [
-  { value: 'zhipu', label: '智谱 (Zhipu)' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'siliconflow', label: '硅基流动 (SiliconFlow)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'moonshot', label: 'Moonshot (Kimi)' },
-  { value: 'qwen', label: '通义千问 (Qwen)' },
-  { value: 'groq', label: 'Groq' },
-  { value: 'claude', label: 'Claude' },
-  { value: 'ollama', label: 'Ollama (Local)' },
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'cloud', label: 'OpenTypeless Cloud' },
+export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
+  { value: 'zhipu', labelKey: 'providers.llm.zhipu' },
+  { value: 'deepseek', labelKey: 'providers.llm.deepseek' },
+  { value: 'siliconflow', labelKey: 'providers.llm.siliconflow' },
+  { value: 'openai', labelKey: 'providers.llm.openai' },
+  { value: 'gemini', labelKey: 'providers.llm.gemini' },
+  { value: 'moonshot', labelKey: 'providers.llm.moonshot' },
+  { value: 'qwen', labelKey: 'providers.llm.qwen' },
+  { value: 'groq', labelKey: 'providers.llm.groq' },
+  { value: 'claude', labelKey: 'providers.llm.claude' },
+  { value: 'ollama', labelKey: 'providers.llm.ollama' },
+  { value: 'openrouter', labelKey: 'providers.llm.openrouter' },
+  { value: 'cloud', labelKey: 'providers.llm.cloud' },
 ] as const
 
 export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string }> = {
@@ -67,49 +83,49 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   cloud: { baseUrl: `${API_BASE_URL}/api/proxy`, model: 'default' },
 }
 
-export const LANGUAGES = [
-  { value: 'multi', label: 'Auto Detect' },
-  { value: 'zh', label: '中文 (Chinese)' },
+export const LANGUAGES: { value: string; label?: string; labelKey?: string }[] = [
+  { value: 'multi', labelKey: 'settings.autoDetect' },
+  { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語 (Japanese)' },
-  { value: 'ko', label: '한국어 (Korean)' },
-  { value: 'fr', label: 'Français (French)' },
-  { value: 'de', label: 'Deutsch (German)' },
-  { value: 'es', label: 'Español (Spanish)' },
-  { value: 'pt', label: 'Português (Portuguese)' },
-  { value: 'ru', label: 'Русский (Russian)' },
-  { value: 'ar', label: 'العربية (Arabic)' },
-  { value: 'hi', label: 'हिन्दी (Hindi)' },
-  { value: 'th', label: 'ไทย (Thai)' },
-  { value: 'vi', label: 'Tiếng Việt (Vietnamese)' },
-  { value: 'it', label: 'Italiano (Italian)' },
-  { value: 'nl', label: 'Nederlands (Dutch)' },
-  { value: 'tr', label: 'Türkçe (Turkish)' },
-  { value: 'pl', label: 'Polski (Polish)' },
-  { value: 'uk', label: 'Українська (Ukrainian)' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'es', label: 'Español' },
+  { value: 'pt', label: 'Português' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'ar', label: 'العربية' },
+  { value: 'hi', label: 'हिन्दी' },
+  { value: 'th', label: 'ไทย' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'it', label: 'Italiano' },
+  { value: 'nl', label: 'Nederlands' },
+  { value: 'tr', label: 'Türkçe' },
+  { value: 'pl', label: 'Polski' },
+  { value: 'uk', label: 'Українська' },
   { value: 'id', label: 'Bahasa Indonesia' },
-  { value: 'ms', label: 'Bahasa Melayu (Malay)' },
-] as const
+  { value: 'ms', label: 'Bahasa Melayu' },
+]
 
-export const TARGET_LANGUAGES = [
+export const TARGET_LANGUAGES: { value: string; label: string; labelKey?: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'zh', label: '中文 (Chinese)' },
-  { value: 'ja', label: '日本語 (Japanese)' },
-  { value: 'ko', label: '한국어 (Korean)' },
-  { value: 'fr', label: 'Français (French)' },
-  { value: 'de', label: 'Deutsch (German)' },
-  { value: 'es', label: 'Español (Spanish)' },
-  { value: 'pt', label: 'Português (Portuguese)' },
-  { value: 'ru', label: 'Русский (Russian)' },
-  { value: 'ar', label: 'العربية (Arabic)' },
-  { value: 'hi', label: 'हिन्दी (Hindi)' },
-  { value: 'th', label: 'ไทย (Thai)' },
-  { value: 'vi', label: 'Tiếng Việt (Vietnamese)' },
-  { value: 'it', label: 'Italiano (Italian)' },
-  { value: 'nl', label: 'Nederlands (Dutch)' },
-  { value: 'tr', label: 'Türkçe (Turkish)' },
-  { value: 'pl', label: 'Polski (Polish)' },
-  { value: 'uk', label: 'Українська (Ukrainian)' },
+  { value: 'zh', label: '中文' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'es', label: 'Español' },
+  { value: 'pt', label: 'Português' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'ar', label: 'العربية' },
+  { value: 'hi', label: 'हिन्दी' },
+  { value: 'th', label: 'ไทย' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'it', label: 'Italiano' },
+  { value: 'nl', label: 'Nederlands' },
+  { value: 'tr', label: 'Türkçe' },
+  { value: 'pl', label: 'Polski' },
+  { value: 'uk', label: 'Українська' },
   { value: 'id', label: 'Bahasa Indonesia' },
-  { value: 'ms', label: 'Bahasa Melayu (Malay)' },
-] as const
+  { value: 'ms', label: 'Bahasa Melayu' },
+]

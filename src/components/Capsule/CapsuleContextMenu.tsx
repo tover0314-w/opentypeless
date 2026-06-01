@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Settings, History, LogOut, CircleUser, Crown, AppWindow } from 'lucide-react'
 
 interface Props {
@@ -5,6 +6,8 @@ interface Props {
 }
 
 export function CapsuleContextMenu({ onClose }: Props) {
+  const { t } = useTranslation()
+
   const openMainWindow = async (hash: string) => {
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
@@ -23,7 +26,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
   const items = [
     {
       icon: AppWindow,
-      label: 'Open Main Window',
+      label: t('capsule.menu.openMainWindow'),
       onClick: () => {
         openMainWindow('#/')
         onClose()
@@ -32,7 +35,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
     { type: 'separator' as const },
     {
       icon: Settings,
-      label: 'Settings',
+      label: t('capsule.menu.settings'),
       onClick: () => {
         openMainWindow('#/settings')
         onClose()
@@ -40,7 +43,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
     },
     {
       icon: History,
-      label: 'History',
+      label: t('capsule.menu.history'),
       onClick: () => {
         openMainWindow('#/history')
         onClose()
@@ -48,7 +51,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
     },
     {
       icon: CircleUser,
-      label: 'Account',
+      label: t('capsule.menu.account'),
       onClick: () => {
         openMainWindow('#/account')
         onClose()
@@ -56,7 +59,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
     },
     {
       icon: Crown,
-      label: 'Upgrade',
+      label: t('capsule.menu.upgrade'),
       onClick: () => {
         openMainWindow('#/upgrade')
         onClose()
@@ -65,7 +68,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
     { type: 'separator' as const },
     {
       icon: LogOut,
-      label: 'Exit',
+      label: t('capsule.menu.exit'),
       onClick: () => {
         import('@tauri-apps/api/core')
           .then(({ invoke }) => invoke('plugin:process|exit', { code: 0 }))

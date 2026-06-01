@@ -69,14 +69,14 @@ export function HomePage() {
                   label={t('upgrade.stt')}
                   used={sttSecondsUsed}
                   limit={sttSecondsLimit}
-                  unit="hours"
+                  unit={t('account.quotaHours')}
                   divisor={3600}
                 />
                 <QuotaBar
                   label={t('upgrade.llm')}
                   used={llmTokensUsed}
                   limit={llmTokensLimit}
-                  unit="k tokens"
+                  unit={t('account.quotaTokens')}
                   divisor={1000}
                 />
               </div>
@@ -98,14 +98,14 @@ export function HomePage() {
                     label={t('upgrade.stt')}
                     used={sttSecondsUsed}
                     limit={sttSecondsLimit}
-                    unit="min"
+                    unit={t('account.quotaMin')}
                     divisor={60}
                   />
                   <QuotaBar
                     label={t('upgrade.llm')}
                     used={llmTokensUsed}
                     limit={llmTokensLimit}
-                    unit="k tokens"
+                    unit={t('account.quotaTokens')}
                     divisor={1000}
                   />
                 </div>

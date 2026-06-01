@@ -99,7 +99,7 @@ export function LlmPane() {
         >
           {LLM_PROVIDERS.map((p) => (
             <option key={p.value} value={p.value}>
-              {p.label}
+              {t(p.labelKey)}
             </option>
           ))}
         </select>
@@ -167,7 +167,7 @@ export function LlmPane() {
                     updateConfig({ llm_model: e.target.value })
                     setLlmLatencyMs(null)
                   }}
-                  placeholder="e.g. gpt-4o-mini"
+                  placeholder={t('settings.llmModelPlaceholder')}
                   className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
                 />
                 <datalist id="llm-model-list">
@@ -196,7 +196,9 @@ export function LlmPane() {
             <input
               value={config.llm_base_url}
               onChange={(e) => updateConfig({ llm_base_url: e.target.value })}
-              placeholder="https://open.bigmodel.cn/api/paas/v4"
+              placeholder={
+                LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl ?? 'https://api.openai.com/v1'
+              }
               className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
             />
           </FormField>
@@ -235,7 +237,7 @@ export function LlmPane() {
           >
             {TARGET_LANGUAGES.map((l) => (
               <option key={l.value} value={l.value}>
-                {l.label}
+                {l.labelKey ? t(l.labelKey) : l.label}
               </option>
             ))}
           </select>

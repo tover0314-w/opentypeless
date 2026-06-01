@@ -128,11 +128,15 @@ fn run_capture(
         .default_input_device()
         .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
 
-    tracing::info!("Using input device: {:?}", device.name());
+    let device_description = device
+        .description()
+        .map(|description| description.to_string())
+        .unwrap_or_else(|_| "unknown input device".to_string());
+    tracing::info!("Using input device: {}", device_description);
 
     // Use the device's default config instead of forcing 16kHz mono
     let default_config = device.default_input_config()?;
-    let device_sample_rate = default_config.sample_rate().0;
+    let device_sample_rate = default_config.sample_rate();
     let device_channels = default_config.channels();
 
     tracing::info!(
@@ -144,7 +148,7 @@ fn run_capture(
 
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
-        sample_rate: cpal::SampleRate(device_sample_rate),
+        sample_rate: device_sample_rate,
         buffer_size: cpal::BufferSize::Default,
     };
 

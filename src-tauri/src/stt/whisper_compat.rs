@@ -103,8 +103,9 @@ impl SttProvider for WhisperCompatProvider {
     }
 
     async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError> {
-        // File-based — transcription happens in disconnect().
-        Ok(None)
+        // File-based providers transcribe in disconnect(); keep this future
+        // pending so the pipeline select loop does not busy-spin while recording.
+        std::future::pending().await
     }
 
     async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
@@ -240,5 +241,28 @@ impl SttProvider for WhisperCompatProvider {
 
     fn name(&self) -> &str {
         &self.provider_config.provider_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn recv_transcript_waits_for_file_based_provider() {
+        let mut provider = WhisperCompatProvider::new(WhisperCompatConfig {
+            provider_name: "test-whisper".to_string(),
+            endpoint: "https://example.test/transcriptions".to_string(),
+            model: "test-model".to_string(),
+            extra_fields: vec![],
+        });
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            provider.recv_transcript(),
+        )
+        .await;
+
+        assert!(result.is_err());
     }
 }

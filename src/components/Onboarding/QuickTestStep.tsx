@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mic, FileText, Sparkles, Type, Keyboard, Check } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../stores/appStore'
 import { CapsuleLogo } from '../Capsule/CapsuleLogo'
 
@@ -16,29 +17,30 @@ const PHASE_DURATION: Record<DemoPhase, number> = {
 }
 
 const STAGES = [
-  { icon: Mic, label: 'Record', key: 'recording' },
-  { icon: FileText, label: 'STT', key: 'transcribing' },
-  { icon: Sparkles, label: 'LLM', key: 'polishing' },
-  { icon: Type, label: 'Output', key: 'complete' },
+  { icon: Mic, label: 'onboarding.test.stageRecord', key: 'recording' },
+  { icon: FileText, label: 'onboarding.test.stageStt', key: 'transcribing' },
+  { icon: Sparkles, label: 'onboarding.test.stageLlm', key: 'polishing' },
+  { icon: Type, label: 'onboarding.test.stageOutput', key: 'complete' },
 ] as const
 
-const DEMO_RAW = 'hello um can you help me with this'
-const DEMO_POLISHED = 'Hello, can you help me with this?'
-
-const PHASE_DESC: Record<DemoPhase, string> = {
-  idle: 'Press the hotkey to start',
-  recording: 'Speaking...',
-  transcribing: 'Converting speech to text',
-  polishing: 'AI refines your words',
-  complete: 'Done — typed into your app',
-}
-
 export function QuickTestStep() {
+  const { t } = useTranslation()
   const config = useAppStore((s) => s.config)
   const [phase, setPhase] = useState<DemoPhase>('idle')
   const [rawChars, setRawChars] = useState(0)
   const [polishedChars, setPolishedChars] = useState(0)
   const [seconds, setSeconds] = useState(0)
+
+  const DEMO_RAW = t('onboarding.test.demoRaw')
+  const DEMO_POLISHED = t('onboarding.test.demoPolished')
+
+  const PHASE_DESC: Record<DemoPhase, string> = {
+    idle: 'onboarding.test.phaseIdle',
+    recording: 'onboarding.test.phaseRecording',
+    transcribing: 'onboarding.test.phaseStt',
+    polishing: 'onboarding.test.phaseLlm',
+    complete: 'onboarding.test.phaseDone',
+  }
 
   // Auto-advance through demo phases in a loop
   useEffect(() => {
@@ -78,7 +80,7 @@ export function QuickTestStep() {
       })
     }, interval)
     return () => clearInterval(timer)
-  }, [phase])
+  }, [phase, DEMO_RAW.length])
 
   // Typewriter: polished text during polishing
   useEffect(() => {
@@ -95,7 +97,7 @@ export function QuickTestStep() {
       })
     }, interval)
     return () => clearInterval(timer)
-  }, [phase])
+  }, [phase, DEMO_POLISHED.length])
 
   const activeIdx = STAGES.findIndex((s) => s.key === phase)
 
@@ -119,11 +121,13 @@ export function QuickTestStep() {
         >
           <Keyboard size={12} className="text-text-tertiary" />
           <span className="text-[11px] text-text-secondary">
-            {config.hotkey_mode === 'hold' ? 'Hold' : 'Press'}{' '}
+            {config.hotkey_mode === 'hold' ? t('onboarding.test.hold') : t('onboarding.test.press')}{' '}
             <kbd className="px-1 py-0.5 bg-bg-tertiary rounded-[4px] text-[11px] font-mono text-text-primary font-medium border border-border">
               {config.hotkey}
             </kbd>{' '}
-            {config.hotkey_mode === 'hold' ? 'to talk' : 'to start/stop'}
+            {config.hotkey_mode === 'hold'
+              ? t('onboarding.test.toTalk')
+              : t('onboarding.test.toStartStop')}
           </span>
         </motion.div>
       </div>
@@ -186,7 +190,7 @@ export function QuickTestStep() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.12 }}
           >
-            {PHASE_DESC[phase]}
+            {t(PHASE_DESC[phase])}
           </motion.p>
         </AnimatePresence>
       </div>
@@ -218,7 +222,7 @@ export function QuickTestStep() {
                     isCurrent ? 'text-accent' : isDone ? 'text-success' : 'text-text-tertiary'
                   }`}
                 >
-                  {stage.label}
+                  {t(stage.label)}
                 </span>
               </motion.div>
               {i < STAGES.length - 1 && (
@@ -258,7 +262,7 @@ export function QuickTestStep() {
 
             {phase === 'transcribing' && (
               <div>
-                <StageLabel>Transcribing</StageLabel>
+                <StageLabel>{t('onboarding.test.transcribing')}</StageLabel>
                 <p className="text-text-secondary">
                   {DEMO_RAW.slice(0, rawChars)}
                   <BlinkingCursor color="bg-text-tertiary" />
@@ -269,11 +273,11 @@ export function QuickTestStep() {
             {phase === 'polishing' && (
               <div className="space-y-2">
                 <div>
-                  <StageLabel>Raw</StageLabel>
+                  <StageLabel>{t('onboarding.test.raw')}</StageLabel>
                   <p className="text-text-tertiary line-through">{DEMO_RAW}</p>
                 </div>
                 <div>
-                  <StageLabel>Polished</StageLabel>
+                  <StageLabel>{t('onboarding.test.polished')}</StageLabel>
                   <p className="text-[13px] text-text-primary">
                     {DEMO_POLISHED.slice(0, polishedChars)}
                     <BlinkingCursor color="bg-accent" />
@@ -285,11 +289,11 @@ export function QuickTestStep() {
             {phase === 'complete' && (
               <div className="space-y-2">
                 <div>
-                  <StageLabel>Raw</StageLabel>
+                  <StageLabel>{t('onboarding.test.raw')}</StageLabel>
                   <p className="text-text-tertiary line-through">{DEMO_RAW}</p>
                 </div>
                 <div>
-                  <StageLabel>Result</StageLabel>
+                  <StageLabel>{t('onboarding.test.result')}</StageLabel>
                   <p className="text-[13px] text-text-primary">{DEMO_POLISHED}</p>
                 </div>
               </div>

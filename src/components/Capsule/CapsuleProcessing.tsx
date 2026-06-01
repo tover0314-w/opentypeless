@@ -1,13 +1,15 @@
+import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Loader2, X } from 'lucide-react'
 import { abortRecording } from '../../lib/tauri'
 import { useAppStore } from '../../stores/appStore'
 
 export function CapsuleProcessing() {
+  const { t } = useTranslation()
   const partialTranscript = useAppStore((s) => s.partialTranscript)
   const reduced = useReducedMotion()
 
-  const displayText = partialTranscript || 'Transcribing...'
+  const displayText = partialTranscript || t('capsule.transcribing')
 
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -39,7 +41,7 @@ export function CapsuleProcessing() {
       </p>
       <button
         onClick={handleCancel}
-        aria-label="Cancel processing"
+        aria-label={t('capsule.cancelProcessing')}
         className="flex-shrink-0 p-1 rounded-full text-white/70 hover:text-white hover:bg-white/15 transition-colors bg-transparent border-none cursor-pointer"
       >
         <X size={12} />

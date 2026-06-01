@@ -80,7 +80,7 @@ impl SttProvider for AssemblyAiProvider {
 
     async fn send_audio(&mut self, chunk: &[u8]) -> Result<(), AppError> {
         if let Some(ws) = &mut self.ws {
-            ws.send(Message::Binary(chunk.to_vec()))
+            ws.send(Message::Binary(chunk.to_vec().into()))
                 .await
                 .map_err(|e| AppError::Network(e.to_string()))?;
         }
@@ -150,7 +150,7 @@ impl SttProvider for AssemblyAiProvider {
     async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
         if let Some(ws) = &mut self.ws {
             let terminate = serde_json::json!({"type": "Terminate"});
-            let _ = ws.send(Message::Text(terminate.to_string())).await;
+            let _ = ws.send(Message::Text(terminate.to_string().into())).await;
             let _ = ws.close(None).await;
         }
         self.ws = None;

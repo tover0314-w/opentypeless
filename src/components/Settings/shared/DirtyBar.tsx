@@ -1,18 +1,14 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { useAppStore } from '../../../stores/appStore'
 import { updateConfig, setAutoStart } from '../../../lib/tauri'
 
-export function useDirtyConfig() {
-  const config = useAppStore((s) => s.config)
-  const savedConfig = useAppStore((s) => s.savedConfig)
-  return savedConfig !== null && JSON.stringify(config) !== JSON.stringify(savedConfig)
-}
-
 type SaveResult = 'idle' | 'success' | 'error'
 
 export function DirtyBar() {
+  const { t } = useTranslation()
   const config = useAppStore((s) => s.config)
   const savedConfig = useAppStore((s) => s.savedConfig)
   const resetConfig = useAppStore((s) => s.resetConfig)
@@ -61,10 +57,10 @@ export function DirtyBar() {
 
   const labelText =
     saveResult === 'success'
-      ? 'Settings saved'
+      ? t('common.save')
       : saveResult === 'error'
-        ? errorMsg || 'Save failed'
-        : 'Unsaved changes'
+        ? errorMsg || t('common.connectionFail')
+        : t('settings.unsavedChanges')
 
   const labelColor =
     saveResult === 'success'
@@ -104,7 +100,7 @@ export function DirtyBar() {
                 <Loader2 size={12} />
               </motion.div>
             )}
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
       )}

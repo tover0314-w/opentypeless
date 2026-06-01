@@ -1,11 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import i18n from '../../i18n'
+import { invoke } from '@tauri-apps/api/core'
+import { UI_LANGUAGES } from '../../lib/constants'
 import { useAppStore } from '../../stores/appStore'
-
-const UI_LANGUAGES = [
-  { code: 'en', label: 'English', native: 'English' },
-  { code: 'zh', label: 'Chinese', native: '中文' },
-] as const
 
 export function WelcomeStep() {
   const { t } = useTranslation()
@@ -14,10 +11,11 @@ export function WelcomeStep() {
 
   const currentLang = config.ui_language || i18n.language || 'en'
 
-  const handleSelectLanguage = (code: string) => {
-    i18n.changeLanguage(code)
-    localStorage.setItem('ui_language', code)
-    updateConfig({ ui_language: code })
+  const handleSelectLanguage = (value: string) => {
+    i18n.changeLanguage(value)
+    localStorage.setItem('ui_language', value)
+    updateConfig({ ui_language: value })
+    invoke('refresh_tray_labels').catch(() => {})
   }
 
   return (
@@ -36,16 +34,15 @@ export function WelcomeStep() {
         <div className="grid grid-cols-2 gap-3">
           {UI_LANGUAGES.map((lang) => (
             <button
-              key={lang.code}
-              onClick={() => handleSelectLanguage(lang.code)}
+              key={lang.value}
+              onClick={() => handleSelectLanguage(lang.value)}
               className={`px-4 py-4 rounded-[10px] text-[14px] border cursor-pointer transition-all ${
-                currentLang === lang.code
+                currentLang === lang.value
                   ? 'bg-accent/10 border-accent text-accent font-medium'
                   : 'bg-bg-secondary border-border text-text-primary hover:border-text-tertiary'
               }`}
             >
-              <div className="font-medium">{lang.native}</div>
-              <div className="text-[12px] text-text-tertiary mt-0.5">{lang.label}</div>
+              <div className="font-medium">{lang.label}</div>
             </button>
           ))}
         </div>
