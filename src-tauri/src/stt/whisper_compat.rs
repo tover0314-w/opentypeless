@@ -5,12 +5,15 @@ use crate::error::AppError;
 use super::{SttConfig, SttProvider, TranscriptEvent};
 
 /// Configuration for a Whisper-compatible HTTP file-upload STT provider.
+#[derive(Debug)]
 pub struct WhisperCompatConfig {
     pub provider_name: String,
     pub endpoint: String,
     pub model: String,
     /// Extra form text fields (e.g. GLM-ASR needs "stream"="false").
     pub extra_fields: Vec<(String, String)>,
+    /// Local OpenAI-compatible servers often do not require authentication.
+    pub api_key_required: bool,
 }
 
 /// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
@@ -76,7 +79,7 @@ impl WhisperCompatProvider {
 #[async_trait]
 impl SttProvider for WhisperCompatProvider {
     async fn connect(&mut self, config: &SttConfig) -> Result<(), AppError> {
-        if config.api_key.is_empty() {
+        if self.provider_config.api_key_required && config.api_key.is_empty() {
             return Err(AppError::Auth(format!(
                 "{} API key is empty",
                 self.provider_config.provider_name
@@ -103,8 +106,9 @@ impl SttProvider for WhisperCompatProvider {
     }
 
     async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError> {
-        // File-based — transcription happens in disconnect().
-        Ok(None)
+        // File-based providers transcribe in disconnect(); keep this future
+        // pending so the pipeline select loop does not busy-spin while recording.
+        std::future::pending().await
     }
 
     async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
@@ -153,14 +157,17 @@ impl SttProvider for WhisperCompatProvider {
                 form = form.text(key.clone(), value.clone());
             }
 
-            let resp_result = self
+            let mut request = self
                 .client
                 .post(&self.provider_config.endpoint)
-                .header("Authorization", format!("Bearer {}", config.api_key))
                 .multipart(form)
-                .timeout(std::time::Duration::from_secs(60))
-                .send()
-                .await;
+                .timeout(std::time::Duration::from_secs(60));
+
+            if !config.api_key.trim().is_empty() {
+                request = request.header("Authorization", format!("Bearer {}", config.api_key));
+            }
+
+            let resp_result = request.send().await;
 
             match resp_result {
                 Ok(resp) => {
@@ -240,5 +247,51 @@ impl SttProvider for WhisperCompatProvider {
 
     fn name(&self) -> &str {
         &self.provider_config.provider_name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connect_allows_empty_api_key_when_not_required() {
+        let mut provider = WhisperCompatProvider::new(WhisperCompatConfig {
+            provider_name: "custom-whisper".to_string(),
+            endpoint: "http://localhost:8000/v1/audio/transcriptions".to_string(),
+            model: "test-model".to_string(),
+            extra_fields: vec![],
+            api_key_required: false,
+        });
+
+        let result = provider
+            .connect(&SttConfig {
+                api_key: String::new(),
+                language: None,
+                smart_format: true,
+                sample_rate: 16000,
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn recv_transcript_waits_for_file_based_provider() {
+        let mut provider = WhisperCompatProvider::new(WhisperCompatConfig {
+            provider_name: "test-whisper".to_string(),
+            endpoint: "https://example.test/transcriptions".to_string(),
+            model: "test-model".to_string(),
+            extra_fields: vec![],
+            api_key_required: true,
+        });
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            provider.recv_transcript(),
+        )
+        .await;
+
+        assert!(result.is_err());
     }
 }

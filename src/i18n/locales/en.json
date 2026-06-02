@@ -118,6 +118,16 @@
     "sttSignInHint": "Sign in and subscribe to Pro to use official STT quota (10h/month).",
     "sttUpgradeHint": "Upgrade to Pro for millisecond STT — 10h/month, 99 languages. No API key needed.",
     "sttProActive": "Pro active — millisecond STT, 99 languages. No API key needed.",
+    "customSttPreset": "Preset",
+    "customSttPresetSpeaches": "Speaches",
+    "customSttPresetCustom": "Custom OpenAI-compatible",
+    "customSttBaseUrl": "Base URL",
+    "customSttBaseUrlPlaceholder": "http://localhost:8000/v1",
+    "customSttModel": "Model",
+    "customSttModelPlaceholder": "Systran/faster-whisper-large-v3",
+    "customSttApiKeyOptional": "API Key (optional)",
+    "customSttSetupHint": "Start your local OpenAI-compatible STT server first, then test the connection here.",
+    "customSttConnectionFailed": "Local STT server is not reachable. Check that it is running and the port is correct.",
     "llmSignInHint": "Sign in and subscribe to Pro to use official LLM quota (~5M tokens/month).",
     "llmUpgradeHint": "Upgrade to Pro for instant AI rewriting (~5M tokens/month). No API key needed.",
     "llmProActive": "Pro active — instant AI rewriting. No API key needed.",
@@ -245,5 +255,36 @@
     "output_fallback_clipboard": "Copied to clipboard, paste manually",
     "output_wayland_unsupported": "Keyboard output unsupported on Wayland, switched to clipboard mode",
     "output_xdotool_missing": "xdotool not found, install it for keyboard output: sudo apt install xdotool"
+  },
+  "common": {
+    "save": "Save",
+    "saving": "Saving...",
+    "connectionFail": "Connection failed"
+  },
+  "providers": {
+    "stt": {
+      "deepgram": "Deepgram Nova-3",
+      "assemblyai": "AssemblyAI",
+      "glmAsr": "GLM-ASR (Zhipu)",
+      "openaiWhisper": "OpenAI Whisper",
+      "groqWhisper": "Groq Whisper",
+      "siliconflow": "SiliconFlow",
+      "customWhisper": "Local / Custom Whisper",
+      "cloud": "OpenTypeless Cloud"
+    },
+    "llm": {
+      "zhipu": "Zhipu",
+      "deepseek": "DeepSeek",
+      "siliconflow": "SiliconFlow",
+      "openai": "OpenAI",
+      "gemini": "Google Gemini",
+      "moonshot": "Moonshot (Kimi)",
+      "qwen": "Qwen",
+      "groq": "Groq",
+      "claude": "Claude",
+      "ollama": "Ollama (Local)",
+      "openrouter": "OpenRouter",
+      "cloud": "OpenTypeless Cloud"
+    }
   }
 }

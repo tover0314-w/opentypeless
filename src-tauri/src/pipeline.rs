@@ -366,11 +366,13 @@ impl PipelineHandle {
             config_data.stt_language
         );
 
-        // Guard: empty API key — bail before starting audio (skip for cloud provider)
-        if config_data.stt_api_key.is_empty() && config_data.stt_provider != "cloud" {
+        // Guard: empty API key - bail before starting audio when provider requires one.
+        if stt::config::stt_provider_requires_api_key(&config_data.stt_provider)
+            && config_data.stt_api_key.is_empty()
+        {
             let _ = self.app_handle.emit(
                 "pipeline:error",
-                "STT API key is not configured. Please set it in Settings → Speech Recognition.",
+                "STT API key is not configured. Please set it in Settings -> Speech Recognition.",
             );
             *self
                 .preloaded_config
@@ -387,6 +389,35 @@ impl PipelineHandle {
             self.set_state(PipelineState::Idle);
             return Ok(());
         }
+
+        let custom_whisper_config =
+            if config_data.stt_provider == stt::config::CUSTOM_WHISPER_PROVIDER {
+                match stt::config::build_custom_whisper_config(
+                    &config_data.stt_custom_base_url,
+                    &config_data.stt_custom_model,
+                ) {
+                    Ok(cfg) => Some(cfg),
+                    Err(e) => {
+                        let _ = self.app_handle.emit("pipeline:error", e);
+                        *self
+                            .preloaded_config
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner()) = None;
+                        *self
+                            .preloaded_app_ctx
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner()) = None;
+                        *self
+                            .preloaded_dictionary
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner()) = None;
+                        self.set_state(PipelineState::Idle);
+                        return Ok(());
+                    }
+                }
+            } else {
+                None
+            };
 
         // P0-3: Pre-connect STT provider before spawning task
         let stt_api_key = if config_data.stt_provider == "cloud" {
@@ -411,8 +442,33 @@ impl PipelineHandle {
             sample_rate: 16000,
         };
 
-        let mut provider =
-            stt::create_provider(&config_data.stt_provider, Some(self.shared_client.clone()));
+        let mut provider = match stt::create_provider(
+            &config_data.stt_provider,
+            custom_whisper_config,
+            Some(self.shared_client.clone()),
+        ) {
+            Ok(provider) => provider,
+            Err(e) => {
+                tracing::error!("STT provider creation failed: {}", e);
+                let _ = self
+                    .app_handle
+                    .emit("pipeline:error", format!("STT configuration failed: {e}"));
+                *self
+                    .preloaded_config
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self
+                    .preloaded_app_ctx
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self
+                    .preloaded_dictionary
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                self.set_state(PipelineState::Idle);
+                return Ok(());
+            }
+        };
         if let Err(e) = provider.connect(&stt_config).await {
             tracing::error!("STT connect failed: {}", e);
             let _ = self
@@ -466,6 +522,18 @@ impl PipelineHandle {
         if self.abort_flag.load(Ordering::SeqCst) {
             tracing::info!("Pipeline aborted during setup, discarding audio capture");
             // handle drops here, stopping the capture thread
+            *self
+                .preloaded_config
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
+            *self
+                .preloaded_app_ctx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
+            *self
+                .preloaded_dictionary
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = None;
             self.set_state(PipelineState::Idle);
             return Ok(());
         }

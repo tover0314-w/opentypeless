@@ -47,3 +47,6 @@ jelly-reference*.png
 
 # Internal design docs (not for public distribution)
 docs/superpowers/
+
+# Local isolated worktrees
+.worktrees/

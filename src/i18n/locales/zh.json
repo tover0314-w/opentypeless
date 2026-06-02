@@ -118,6 +118,16 @@
     "sttSignInHint": "登录并订阅 Pro 以使用官方语音识别配额（10小时/月）。",
     "sttUpgradeHint": "升级到 Pro 享受毫秒级语音识别 — 10小时/月，99 种语言。无需 API 密钥。",
     "sttProActive": "Pro 已激活 — 毫秒级语音识别，99 种语言。无需 API 密钥。",
+    "customSttPreset": "预设",
+    "customSttPresetSpeaches": "Speaches",
+    "customSttPresetCustom": "自定义 OpenAI 兼容服务",
+    "customSttBaseUrl": "Base URL",
+    "customSttBaseUrlPlaceholder": "http://localhost:8000/v1",
+    "customSttModel": "模型",
+    "customSttModelPlaceholder": "Systran/faster-whisper-large-v3",
+    "customSttApiKeyOptional": "API Key（可选）",
+    "customSttSetupHint": "请先启动本地 OpenAI 兼容 STT 服务，然后在这里测试连接。",
+    "customSttConnectionFailed": "无法连接本地 STT 服务。请确认服务已启动且端口正确。",
     "llmSignInHint": "登录并订阅 Pro 以使用官方 LLM 配额（约500万 tokens/月）。",
     "llmUpgradeHint": "升级到 Pro 享受即时 AI 改写（约500万 tokens/月）。无需 API 密钥。",
     "llmProActive": "Pro 已激活 — 即时 AI 改写。无需 API 密钥。",
@@ -245,5 +255,36 @@
     "output_fallback_clipboard": "已复制到剪贴板，请手动粘贴",
     "output_wayland_unsupported": "Wayland 不支持键盘输出，已切换为剪贴板模式",
     "output_xdotool_missing": "未找到 xdotool，请安装以使用键盘输出：sudo apt install xdotool"
+  },
+  "common": {
+    "save": "保存",
+    "saving": "保存中...",
+    "connectionFail": "连接失败"
+  },
+  "providers": {
+    "stt": {
+      "deepgram": "Deepgram Nova-3",
+      "assemblyai": "AssemblyAI",
+      "glmAsr": "智谱 GLM-ASR",
+      "openaiWhisper": "OpenAI Whisper",
+      "groqWhisper": "Groq Whisper",
+      "siliconflow": "硅基流动 SiliconFlow",
+      "customWhisper": "本地 / 自定义 Whisper",
+      "cloud": "OpenTypeless 云服务"
+    },
+    "llm": {
+      "zhipu": "智谱",
+      "deepseek": "DeepSeek",
+      "siliconflow": "硅基流动 SiliconFlow",
+      "openai": "OpenAI",
+      "gemini": "Google Gemini",
+      "moonshot": "Moonshot (Kimi)",
+      "qwen": "通义千问",
+      "groq": "Groq",
+      "claude": "Claude",
+      "ollama": "Ollama (本地)",
+      "openrouter": "OpenRouter",
+      "cloud": "OpenTypeless 云服务"
+    }
   }
 }

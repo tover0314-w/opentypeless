@@ -51,41 +51,69 @@ pub trait SttProvider: Send + Sync {
 
 pub fn create_provider(
     provider_name: &str,
+    custom_whisper_config: Option<WhisperCompatConfig>,
     client: Option<reqwest::Client>,
-) -> Box<dyn SttProvider> {
+) -> Result<Box<dyn SttProvider>, AppError> {
     match provider_name {
         "cloud" => {
             let api_base_url = crate::api_base_url();
-            match client {
+            Ok(match client {
                 Some(ref c) => Box::new(cloud::CloudSttProvider::with_client(
                     api_base_url,
                     c.clone(),
                 )),
                 None => Box::new(cloud::CloudSttProvider::new(api_base_url)),
-            }
+            })
         }
-        "assemblyai" => Box::new(assemblyai::AssemblyAiProvider::new()),
-        "deepgram" => Box::new(deepgram::DeepgramProvider::new()),
-        name => {
-            // All Whisper-compatible providers share the same HTTP upload logic.
-            // Config is centralised in config::get_whisper_config.
-            let cfg = config::get_whisper_config(name)
-                .or_else(|| config::get_whisper_config("glm-asr"))
-                .expect("glm-asr config must always exist");
-            let wc = WhisperCompatConfig {
-                provider_name: name.to_string(),
-                endpoint: cfg.endpoint.to_string(),
-                model: cfg.model.to_string(),
-                extra_fields: cfg
-                    .extra_fields
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
-            };
-            match client {
+        "assemblyai" => Ok(Box::new(assemblyai::AssemblyAiProvider::new())),
+        "deepgram" => Ok(Box::new(deepgram::DeepgramProvider::new())),
+        config::CUSTOM_WHISPER_PROVIDER => {
+            let wc = custom_whisper_config.ok_or_else(|| {
+                AppError::Config("Local / Custom Whisper is missing base URL or model".to_string())
+            })?;
+            Ok(match client {
                 Some(ref c) => Box::new(WhisperCompatProvider::with_client(wc, c.clone())),
                 None => Box::new(WhisperCompatProvider::new(wc)),
-            }
+            })
         }
+        name => {
+            // All Whisper-compatible providers share the same HTTP upload logic.
+            // Config is centralised in config::build_known_whisper_config.
+            let wc = config::build_known_whisper_config(name)
+                .ok_or_else(|| AppError::Config(format!("Unknown STT provider: {}", name)))?;
+            Ok(match client {
+                Some(ref c) => Box::new(WhisperCompatProvider::with_client(wc, c.clone())),
+                None => Box::new(WhisperCompatProvider::new(wc)),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_whisper_requires_explicit_config() {
+        let result = create_provider(config::CUSTOM_WHISPER_PROVIDER, None, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn custom_whisper_uses_explicit_config() {
+        let cfg = config::build_custom_whisper_config(
+            "http://localhost:8000/v1",
+            "Systran/faster-whisper-large-v3",
+        )
+        .unwrap();
+
+        let provider = create_provider(config::CUSTOM_WHISPER_PROVIDER, Some(cfg), None).unwrap();
+        assert_eq!(provider.name(), config::CUSTOM_WHISPER_PROVIDER);
+    }
+
+    #[test]
+    fn unknown_stt_provider_returns_error() {
+        let result = create_provider("not-a-provider", None, None);
+        assert!(result.is_err());
     }
 }

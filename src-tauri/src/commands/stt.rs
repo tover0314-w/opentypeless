@@ -2,10 +2,28 @@ use crate::api_base_url;
 use crate::stt;
 use crate::SessionTokenStore;
 
+fn resolve_whisper_test_config(
+    provider: &str,
+    custom_base_url: Option<String>,
+    custom_model: Option<String>,
+) -> Result<stt::whisper_compat::WhisperCompatConfig, String> {
+    if provider == stt::config::CUSTOM_WHISPER_PROVIDER {
+        return stt::config::build_custom_whisper_config(
+            custom_base_url.as_deref().unwrap_or_default(),
+            custom_model.as_deref().unwrap_or_default(),
+        );
+    }
+
+    stt::config::build_known_whisper_config(provider)
+        .ok_or_else(|| format!("Unknown STT provider: {}", provider))
+}
+
 #[tauri::command]
 pub async fn test_stt_connection(
     api_key: String,
     provider: String,
+    custom_base_url: Option<String>,
+    custom_model: Option<String>,
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<bool, String> {
@@ -38,7 +56,7 @@ pub async fn test_stt_connection(
         return Ok(body["plan"].as_str() == Some("pro"));
     }
 
-    if api_key.is_empty() {
+    if stt::config::stt_provider_requires_api_key(&provider) && api_key.is_empty() {
         return Ok(false);
     }
 
@@ -64,8 +82,7 @@ pub async fn test_stt_connection(
             Ok(resp.status().is_success())
         }
         _ => {
-            let cfg = stt::config::get_whisper_config(&provider)
-                .ok_or_else(|| format!("Unknown STT provider: {}", provider))?;
+            let cfg = resolve_whisper_test_config(&provider, custom_base_url, custom_model)?;
 
             let silent_pcm = vec![0u8; 3200]; // 0.1s at 16kHz 16-bit mono
             let wav = stt::whisper_compat::WhisperCompatProvider::build_wav(&silent_pcm, 16000);
@@ -75,22 +92,55 @@ pub async fn test_stt_connection(
                 .mime_str("audio/wav")
                 .map_err(|e| e.to_string())?;
             let mut form = reqwest::multipart::Form::new()
-                .text("model", cfg.model.to_string())
+                .text("model", cfg.model.clone())
                 .part("file", file_part);
-            for &(key, value) in cfg.extra_fields {
-                form = form.text(key.to_string(), value.to_string());
+            for (key, value) in &cfg.extra_fields {
+                form = form.text(key.clone(), value.clone());
             }
 
-            let resp = client
-                .post(cfg.endpoint)
-                .header("Authorization", format!("Bearer {}", api_key))
+            let mut request = client
+                .post(&cfg.endpoint)
                 .multipart(form)
-                .timeout(std::time::Duration::from_secs(15))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
+                .timeout(std::time::Duration::from_secs(15));
+
+            if !api_key.trim().is_empty() {
+                request = request.header("Authorization", format!("Bearer {}", api_key));
+            }
+
+            let resp = request.send().await.map_err(|e| e.to_string())?;
             Ok(resp.status().is_success())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_custom_whisper_test_config() {
+        let cfg = resolve_whisper_test_config(
+            stt::config::CUSTOM_WHISPER_PROVIDER,
+            Some("http://localhost:8000/v1".to_string()),
+            Some("Systran/faster-whisper-large-v3".to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.endpoint,
+            "http://localhost:8000/v1/audio/transcriptions"
+        );
+        assert!(!cfg.api_key_required);
+    }
+
+    #[test]
+    fn custom_whisper_test_config_requires_model() {
+        let err = resolve_whisper_test_config(
+            stt::config::CUSTOM_WHISPER_PROVIDER,
+            Some("http://localhost:8000/v1".to_string()),
+            Some(" ".to_string()),
+        )
+        .unwrap_err();
+        assert!(err.contains("Model is required"));
     }
 }
 
@@ -98,6 +148,8 @@ pub async fn test_stt_connection(
 pub async fn bench_stt_connection(
     api_key: String,
     provider: String,
+    custom_base_url: Option<String>,
+    custom_model: Option<String>,
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<u32, String> {
@@ -134,7 +186,7 @@ pub async fn bench_stt_connection(
         return Ok(elapsed);
     }
 
-    if api_key.is_empty() {
+    if stt::config::stt_provider_requires_api_key(&provider) && api_key.is_empty() {
         return Err("API key is empty".to_string());
     }
 
@@ -170,8 +222,7 @@ pub async fn bench_stt_connection(
             Ok(elapsed)
         }
         _ => {
-            let cfg = stt::config::get_whisper_config(&provider)
-                .ok_or_else(|| format!("Unknown STT provider: {}", provider))?;
+            let cfg = resolve_whisper_test_config(&provider, custom_base_url, custom_model)?;
 
             let silent_pcm = vec![0u8; 3200]; // 0.1s at 16kHz 16-bit mono
             let wav = stt::whisper_compat::WhisperCompatProvider::build_wav(&silent_pcm, 16000);
@@ -181,21 +232,23 @@ pub async fn bench_stt_connection(
                 .mime_str("audio/wav")
                 .map_err(|e| e.to_string())?;
             let mut form = reqwest::multipart::Form::new()
-                .text("model", cfg.model.to_string())
+                .text("model", cfg.model.clone())
                 .part("file", file_part);
-            for &(key, value) in cfg.extra_fields {
-                form = form.text(key.to_string(), value.to_string());
+            for (key, value) in &cfg.extra_fields {
+                form = form.text(key.clone(), value.clone());
             }
 
             let t0 = std::time::Instant::now();
-            let resp = client
-                .post(cfg.endpoint)
-                .header("Authorization", format!("Bearer {}", api_key))
+            let mut request = client
+                .post(&cfg.endpoint)
                 .multipart(form)
-                .timeout(std::time::Duration::from_secs(15))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
+                .timeout(std::time::Duration::from_secs(15));
+
+            if !api_key.trim().is_empty() {
+                request = request.header("Authorization", format!("Bearer {}", api_key));
+            }
+
+            let resp = request.send().await.map_err(|e| e.to_string())?;
             let elapsed = t0.elapsed().as_millis() as u32;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));

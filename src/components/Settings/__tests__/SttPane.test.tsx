@@ -23,6 +23,18 @@ vi.mock('react-i18next', () => ({
         'settings.sttSignInHint': 'Sign in to use cloud STT',
         'settings.sttUpgradeHint': 'Upgrade to Pro to use cloud STT',
         'settings.sttProActive': 'Cloud STT active',
+        'settings.customSttPreset': 'Preset',
+        'settings.customSttPresetSpeaches': 'Speaches',
+        'settings.customSttPresetCustom': 'Custom OpenAI-compatible',
+        'settings.customSttBaseUrl': 'Base URL',
+        'settings.customSttBaseUrlPlaceholder': 'http://localhost:8000/v1',
+        'settings.customSttModel': 'Model',
+        'settings.customSttModelPlaceholder': 'Systran/faster-whisper-large-v3',
+        'settings.customSttApiKeyOptional': 'API Key (optional)',
+        'settings.customSttSetupHint':
+          'Start your local OpenAI-compatible STT server first, then test the connection here.',
+        'settings.customSttConnectionFailed':
+          'Local STT server is not reachable. Check that it is running and the port is correct.',
       }
       return translations[key] || key
     },
@@ -35,6 +47,9 @@ const mockAppStore = {
     stt_provider: 'deepgram' as string,
     stt_api_key: '',
     stt_language: 'en',
+    stt_custom_preset: 'speaches',
+    stt_custom_base_url: 'http://localhost:8000/v1',
+    stt_custom_model: 'Systran/faster-whisper-large-v3',
   },
   updateConfig: vi.fn(),
   sttTestStatus: 'idle' as 'idle' | 'testing' | 'success' | 'error',
@@ -73,6 +88,9 @@ describe('SttPane', () => {
       stt_provider: 'deepgram',
       stt_api_key: '',
       stt_language: 'en',
+      stt_custom_preset: 'speaches',
+      stt_custom_base_url: 'http://localhost:8000/v1',
+      stt_custom_model: 'Systran/faster-whisper-large-v3',
     }
     mockAppStore.sttTestStatus = 'idle'
     mockAppStore.sttLatencyMs = null
@@ -165,6 +183,80 @@ describe('SttPane', () => {
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ stt_api_key: 'sk-new-key' })
       expect(mockAppStore.setSttTestStatus).toHaveBeenCalledWith('idle')
       expect(mockAppStore.setSttLatencyMs).toHaveBeenCalledWith(null)
+    })
+  })
+
+  describe('Custom Whisper provider UI', () => {
+    beforeEach(() => {
+      mockAppStore.config.stt_provider = 'custom-whisper'
+      mockAppStore.config.stt_api_key = ''
+    })
+
+    it('shows preset, base URL, model, and optional API key fields', () => {
+      render(<SttPane />)
+      const selects = screen.getAllByRole('combobox')
+      const presetSelect = selects[1]
+
+      expect(screen.getByText('Preset')).toBeInTheDocument()
+      expect(screen.getByText('Base URL')).toBeInTheDocument()
+      expect(screen.getByText('Model')).toBeInTheDocument()
+      expect(screen.getByText('API Key (optional)')).toBeInTheDocument()
+      expect(presetSelect).toHaveValue('speaches')
+      expect(screen.getByDisplayValue('http://localhost:8000/v1')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Systran/faster-whisper-large-v3')).toBeInTheDocument()
+    })
+
+    it('enables test without an API key when base URL and model are present', () => {
+      render(<SttPane />)
+      const button = screen.getAllByRole('button', { name: /test/i })[0]
+      expect(button).not.toBeDisabled()
+    })
+
+    it('fills Speaches defaults when Speaches preset is selected', () => {
+      mockAppStore.config.stt_custom_preset = 'custom'
+      mockAppStore.config.stt_custom_base_url = 'http://localhost:9000/v1'
+      mockAppStore.config.stt_custom_model = 'custom-model'
+
+      render(<SttPane />)
+      const selects = screen.getAllByRole('combobox')
+      const presetSelect = selects[1]
+
+      fireEvent.change(presetSelect, { target: { value: 'speaches' } })
+
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
+        stt_custom_preset: 'speaches',
+        stt_custom_base_url: 'http://localhost:8000/v1',
+        stt_custom_model: 'Systran/faster-whisper-large-v3',
+      })
+    })
+
+    it('preserves values when Custom preset is selected', () => {
+      render(<SttPane />)
+      const selects = screen.getAllByRole('combobox')
+      const presetSelect = selects[1]
+
+      fireEvent.change(presetSelect, { target: { value: 'custom' } })
+
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
+        stt_custom_preset: 'custom',
+      })
+    })
+
+    it('passes custom base URL and model to the benchmark command', async () => {
+      const mockBenchStt = vi.mocked(tauri.benchSttConnection)
+      mockBenchStt.mockResolvedValue(123)
+
+      render(<SttPane />)
+      fireEvent.click(screen.getAllByRole('button', { name: /test/i })[0])
+
+      await waitFor(() => {
+        expect(mockBenchStt).toHaveBeenCalledWith(
+          '',
+          'custom-whisper',
+          'http://localhost:8000/v1',
+          'Systran/faster-whisper-large-v3',
+        )
+      })
     })
   })
 
