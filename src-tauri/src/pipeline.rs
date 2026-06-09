@@ -43,6 +43,7 @@ pub fn request_accessibility_permission() -> bool {
     {
         #[link(name = "ApplicationServices", kind = "framework")]
         extern "C" {
+            fn AXIsProcessTrusted() -> u8;
             fn AXIsProcessTrustedWithOptions(options: *mut std::ffi::c_void) -> u8;
         }
         #[link(name = "CoreFoundation", kind = "framework")]
@@ -79,15 +80,23 @@ pub fn request_accessibility_permission() -> bool {
                 K_CF_STRING_ENCODING_UTF8,
             );
             let value = kCFBooleanTrue;
+            if key.is_null() || value.is_null() {
+                return AXIsProcessTrusted() != 0;
+            }
+            let keys = [key];
+            let values = [value];
 
             let options = CFDictionaryCreate(
                 std::ptr::null_mut(),
-                &[key] as *const *mut std::ffi::c_void,
-                &[value] as *const *mut std::ffi::c_void,
+                keys.as_ptr(),
+                values.as_ptr(),
                 1,
                 &kCFTypeDictionaryKeyCallBacks as *const std::ffi::c_void,
                 &kCFTypeDictionaryValueCallBacks as *const std::ffi::c_void,
             );
+            if options.is_null() {
+                return AXIsProcessTrusted() != 0;
+            }
 
             let trusted = AXIsProcessTrustedWithOptions(options);
             // options is leaked (trivial — called at most a few times)
