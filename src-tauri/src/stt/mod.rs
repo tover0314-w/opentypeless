@@ -2,6 +2,7 @@ pub mod assemblyai;
 pub mod cloud;
 pub mod config;
 pub mod deepgram;
+pub mod sixtydb;
 pub mod whisper_compat;
 
 use async_trait::async_trait;
@@ -67,6 +68,10 @@ pub fn create_provider(
         }
         "assemblyai" => Ok(Box::new(assemblyai::AssemblyAiProvider::new())),
         "deepgram" => Ok(Box::new(deepgram::DeepgramProvider::new())),
+        "60db" => Ok(match client {
+            Some(ref c) => Box::new(sixtydb::SixtyDbProvider::with_client(c.clone())),
+            None => Box::new(sixtydb::SixtyDbProvider::new()),
+        }),
         config::CUSTOM_WHISPER_PROVIDER => {
             let wc = custom_whisper_config.ok_or_else(|| {
                 AppError::Config("Local / Custom Whisper is missing base URL or model".to_string())

@@ -18,6 +18,30 @@ fn resolve_whisper_test_config(
         .ok_or_else(|| format!("Unknown STT provider: {}", provider))
 }
 
+/// Probe the 60db STT endpoint with a 0.1s silent WAV to validate an API key.
+/// Silent audio is rejected as low-SNR with no credits charged, so this is a
+/// free key check; a bad key returns 401 (non-success).
+async fn sixtydb_probe(
+    client: &reqwest::Client,
+    api_key: &str,
+) -> Result<reqwest::Response, String> {
+    let silent_pcm = vec![0u8; 3200]; // 0.1s at 16kHz 16-bit mono
+    let wav = stt::whisper_compat::WhisperCompatProvider::build_wav(&silent_pcm, 16000);
+    let file_part = reqwest::multipart::Part::bytes(wav)
+        .file_name("test.wav")
+        .mime_str("audio/wav")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+    client
+        .post("https://api.60db.ai/stt")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .multipart(form)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn test_stt_connection(
     api_key: String,
@@ -79,6 +103,13 @@ pub async fn test_stt_connection(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
+            Ok(resp.status().is_success())
+        }
+        "60db" => {
+            // 60db has no cheap key-check endpoint; POST a tiny silent clip.
+            // Silent audio is dropped as low-SNR with no credits charged, while
+            // a bad key still returns 401, so the status validates the key.
+            let resp = sixtydb_probe(client.inner(), &api_key).await?;
             Ok(resp.status().is_success())
         }
         _ => {
@@ -215,6 +246,15 @@ pub async fn bench_stt_connection(
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
+            let elapsed = t0.elapsed().as_millis() as u32;
+            if !resp.status().is_success() {
+                return Err(format!("HTTP {}", resp.status()));
+            }
+            Ok(elapsed)
+        }
+        "60db" => {
+            let t0 = std::time::Instant::now();
+            let resp = sixtydb_probe(client.inner(), &api_key).await?;
             let elapsed = t0.elapsed().as_millis() as u32;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));
