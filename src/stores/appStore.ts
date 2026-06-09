@@ -63,6 +63,7 @@ export interface AppConfig {
   hotkey: string
   hotkey_mode: HotkeyMode
   output_mode: OutputMode
+  audio_input_device: string
   selected_text_enabled: boolean
   theme: Theme
   auto_start: boolean
@@ -181,6 +182,7 @@ const defaultConfig: AppConfig = {
   hotkey: isMac ? 'Alt+/' : 'Ctrl+/',
   hotkey_mode: 'hold',
   output_mode: 'keyboard',
+  audio_input_device: '',
   selected_text_enabled: false,
   theme: 'system',
   auto_start: false,

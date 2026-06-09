@@ -577,8 +577,12 @@ impl PipelineHandle {
         }
 
         // Start audio capture on dedicated thread
-        let config = AudioConfig::default();
-        let (handle, mut audio_rx) = match AudioCaptureHandle::start(config) {
+        let audio_config = AudioConfig {
+            input_device_name: Some(config_data.audio_input_device.clone())
+                .filter(|name| !name.trim().is_empty()),
+            ..AudioConfig::default()
+        };
+        let (handle, mut audio_rx) = match AudioCaptureHandle::start(audio_config) {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Audio capture failed: {}", e);
