@@ -1,5 +1,7 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use serde::Serialize;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -14,6 +16,7 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     pub channels: u16,
     pub chunk_duration_ms: u32,
+    pub input_device_name: Option<String>,
 }
 
 impl Default for AudioConfig {
@@ -22,8 +25,44 @@ impl Default for AudioConfig {
             sample_rate: 16000,
             channels: 1,
             chunk_duration_ms: 20,
+            input_device_name: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioInputDevice {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+pub fn list_audio_input_devices() -> Result<Vec<AudioInputDevice>> {
+    let host = cpal::default_host();
+    let default_device_name = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+    let mut seen = HashSet::new();
+    let mut devices = Vec::new();
+
+    for device in host.input_devices()? {
+        let name = match device.name() {
+            Ok(name) if !name.trim().is_empty() => name,
+            _ => continue,
+        };
+
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+
+        devices.push(AudioInputDevice {
+            id: name.clone(),
+            is_default: default_device_name.as_deref() == Some(name.as_str()),
+            name,
+        });
+    }
+
+    Ok(devices)
 }
 
 /// Maximum audio buffer size in samples before we stop accumulating.
@@ -41,6 +80,8 @@ pub struct AudioCaptureHandle {
 impl AudioCaptureHandle {
     /// Start audio capture on a dedicated thread. Returns a handle and a receiver for audio chunks.
     pub fn start(config: AudioConfig) -> Result<(Self, mpsc::Receiver<Vec<u8>>)> {
+        validate_input_device(&config)?;
+
         let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>(200);
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let volume = Arc::new(Mutex::new(0.0f32));
@@ -80,6 +121,32 @@ impl AudioCaptureHandle {
     pub fn state(&self) -> CaptureState {
         *self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+fn configured_input_device_name(config: &AudioConfig) -> Option<&str> {
+    config
+        .input_device_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
+fn validate_input_device(config: &AudioConfig) -> Result<()> {
+    let host = cpal::default_host();
+
+    if let Some(selected_name) = configured_input_device_name(config) {
+        let found = host
+            .input_devices()?
+            .any(|device| matches!(device.name().as_deref(), Ok(name) if name == selected_name));
+
+        if !found {
+            return Err(anyhow::anyhow!("Input device not found: {}", selected_name));
+        }
+    } else if host.default_input_device().is_none() {
+        return Err(anyhow::anyhow!("No input device available"));
+    }
+
+    Ok(())
 }
 
 /// Downsample audio from `from_rate` to `to_rate` (simple linear interpolation, mono).
@@ -124,9 +191,16 @@ fn run_capture(
     state: Arc<Mutex<CaptureState>>,
 ) -> Result<()> {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
+    let selected_input_device = configured_input_device_name(&config);
+
+    let device = if let Some(selected_name) = selected_input_device {
+        host.input_devices()?
+            .find(|device| matches!(device.name().as_deref(), Ok(name) if name == selected_name))
+            .ok_or_else(|| anyhow::anyhow!("Input device not found: {}", selected_name))?
+    } else {
+        host.default_input_device()
+            .ok_or_else(|| anyhow::anyhow!("No input device available"))?
+    };
 
     tracing::info!("Using input device: {:?}", device.name());
 

@@ -410,6 +410,7 @@ pub fn run() {
             abort_recording,
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
+            commands::misc::list_audio_input_devices,
             commands::config::get_config,
             commands::config::update_config,
             commands::stt::test_stt_connection,

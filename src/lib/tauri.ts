@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { AppConfig, HistoryEntry, DictionaryEntry } from '../stores/appStore'
 
+export interface AudioInputDevice {
+  id: string
+  name: string
+  is_default: boolean
+}
+
 // Pipeline commands
 export async function startRecording(): Promise<void> {
   return invoke('start_recording')
@@ -130,6 +136,10 @@ export async function checkAccessibilityPermission(): Promise<boolean> {
 
 export async function requestAccessibilityPermission(): Promise<boolean> {
   return invoke('request_accessibility_permission')
+}
+
+export async function listAudioInputDevices(): Promise<AudioInputDevice[]> {
+  return invoke('list_audio_input_devices')
 }
 
 // Onboarding persistence via tauri-plugin-store

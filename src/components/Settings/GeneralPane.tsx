@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { RefreshCw } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import type { HotkeyMode, OutputMode } from '../../stores/appStore'
 import {
@@ -8,7 +9,9 @@ import {
   resumeHotkey,
   checkAccessibilityPermission,
   requestAccessibilityPermission,
+  listAudioInputDevices,
 } from '../../lib/tauri'
+import type { AudioInputDevice } from '../../lib/tauri'
 import { SegmentedControl } from './shared/SegmentedControl'
 import { Toggle } from './shared/Toggle'
 
@@ -185,6 +188,71 @@ function HotkeyRecorder() {
   )
 }
 
+function MicrophoneSelector() {
+  const config = useAppStore((s) => s.config)
+  const updateConfig = useAppStore((s) => s.updateConfig)
+  const { t } = useTranslation()
+  const [devices, setDevices] = useState<AudioInputDevice[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadDevices = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      setDevices(await listAudioInputDevices())
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadDevices()
+  }, [loadDevices])
+
+  const selectedDeviceAvailable =
+    config.audio_input_device === '' ||
+    devices.some((device) => device.id === config.audio_input_device)
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <select
+          value={config.audio_input_device}
+          onChange={(e) => updateConfig({ audio_input_device: e.target.value })}
+          className="min-w-0 flex-1 px-3 py-2.5 rounded-[10px] text-[13px] text-text-primary bg-bg-secondary border border-transparent outline-none cursor-pointer hover:border-border focus:border-accent"
+        >
+          <option value="">{t('settings.systemDefaultMicrophone')}</option>
+          {devices.map((device) => (
+            <option key={device.id} value={device.id}>
+              {device.is_default
+                ? t('settings.defaultDeviceLabel', { name: device.name })
+                : device.name}
+            </option>
+          ))}
+          {!selectedDeviceAvailable && (
+            <option value={config.audio_input_device}>{config.audio_input_device}</option>
+          )}
+        </select>
+        <button
+          type="button"
+          onClick={loadDevices}
+          disabled={loading}
+          title={t('settings.refreshMicrophones')}
+          className="shrink-0 w-10 h-10 inline-flex items-center justify-center rounded-[10px] text-text-secondary bg-bg-secondary border border-transparent cursor-pointer hover:border-border hover:text-text-primary disabled:opacity-50 disabled:cursor-default transition-colors"
+        >
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      {error && (
+        <p className="text-[11px] text-error mt-1.5">{t('settings.microphoneLoadFailed')}</p>
+      )}
+    </div>
+  )
+}
+
 export function GeneralPane() {
   const config = useAppStore((s) => s.config)
   const updateConfig = useAppStore((s) => s.updateConfig)
@@ -259,6 +327,10 @@ export function GeneralPane() {
           </div>
         </Section>
       )}
+
+      <Section title={t('settings.microphone')}>
+        <MicrophoneSelector />
+      </Section>
 
       <Section title={t('settings.maxRecordingDuration', 'Max Recording Duration')}>
         <div className="flex items-center gap-3">

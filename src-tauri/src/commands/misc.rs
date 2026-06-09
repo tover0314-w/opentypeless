@@ -1,3 +1,4 @@
+use crate::audio::{self, AudioInputDevice};
 use crate::pipeline;
 use crate::storage;
 use crate::tray;
@@ -17,6 +18,11 @@ pub fn check_accessibility_permission() -> bool {
 #[tauri::command]
 pub fn request_accessibility_permission() -> bool {
     pipeline::request_accessibility_permission()
+}
+
+#[tauri::command]
+pub fn list_audio_input_devices() -> Result<Vec<AudioInputDevice>, String> {
+    audio::list_audio_input_devices().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
