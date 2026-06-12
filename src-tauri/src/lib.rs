@@ -3,6 +3,8 @@ pub mod audio;
 pub mod commands;
 pub mod error;
 pub mod hotkey;
+#[cfg(target_os = "linux")]
+mod linux_x11;
 pub mod llm;
 pub mod output;
 pub mod pipeline;
@@ -86,6 +88,9 @@ fn apply_linux_workarounds() {
 }
 
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    let xinitthreads_status = linux_x11::init_xlib_threads();
+
     apply_linux_workarounds();
 
     tracing_subscriber::fmt()
@@ -97,6 +102,19 @@ pub fn run() {
             ),
         )
         .init();
+
+    #[cfg(target_os = "linux")]
+    match xinitthreads_status {
+        linux_x11::XInitThreadsStatus::Enabled => {
+            tracing::debug!("Initialized Xlib thread support with XInitThreads");
+        }
+        linux_x11::XInitThreadsStatus::Unavailable => {
+            tracing::debug!("libX11 unavailable; skipping XInitThreads");
+        }
+        linux_x11::XInitThreadsStatus::Failed => {
+            tracing::warn!("XInitThreads returned failure; Xlib thread support may be unavailable");
+        }
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::default().build())

@@ -51,6 +51,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.8"
+
 [profile.release]
 codegen-units = 1
 opt-level = "s"
