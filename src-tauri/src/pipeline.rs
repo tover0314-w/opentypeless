@@ -1285,6 +1285,7 @@ impl PipelineHandle {
             "siliconflow" => "https://api.siliconflow.cn/v1/audio/transcriptions".to_string(),
             "deepgram" => "https://api.deepgram.com/v1/listen".to_string(),
             "assemblyai" => "https://api.assemblyai.com/v2/transcript".to_string(),
+            "60db" => "https://api.60db.ai/stt".to_string(),
             _ => {
                 tracing::debug!(
                     "Unknown STT provider '{}', skipping pre-warm",

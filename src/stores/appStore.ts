@@ -5,6 +5,7 @@ export type PipelineState = 'idle' | 'recording' | 'transcribing' | 'polishing' 
 export type SttProvider =
   | 'deepgram'
   | 'assemblyai'
+  | '60db'
   | 'glm-asr'
   | 'openai-whisper'
   | 'groq-whisper'

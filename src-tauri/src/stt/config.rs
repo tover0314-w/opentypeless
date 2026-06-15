@@ -162,6 +162,11 @@ mod tests {
     }
 
     #[test]
+    fn test_60db_not_in_whisper_config() {
+        assert!(get_whisper_config("60db").is_none());
+    }
+
+    #[test]
     fn test_normalize_custom_whisper_base_url() {
         let endpoint = normalize_custom_whisper_endpoint("http://localhost:8000/v1").unwrap();
         assert_eq!(endpoint, "http://localhost:8000/v1/audio/transcriptions");
