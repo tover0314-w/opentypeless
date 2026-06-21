@@ -10,7 +10,8 @@
     "account": "Cuenta",
     "upgrade": "Mejorar",
     "pro": "Pro",
-    "mainNavigation": "Navegación principal"
+    "mainNavigation": "Navegación principal",
+    "recordings": "Grabaciones"
   },
   "errors": {
     "stt_timeout": "El reconocimiento de voz agotó el tiempo de espera. Inténtalo de nuevo.",
@@ -273,7 +274,10 @@
     "grantPermission": "Conceder permiso",
     "unsavedChanges": "Tienes cambios sin guardar",
     "autoDetect": "Detección automática",
-    "llmModelPlaceholder": "ej: gpt-4o-mini"
+    "llmModelPlaceholder": "ej: gpt-4o-mini",
+    "recordings": "Grabaciones",
+    "saveRecordings": "Guardar grabaciones",
+    "recordingFormat": "Formato de grabación"
   },
   "dictionary": {
     "word": "Palabra",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Grabaciones",
+    "searchPlaceholder": "Buscar grabaciones...",
+    "noResults": "No hay resultados coincidentes",
+    "noRecordings": "Aún no hay grabaciones.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "retranscribe": "Volver a transcribir",
+    "retranscribing": "Volviendo a transcribir...",
+    "delete": "Eliminar",
+    "deleteConfirm": "¿Seguro que quieres eliminar esta grabación? Esto no se puede deshacer.",
+    "failedToLoad": "Error al cargar las grabaciones",
+    "failedToLoadAudio": "Error al cargar el audio",
+    "failedToRetranscribe": "Error al volver a transcribir",
+    "failedToDelete": "Error al eliminar la grabación"
   }
 }

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { AppConfig, HistoryEntry, DictionaryEntry } from '../stores/appStore'
+import type { AppConfig, HistoryEntry, DictionaryEntry, RecordingEntry } from '../stores/appStore'
 
 // Pipeline commands
 export async function startRecording(): Promise<void> {
@@ -100,6 +100,23 @@ export async function getHistory(limit: number, offset: number): Promise<History
 
 export async function clearHistory(): Promise<void> {
   return invoke('clear_history')
+}
+
+// Recordings
+export async function getRecordings(limit: number, offset: number): Promise<RecordingEntry[]> {
+  return invoke('get_recordings', { limit, offset })
+}
+
+export async function getRecordingPath(id: number): Promise<string> {
+  return invoke('get_recording_path', { id })
+}
+
+export async function retranscribeRecording(id: number): Promise<string> {
+  return invoke('retranscribe_recording', { id })
+}
+
+export async function deleteRecording(id: number): Promise<void> {
+  return invoke('delete_recording', { id })
 }
 
 // Dictionary

@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 
-export type Route = 'home' | 'settings' | 'history' | 'upgrade' | 'account'
+export type Route = 'home' | 'settings' | 'history' | 'recordings' | 'upgrade' | 'account'
 
 function parseHash(): Route {
   const hash = window.location.hash.replace('#/', '')
-  if (hash === 'settings' || hash === 'history' || hash === 'upgrade' || hash === 'account')
+  if (
+    hash === 'settings' ||
+    hash === 'history' ||
+    hash === 'recordings' ||
+    hash === 'upgrade' ||
+    hash === 'account'
+  )
     return hash
   return 'home'
 }

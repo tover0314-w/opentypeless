@@ -10,7 +10,8 @@
     "account": "Account",
     "upgrade": "Upgrade",
     "pro": "Pro",
-    "mainNavigation": "Main navigation"
+    "mainNavigation": "Main navigation",
+    "recordings": "Recordings"
   },
   "errors": {
     "stt_timeout": "Speech recognition timed out. Please try again.",
@@ -273,7 +274,10 @@
     "accessibilityRequired": "Required for keyboard output",
     "grantPermission": "Grant Permission",
     "unsavedChanges": "You have unsaved changes",
-    "llmModelPlaceholder": "e.g. gpt-4o-mini"
+    "llmModelPlaceholder": "e.g. gpt-4o-mini",
+    "recordings": "Recordings",
+    "saveRecordings": "Save recordings",
+    "recordingFormat": "Recording format"
   },
   "dictionary": {
     "word": "Word",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Recordings",
+    "searchPlaceholder": "Search recordings...",
+    "noResults": "No matching results",
+    "noRecordings": "No recordings yet.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "retranscribe": "Re-transcribe",
+    "retranscribing": "Re-transcribing...",
+    "delete": "Delete",
+    "deleteConfirm": "Are you sure you want to delete this recording? This cannot be undone.",
+    "failedToLoad": "Failed to load recordings",
+    "failedToLoadAudio": "Failed to load audio",
+    "failedToRetranscribe": "Failed to re-transcribe recording",
+    "failedToDelete": "Failed to delete recording"
   }
 }

@@ -16,6 +16,7 @@ import { initDeepLinkListener } from './lib/deep-link'
 import { Capsule } from './components/Capsule'
 import { Settings } from './components/Settings'
 import { History } from './components/History'
+import { Recordings } from './components/Recordings'
 import { Onboarding } from './components/Onboarding'
 import { MainLayout } from './components/MainLayout'
 import { HomePage } from './components/HomePage'
@@ -170,6 +171,7 @@ function MainApp() {
       {route === 'home' && <HomePage />}
       {route === 'settings' && <Settings />}
       {route === 'history' && <History />}
+      {route === 'recordings' && <Recordings />}
       {route === 'upgrade' && <UpgradePage />}
       {route === 'account' && <AccountPage />}
       <ToastContainer />

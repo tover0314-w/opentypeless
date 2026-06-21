@@ -10,7 +10,8 @@
     "account": "Аккаунт",
     "upgrade": "Обновить",
     "pro": "Pro",
-    "mainNavigation": "Основная навигация"
+    "mainNavigation": "Основная навигация",
+    "recordings": "Записи"
   },
   "errors": {
     "stt_timeout": "Время распознавания речи истекло. Попробуйте еще раз.",
@@ -273,7 +274,10 @@
     "grantPermission": "Предоставить разрешение",
     "unsavedChanges": "У вас есть несохранённые изменения",
     "autoDetect": "Автоопределение",
-    "llmModelPlaceholder": "напр. gpt-4o-mini"
+    "llmModelPlaceholder": "напр. gpt-4o-mini",
+    "recordings": "Записи",
+    "saveRecordings": "Сохранять записи",
+    "recordingFormat": "Формат записи"
   },
   "dictionary": {
     "word": "Слово",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Записи",
+    "searchPlaceholder": "Поиск записей...",
+    "noResults": "Нет совпадений",
+    "noRecordings": "Пока нет записей.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Сегодня",
+    "yesterday": "Вчера",
+    "retranscribe": "Перетранскрибировать",
+    "retranscribing": "Перетранскрибирование...",
+    "delete": "Удалить",
+    "deleteConfirm": "Вы уверены, что хотите удалить эту запись? Это действие нельзя отменить.",
+    "failedToLoad": "Не удалось загрузить записи",
+    "failedToLoadAudio": "Не удалось загрузить аудио",
+    "failedToRetranscribe": "Не удалось перетранскрибировать",
+    "failedToDelete": "Не удалось удалить запись"
   }
 }
