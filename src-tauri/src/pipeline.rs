@@ -208,12 +208,45 @@ fn copy_selected_text_to_clipboard() -> bool {
     pressed
 }
 
+/// Sample rate of captured PCM (16 kHz mono s16le); used when encoding recordings.
+const RECORDING_SAMPLE_RATE: u32 = 16000;
+
+/// Encode teed PCM and write it to `<app_data_dir>/recordings/<UTC-timestamp>.<ext>`.
+/// Returns the absolute path to the written file.
+fn write_recording_file(
+    app_handle: &tauri::AppHandle,
+    pcm: &[u8],
+    format_str: &str,
+) -> anyhow::Result<String> {
+    use crate::audio::encode::{encode_pcm, RecordingFormat};
+
+    let format = RecordingFormat::from_config_str(format_str);
+    let (bytes, ext) = encode_pcm(pcm, RECORDING_SAMPLE_RATE, format)?;
+
+    let dir = app_handle.path().app_data_dir()?.join("recordings");
+    std::fs::create_dir_all(&dir)?;
+
+    let filename = format!(
+        "{}.{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ"),
+        ext
+    );
+    let path = dir.join(filename);
+    std::fs::write(&path, &bytes)?;
+
+    tracing::info!("Saved recording to {}", path.display());
+    Ok(path.to_string_lossy().to_string())
+}
+
 pub struct PipelineHandle {
     app_handle: tauri::AppHandle,
     state: Arc<AtomicU8>,
     audio_handle: Arc<Mutex<Option<AudioCaptureHandle>>>,
     audio_volume: Arc<Mutex<f32>>,
     accumulated_text: Arc<Mutex<String>>,
+    /// Path of the saved recording file for the current session, set by the STT
+    /// task on audio-channel close and consumed by `save_history` in `stop()`.
+    recording_file: Arc<Mutex<Option<String>>>,
     stt_session: Arc<Mutex<Option<SttTaskControl>>>,
     stt_error: Arc<Mutex<Option<(u64, crate::error::UserError)>>>,
     active_stt_session_id: Arc<AtomicU64>,
@@ -239,6 +272,7 @@ impl PipelineHandle {
             audio_handle: Arc::new(Mutex::new(None)),
             audio_volume: Arc::new(Mutex::new(0.0)),
             accumulated_text: Arc::new(Mutex::new(String::new())),
+            recording_file: Arc::new(Mutex::new(None)),
             stt_session: Arc::new(Mutex::new(None)),
             stt_error: Arc::new(Mutex::new(None)),
             active_stt_session_id: Arc::new(AtomicU64::new(0)),
@@ -314,6 +348,10 @@ impl PipelineHandle {
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         *self.stt_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self
+            .recording_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
 
         // Force state to Idle — emits pipeline:state event to sync frontend
         self.set_state(PipelineState::Idle);
@@ -411,6 +449,10 @@ impl PipelineHandle {
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         *self.stt_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self
+            .recording_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
 
         // P0-2: Load config BEFORE starting audio capture — fail fast on missing API key
         let config_data = self.load_config().await;
@@ -676,6 +718,9 @@ impl PipelineHandle {
         // STT streaming task — provider is already connected
         let app_handle = self.app_handle.clone();
         let accumulated = self.accumulated_text.clone();
+        let recording_file_ref = self.recording_file.clone();
+        let save_recordings = config_data.save_recordings;
+        let recording_format = config_data.recording_format.clone();
         let session_id = self.active_stt_session_id.fetch_add(1, Ordering::SeqCst) + 1;
         let stt_control = SttTaskControl {
             id: session_id,
@@ -688,6 +733,10 @@ impl PipelineHandle {
         let stt_error_ref = self.stt_error.clone();
 
         tokio::spawn(async move {
+            // When recording-to-disk is enabled, tee a copy of every PCM chunk
+            // (provider-agnostic) so it can be encoded and saved on close.
+            let mut recorded_pcm: Vec<u8> = Vec::new();
+
             // Forward audio to STT and receive transcripts
             loop {
                 if !should_finalize_stt_task(
@@ -706,6 +755,9 @@ impl PipelineHandle {
                     chunk = audio_rx.recv() => {
                         match chunk {
                             Some(data) => {
+                                if save_recordings {
+                                    recorded_pcm.extend_from_slice(&data);
+                                }
                                 let _ = provider.send_audio(&data).await;
                             }
                             None => {
@@ -752,6 +804,32 @@ impl PipelineHandle {
                                         }
                                     }
                                     None => {}
+                                }
+
+                                // Persist the recording to disk if enabled and we
+                                // are still the active (non-aborted) session.
+                                if save_recordings
+                                    && !recorded_pcm.is_empty()
+                                    && should_finalize_stt_task(
+                                        abort_flag_ref.as_ref(),
+                                        active_session_id_ref.as_ref(),
+                                        stt_control.id,
+                                    )
+                                {
+                                    match write_recording_file(
+                                        &app_handle,
+                                        &recorded_pcm,
+                                        &recording_format,
+                                    ) {
+                                        Ok(path) => {
+                                            *recording_file_ref
+                                                .lock()
+                                                .unwrap_or_else(|e| e.into_inner()) = Some(path);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to save recording file: {}", e);
+                                        }
+                                    }
                                 }
                                 break;
                             }
@@ -1010,8 +1088,13 @@ impl PipelineHandle {
             }),
         );
 
-        // Save to history
-        self.save_history(&raw_text, &final_text, &app_ctx, duration_ms)
+        // Save to history (with the saved recording path, if one was written)
+        let recording_file = self
+            .recording_file
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        self.save_history(&raw_text, &final_text, &app_ctx, duration_ms, recording_file)
             .await;
 
         if let Some(control) = &stt_control {
@@ -1190,6 +1273,7 @@ impl PipelineHandle {
         final_text: &str,
         app_ctx: &app_detector::AppContext,
         duration_ms: Option<i64>,
+        recording_file: Option<String>,
     ) {
         let now = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
         let entry = storage::HistoryEntry {
@@ -1201,6 +1285,7 @@ impl PipelineHandle {
             polished_text: final_text.to_string(),
             language: None,
             duration_ms,
+            recording_file,
         };
         if let Err(e) = self
             .app_handle
