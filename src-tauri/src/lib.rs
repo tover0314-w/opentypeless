@@ -438,6 +438,7 @@ pub fn run() {
             commands::history::clear_history,
             commands::recordings::get_recordings,
             commands::recordings::get_recording_path,
+            commands::recordings::read_recording_bytes,
             commands::recordings::retranscribe_recording,
             commands::recordings::delete_recording,
             commands::dictionary::get_dictionary,

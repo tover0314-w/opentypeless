@@ -70,6 +70,30 @@ pub async fn get_recording_path(
         .ok_or_else(|| format!("Recording {id} has no saved audio file"))
 }
 
+/// Read a recording's raw audio bytes for in-app playback.
+///
+/// WebKitGTK's `<audio>` element rejects Tauri's custom `asset://` scheme as a
+/// media source (it only accepts http/file/blob), so the frontend plays
+/// recordings from a `blob:` URL built from these bytes instead of from the
+/// asset protocol. Returns the bytes as a raw IPC response (ArrayBuffer on the
+/// JS side), not a JSON number array.
+#[tauri::command]
+pub async fn read_recording_bytes(
+    state: tauri::State<'_, storage::HistoryStore>,
+    id: i64,
+) -> Result<tauri::ipc::Response, String> {
+    let entry = state
+        .find_by_id(id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Recording {id} not found"))?;
+    let path = entry
+        .recording_file
+        .ok_or_else(|| format!("Recording {id} has no saved audio file"))?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read {path}: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Re-run the configured STT provider on a saved recording, update the stored
 /// raw transcript, and return the new transcript.
 #[tauri::command]
@@ -98,7 +122,7 @@ pub async fn retranscribe_recording(
         .map_err(|e| e.to_string())?;
 
     history
-        .update_raw_text(id, &transcript)
+        .update_transcript(id, &transcript)
         .await
         .map_err(|e| e.to_string())?;
 

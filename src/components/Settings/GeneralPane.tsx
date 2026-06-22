@@ -300,6 +300,31 @@ export function GeneralPane() {
               </select>
             </div>
           )}
+          {config.save_recordings && (
+            <div>
+              <label className="block text-[13px] font-medium text-text-secondary mb-2">
+                {t('settings.maxSavedRecordings')}
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={999}
+                value={config.max_saved_recordings}
+                onChange={(e) =>
+                  updateConfig({
+                    max_saved_recordings: Math.max(
+                      0,
+                      Math.min(999, Math.floor(Number(e.target.value) || 0)),
+                    ),
+                  })
+                }
+                className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              />
+              <p className="mt-1.5 text-[12px] text-text-tertiary">
+                {t('settings.maxSavedRecordingsHint')}
+              </p>
+            </div>
+          )}
         </div>
       </Section>
 

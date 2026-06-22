@@ -111,6 +111,10 @@ export async function getRecordingPath(id: number): Promise<string> {
   return invoke('get_recording_path', { id })
 }
 
+export async function readRecordingBytes(id: number): Promise<ArrayBuffer> {
+  return invoke('read_recording_bytes', { id })
+}
+
 export async function retranscribeRecording(id: number): Promise<string> {
   return invoke('retranscribe_recording', { id })
 }

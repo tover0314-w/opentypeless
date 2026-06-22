@@ -114,9 +114,9 @@ export function Capsule() {
               : 'jelly-capsule-active text-white'
         }`}
         initial={false}
-        animate={visible ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.8, y: 10 }}
+        animate={visible ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.8, y: -10 }}
         transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.7 }}
-        style={{ transformOrigin: 'center bottom' }}
+        style={{ transformOrigin: 'center top' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

@@ -1,19 +1,31 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { Search, RefreshCw, Trash2, Loader2 } from 'lucide-react'
 import { spring } from '../../lib/animations'
 import type { RecordingEntry } from '../../stores/appStore'
 import {
   getRecordings,
-  getRecordingPath,
+  readRecordingBytes,
   retranscribeRecording,
   deleteRecording,
 } from '../../lib/tauri'
 import { toast } from '../Toast'
+import { RecordingPlayer } from './RecordingPlayer'
 
 const PAGE_SIZE = 200
+
+/** Map a saved-file format to the MIME type for blob playback. */
+function mimeForFormat(format: string | null | undefined): string {
+  switch ((format || '').toLowerCase()) {
+    case 'wav':
+      return 'audio/wav'
+    case 'flac':
+      return 'audio/flac'
+    default:
+      return 'audio/mpeg' // mp3
+  }
+}
 
 export function Recordings() {
   const { t } = useTranslation()
@@ -21,6 +33,9 @@ export function Recordings() {
   const [audioSrc, setAudioSrc] = useState<Record<number, string>>({})
   const [retranscribingId, setRetranscribingId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
+
+  // Track every blob URL we create so we can revoke them on unmount/delete.
+  const blobUrls = useRef<Map<number, string>>(new Map())
 
   // Load recordings on mount (Recordings are fetched here, not preloaded in App)
   useEffect(() => {
@@ -32,26 +47,40 @@ export function Recordings() {
       })
   }, [t])
 
-  // Resolve audio src lazily per row (absolute path → asset URL)
+  // Resolve audio lazily per row. WebKitGTK rejects the custom asset:// scheme
+  // as a media source, so we fetch the bytes over IPC and play from a blob URL.
   const loadAudio = useCallback(
-    (id: number) => {
-      if (audioSrc[id]) return
-      getRecordingPath(id)
-        .then((path) => {
-          setAudioSrc((prev) => ({ ...prev, [id]: convertFileSrc(path) }))
+    (entry: RecordingEntry) => {
+      if (blobUrls.current.has(entry.id)) return
+      readRecordingBytes(entry.id)
+        .then((buf) => {
+          if (blobUrls.current.has(entry.id)) return
+          const blob = new Blob([buf], { type: mimeForFormat(entry.format) })
+          const url = URL.createObjectURL(blob)
+          blobUrls.current.set(entry.id, url)
+          setAudioSrc((prev) => ({ ...prev, [entry.id]: url }))
         })
         .catch((e) => {
-          console.error('Failed to resolve recording path:', e)
+          console.error('Failed to load recording audio:', e)
           toast.error(t('recordings.failedToLoadAudio'))
         })
     },
-    [audioSrc, t],
+    [t],
   )
 
   useEffect(() => {
-    for (const r of recordings) loadAudio(r.id)
+    for (const r of recordings) loadAudio(r)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordings])
+
+  // Revoke all blob URLs when the screen unmounts.
+  useEffect(() => {
+    const urls = blobUrls.current
+    return () => {
+      for (const url of urls.values()) URL.revokeObjectURL(url)
+      urls.clear()
+    }
+  }, [])
 
   const filtered = useMemo(
     () =>
@@ -100,6 +129,16 @@ export function Recordings() {
     if (!window.confirm(t('recordings.deleteConfirm'))) return
     try {
       await deleteRecording(id)
+      const url = blobUrls.current.get(id)
+      if (url) {
+        URL.revokeObjectURL(url)
+        blobUrls.current.delete(id)
+      }
+      setAudioSrc((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
       setRecordings((prev) => prev.filter((r) => r.id !== id))
     } catch (e) {
       console.error('Failed to delete recording:', e)
@@ -168,6 +207,7 @@ export function Recordings() {
                             {entry.polished_text || entry.raw_text}
                           </p>
                           <p className="text-[11px] text-text-tertiary mt-1">
+                            <span className="tabular-nums">#{entry.id}</span> ·{' '}
                             {entry.created_at.split('T')[1]?.slice(0, 5) || ''} ·{' '}
                             {entry.format.toUpperCase()}
                           </p>
@@ -212,12 +252,7 @@ export function Recordings() {
                         </p>
                       )}
                       {audioSrc[entry.id] && (
-                        <audio
-                          controls
-                          preload="none"
-                          src={audioSrc[entry.id]}
-                          className="w-full h-9 mt-2"
-                        />
+                        <RecordingPlayer src={audioSrc[entry.id]} durationMs={entry.duration_ms} />
                       )}
                     </motion.div>
                   ))}

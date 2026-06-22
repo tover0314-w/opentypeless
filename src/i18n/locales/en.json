@@ -277,7 +277,9 @@
     "llmModelPlaceholder": "e.g. gpt-4o-mini",
     "recordings": "Recordings",
     "saveRecordings": "Save recordings",
-    "recordingFormat": "Recording format"
+    "recordingFormat": "Recording format",
+    "maxSavedRecordings": "Max saved recordings",
+    "maxSavedRecordingsHint": "0 = unlimited. Oldest audio is deleted past this count (transcripts kept)."
   },
   "dictionary": {
     "word": "Word",

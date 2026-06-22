@@ -83,6 +83,7 @@ export interface AppConfig {
   capsule_auto_hide: boolean
   save_recordings: boolean
   recording_format: string
+  max_saved_recordings: number
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -203,6 +204,7 @@ const defaultConfig: AppConfig = {
   capsule_auto_hide: true,
   save_recordings: false,
   recording_format: 'wav',
+  max_saved_recordings: 0,
 }
 
 export const useAppStore = create<AppState>((set) => ({

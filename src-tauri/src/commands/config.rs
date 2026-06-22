@@ -31,6 +31,12 @@ fn config_patch_between(previous: &storage::AppConfig, next: &storage::AppConfig
             json!(next.recording_format),
         );
     }
+    if previous.max_saved_recordings != next.max_saved_recordings {
+        patch.insert(
+            "max_saved_recordings".to_string(),
+            json!(next.max_saved_recordings),
+        );
+    }
     Value::Object(patch)
 }
 

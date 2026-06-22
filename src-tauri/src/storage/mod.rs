@@ -35,6 +35,8 @@ pub struct AppConfig {
     pub capsule_auto_hide: bool,
     pub save_recordings: bool,
     pub recording_format: String,
+    /// Max number of audio recordings to keep on disk. 0 = unlimited.
+    pub max_saved_recordings: u32,
 }
 
 impl Default for AppConfig {
@@ -70,6 +72,7 @@ impl Default for AppConfig {
             capsule_auto_hide: false,
             save_recordings: false,
             recording_format: "flac".to_string(),
+            max_saved_recordings: 0,
         }
     }
 }
@@ -321,12 +324,52 @@ impl HistoryStore {
         Ok(())
     }
 
-    /// Overwrite the raw transcript for a history row (used after re-transcription).
-    pub async fn update_raw_text(&self, id: i64, raw_text: &str) -> Result<()> {
+    /// Keep only the newest `max` saved recordings; clear the audio reference on
+    /// older ones and return their file paths so the caller can delete them.
+    ///
+    /// Transcripts are preserved (only `recording_file` is nulled), mirroring a
+    /// manual delete. `max == 0` means unlimited — nothing is pruned.
+    pub async fn prune_recordings_over(&self, max: u32) -> Result<Vec<String>> {
+        if max == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        // All saved recordings beyond the newest `max` (LIMIT -1 = "no limit").
+        let mut stmt = conn.prepare(
+            "SELECT id, recording_file FROM history
+             WHERE recording_file IS NOT NULL
+             ORDER BY id DESC LIMIT -1 OFFSET ?1",
+        )?;
+        let stale: Vec<(i64, String)> = stmt
+            .query_map(rusqlite::params![max], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+
+        let mut paths = Vec::with_capacity(stale.len());
+        for (id, path) in stale {
+            conn.execute(
+                "UPDATE history SET recording_file = NULL WHERE id = ?1",
+                rusqlite::params![id],
+            )?;
+            paths.push(path);
+        }
+        Ok(paths)
+    }
+
+    /// Replace both the raw and polished transcript for a history row.
+    ///
+    /// Used after re-transcription, which produces a fresh STT transcript that
+    /// supersedes the previous text. Both columns are set so the new transcript
+    /// survives a reload — the Recordings list renders `polished_text ||
+    /// raw_text`, so leaving a stale `polished_text` would revert the displayed
+    /// text. Mirrors the "polish off" pipeline path where the two are equal.
+    pub async fn update_transcript(&self, id: i64, text: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(
-            "UPDATE history SET raw_text = ?1 WHERE id = ?2",
-            rusqlite::params![raw_text, id],
+            "UPDATE history SET raw_text = ?1, polished_text = ?1 WHERE id = ?2",
+            rusqlite::params![text, id],
         )?;
         Ok(())
     }
@@ -524,17 +567,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_raw_text_overwrites_transcript() {
+    async fn update_transcript_overwrites_raw_and_polished() {
         let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
         store.add(history_entry("old")).await.unwrap();
         let id = store.list(1, 0).await.unwrap()[0].id;
 
-        store.update_raw_text(id, "new transcript").await.unwrap();
+        store.update_transcript(id, "new transcript").await.unwrap();
 
-        assert_eq!(
-            store.find_by_id(id).await.unwrap().unwrap().raw_text,
-            "new transcript"
-        );
+        let entry = store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(entry.raw_text, "new transcript");
+        // polished_text must also update, else the list reverts to stale text.
+        assert_eq!(entry.polished_text, "new transcript");
+    }
+
+    #[tokio::test]
+    async fn prune_recordings_over_keeps_newest_and_keeps_transcripts() {
+        let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
+        for i in 0..4 {
+            store.add(history_entry(&format!("rec {i}"))).await.unwrap();
+        }
+        let ids: Vec<i64> = store
+            .list(10, 0)
+            .await
+            .unwrap()
+            .iter()
+            .map(|e| e.id)
+            .collect();
+        for id in &ids {
+            store
+                .set_recording_file(*id, &format!("/tmp/{id}.mp3"))
+                .await
+                .unwrap();
+        }
+
+        // Keep newest 2 → the 2 oldest audio refs are cleared and returned.
+        let pruned = store.prune_recordings_over(2).await.unwrap();
+        assert_eq!(pruned.len(), 2);
+        assert_eq!(store.list_recordings(10, 0).await.unwrap().len(), 2);
+        // Transcripts of pruned rows are kept (history row count unchanged).
+        assert_eq!(store.list(10, 0).await.unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn prune_recordings_over_zero_is_unlimited() {
+        let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
+        store.add(history_entry("rec")).await.unwrap();
+        let id = store.list(1, 0).await.unwrap()[0].id;
+        store.set_recording_file(id, "/tmp/x.mp3").await.unwrap();
+
+        let pruned = store.prune_recordings_over(0).await.unwrap();
+        assert!(pruned.is_empty());
+        assert_eq!(store.list_recordings(10, 0).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

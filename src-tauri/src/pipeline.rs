@@ -1094,8 +1094,15 @@ impl PipelineHandle {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
+        let saved_new_recording = recording_file.is_some();
         self.save_history(&raw_text, &final_text, &app_ctx, duration_ms, recording_file)
             .await;
+
+        // Enforce the saved-recordings cap (0 = unlimited). Only runs when a new
+        // file was just written, since that is the only time the count grows.
+        if saved_new_recording && config.max_saved_recordings > 0 {
+            self.prune_saved_recordings(config.max_saved_recordings).await;
+        }
 
         if let Some(control) = &stt_control {
             self.clear_stt_session(control.id);
@@ -1294,6 +1301,24 @@ impl PipelineHandle {
             .await
         {
             tracing::error!("Failed to save history: {}", e);
+        }
+    }
+
+    /// Enforce the saved-recordings cap: prune the oldest audio files beyond the
+    /// newest `max`, keeping their transcripts. Failures are logged, not fatal.
+    async fn prune_saved_recordings(&self, max: u32) {
+        let store = self.app_handle.state::<storage::HistoryStore>();
+        match store.prune_recordings_over(max).await {
+            Ok(paths) => {
+                for path in paths {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            tracing::warn!("Failed to prune recording {path}: {e}");
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("Failed to prune saved recordings: {e}"),
         }
     }
 

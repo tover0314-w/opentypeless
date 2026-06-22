@@ -1,8 +1,8 @@
 import { useEffect } from 'react'
 import { useAppStore, type PipelineState } from '../stores/appStore'
 
-/** Distance (logical px) from the bottom edge of the screen to the capsule. */
-const BOTTOM_MARGIN = 80
+/** Distance (logical px) from the top edge of the screen to the capsule. */
+const TOP_MARGIN = 8
 
 interface CapsuleSize {
   width: number
@@ -85,29 +85,28 @@ export function useCapsuleResize() {
         await win.setFocusable(getCapsuleFocusable()).catch(() => {})
         await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
 
-        // Re-anchor to the bottom-center of the active monitor on EVERY state
-        // change. The window is content-sized (+12px padding each side) so a
-        // centered window keeps the capsule screen-centered as it grows/shrinks.
-        // Recomputing each time (instead of only on first mount, left-edge
-        // anchored) prevents both the off-center drift when recording AND the
-        // top-left fallback when monitor info isn't ready on the first pass.
-        const anchorBottomCenter = async (): Promise<boolean> => {
+        // Re-anchor to the top-center of the active monitor on EVERY state
+        // change. The window is content-sized so a horizontally-centered window
+        // keeps the capsule screen-centered as it grows/shrinks. Recomputing
+        // each time (instead of only on first mount, left-edge anchored)
+        // prevents both the off-center drift as it grows AND the top-left
+        // fallback when monitor info isn't ready on the first pass.
+        const anchorTopCenter = async (): Promise<boolean> => {
           try {
             const monitor = await currentMonitor()
             if (!monitor) return false
             const sw = monitor.size.width / monitor.scaleFactor
-            const sh = monitor.size.height / monitor.scaleFactor
             const x = Math.round(sw / 2 - windowWidth / 2)
-            const y = Math.round(sh - windowHeight - BOTTOM_MARGIN)
+            const y = TOP_MARGIN
             await win.setPosition(new LogicalPosition(x, y)).catch(() => {})
             return true
           } catch {
             return false
           }
         }
-        if (!(await anchorBottomCenter())) {
+        if (!(await anchorTopCenter())) {
           // Monitor not ready yet — retry once so we never sit at the top-left.
-          setTimeout(() => void anchorBottomCenter(), 150)
+          setTimeout(() => void anchorTopCenter(), 150)
         }
 
         // Signal that the window has finished resizing for the context menu.

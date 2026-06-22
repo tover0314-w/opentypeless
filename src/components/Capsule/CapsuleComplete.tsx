@@ -14,7 +14,7 @@ export function CapsuleComplete() {
     const timer = setTimeout(() => {
       resetRecording()
       setPipelineState('idle')
-    }, 1200)
+    }, 3000)
     return () => clearTimeout(timer)
   }, [resetRecording, setPipelineState])
 
