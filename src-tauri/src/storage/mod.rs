@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub max_recording_seconds: u32,
     pub ui_language: String,
     pub capsule_auto_hide: bool,
+    pub save_recordings: bool,
+    pub recording_format: String,
 }
 
 impl Default for AppConfig {
@@ -66,6 +68,8 @@ impl Default for AppConfig {
             max_recording_seconds: 30,
             ui_language: "en".to_string(),
             capsule_auto_hide: false,
+            save_recordings: false,
+            recording_format: "flac".to_string(),
         }
     }
 }
@@ -161,6 +165,26 @@ pub struct HistoryEntry {
     pub polished_text: String,
     pub language: Option<String>,
     pub duration_ms: Option<i64>,
+    /// Absolute path to the saved audio file, if recording-to-disk was enabled.
+    pub recording_file: Option<String>,
+}
+
+/// Columns selected for a `HistoryEntry`, in struct-field order.
+const HISTORY_COLUMNS: &str =
+    "id, created_at, app_name, app_type, raw_text, polished_text, language, duration_ms, recording_file";
+
+fn map_history_row(row: &rusqlite::Row) -> rusqlite::Result<HistoryEntry> {
+    Ok(HistoryEntry {
+        id: row.get(0)?,
+        created_at: row.get(1)?,
+        app_name: row.get(2)?,
+        app_type: row.get(3)?,
+        raw_text: row.get(4)?,
+        polished_text: row.get(5)?,
+        language: row.get(6)?,
+        duration_ms: row.get(7)?,
+        recording_file: row.get(8)?,
+    })
 }
 
 pub struct HistoryStore {
@@ -183,16 +207,38 @@ impl HistoryStore {
                 duration_ms INTEGER
             );",
         )?;
+        Self::ensure_recording_file_column(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
+    /// Idempotently add the `recording_file` column to pre-existing databases.
+    /// `ALTER TABLE ADD COLUMN` errors if the column already exists, so guard on
+    /// the current schema first.
+    fn ensure_recording_file_column(conn: &Connection) -> Result<()> {
+        let mut has_column = false;
+        {
+            let mut stmt = conn.prepare("PRAGMA table_info(history)")?;
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            for name in names {
+                if name? == "recording_file" {
+                    has_column = true;
+                    break;
+                }
+            }
+        }
+        if !has_column {
+            conn.execute("ALTER TABLE history ADD COLUMN recording_file TEXT", [])?;
+        }
+        Ok(())
+    }
+
     pub async fn add(&self, entry: HistoryEntry) -> Result<()> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(
-            "INSERT INTO history (created_at, app_name, app_type, raw_text, polished_text, language, duration_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO history (created_at, app_name, app_type, raw_text, polished_text, language, duration_ms, recording_file)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 entry.created_at,
                 entry.app_name,
@@ -201,6 +247,7 @@ impl HistoryStore {
                 entry.polished_text,
                 entry.language,
                 entry.duration_ms,
+                entry.recording_file,
             ],
         )?;
 
@@ -215,27 +262,73 @@ impl HistoryStore {
 
     pub async fn list(&self, limit: u32, offset: u32) -> Result<Vec<HistoryEntry>> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt = conn.prepare(
-            "SELECT id, created_at, app_name, app_type, raw_text, polished_text, language, duration_ms
-             FROM history ORDER BY id DESC LIMIT ?1 OFFSET ?2"
-        )?;
-        let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
-            Ok(HistoryEntry {
-                id: row.get(0)?,
-                created_at: row.get(1)?,
-                app_name: row.get(2)?,
-                app_type: row.get(3)?,
-                raw_text: row.get(4)?,
-                polished_text: row.get(5)?,
-                language: row.get(6)?,
-                duration_ms: row.get(7)?,
-            })
-        })?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {HISTORY_COLUMNS} FROM history ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![limit, offset], map_history_row)?;
         let mut entries = Vec::new();
         for row in rows {
             entries.push(row?);
         }
         Ok(entries)
+    }
+
+    /// List history rows that have a saved audio file, newest first.
+    pub async fn list_recordings(&self, limit: u32, offset: u32) -> Result<Vec<HistoryEntry>> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {HISTORY_COLUMNS} FROM history
+             WHERE recording_file IS NOT NULL
+             ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![limit, offset], map_history_row)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub async fn find_by_id(&self, id: i64) -> Result<Option<HistoryEntry>> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {HISTORY_COLUMNS} FROM history WHERE id = ?1"
+        ))?;
+        let mut rows = stmt.query_map(rusqlite::params![id], map_history_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Record the saved audio file path for a history row.
+    pub async fn set_recording_file(&self, id: i64, path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "UPDATE history SET recording_file = ?1 WHERE id = ?2",
+            rusqlite::params![path, id],
+        )?;
+        Ok(())
+    }
+
+    /// Clear the saved audio file path for a history row, keeping the transcript.
+    pub async fn clear_recording_file(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "UPDATE history SET recording_file = NULL WHERE id = ?1",
+            rusqlite::params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Overwrite the raw transcript for a history row (used after re-transcription).
+    pub async fn update_raw_text(&self, id: i64, raw_text: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute(
+            "UPDATE history SET raw_text = ?1 WHERE id = ?2",
+            rusqlite::params![raw_text, id],
+        )?;
+        Ok(())
     }
 
     pub async fn clear(&self) -> Result<()> {
@@ -370,6 +463,84 @@ mod tests {
         let config = AppConfig::from_stored_value(value).unwrap();
 
         assert!(config.capsule_auto_hide);
+    }
+
+    #[test]
+    fn app_config_defaults_save_recordings_off_and_flac() {
+        let config = AppConfig::default();
+        assert!(!config.save_recordings);
+        assert_eq!(config.recording_format, "flac");
+    }
+
+    #[test]
+    fn app_config_existing_missing_recording_fields_use_defaults() {
+        let value = serde_json::json!({ "stt_provider": "deepgram" });
+        let config = AppConfig::from_stored_value(value).unwrap();
+        assert!(!config.save_recordings);
+        assert_eq!(config.recording_format, "flac");
+    }
+
+    fn history_entry(raw_text: &str) -> HistoryEntry {
+        HistoryEntry {
+            id: 0,
+            created_at: "2026-06-22T10:00:00".to_string(),
+            app_name: "Test".to_string(),
+            app_type: "Unknown".to_string(),
+            raw_text: raw_text.to_string(),
+            polished_text: String::new(),
+            language: None,
+            duration_ms: Some(1234),
+            recording_file: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn history_recording_file_lifecycle() {
+        let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
+        store.add(history_entry("hello")).await.unwrap();
+
+        let rows = store.list(10, 0).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let id = rows[0].id;
+        assert!(rows[0].recording_file.is_none());
+        assert!(store.list_recordings(10, 0).await.unwrap().is_empty());
+
+        store
+            .set_recording_file(id, "/tmp/rec.flac")
+            .await
+            .unwrap();
+        let found = store.find_by_id(id).await.unwrap().unwrap();
+        assert_eq!(found.recording_file.as_deref(), Some("/tmp/rec.flac"));
+        assert_eq!(found.duration_ms, Some(1234));
+
+        let recs = store.list_recordings(10, 0).await.unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].id, id);
+
+        // Clearing the file keeps the transcript row.
+        store.clear_recording_file(id).await.unwrap();
+        assert!(store.find_by_id(id).await.unwrap().unwrap().recording_file.is_none());
+        assert_eq!(store.list(10, 0).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn update_raw_text_overwrites_transcript() {
+        let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
+        store.add(history_entry("old")).await.unwrap();
+        let id = store.list(1, 0).await.unwrap()[0].id;
+
+        store.update_raw_text(id, "new transcript").await.unwrap();
+
+        assert_eq!(
+            store.find_by_id(id).await.unwrap().unwrap().raw_text,
+            "new transcript"
+        );
+    }
+
+    #[tokio::test]
+    async fn find_by_id_returns_none_for_missing_row() {
+        let store = HistoryStore::new(PathBuf::from(":memory:")).unwrap();
+        assert!(store.find_by_id(999).await.unwrap().is_none());
     }
 
     #[cfg(target_os = "macos")]

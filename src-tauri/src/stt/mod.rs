@@ -89,6 +89,61 @@ pub fn create_provider(
     }
 }
 
+/// Re-transcribe a saved recording by uploading the encoded file directly to
+/// the configured Whisper-compatible STT provider. Returns the new transcript.
+///
+/// Only Whisper-compatible providers (glm-asr, openai-whisper, groq-whisper,
+/// siliconflow, custom-whisper) are supported; streaming providers (deepgram,
+/// assemblyai, cloud) return an error.
+pub async fn retranscribe_file(
+    config: &crate::storage::AppConfig,
+    audio: Vec<u8>,
+    file_ext: &str,
+    client: reqwest::Client,
+) -> Result<String, AppError> {
+    let provider_name = config.stt_provider.as_str();
+
+    let wc_config = if provider_name == config::CUSTOM_WHISPER_PROVIDER {
+        config::build_custom_whisper_config(&config.stt_custom_base_url, &config.stt_custom_model)
+            .map_err(AppError::Config)?
+    } else {
+        config::build_known_whisper_config(provider_name).ok_or_else(|| {
+            AppError::Config(format!(
+                "Re-transcription is only supported for Whisper-compatible providers; '{provider_name}' is not supported"
+            ))
+        })?
+    };
+
+    let api_key = if provider_name == config::CUSTOM_WHISPER_PROVIDER {
+        config.stt_custom_api_key.clone()
+    } else {
+        config.stt_api_key.clone()
+    };
+
+    let stt_config = SttConfig {
+        api_key,
+        language: if config.stt_language == "multi" {
+            None
+        } else {
+            Some(config.stt_language.clone())
+        },
+        smart_format: true,
+        sample_rate: 16000,
+    };
+
+    let (filename, mime) = match file_ext.to_ascii_lowercase().as_str() {
+        "flac" => ("audio.flac", "audio/flac"),
+        "mp3" => ("audio.mp3", "audio/mpeg"),
+        _ => ("audio.wav", "audio/wav"),
+    };
+
+    let provider = WhisperCompatProvider::with_client(wc_config, client);
+    let text = provider
+        .transcribe_encoded(audio, filename, mime, &stt_config)
+        .await?;
+    Ok(text.unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +169,18 @@ mod tests {
     #[test]
     fn unknown_stt_provider_returns_error() {
         let result = create_provider("not-a-provider", None, None);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn retranscribe_rejects_streaming_provider() {
+        let config = crate::storage::AppConfig {
+            stt_provider: "deepgram".to_string(),
+            ..crate::storage::AppConfig::default()
+        };
+        // Errors at provider construction, before any network call.
+        let result =
+            retranscribe_file(&config, vec![1, 2, 3], "flac", reqwest::Client::new()).await;
         assert!(result.is_err());
     }
 }
