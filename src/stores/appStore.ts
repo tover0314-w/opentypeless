@@ -39,6 +39,16 @@ export interface HistoryEntry {
   duration_ms: number | null
 }
 
+export interface RecordingEntry {
+  id: number
+  created_at: string
+  raw_text: string
+  polished_text: string
+  recording_file: string
+  format: string
+  duration_ms: number | null
+}
+
 export interface DictionaryEntry {
   id: number
   word: string
@@ -71,6 +81,8 @@ export interface AppConfig {
   max_recording_seconds: number
   ui_language: string
   capsule_auto_hide: boolean
+  save_recordings: boolean
+  recording_format: string
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -189,6 +201,8 @@ const defaultConfig: AppConfig = {
   max_recording_seconds: 30,
   ui_language: 'en',
   capsule_auto_hide: true,
+  save_recordings: false,
+  recording_format: 'wav',
 }
 
 export const useAppStore = create<AppState>((set) => ({

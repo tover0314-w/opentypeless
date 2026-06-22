@@ -1,4 +1,4 @@
-import { Home, Settings, History, Crown, CircleUser } from 'lucide-react'
+import { Home, Settings, History, Mic, Crown, CircleUser } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { spring } from '../../lib/animations'
@@ -10,6 +10,7 @@ const baseNavItems: { id: Route; labelKey: string; icon: typeof Home }[] = [
   { id: 'home', labelKey: 'nav.home', icon: Home },
   { id: 'settings', labelKey: 'nav.settings', icon: Settings },
   { id: 'history', labelKey: 'nav.history', icon: History },
+  { id: 'recordings', labelKey: 'nav.recordings', icon: Mic },
 ]
 
 const bottomNavItem = { id: 'account' as Route, labelKey: 'nav.account', icon: CircleUser }

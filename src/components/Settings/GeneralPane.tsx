@@ -277,6 +277,32 @@ export function GeneralPane() {
         </div>
       </Section>
 
+      <Section title={t('settings.recordings')}>
+        <div className="space-y-3">
+          <Toggle
+            checked={config.save_recordings}
+            onChange={(checked) => updateConfig({ save_recordings: checked })}
+            label={t('settings.saveRecordings')}
+          />
+          {config.save_recordings && (
+            <div>
+              <label className="block text-[13px] font-medium text-text-secondary mb-2">
+                {t('settings.recordingFormat')}
+              </label>
+              <select
+                value={config.recording_format}
+                onChange={(e) => updateConfig({ recording_format: e.target.value })}
+                className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              >
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+                <option value="mp3">MP3</option>
+              </select>
+            </div>
+          )}
+        </div>
+      </Section>
+
       <Section title={t('settings.other')}>
         <div className="space-y-3">
           <Toggle

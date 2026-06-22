@@ -10,7 +10,8 @@
     "account": "アカウント",
     "upgrade": "アップグレード",
     "pro": "Pro",
-    "mainNavigation": "メインナビゲーション"
+    "mainNavigation": "メインナビゲーション",
+    "recordings": "録音"
   },
   "errors": {
     "stt_timeout": "音声認識がタイムアウトしました。もう一度お試しください。",
@@ -273,7 +274,10 @@
     "grantPermission": "権限を付与",
     "unsavedChanges": "未保存の変更があります",
     "autoDetect": "自動検出",
-    "llmModelPlaceholder": "例: gpt-4o-mini"
+    "llmModelPlaceholder": "例: gpt-4o-mini",
+    "recordings": "録音",
+    "saveRecordings": "録音を保存",
+    "recordingFormat": "録音形式"
   },
   "dictionary": {
     "word": "単語",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "録音",
+    "searchPlaceholder": "録音を検索...",
+    "noResults": "一致する結果がありません",
+    "noRecordings": "録音はまだありません。",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "今日",
+    "yesterday": "昨日",
+    "retranscribe": "再文字起こし",
+    "retranscribing": "再文字起こし中...",
+    "delete": "削除",
+    "deleteConfirm": "この録音を削除してもよろしいですか？この操作は取り消せません。",
+    "failedToLoad": "録音の読み込みに失敗しました",
+    "failedToLoadAudio": "音声の読み込みに失敗しました",
+    "failedToRetranscribe": "再文字起こしに失敗しました",
+    "failedToDelete": "録音の削除に失敗しました"
   }
 }
