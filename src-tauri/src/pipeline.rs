@@ -66,8 +66,9 @@ const SELECTED_TEXT_CAPTURE_DELAY_MS: u64 = 60;
 const CLIPBOARD_COPY_SETTLE_MS: u64 = 100;
 /// Interval for polling audio volume during recording.
 const VOLUME_POLL_INTERVAL_MS: u64 = 50;
-/// Timeout for STT finalization after recording stops.
-const STT_FINALIZE_TIMEOUT_SECS: u64 = 120;
+/// Timeout for STT finalization after recording stops. Generous so long local
+/// recordings (up to ~1 h) are not cut off while the server transcribes.
+const STT_FINALIZE_TIMEOUT_SECS: u64 = 600;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

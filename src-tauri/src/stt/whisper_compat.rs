@@ -16,9 +16,12 @@ pub struct WhisperCompatConfig {
     pub api_key_required: bool,
 }
 
-/// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
-/// Keeps the resulting WAV under 25 MB (OpenAI/Groq limit).
-const MAX_AUDIO_BYTES: usize = 24 * 1024 * 1024;
+/// Max audio buffer for cloud Whisper APIs (OpenAI/Groq cap uploads at 25 MB).
+/// ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono keeps the WAV under that limit.
+const MAX_AUDIO_BYTES_CLOUD: usize = 24 * 1024 * 1024;
+/// Max audio buffer for a local server, which has no upstream upload limit.
+/// ~256 MB PCM ≈ 2.2 h at 16kHz 16-bit mono; bounded only to cap RAM growth.
+const MAX_AUDIO_BYTES_LOCAL: usize = 256 * 1024 * 1024;
 
 /// Generic provider for any OpenAI Whisper-compatible transcription API.
 /// Works with: OpenAI, Groq, SiliconFlow, GLM-ASR.
@@ -239,9 +242,16 @@ impl SttProvider for WhisperCompatProvider {
     }
 
     async fn send_audio(&mut self, chunk: &[u8]) -> Result<(), AppError> {
-        if self.audio_buffer.len() + chunk.len() > MAX_AUDIO_BYTES {
+        // Local servers (no API key required) have no upstream upload limit, so
+        // allow much longer recordings than cloud Whisper APIs.
+        let max_audio_bytes = if self.provider_config.api_key_required {
+            MAX_AUDIO_BYTES_CLOUD
+        } else {
+            MAX_AUDIO_BYTES_LOCAL
+        };
+        if self.audio_buffer.len() + chunk.len() > max_audio_bytes {
             return Err(AppError::Config(format!(
-                "{}: audio exceeds maximum length (~12 min)",
+                "{}: audio exceeds maximum length",
                 self.provider_config.provider_name
             )));
         }

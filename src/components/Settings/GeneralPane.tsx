@@ -265,7 +265,7 @@ export function GeneralPane() {
           <input
             type="range"
             min={10}
-            max={300}
+            max={3600}
             step={10}
             value={config.max_recording_seconds}
             onChange={(e) => updateConfig({ max_recording_seconds: Number(e.target.value) })}
