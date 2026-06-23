@@ -888,6 +888,7 @@
       "claude": "Claude",
       "ollama": "Ollama (local)",
       "openrouter": "OpenRouter",
+      "requesty": "Requesty",
       "cloud": "Nuvem do OpenTypeless"
     }
   }
