@@ -374,6 +374,17 @@ impl PipelineHandle {
     }
 
     pub async fn start(&self) -> Result<()> {
+        // Mic exclusivity: a meeting recording owns the mic exclusively, so
+        // instant dictation early-returns while one is active (MEL-74 §1.2).
+        // This is the only cross-mode coupling on the instant-mode path and is
+        // a pure early-return guard — existing behavior is otherwise untouched.
+        if let Some(meeting) = self.app_handle.try_state::<crate::meeting::MeetingHandle>() {
+            if meeting.is_active() {
+                tracing::info!("Ignoring instant recording start — a meeting is recording");
+                return Ok(());
+            }
+        }
+
         // Hold pipeline_lock for the entire setup so stop() cannot read
         // partially-initialised state (preloaded_config, audio_handle, etc.).
         let _guard = self.pipeline_lock.lock().await;

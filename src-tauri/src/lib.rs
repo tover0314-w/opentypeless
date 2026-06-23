@@ -6,6 +6,7 @@ pub mod hotkey;
 #[cfg(target_os = "linux")]
 mod linux_x11;
 pub mod llm;
+pub mod meeting;
 pub mod output;
 pub mod pipeline;
 pub mod storage;
@@ -66,6 +67,30 @@ async fn stop_recording(state: tauri::State<'_, pipeline::PipelineHandle>) -> Re
 fn abort_recording(state: tauri::State<'_, pipeline::PipelineHandle>) -> Result<(), String> {
     state.abort();
     Ok(())
+}
+
+#[tauri::command]
+async fn start_meeting(
+    state: tauri::State<'_, meeting::MeetingHandle>,
+    config: tauri::State<'_, storage::ConfigManager>,
+) -> Result<(), String> {
+    let cfg = config.load().await.unwrap_or_default();
+    let language = if cfg.stt_language == "multi" {
+        None
+    } else {
+        Some(cfg.stt_language.clone())
+    };
+    state.start(cfg.stt_provider.clone(), language).await
+}
+
+#[tauri::command]
+async fn stop_meeting(state: tauri::State<'_, meeting::MeetingHandle>) -> Result<(), String> {
+    state.stop().await
+}
+
+#[tauri::command]
+fn is_meeting_active(state: tauri::State<'_, meeting::MeetingHandle>) -> bool {
+    state.is_active()
 }
 
 /// On Linux with NVIDIA proprietary drivers + Wayland, WebKit's DMA-BUF renderer
@@ -170,6 +195,8 @@ pub fn run() {
             let pipeline_handle =
                 pipeline::PipelineHandle::new(app_handle.clone(), shared_client.clone());
 
+            let meeting_handle = meeting::MeetingHandle::new(app_handle.clone());
+
             // Load initial config to get hotkey
             let initial_config =
                 tauri::async_runtime::block_on(config_manager.load()).unwrap_or_default();
@@ -181,6 +208,7 @@ pub fn run() {
             app.manage(dictionary_store);
             app.manage(shared_client);
             app.manage(pipeline_handle);
+            app.manage(meeting_handle);
             app.manage(HotkeyModeCache(Arc::new(Mutex::new(
                 initial_config.hotkey_mode.clone(),
             ))));
@@ -425,6 +453,9 @@ pub fn run() {
             start_recording,
             stop_recording,
             abort_recording,
+            start_meeting,
+            stop_meeting,
+            is_meeting_active,
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
             commands::config::get_config,
