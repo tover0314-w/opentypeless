@@ -23,6 +23,7 @@ export type LlmProvider =
   | 'claude'
   | 'ollama'
   | 'openrouter'
+  | 'requesty'
   | 'cloud'
 export type OutputMode = 'keyboard' | 'clipboard'
 export type HotkeyMode = 'hold' | 'toggle'

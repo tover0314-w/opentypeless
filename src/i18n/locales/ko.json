@@ -428,6 +428,7 @@
       "claude": "Claude",
       "ollama": "Ollama (로컬)",
       "openrouter": "OpenRouter",
+      "requesty": "Requesty",
       "cloud": "OpenTypeless Cloud"
     }
   }
