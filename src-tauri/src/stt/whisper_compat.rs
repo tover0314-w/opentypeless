@@ -16,9 +16,12 @@ pub struct WhisperCompatConfig {
     pub api_key_required: bool,
 }
 
-/// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
-/// Keeps the resulting WAV under 25 MB (OpenAI/Groq limit).
-const MAX_AUDIO_BYTES: usize = 24 * 1024 * 1024;
+/// Max audio buffer for cloud Whisper APIs (OpenAI/Groq cap uploads at 25 MB).
+/// ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono keeps the WAV under that limit.
+const MAX_AUDIO_BYTES_CLOUD: usize = 24 * 1024 * 1024;
+/// Max audio buffer for a local server, which has no upstream upload limit.
+/// ~256 MB PCM ≈ 2.2 h at 16kHz 16-bit mono; bounded only to cap RAM growth.
+const MAX_AUDIO_BYTES_LOCAL: usize = 256 * 1024 * 1024;
 
 /// Generic provider for any OpenAI Whisper-compatible transcription API.
 /// Works with: OpenAI, Groq, SiliconFlow, GLM-ASR.
@@ -74,71 +77,45 @@ impl WhisperCompatProvider {
         wav.extend_from_slice(pcm);
         wav
     }
-}
 
-#[async_trait]
-impl SttProvider for WhisperCompatProvider {
-    async fn connect(&mut self, config: &SttConfig) -> Result<(), AppError> {
+    /// Transcribe a pre-encoded audio file (wav/flac/mp3) by uploading it
+    /// directly to the configured Whisper-compatible endpoint. Used for
+    /// re-transcription of saved recordings. `filename`/`mime` should match the
+    /// container so the server picks the right decoder.
+    pub async fn transcribe_encoded(
+        &self,
+        audio: Vec<u8>,
+        filename: &str,
+        mime: &str,
+        config: &SttConfig,
+    ) -> Result<Option<String>, AppError> {
         if self.provider_config.api_key_required && config.api_key.is_empty() {
             return Err(AppError::Auth(format!(
                 "{} API key is empty",
                 self.provider_config.provider_name
             )));
         }
-        self.stt_config = Some(config.clone());
-        self.audio_buffer.clear();
-        tracing::info!(
-            "{} provider ready (buffering mode)",
-            self.provider_config.provider_name
-        );
-        Ok(())
-    }
-
-    async fn send_audio(&mut self, chunk: &[u8]) -> Result<(), AppError> {
-        if self.audio_buffer.len() + chunk.len() > MAX_AUDIO_BYTES {
-            return Err(AppError::Config(format!(
-                "{}: audio exceeds maximum length (~12 min)",
-                self.provider_config.provider_name
-            )));
-        }
-        self.audio_buffer.extend_from_slice(chunk);
-        Ok(())
-    }
-
-    async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError> {
-        // File-based providers transcribe in disconnect(); keep this future
-        // pending so the pipeline select loop does not busy-spin while recording.
-        std::future::pending().await
-    }
-
-    async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
-        let config = match &self.stt_config {
-            Some(c) => c.clone(),
-            None => return Ok(None),
-        };
-
-        if self.audio_buffer.is_empty() {
-            tracing::info!(
-                "{}: no audio buffered, skipping",
-                self.provider_config.provider_name
-            );
+        if audio.is_empty() {
             return Ok(None);
         }
+        self.post_audio(audio, filename, mime, config).await
+    }
 
-        let audio_len_secs = self.audio_buffer.len() as f64 / (config.sample_rate as f64 * 2.0);
-        let wav_data = Self::build_wav(&self.audio_buffer, config.sample_rate);
-        self.audio_buffer.clear();
-        tracing::info!(
-            "{}: sending {:.1}s of audio for transcription",
-            self.provider_config.provider_name,
-            audio_len_secs
-        );
-
+    /// Upload an encoded audio payload to the transcription endpoint, with the
+    /// shared retry/error handling. Shared by `disconnect` (live capture, WAV)
+    /// and `transcribe_encoded` (saved file, any container).
+    async fn post_audio(
+        &self,
+        audio: Vec<u8>,
+        filename: &str,
+        mime: &str,
+        config: &SttConfig,
+    ) -> Result<Option<String>, AppError> {
         let mut attempt = 0u32;
         loop {
-            let file_part = reqwest::multipart::Part::bytes(wav_data.clone())
-                .file_name("audio.wav")
-                .mime_str("audio/wav")
+            let file_part = reqwest::multipart::Part::bytes(audio.clone())
+                .file_name(filename.to_string())
+                .mime_str(mime)
                 .map_err(|e| AppError::Config(e.to_string()))?;
 
             let mut form = reqwest::multipart::Form::new()
@@ -243,6 +220,76 @@ impl SttProvider for WhisperCompatProvider {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+}
+
+#[async_trait]
+impl SttProvider for WhisperCompatProvider {
+    async fn connect(&mut self, config: &SttConfig) -> Result<(), AppError> {
+        if self.provider_config.api_key_required && config.api_key.is_empty() {
+            return Err(AppError::Auth(format!(
+                "{} API key is empty",
+                self.provider_config.provider_name
+            )));
+        }
+        self.stt_config = Some(config.clone());
+        self.audio_buffer.clear();
+        tracing::info!(
+            "{} provider ready (buffering mode)",
+            self.provider_config.provider_name
+        );
+        Ok(())
+    }
+
+    async fn send_audio(&mut self, chunk: &[u8]) -> Result<(), AppError> {
+        // Local servers (no API key required) have no upstream upload limit, so
+        // allow much longer recordings than cloud Whisper APIs.
+        let max_audio_bytes = if self.provider_config.api_key_required {
+            MAX_AUDIO_BYTES_CLOUD
+        } else {
+            MAX_AUDIO_BYTES_LOCAL
+        };
+        if self.audio_buffer.len() + chunk.len() > max_audio_bytes {
+            return Err(AppError::Config(format!(
+                "{}: audio exceeds maximum length",
+                self.provider_config.provider_name
+            )));
+        }
+        self.audio_buffer.extend_from_slice(chunk);
+        Ok(())
+    }
+
+    async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError> {
+        // File-based providers transcribe in disconnect(); keep this future
+        // pending so the pipeline select loop does not busy-spin while recording.
+        std::future::pending().await
+    }
+
+    async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
+        let config = match &self.stt_config {
+            Some(c) => c.clone(),
+            None => return Ok(None),
+        };
+
+        if self.audio_buffer.is_empty() {
+            tracing::info!(
+                "{}: no audio buffered, skipping",
+                self.provider_config.provider_name
+            );
+            return Ok(None);
+        }
+
+        let audio_len_secs = self.audio_buffer.len() as f64 / (config.sample_rate as f64 * 2.0);
+        let wav_data = Self::build_wav(&self.audio_buffer, config.sample_rate);
+        self.audio_buffer.clear();
+        tracing::info!(
+            "{}: sending {:.1}s of audio for transcription",
+            self.provider_config.provider_name,
+            audio_len_secs
+        );
+
+        self.post_audio(wav_data, "audio.wav", "audio/wav", &config)
+            .await
     }
 
     fn name(&self) -> &str {

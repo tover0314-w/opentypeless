@@ -10,7 +10,8 @@
     "account": "账户",
     "upgrade": "升级",
     "pro": "Pro",
-    "mainNavigation": "主导航"
+    "mainNavigation": "主导航",
+    "recordings": "录音"
   },
   "errors": {
     "stt_timeout": "语音识别超时，请重试。",
@@ -273,7 +274,10 @@
     "accessibilityRequired": "键盘输出需要此权限",
     "grantPermission": "授权",
     "unsavedChanges": "你有未保存的更改",
-    "llmModelPlaceholder": "例如 gpt-4o-mini"
+    "llmModelPlaceholder": "例如 gpt-4o-mini",
+    "recordings": "录音",
+    "saveRecordings": "保存录音",
+    "recordingFormat": "录音格式"
   },
   "dictionary": {
     "word": "词语",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless 云服务"
     }
+  },
+  "recordings": {
+    "title": "录音",
+    "searchPlaceholder": "搜索录音...",
+    "noResults": "没有匹配的结果",
+    "noRecordings": "暂无录音。",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "今天",
+    "yesterday": "昨天",
+    "retranscribe": "重新转录",
+    "retranscribing": "正在重新转录...",
+    "delete": "删除",
+    "deleteConfirm": "确定要删除此录音吗？此操作无法撤销。",
+    "failedToLoad": "加载录音失败",
+    "failedToLoadAudio": "加载音频失败",
+    "failedToRetranscribe": "重新转录失败",
+    "failedToDelete": "删除录音失败"
   }
 }

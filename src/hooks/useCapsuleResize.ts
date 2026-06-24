@@ -1,5 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useAppStore, type PipelineState } from '../stores/appStore'
+
+/** Distance (logical px) from the top edge of the screen to the capsule. */
+const TOP_MARGIN = 8
 
 interface CapsuleSize {
   width: number
@@ -61,8 +64,6 @@ export function useCapsuleResize() {
   const contextMenuOpen = useAppStore((s) => s.contextMenuOpen)
   const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
-  const initialized = useRef(false)
-  const prevWindowSize = useRef<{ width: number; height: number } | null>(null)
 
   const hasError = pipelineError !== null
 
@@ -82,57 +83,33 @@ export function useCapsuleResize() {
       .then(async ({ getCurrentWindow, LogicalSize, LogicalPosition, currentMonitor }) => {
         const win = getCurrentWindow()
         await win.setFocusable(getCapsuleFocusable()).catch(() => {})
+        await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
 
-        if (!initialized.current) {
-          // First mount: position at bottom-center of screen, then show
-          await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
+        // Re-anchor to the top-center of the active monitor on EVERY state
+        // change. The window is content-sized so a horizontally-centered window
+        // keeps the capsule screen-centered as it grows/shrinks. Recomputing
+        // each time (instead of only on first mount, left-edge anchored)
+        // prevents both the off-center drift as it grows AND the top-left
+        // fallback when monitor info isn't ready on the first pass.
+        const anchorTopCenter = async (): Promise<boolean> => {
           try {
             const monitor = await currentMonitor()
-            if (monitor) {
-              const sw = monitor.size.width / monitor.scaleFactor
-              const sh = monitor.size.height / monitor.scaleFactor
-              const x = Math.round(sw / 2 - windowWidth / 2)
-              const y = Math.round(sh - windowHeight - 80)
-              await win.setPosition(new LogicalPosition(x, y)).catch(() => {})
-            }
+            if (!monitor) return false
+            const sw = monitor.size.width / monitor.scaleFactor
+            const x = Math.round(sw / 2 - windowWidth / 2)
+            const y = TOP_MARGIN
+            await win.setPosition(new LogicalPosition(x, y)).catch(() => {})
+            return true
           } catch {
-            /* ignore – monitor info unavailable */
+            return false
           }
-          if (shouldShow) {
-            await win.show().catch(() => {})
-          } else {
-            await win.hide().catch(() => {})
-          }
-          initialized.current = true
-          prevWindowSize.current = { width: windowWidth, height: windowHeight }
-          return
+        }
+        if (!(await anchorTopCenter())) {
+          // Monitor not ready yet — retry once so we never sit at the top-left.
+          setTimeout(() => void anchorTopCenter(), 150)
         }
 
-        // Subsequent resizes: left edge + vertical center stay fixed.
-        // Since content is always padded 12px each side, the capsule at x=12
-        // is identical to a centered capsule — so the mic icon never moves.
-        const prev = prevWindowSize.current
-        if (prev) {
-          const pos = await win.outerPosition().catch(() => null)
-          if (pos) {
-            const monitor = await currentMonitor()
-            const scale = monitor?.scaleFactor ?? 1
-            const oldLeftX = pos.x / scale
-            const oldCenterY = pos.y / scale + prev.height / 2
-            const newX = Math.round(oldLeftX)
-            const newY = Math.round(oldCenterY - windowHeight / 2)
-            await win.setPosition(new LogicalPosition(newX, newY)).catch(() => {})
-            await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
-          } else {
-            await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
-          }
-        } else {
-          await win.setSize(new LogicalSize(windowWidth, windowHeight)).catch(() => {})
-        }
-
-        prevWindowSize.current = { width: windowWidth, height: windowHeight }
-
-        // Signal that the window has finished resizing for context menu
+        // Signal that the window has finished resizing for the context menu.
         if (contextMenuOpen) {
           setContextMenuReady(true)
         }

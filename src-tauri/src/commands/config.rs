@@ -22,6 +22,21 @@ fn config_patch_between(previous: &storage::AppConfig, next: &storage::AppConfig
     if previous.ui_language != next.ui_language {
         patch.insert("ui_language".to_string(), json!(next.ui_language));
     }
+    if previous.save_recordings != next.save_recordings {
+        patch.insert("save_recordings".to_string(), json!(next.save_recordings));
+    }
+    if previous.recording_format != next.recording_format {
+        patch.insert(
+            "recording_format".to_string(),
+            json!(next.recording_format),
+        );
+    }
+    if previous.max_saved_recordings != next.max_saved_recordings {
+        patch.insert(
+            "max_saved_recordings".to_string(),
+            json!(next.max_saved_recordings),
+        );
+    }
     Value::Object(patch)
 }
 

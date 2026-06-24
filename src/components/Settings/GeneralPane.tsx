@@ -265,7 +265,7 @@ export function GeneralPane() {
           <input
             type="range"
             min={10}
-            max={300}
+            max={3600}
             step={10}
             value={config.max_recording_seconds}
             onChange={(e) => updateConfig({ max_recording_seconds: Number(e.target.value) })}
@@ -274,6 +274,57 @@ export function GeneralPane() {
           <span className="text-[13px] text-text-secondary font-mono w-12 text-right">
             {config.max_recording_seconds}s
           </span>
+        </div>
+      </Section>
+
+      <Section title={t('settings.recordings')}>
+        <div className="space-y-3">
+          <Toggle
+            checked={config.save_recordings}
+            onChange={(checked) => updateConfig({ save_recordings: checked })}
+            label={t('settings.saveRecordings')}
+          />
+          {config.save_recordings && (
+            <div>
+              <label className="block text-[13px] font-medium text-text-secondary mb-2">
+                {t('settings.recordingFormat')}
+              </label>
+              <select
+                value={config.recording_format}
+                onChange={(e) => updateConfig({ recording_format: e.target.value })}
+                className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              >
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+                <option value="mp3">MP3</option>
+              </select>
+            </div>
+          )}
+          {config.save_recordings && (
+            <div>
+              <label className="block text-[13px] font-medium text-text-secondary mb-2">
+                {t('settings.maxSavedRecordings')}
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={999}
+                value={config.max_saved_recordings}
+                onChange={(e) =>
+                  updateConfig({
+                    max_saved_recordings: Math.max(
+                      0,
+                      Math.min(999, Math.floor(Number(e.target.value) || 0)),
+                    ),
+                  })
+                }
+                className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              />
+              <p className="mt-1.5 text-[12px] text-text-tertiary">
+                {t('settings.maxSavedRecordingsHint')}
+              </p>
+            </div>
+          )}
         </div>
       </Section>
 

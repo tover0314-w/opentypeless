@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '../../stores/appStore'
 import { useRecording } from '../../hooks/useRecording'
-import { useCapsuleResize } from '../../hooks/useCapsuleResize'
+import { useCapsuleResize, getCapsuleVisibility } from '../../hooks/useCapsuleResize'
 import { CapsuleIdle } from './CapsuleIdle'
 import { CapsuleRecording } from './CapsuleRecording'
 import { CapsuleProcessing } from './CapsuleProcessing'
@@ -25,6 +25,8 @@ export function Capsule() {
   const setContextMenuOpen = useAppStore((s) => s.setContextMenuOpen)
   const contextMenuReady = useAppStore((s) => s.contextMenuReady)
   const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
+  const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
+  const capsuleExpanded = useAppStore((s) => s.capsuleExpanded)
   const { startRecording, stopRecording, isRecording, isProcessing } = useRecording()
 
   const dragStart = useRef<{ x: number; y: number } | null>(null)
@@ -34,6 +36,13 @@ export function Capsule() {
 
   const hasError = pipelineError !== null
   const capsuleState = getCapsuleState(pipelineState, hasError)
+  const visible = getCapsuleVisibility({
+    capsuleAutoHide,
+    contextMenuOpen,
+    capsuleExpanded,
+    hasError,
+    pipelineState,
+  })
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return
@@ -104,6 +113,10 @@ export function Capsule() {
               ? 'jelly-capsule text-neutral-700'
               : 'jelly-capsule-active text-white'
         }`}
+        initial={false}
+        animate={visible ? { opacity: 1, scale: 1, y: 0 } : { opacity: 0, scale: 0.8, y: -10 }}
+        transition={{ type: 'spring', stiffness: 460, damping: 26, mass: 0.7 }}
+        style={{ transformOrigin: 'center top' }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

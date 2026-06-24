@@ -10,7 +10,8 @@
     "account": "Account",
     "upgrade": "Aggiorna",
     "pro": "Pro",
-    "mainNavigation": "Navigazione principale"
+    "mainNavigation": "Navigazione principale",
+    "recordings": "Registrazioni"
   },
   "errors": {
     "stt_timeout": "Il riconoscimento vocale è scaduto. Riprova.",
@@ -273,7 +274,10 @@
     "grantPermission": "Concedi autorizzazione",
     "unsavedChanges": "Hai modifiche non salvate",
     "autoDetect": "Rilevamento automatico",
-    "llmModelPlaceholder": "es: gpt-4o-mini"
+    "llmModelPlaceholder": "es: gpt-4o-mini",
+    "recordings": "Registrazioni",
+    "saveRecordings": "Salva registrazioni",
+    "recordingFormat": "Formato di registrazione"
   },
   "dictionary": {
     "word": "Parola",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Registrazioni",
+    "searchPlaceholder": "Cerca registrazioni...",
+    "noResults": "Nessun risultato corrispondente",
+    "noRecordings": "Ancora nessuna registrazione.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Oggi",
+    "yesterday": "Ieri",
+    "retranscribe": "Ritrascrivi",
+    "retranscribing": "Ritrascrizione...",
+    "delete": "Elimina",
+    "deleteConfirm": "Sei sicuro di voler eliminare questa registrazione? L'operazione non può essere annullata.",
+    "failedToLoad": "Caricamento delle registrazioni non riuscito",
+    "failedToLoadAudio": "Caricamento dell'audio non riuscito",
+    "failedToRetranscribe": "Ritrascrizione non riuscita",
+    "failedToDelete": "Eliminazione della registrazione non riuscita"
   }
 }

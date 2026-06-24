@@ -10,7 +10,8 @@
     "account": "Conta",
     "upgrade": "Atualizar",
     "pro": "Pro",
-    "mainNavigation": "Navegação principal"
+    "mainNavigation": "Navegação principal",
+    "recordings": "Gravações"
   },
   "errors": {
     "stt_timeout": "O reconhecimento de fala expirou. Tente novamente.",
@@ -273,7 +274,10 @@
     "grantPermission": "Conceder Permissão",
     "unsavedChanges": "Você tem alterações não salvas",
     "autoDetect": "Detecção automática",
-    "llmModelPlaceholder": "ex: gpt-4o-mini"
+    "llmModelPlaceholder": "ex: gpt-4o-mini",
+    "recordings": "Gravações",
+    "saveRecordings": "Salvar gravações",
+    "recordingFormat": "Formato de gravação"
   },
   "dictionary": {
     "word": "Palavra",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Gravações",
+    "searchPlaceholder": "Pesquisar gravações...",
+    "noResults": "Nenhum resultado correspondente",
+    "noRecordings": "Ainda não há gravações.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Hoje",
+    "yesterday": "Ontem",
+    "retranscribe": "Retranscrever",
+    "retranscribing": "Retranscrevendo...",
+    "delete": "Excluir",
+    "deleteConfirm": "Tem certeza de que deseja excluir esta gravação? Isto não pode ser desfeito.",
+    "failedToLoad": "Falha ao carregar gravações",
+    "failedToLoadAudio": "Falha ao carregar áudio",
+    "failedToRetranscribe": "Falha ao retranscrever",
+    "failedToDelete": "Falha ao excluir gravação"
   }
 }

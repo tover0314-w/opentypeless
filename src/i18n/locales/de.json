@@ -10,7 +10,8 @@
     "account": "Konto",
     "upgrade": "Upgrade",
     "pro": "Pro",
-    "mainNavigation": "Hauptnavigation"
+    "mainNavigation": "Hauptnavigation",
+    "recordings": "Aufnahmen"
   },
   "errors": {
     "stt_timeout": "Die Spracherkennung ist abgelaufen. Bitte versuchen Sie es erneut.",
@@ -273,7 +274,10 @@
     "grantPermission": "Berechtigung erteilen",
     "unsavedChanges": "Sie haben ungespeicherte Änderungen",
     "autoDetect": "Automatische Erkennung",
-    "llmModelPlaceholder": "z.B. gpt-4o-mini"
+    "llmModelPlaceholder": "z.B. gpt-4o-mini",
+    "recordings": "Aufnahmen",
+    "saveRecordings": "Aufnahmen speichern",
+    "recordingFormat": "Aufnahmeformat"
   },
   "dictionary": {
     "word": "Wort",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Aufnahmen",
+    "searchPlaceholder": "Aufnahmen suchen...",
+    "noResults": "Keine passenden Ergebnisse",
+    "noRecordings": "Noch keine Aufnahmen.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Heute",
+    "yesterday": "Gestern",
+    "retranscribe": "Neu transkribieren",
+    "retranscribing": "Wird neu transkribiert...",
+    "delete": "Löschen",
+    "deleteConfirm": "Möchten Sie diese Aufnahme wirklich löschen? Dies kann nicht rückgängig gemacht werden.",
+    "failedToLoad": "Aufnahmen konnten nicht geladen werden",
+    "failedToLoadAudio": "Audio konnte nicht geladen werden",
+    "failedToRetranscribe": "Neu-Transkription fehlgeschlagen",
+    "failedToDelete": "Aufnahme konnte nicht gelöscht werden"
   }
 }

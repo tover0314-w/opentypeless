@@ -10,7 +10,8 @@
     "account": "Compte",
     "upgrade": "Passer à Pro",
     "pro": "Pro",
-    "mainNavigation": "Navigation principale"
+    "mainNavigation": "Navigation principale",
+    "recordings": "Enregistrements"
   },
   "errors": {
     "stt_timeout": "La reconnaissance vocale a expiré. Veuillez réessayer.",
@@ -273,7 +274,10 @@
     "grantPermission": "Accorder l'autorisation",
     "unsavedChanges": "Vous avez des modifications non enregistrées",
     "autoDetect": "Détection automatique",
-    "llmModelPlaceholder": "ex: gpt-4o-mini"
+    "llmModelPlaceholder": "ex: gpt-4o-mini",
+    "recordings": "Enregistrements",
+    "saveRecordings": "Enregistrer les enregistrements",
+    "recordingFormat": "Format d'enregistrement"
   },
   "dictionary": {
     "word": "Mot",
@@ -430,5 +434,22 @@
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
     }
+  },
+  "recordings": {
+    "title": "Enregistrements",
+    "searchPlaceholder": "Rechercher des enregistrements...",
+    "noResults": "Aucun résultat correspondant",
+    "noRecordings": "Aucun enregistrement pour l'instant.",
+    "noRecordingsHint": "Enable \"Save recordings\" in Settings and your saved audio will appear here.",
+    "today": "Aujourd'hui",
+    "yesterday": "Hier",
+    "retranscribe": "Re-transcrire",
+    "retranscribing": "Re-transcription...",
+    "delete": "Supprimer",
+    "deleteConfirm": "Voulez-vous vraiment supprimer cet enregistrement ? Cette action est irréversible.",
+    "failedToLoad": "Échec du chargement des enregistrements",
+    "failedToLoadAudio": "Échec du chargement de l'audio",
+    "failedToRetranscribe": "Échec de la re-transcription",
+    "failedToDelete": "Échec de la suppression de l'enregistrement"
   }
 }
