@@ -1,3 +1,5 @@
+pub mod meeting;
+
 use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};

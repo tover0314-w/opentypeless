@@ -5,7 +5,7 @@ use crate::error::AppError;
 use super::{SttConfig, SttProvider, TranscriptEvent};
 
 /// Configuration for a Whisper-compatible HTTP file-upload STT provider.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhisperCompatConfig {
     pub provider_name: String,
     pub endpoint: String,

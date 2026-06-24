@@ -29,12 +29,13 @@ use engine::{MeetingConfig, MeetingState, SessionMeta};
 /// within a quarter second while costing almost nothing.
 const TICK_INTERVAL_MS: u64 = 250;
 
-/// The concrete engine type MEL-75 ships: real audio + Tauri events, but
-/// **stub** transcriber + store (the real ones arrive in MEL-76).
+/// The concrete engine type the desktop host runs: real cpal audio, real
+/// `SttProvider`-backed transcriber, real SQLite store, and Tauri events
+/// (MEL-76 swapped in the real transcriber + store over MEL-75's stubs).
 type DesktopEngine = engine::MeetingEngine<
     adapters::ChannelAudioSource,
-    engine::stub::StubTranscriber,
-    engine::stub::StubStore,
+    adapters::SttTranscriber,
+    crate::storage::meeting::MeetingDbStore,
     adapters::TauriMeetingEvents,
 >;
 
@@ -76,6 +77,76 @@ impl MeetingHandle {
         self.active.load(Ordering::SeqCst)
     }
 
+    /// Build the real STT transcriber for this meeting from the app's STT
+    /// settings. Mirrors the instant pipeline's provider/key/custom-config
+    /// resolution (`pipeline::run` §P0-3) so meeting transcription uses the
+    /// exact same provider the user configured.
+    async fn build_transcriber(
+        &self,
+        provider_name: &str,
+        language: Option<String>,
+    ) -> Result<adapters::SttTranscriber, String> {
+        use crate::stt::config;
+
+        let cfg = self
+            .app_handle
+            .state::<crate::storage::ConfigManager>()
+            .load()
+            .await
+            .map_err(|e| format!("Failed to load config: {e}"))?;
+
+        // Custom-Whisper needs its base URL + model resolved into a config.
+        let custom_whisper_config = if provider_name == config::CUSTOM_WHISPER_PROVIDER {
+            Some(
+                config::build_custom_whisper_config(&cfg.stt_custom_base_url, &cfg.stt_custom_model)?,
+            )
+        } else {
+            None
+        };
+
+        // API key source matches the pipeline: cloud → session token,
+        // custom-whisper → its own key, everything else → the hosted key.
+        let api_key = if provider_name == "cloud" {
+            self.app_handle
+                .state::<crate::SessionTokenStore>()
+                .0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        } else if provider_name == config::CUSTOM_WHISPER_PROVIDER {
+            cfg.stt_custom_api_key.clone()
+        } else {
+            cfg.stt_api_key.clone()
+        };
+
+        if config::stt_provider_requires_api_key(provider_name) && api_key.is_empty() {
+            return Err(
+                "STT API key is not configured. Please set it in Settings -> Speech Recognition."
+                    .to_string(),
+            );
+        }
+
+        let stt_config = crate::stt::SttConfig {
+            api_key,
+            language,
+            smart_format: true,
+            sample_rate: AudioConfig::default().sample_rate,
+        };
+
+        let client = self
+            .app_handle
+            .try_state::<reqwest::Client>()
+            .map(|c| (*c).clone())
+            .unwrap_or_default();
+
+        Ok(adapters::SttTranscriber::new(
+            provider_name.to_string(),
+            stt_config,
+            custom_whisper_config,
+            client,
+        ))
+    }
+
     /// Start a meeting recording.
     ///
     /// Refuses if a meeting is already active **or** the instant pipeline is
@@ -99,6 +170,19 @@ impl MeetingHandle {
             }
         }
 
+        // Build the real STT transcriber from the app's STT config before we
+        // open the mic, so a misconfiguration fails fast.
+        let transcriber = self
+            .build_transcriber(&stt_provider, language.clone())
+            .await?;
+
+        // The SQLite meeting store is managed Tauri state; clone the handle.
+        let store = self
+            .app_handle
+            .try_state::<crate::storage::meeting::MeetingDbStore>()
+            .map(|s| (*s).clone())
+            .ok_or_else(|| "Meeting store is not initialized".to_string())?;
+
         // Reuse the existing cpal capture pipeline; only the consumer differs.
         let (capture, audio_rx) = AudioCaptureHandle::start(AudioConfig::default())
             .map_err(|e| format!("Audio capture failed: {e}"))?;
@@ -106,11 +190,6 @@ impl MeetingHandle {
         let sample_rate = AudioConfig::default().sample_rate;
         let audio = adapters::ChannelAudioSource::new(audio_rx, sample_rate);
         let events = adapters::TauriMeetingEvents::new(self.app_handle.clone());
-
-        // MEL-76 replaces these two stubs with the real SttProvider-backed
-        // transcriber and the SQLite-backed store.
-        let transcriber = engine::stub::StubTranscriber::new(false);
-        let store = engine::stub::StubStore::default();
 
         let mut eng =
             engine::MeetingEngine::new(audio, transcriber, store, events, self.config, sample_rate);

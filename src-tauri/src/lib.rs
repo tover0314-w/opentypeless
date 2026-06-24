@@ -182,8 +182,10 @@ pub fn run() {
             let config_manager = storage::ConfigManager::new(app_handle.clone());
             let history_store = storage::HistoryStore::new(db_path.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to init history store: {}", e))?;
-            let dictionary_store = storage::DictionaryStore::new(db_path)
+            let dictionary_store = storage::DictionaryStore::new(db_path.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to init dictionary store: {}", e))?;
+            let meeting_store = storage::meeting::MeetingDbStore::new(db_path)
+                .map_err(|e| anyhow::anyhow!("Failed to init meeting store: {}", e))?;
 
             let shared_client = reqwest::Client::builder()
                 .pool_max_idle_per_host(2)
@@ -206,6 +208,7 @@ pub fn run() {
             app.manage(config_manager);
             app.manage(history_store);
             app.manage(dictionary_store);
+            app.manage(meeting_store);
             app.manage(shared_client);
             app.manage(pipeline_handle);
             app.manage(meeting_handle);
@@ -467,6 +470,10 @@ pub fn run() {
             commands::llm::fetch_llm_models,
             commands::history::get_history,
             commands::history::clear_history,
+            commands::meeting::list_meetings,
+            commands::meeting::get_meeting,
+            commands::meeting::delete_meeting,
+            commands::meeting::export_meeting,
             commands::dictionary::get_dictionary,
             commands::dictionary::add_dictionary_entry,
             commands::dictionary::remove_dictionary_entry,
