@@ -1026,11 +1026,34 @@ impl PipelineHandle {
         let raw_text = match self.wait_for_stt(stt_control.clone()).await? {
             Some(text) => text,
             None => {
+                // STT failed or no speech was detected. If the audio was still
+                // written to disk, record it with an empty transcript so it shows
+                // up in Recordings and can be re-transcribed, instead of leaving
+                // an orphaned file. (Aborted sessions don't write a file, so
+                // recording_file is None here and nothing is saved.)
+                let recording_file = self
+                    .recording_file
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take();
+                if recording_file.is_some() {
+                    let duration_ms = self
+                        .recording_start
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take()
+                        .map(|start| start.elapsed().as_millis() as i64);
+                    self.save_history("", "", &app_ctx, duration_ms, recording_file)
+                        .await;
+                    if config.max_saved_recordings > 0 {
+                        self.prune_saved_recordings(config.max_saved_recordings).await;
+                    }
+                }
                 if let Some(control) = &stt_control {
                     self.clear_stt_session(control.id);
                 }
                 return Ok(());
-            } // aborted or no speech detected
+            }
         };
         let stt_elapsed = stop_start.elapsed();
         tracing::info!(
