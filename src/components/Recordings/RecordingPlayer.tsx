@@ -29,13 +29,13 @@ interface RecordingPlayerProps {
  */
 export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
-  const recovered = useRef(false)
   // Set when the user pressed play before the audio was loaded; once `src`
   // arrives we auto-start playback.
   const pendingPlay = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
+  const [errorCode, setErrorCode] = useState<number | null>(null)
 
   useEffect(() => {
     if (durationMs) setDuration((d) => (d > 0 ? d : durationMs / 1000))
@@ -52,26 +52,13 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
   const handleLoadedMetadata = useCallback(() => {
     const a = audioRef.current
     if (!a) return
+    // Adopt the element's duration only when it's a real, finite value. Raw MP3
+    // streams report Infinity here; we keep the backend `durationMs` for the
+    // timeline instead. We deliberately do NOT seek the element to coax a
+    // duration out of it — that left the playhead stranded at the end of the
+    // stream and stalled playback (element "playing" but no sound, stuck at 0).
     if (isFinite(a.duration) && a.duration > 0) {
       setDuration(a.duration)
-      return
-    }
-    // No duration header: scan to the end once so WebKit computes a real,
-    // seekable duration, then rewind to the start.
-    if (recovered.current) return
-    recovered.current = true
-    const onDurationChange = () => {
-      if (isFinite(a.duration) && a.duration > 0) {
-        setDuration(a.duration)
-        a.currentTime = 0
-        a.removeEventListener('durationchange', onDurationChange)
-      }
-    }
-    a.addEventListener('durationchange', onDurationChange)
-    try {
-      a.currentTime = 1e7
-    } catch {
-      // ignore — element not ready to seek yet
     }
   }, [])
 
@@ -104,7 +91,11 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
         ref={audioRef}
         src={src}
         preload="metadata"
-        onError={() => console.error('Audio element error for', src)}
+        onError={() => {
+          const code = audioRef.current?.error?.code ?? -1
+          setErrorCode(code)
+          console.error('Audio element error', code, 'for', src)
+        }}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={() => setCurrent(audioRef.current?.currentTime ?? 0)}
         onPlay={() => setPlaying(true)}
@@ -141,6 +132,11 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
       <span className="tabular-nums text-[11px] text-text-tertiary w-8 shrink-0">
         {fmtTime(max)}
       </span>
+      {errorCode !== null && (
+        <span className="text-[10px] text-error shrink-0" title="Media error code">
+          err {errorCode}
+        </span>
+      )}
     </div>
   )
 }
