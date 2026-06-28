@@ -13,8 +13,11 @@ import { CapsuleContextMenu } from './CapsuleContextMenu'
 
 const DRAG_THRESHOLD = 5
 
-function getCapsuleState(pipelineState: string, hasError: boolean) {
+function getCapsuleState(pipelineState: string, hasError: boolean, justCompleted: boolean) {
   if (hasError) return 'error'
+  // Show the completion confirmation from the moment output starts through the
+  // ~2.5s hint window after the backend returns to idle — one continuous mount.
+  if (justCompleted) return 'complete'
   return pipelineState
 }
 
@@ -27,6 +30,7 @@ export function Capsule() {
   const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
   const capsuleExpanded = useAppStore((s) => s.capsuleExpanded)
+  const justCompleted = useAppStore((s) => s.justCompleted)
   const { startRecording, stopRecording, isRecording, isProcessing } = useRecording()
 
   const dragStart = useRef<{ x: number; y: number } | null>(null)
@@ -35,13 +39,14 @@ export function Capsule() {
   useCapsuleResize()
 
   const hasError = pipelineError !== null
-  const capsuleState = getCapsuleState(pipelineState, hasError)
+  const capsuleState = getCapsuleState(pipelineState, hasError, justCompleted)
   const visible = getCapsuleVisibility({
     capsuleAutoHide,
     contextMenuOpen,
     capsuleExpanded,
     hasError,
     pipelineState,
+    justCompleted,
   })
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -134,6 +139,7 @@ export function Capsule() {
             {capsuleState === 'transcribing' && <CapsuleProcessing />}
             {capsuleState === 'polishing' && <CapsulePolishing />}
             {capsuleState === 'outputting' && <CapsuleComplete />}
+            {capsuleState === 'complete' && <CapsuleComplete />}
             {capsuleState === 'error' && <CapsuleError />}
           </motion.div>
         </AnimatePresence>

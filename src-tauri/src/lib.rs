@@ -84,6 +84,22 @@ fn apply_linux_workarounds() {
             tracing::info!("Detected NVIDIA + Wayland, disabling WebKit DMA-BUF renderer");
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
+
+        // Wayland forbids clients from positioning their own top-level windows,
+        // so the capsule cannot be anchored to the top-center of the screen and
+        // ends up wherever the compositor drops it. Force the GTK/WebKit backend
+        // onto XWayland (X11), where absolute positioning works, as long as an X
+        // server is reachable. GNOME pre-sets GDK_BACKEND=wayland in the session,
+        // so we override that too — only a deliberately pinned *non-wayland*
+        // backend (e.g. the user exported GDK_BACKEND=broadway) is left alone.
+        let gdk_backend = std::env::var("GDK_BACKEND").unwrap_or_default();
+        let user_pinned_non_wayland = !gdk_backend.is_empty() && !gdk_backend.contains("wayland");
+        let x_server_available =
+            std::env::var("DISPLAY").map(|d| !d.is_empty()).unwrap_or(false);
+        if session == "wayland" && !user_pinned_non_wayland && x_server_available {
+            tracing::info!("Wayland session: forcing GDK_BACKEND=x11 (XWayland) for capsule positioning");
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
     }
 }
 

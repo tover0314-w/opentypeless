@@ -93,6 +93,11 @@ interface AppState {
   // Pipeline
   pipelineState: PipelineState
   setPipelineState: (state: PipelineState) => void
+  // True for a few seconds after a successful transcription so the capsule can
+  // show a "completed" confirmation even though the backend returns to idle
+  // almost immediately.
+  justCompleted: boolean
+  setJustCompleted: (v: boolean) => void
 
   // Recording
   audioVolume: number
@@ -216,6 +221,8 @@ const defaultConfig: AppConfig = {
 export const useAppStore = create<AppState>((set) => ({
   pipelineState: 'idle',
   setPipelineState: (pipelineState) => set({ pipelineState }),
+  justCompleted: false,
+  setJustCompleted: (justCompleted) => set({ justCompleted }),
 
   audioVolume: 0,
   setAudioVolume: (audioVolume) => set({ audioVolume }),

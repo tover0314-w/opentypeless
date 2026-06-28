@@ -3,7 +3,7 @@ import { useAppStore, type PipelineState } from '../stores/appStore'
 import { shouldShowSavedRecordingHint } from '../lib/capsuleError'
 
 /** Distance (logical px) from the top edge of the screen to the capsule. */
-const TOP_MARGIN = 8
+const TOP_MARGIN = 14
 
 interface CapsuleSize {
   width: number
@@ -16,6 +16,7 @@ export interface CapsuleVisibilityInput {
   capsuleExpanded: boolean
   hasError: boolean
   pipelineState: PipelineState
+  justCompleted: boolean
 }
 
 export function getCapsuleVisibility({
@@ -24,9 +25,15 @@ export function getCapsuleVisibility({
   capsuleExpanded,
   hasError,
   pipelineState,
+  justCompleted,
 }: CapsuleVisibilityInput): boolean {
   return (
-    !capsuleAutoHide || contextMenuOpen || capsuleExpanded || hasError || pipelineState !== 'idle'
+    !capsuleAutoHide ||
+    contextMenuOpen ||
+    capsuleExpanded ||
+    hasError ||
+    justCompleted ||
+    pipelineState !== 'idle'
   )
 }
 
@@ -40,10 +47,14 @@ function getSizeForState(
   hasError: boolean,
   contextMenuOpen: boolean,
   showSavedHint: boolean,
+  justCompleted: boolean,
 ): CapsuleSize {
   if (contextMenuOpen) return { width: 220, height: 220 }
   if (hasError) return showSavedHint ? { width: 230, height: 54 } : { width: 200, height: 36 }
   if (expanded) return { width: 220, height: 90 }
+  // Completion confirmation ("✓ Transcribed") — also covers the brief
+  // `outputting` state, which renders the same view.
+  if (justCompleted) return { width: 140, height: 36 }
   switch (state) {
     case 'idle':
       return { width: 36, height: 36 }
@@ -68,6 +79,7 @@ export function useCapsuleResize() {
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
   const pipelineErrorKey = useAppStore((s) => s.pipelineErrorKey)
   const saveRecordings = useAppStore((s) => s.config.save_recordings)
+  const justCompleted = useAppStore((s) => s.justCompleted)
 
   const hasError = pipelineError !== null
   const showSavedHint = shouldShowSavedRecordingHint(pipelineErrorKey, saveRecordings)
@@ -79,6 +91,7 @@ export function useCapsuleResize() {
       hasError,
       contextMenuOpen,
       showSavedHint,
+      justCompleted,
     )
     const windowWidth = size.width + 24
     const windowHeight = size.height + 24
@@ -88,6 +101,7 @@ export function useCapsuleResize() {
       capsuleExpanded,
       hasError,
       pipelineState,
+      justCompleted,
     })
 
     import('@tauri-apps/api/window')
@@ -140,7 +154,15 @@ export function useCapsuleResize() {
     capsuleAutoHide,
     setContextMenuReady,
     showSavedHint,
+    justCompleted,
   ])
 
-  return getSizeForState(pipelineState, capsuleExpanded, hasError, contextMenuOpen, showSavedHint)
+  return getSizeForState(
+    pipelineState,
+    capsuleExpanded,
+    hasError,
+    contextMenuOpen,
+    showSavedHint,
+    justCompleted,
+  )
 }

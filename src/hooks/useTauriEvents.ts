@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
@@ -22,8 +22,14 @@ export function useTauriEvents() {
     setAccessibilityTrusted,
     setHistory,
     setHistoryCount,
+    setJustCompleted,
     applyPersistedConfigPatch,
   } = useAppStore()
+
+  // Holds the "transcription completed" confirmation visible for a couple of
+  // seconds after success, independent of the backend's quick return to idle.
+  const completeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const COMPLETE_HINT_MS = 2500
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +59,23 @@ export function useTauriEvents() {
         // Clear any previous error when starting a new pipeline run
         setPipelineError(null)
         setPipelineErrorKey(null)
+        // Cancel a lingering completion hint from the previous run.
+        setJustCompleted(false)
+        if (completeTimer.current) {
+          clearTimeout(completeTimer.current)
+          completeTimer.current = null
+        }
+      }
+      if (state === 'outputting') {
+        // Output means a transcript was produced and is being delivered — show a
+        // brief "completed" confirmation that outlives the backend's near-instant
+        // transition back to idle.
+        setJustCompleted(true)
+        if (completeTimer.current) clearTimeout(completeTimer.current)
+        completeTimer.current = setTimeout(() => {
+          setJustCompleted(false)
+          completeTimer.current = null
+        }, COMPLETE_HINT_MS)
       }
       if (state === 'idle') {
         // Don't clear pipelineError here — CapsuleError auto-resets after 2.5s.
@@ -107,6 +130,10 @@ export function useTauriEvents() {
     return () => {
       cancelled = true
       unlisteners.forEach((unlisten) => unlisten())
+      if (completeTimer.current) {
+        clearTimeout(completeTimer.current)
+        completeTimer.current = null
+      }
     }
   }, [
     setAudioVolume,
@@ -120,6 +147,7 @@ export function useTauriEvents() {
     setAccessibilityTrusted,
     setHistory,
     setHistoryCount,
+    setJustCompleted,
     applyPersistedConfigPatch,
     t,
   ])
