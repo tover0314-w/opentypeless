@@ -169,6 +169,7 @@
   "capsule": {
     "cancelRecording": "Cancel recording",
     "transcribing": "Transcribing...",
+    "busyHint": "server busy",
     "cancelProcessing": "Cancel processing",
     "thinking": "Thinking...",
     "cancelPolishing": "Cancel polishing",
@@ -176,9 +177,9 @@
     "errorOccurred": "An error occurred",
     "accessibilityRequired": "Accessibility needed — open Settings",
     "errors": {
-      "stt_timeout": "STT timeout",
+      "stt_timeout": "Timed out — server busy",
       "stt_invalid_key": "Check STT key",
-      "stt_failed": "STT failed",
+      "stt_failed": "Transcription failed",
       "stt_quota_exceeded": "Voice quota used",
       "stt_no_speech_detected": "No speech",
       "output_fallback_clipboard": "Copied",
@@ -190,7 +191,8 @@
       "stt_connection_failed": "STT offline",
       "audio_failed": "Mic failed",
       "output_failed": "Output failed",
-      "unknown": "Error"
+      "unknown": "Error",
+      "saved_hint": "Recording saved · re-transcribe"
     },
     "menu": {
       "hideWhenIdle": "Hide capsule when idle",
@@ -452,6 +454,7 @@
     "failedToLoad": "Failed to load recordings",
     "failedToLoadAudio": "Failed to load audio",
     "failedToRetranscribe": "Failed to re-transcribe recording",
-    "failedToDelete": "Failed to delete recording"
+    "failedToDelete": "Failed to delete recording",
+    "failedNeedsRetranscribe": "⚠ Failed — re-transcribe"
   }
 }

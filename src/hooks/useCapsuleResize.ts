@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useAppStore, type PipelineState } from '../stores/appStore'
+import { shouldShowSavedRecordingHint } from '../lib/capsuleError'
 
 /** Distance (logical px) from the top edge of the screen to the capsule. */
 const TOP_MARGIN = 8
@@ -38,9 +39,10 @@ function getSizeForState(
   expanded: boolean,
   hasError: boolean,
   contextMenuOpen: boolean,
+  showSavedHint: boolean,
 ): CapsuleSize {
   if (contextMenuOpen) return { width: 220, height: 220 }
-  if (hasError) return { width: 200, height: 36 }
+  if (hasError) return showSavedHint ? { width: 230, height: 54 } : { width: 200, height: 36 }
   if (expanded) return { width: 220, height: 90 }
   switch (state) {
     case 'idle':
@@ -64,11 +66,20 @@ export function useCapsuleResize() {
   const contextMenuOpen = useAppStore((s) => s.contextMenuOpen)
   const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
+  const pipelineErrorKey = useAppStore((s) => s.pipelineErrorKey)
+  const saveRecordings = useAppStore((s) => s.config.save_recordings)
 
   const hasError = pipelineError !== null
+  const showSavedHint = shouldShowSavedRecordingHint(pipelineErrorKey, saveRecordings)
 
   useEffect(() => {
-    const size = getSizeForState(pipelineState, capsuleExpanded, hasError, contextMenuOpen)
+    const size = getSizeForState(
+      pipelineState,
+      capsuleExpanded,
+      hasError,
+      contextMenuOpen,
+      showSavedHint,
+    )
     const windowWidth = size.width + 24
     const windowHeight = size.height + 24
     const shouldShow = getCapsuleVisibility({
@@ -128,7 +139,8 @@ export function useCapsuleResize() {
     contextMenuOpen,
     capsuleAutoHide,
     setContextMenuReady,
+    showSavedHint,
   ])
 
-  return getSizeForState(pipelineState, capsuleExpanded, hasError, contextMenuOpen)
+  return getSizeForState(pipelineState, capsuleExpanded, hasError, contextMenuOpen, showSavedHint)
 }

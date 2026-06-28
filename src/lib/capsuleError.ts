@@ -39,6 +39,24 @@ function isStructuredCapsuleErrorKey(code: string): code is CapsuleErrorKey {
   return structuredCapsuleErrorKeys.has(code as CapsuleErrorKey)
 }
 
+/**
+ * Failure error keys where the captured audio was saved to disk and can be
+ * re-transcribed. When `save_recordings` is on we reassure the user their
+ * recording is recoverable.
+ */
+const savedHintErrorKeys = new Set<CapsuleErrorKey>([
+  'stt_timeout',
+  'stt_failed',
+  'stt_connection_failed',
+])
+
+export function shouldShowSavedRecordingHint(
+  key: CapsuleErrorKey | null,
+  saveRecordings: boolean,
+): boolean {
+  return saveRecordings && key !== null && savedHintErrorKeys.has(key)
+}
+
 export function capsuleErrorKeyFromPayload(payload: PipelineErrorPayload): CapsuleErrorKey {
   if (typeof payload !== 'string') {
     return isStructuredCapsuleErrorKey(payload.code) ? payload.code : 'unknown'

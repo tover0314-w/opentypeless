@@ -1,15 +1,32 @@
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion, useReducedMotion } from 'framer-motion'
 import { Loader2, X } from 'lucide-react'
 import { abortRecording } from '../../lib/tauri'
 import { useAppStore } from '../../stores/appStore'
 
+/** Seconds elapsed before we hint that the server is slow but still working. */
+const BUSY_HINT_AFTER_SECONDS = 6
+
 export function CapsuleProcessing() {
   const { t } = useTranslation()
   const partialTranscript = useAppStore((s) => s.partialTranscript)
+  const pipelineState = useAppStore((s) => s.pipelineState)
   const reduced = useReducedMotion()
 
-  const displayText = partialTranscript || t('capsule.transcribing')
+  // Elapsed-seconds counter so the user never sees a frozen "Transcribing".
+  // Resets whenever the pipeline state changes (mirrors DurationTimer).
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    setSeconds(0)
+    const interval = setInterval(() => setSeconds((s) => s + 1), 1000)
+    return () => clearInterval(interval)
+  }, [pipelineState])
+
+  // Once we have partial text the live transcript proves progress on its own.
+  const showElapsed = !partialTranscript
+  const isBusy = seconds >= BUSY_HINT_AFTER_SECONDS
+  const baseText = partialTranscript || t('capsule.transcribing')
 
   const handleCancel = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -36,7 +53,9 @@ export function CapsuleProcessing() {
         <Loader2 size={12} className="text-white/80" />
       </motion.div>
       <p className="text-[11px] text-white leading-snug truncate flex-1 min-w-0">
-        {displayText}
+        {baseText}
+        {showElapsed && <span className="tabular-nums"> {seconds}s</span>}
+        {showElapsed && isBusy && <span className="text-white/60"> · {t('capsule.busyHint')}</span>}
         <motion.span
           className="inline-block w-[2px] h-[11px] bg-white/60 ml-0.5 align-middle"
           animate={reduced ? undefined : { opacity: [1, 0, 1] }}

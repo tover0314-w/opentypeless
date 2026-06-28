@@ -419,6 +419,14 @@ pub fn run() {
                 pipeline.pre_warm().await;
             });
 
+            // Recover any recordings left as `.pcm.partial` by an abort or crash
+            // (audio that never reached the normal save) into Recordings.
+            let recover_handle = app_handle.clone();
+            let recover_format = initial_config.recording_format.clone();
+            tauri::async_runtime::spawn(async move {
+                pipeline::recover_partial_recordings(recover_handle, recover_format).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { CapsuleErrorKey } from '../lib/capsuleError'
 
 export type PipelineState = 'idle' | 'recording' | 'transcribing' | 'polishing' | 'outputting'
 
@@ -153,6 +154,8 @@ interface AppState {
   // Pipeline error
   pipelineError: string | null
   setPipelineError: (error: string | null) => void
+  pipelineErrorKey: CapsuleErrorKey | null
+  setPipelineErrorKey: (key: CapsuleErrorKey | null) => void
 
   // macOS Accessibility permission
   accessibilityTrusted: boolean
@@ -265,6 +268,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   pipelineError: null,
   setPipelineError: (pipelineError) => set({ pipelineError }),
+  pipelineErrorKey: null,
+  setPipelineErrorKey: (pipelineErrorKey) => set({ pipelineErrorKey }),
 
   accessibilityTrusted: true,
   setAccessibilityTrusted: (accessibilityTrusted) => set({ accessibilityTrusted }),

@@ -111,6 +111,18 @@ impl WhisperCompatProvider {
         mime: &str,
         config: &SttConfig,
     ) -> Result<Option<String>, AppError> {
+        // Cloud APIs cap uploads and respond quickly, so a short fixed timeout
+        // is fine. A local server has no upstream limit and can be slow under
+        // CPU load, so scale the timeout with clip length (~4x its duration,
+        // 2–30 min) — a slow transcription then waits and succeeds instead of
+        // timing out and triggering a retry pile-up.
+        let request_timeout = if self.provider_config.api_key_required {
+            std::time::Duration::from_secs(60)
+        } else {
+            let bytes_per_sec = (config.sample_rate as u64 * 2).max(1);
+            let secs = (audio.len() as u64 / bytes_per_sec * 4).clamp(120, 1800);
+            std::time::Duration::from_secs(secs)
+        };
         let mut attempt = 0u32;
         loop {
             let file_part = reqwest::multipart::Part::bytes(audio.clone())
@@ -138,7 +150,7 @@ impl WhisperCompatProvider {
                 .client
                 .post(&self.provider_config.endpoint)
                 .multipart(form)
-                .timeout(std::time::Duration::from_secs(60));
+                .timeout(request_timeout);
 
             if !config.api_key.trim().is_empty() {
                 request = request.header("Authorization", format!("Bearer {}", config.api_key));
@@ -204,7 +216,10 @@ impl WhisperCompatProvider {
                         });
                     }
                 }
-                Err(e) if e.is_timeout() && attempt < 2 => {
+                // Retry on timeout only for cloud providers (transient network
+                // blips). A local timeout means the server is slow, not failing —
+                // retrying just re-sends the clip and compounds the backlog.
+                Err(e) if e.is_timeout() && attempt < 2 && self.provider_config.api_key_required => {
                     tracing::warn!(
                         "{} timeout (attempt {}/3)",
                         self.provider_config.provider_name,

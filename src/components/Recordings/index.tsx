@@ -203,9 +203,15 @@ export function Recordings() {
                     >
                       <div className="flex items-start gap-3">
                         <div className="flex-1 min-w-0">
-                          <p className="text-[13px] text-text-primary leading-relaxed">
-                            {entry.polished_text || entry.raw_text}
-                          </p>
+                          {entry.raw_text.trim() ? (
+                            <p className="text-[13px] text-text-primary leading-relaxed">
+                              {entry.polished_text || entry.raw_text}
+                            </p>
+                          ) : (
+                            <p className="text-[13px] text-error leading-relaxed">
+                              {t('recordings.failedNeedsRetranscribe')}
+                            </p>
+                          )}
                           <p className="text-[11px] text-text-tertiary mt-1">
                             <span className="tabular-nums">#{entry.id}</span> ·{' '}
                             {entry.created_at.split('T')[1]?.slice(0, 5) || ''} ·{' '}

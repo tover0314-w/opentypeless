@@ -239,6 +239,105 @@ fn write_recording_file(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Suffix marking an in-progress recording streamed to disk for crash recovery.
+const PARTIAL_RECORDING_SUFFIX: &str = ".pcm.partial";
+
+/// Path for a new recording's crash-recovery partial PCM file. Creates the
+/// recordings directory if needed.
+fn partial_recording_path(app_handle: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app_handle.path().app_data_dir().ok()?.join("recordings");
+    std::fs::create_dir_all(&dir).ok()?;
+    let name = format!(
+        "{}{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ"),
+        PARTIAL_RECORDING_SUFFIX
+    );
+    Some(dir.join(name))
+}
+
+/// On startup, recover any leftover `.pcm.partial` files (left by an abort or a
+/// crash): encode each to the configured format, write the final recording file,
+/// and add a history entry with an empty transcript so it appears in Recordings
+/// and can be re-transcribed. Then remove the partial.
+pub async fn recover_partial_recordings(app_handle: tauri::AppHandle, format_str: String) {
+    let dir = match app_handle.path().app_data_dir() {
+        Ok(d) => d.join("recordings"),
+        Err(_) => return,
+    };
+    let read_dir = match std::fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let format = crate::audio::encode::RecordingFormat::from_config_str(&format_str);
+    // Ignore captures shorter than ~0.5s (likely an accidental tap).
+    let min_bytes = (RECORDING_SAMPLE_RATE as usize) * 2 / 2;
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.to_string_lossy().ends_with(PARTIAL_RECORDING_SUFFIX) {
+            continue;
+        }
+        let pcm = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if pcm.len() < min_bytes {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+
+        let (bytes, ext) =
+            match crate::audio::encode::encode_pcm(&pcm, RECORDING_SAMPLE_RATE, format) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!("Recover: encode failed for {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+        let stem = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| s.trim_end_matches(PARTIAL_RECORDING_SUFFIX))
+            .unwrap_or("recovered");
+        let final_path = dir.join(format!("{stem}.{ext}"));
+        if std::fs::write(&final_path, &bytes).is_err() {
+            continue;
+        }
+
+        let created_at = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .map(|t| {
+                chrono::DateTime::<chrono::Utc>::from(t)
+                    .with_timezone(&chrono::Local)
+                    .format("%Y-%m-%dT%H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_else(|_| chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
+        let duration_ms = (pcm.len() as i64) * 1000 / (RECORDING_SAMPLE_RATE as i64 * 2);
+
+        let entry = storage::HistoryEntry {
+            id: 0,
+            created_at,
+            app_name: String::new(),
+            app_type: "Unknown".to_string(),
+            raw_text: String::new(),
+            polished_text: String::new(),
+            language: None,
+            duration_ms: Some(duration_ms),
+            recording_file: Some(final_path.to_string_lossy().to_string()),
+        };
+        if app_handle
+            .state::<storage::HistoryStore>()
+            .add(entry)
+            .await
+            .is_ok()
+        {
+            let _ = std::fs::remove_file(&path);
+            tracing::info!("Recovered partial recording -> {}", final_path.display());
+        }
+    }
+}
+
 pub struct PipelineHandle {
     app_handle: tauri::AppHandle,
     state: Arc<AtomicU8>,
@@ -737,6 +836,18 @@ impl PipelineHandle {
             // When recording-to-disk is enabled, tee a copy of every PCM chunk
             // (provider-agnostic) so it can be encoded and saved on close.
             let mut recorded_pcm: Vec<u8> = Vec::new();
+            // Crash-proof: also stream the PCM to a `.pcm.partial` file on disk as
+            // we record, so an abort or crash before the normal save does not lose
+            // the audio. It is removed on a successful save; any leftover partial
+            // is recovered into Recordings on the next startup.
+            let partial_path = if save_recordings {
+                partial_recording_path(&app_handle)
+            } else {
+                None
+            };
+            let mut partial_file = partial_path
+                .as_ref()
+                .and_then(|p| std::fs::File::create(p).ok());
 
             // Forward audio to STT and receive transcripts
             loop {
@@ -758,6 +869,10 @@ impl PipelineHandle {
                             Some(data) => {
                                 if save_recordings {
                                     recorded_pcm.extend_from_slice(&data);
+                                    if let Some(file) = partial_file.as_mut() {
+                                        use std::io::Write;
+                                        let _ = file.write_all(&data);
+                                    }
                                 }
                                 let _ = provider.send_audio(&data).await;
                             }
@@ -826,6 +941,10 @@ impl PipelineHandle {
                                             *recording_file_ref
                                                 .lock()
                                                 .unwrap_or_else(|e| e.into_inner()) = Some(path);
+                                            // Final file written — drop the crash-recovery partial.
+                                            if let Some(p) = &partial_path {
+                                                let _ = std::fs::remove_file(p);
+                                            }
                                         }
                                         Err(e) => {
                                             tracing::error!("Failed to save recording file: {}", e);

@@ -18,6 +18,7 @@ export function useTauriEvents() {
     setPipelineState,
     setTargetApp,
     setPipelineError,
+    setPipelineErrorKey,
     setAccessibilityTrusted,
     setHistory,
     applyPersistedConfigPatch,
@@ -50,6 +51,7 @@ export function useTauriEvents() {
       if (state === 'recording') {
         // Clear any previous error when starting a new pipeline run
         setPipelineError(null)
+        setPipelineErrorKey(null)
       }
       if (state === 'idle') {
         // Don't clear pipelineError here — CapsuleError auto-resets after 2.5s.
@@ -66,6 +68,7 @@ export function useTauriEvents() {
     addListener<PipelineErrorPayload>('pipeline:error', (payload) => {
       const capsuleErrorKey = capsuleErrorKeyFromPayload(payload)
       setPipelineError(t(`capsule.errors.${capsuleErrorKey}`))
+      setPipelineErrorKey(capsuleErrorKey)
       if (capsuleErrorKey === 'accessibility_required') {
         setAccessibilityTrusted(false)
       }
@@ -107,6 +110,7 @@ export function useTauriEvents() {
     setPipelineState,
     setTargetApp,
     setPipelineError,
+    setPipelineErrorKey,
     setAccessibilityTrusted,
     setHistory,
     applyPersistedConfigPatch,
