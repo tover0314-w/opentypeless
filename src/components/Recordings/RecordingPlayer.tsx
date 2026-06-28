@@ -10,10 +10,13 @@ function fmtTime(s: number): string {
 }
 
 interface RecordingPlayerProps {
-  src: string
+  /** Blob URL for the audio, or undefined until it has been lazily loaded. */
+  src: string | undefined
   /** Known duration from the backend (ms). Authoritative when the raw MP3
    *  stream carries no duration header and the media element reports Infinity. */
   durationMs: number | null | undefined
+  /** Request the parent to load this recording's audio (first play). */
+  onRequestLoad: () => void
 }
 
 /**
@@ -24,9 +27,12 @@ interface RecordingPlayerProps {
  * `durationMs` for the timeline, and force a one-time end-seek so the element
  * establishes a real, seekable duration before the user scrubs.
  */
-export function RecordingPlayer({ src, durationMs }: RecordingPlayerProps) {
+export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const recovered = useRef(false)
+  // Set when the user pressed play before the audio was loaded; once `src`
+  // arrives we auto-start playback.
+  const pendingPlay = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
@@ -34,6 +40,14 @@ export function RecordingPlayer({ src, durationMs }: RecordingPlayerProps) {
   useEffect(() => {
     if (durationMs) setDuration((d) => (d > 0 ? d : durationMs / 1000))
   }, [durationMs])
+
+  // When audio finishes lazy-loading after a play press, start it.
+  useEffect(() => {
+    if (src && pendingPlay.current) {
+      pendingPlay.current = false
+      audioRef.current?.play().catch((e) => console.error('Audio play failed:', e))
+    }
+  }, [src])
 
   const handleLoadedMetadata = useCallback(() => {
     const a = audioRef.current
@@ -62,11 +76,17 @@ export function RecordingPlayer({ src, durationMs }: RecordingPlayerProps) {
   }, [])
 
   const togglePlay = useCallback(() => {
+    // Not loaded yet: request the bytes and remember to play once they arrive.
+    if (!src) {
+      pendingPlay.current = true
+      onRequestLoad()
+      return
+    }
     const a = audioRef.current
     if (!a) return
-    if (a.paused) a.play().catch(() => {})
+    if (a.paused) a.play().catch((e) => console.error('Audio play failed:', e))
     else a.pause()
-  }, [])
+  }, [src, onRequestLoad])
 
   const handleSeek = useCallback((value: number) => {
     const a = audioRef.current
@@ -84,6 +104,7 @@ export function RecordingPlayer({ src, durationMs }: RecordingPlayerProps) {
         ref={audioRef}
         src={src}
         preload="metadata"
+        onError={() => console.error('Audio element error for', src)}
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={() => setCurrent(audioRef.current?.currentTime ?? 0)}
         onPlay={() => setPlaying(true)}

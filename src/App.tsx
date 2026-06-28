@@ -9,6 +9,7 @@ import {
   loadOnboardingCompleted,
   getConfig,
   getHistory,
+  getHistoryCount,
   getDictionary,
   checkAccessibilityPermission,
 } from './lib/tauri'
@@ -61,6 +62,7 @@ function MainApp() {
   const setConfig = useAppStore((s) => s.setConfig)
   const setSavedConfig = useAppStore((s) => s.setSavedConfig)
   const setHistory = useAppStore((s) => s.setHistory)
+  const setHistoryCount = useAppStore((s) => s.setHistoryCount)
   const setDictionary = useAppStore((s) => s.setDictionary)
   const setAccessibilityTrusted = useAppStore((s) => s.setAccessibilityTrusted)
   const [loaded, setLoaded] = useState(false)
@@ -72,14 +74,16 @@ function MainApp() {
       setOnboardingCompleted(done)
       if (done) {
         try {
-          const [config, history, dictionary] = await Promise.all([
+          const [config, history, historyCount, dictionary] = await Promise.all([
             getConfig(),
             getHistory(200, 0),
+            getHistoryCount(),
             getDictionary(),
           ])
           setConfig(config)
           setSavedConfig(config)
           setHistory(history)
+          setHistoryCount(historyCount)
           setDictionary(dictionary)
           // Check macOS Accessibility permission
           if (navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
@@ -110,6 +114,7 @@ function MainApp() {
     setConfig,
     setSavedConfig,
     setHistory,
+    setHistoryCount,
     setDictionary,
     setAccessibilityTrusted,
   ])

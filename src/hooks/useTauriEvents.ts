@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import type { AppConfig, PipelineState } from '../stores/appStore'
-import { getHistory } from '../lib/tauri'
+import { getHistory, getHistoryCount } from '../lib/tauri'
 import { toast } from '../components/Toast'
 import { capsuleErrorKeyFromPayload, type PipelineErrorPayload } from '../lib/capsuleError'
 
@@ -21,6 +21,7 @@ export function useTauriEvents() {
     setPipelineErrorKey,
     setAccessibilityTrusted,
     setHistory,
+    setHistoryCount,
     applyPersistedConfigPatch,
   } = useAppStore()
 
@@ -61,6 +62,11 @@ export function useTauriEvents() {
           .then(setHistory)
           .catch((err) => {
             console.error('Failed to refresh history:', err)
+          })
+        getHistoryCount()
+          .then(setHistoryCount)
+          .catch((err) => {
+            console.error('Failed to refresh history count:', err)
           })
       }
     })
@@ -113,6 +119,7 @@ export function useTauriEvents() {
     setPipelineErrorKey,
     setAccessibilityTrusted,
     setHistory,
+    setHistoryCount,
     applyPersistedConfigPatch,
     t,
   ])

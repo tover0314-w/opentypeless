@@ -443,6 +443,7 @@ pub fn run() {
             commands::stt::bench_stt_connection,
             commands::llm::fetch_llm_models,
             commands::history::get_history,
+            commands::history::get_history_count,
             commands::history::clear_history,
             commands::recordings::get_recordings,
             commands::recordings::get_recording_path,

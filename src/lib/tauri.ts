@@ -98,6 +98,10 @@ export async function getHistory(limit: number, offset: number): Promise<History
   return invoke('get_history', { limit, offset })
 }
 
+export async function getHistoryCount(): Promise<number> {
+  return invoke('get_history_count')
+}
+
 export async function clearHistory(): Promise<void> {
   return invoke('clear_history')
 }

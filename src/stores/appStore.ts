@@ -118,6 +118,9 @@ interface AppState {
   // History
   history: HistoryEntry[]
   setHistory: (h: HistoryEntry[]) => void
+  // Total history rows (real DB count, not the capped `history` page length).
+  historyCount: number
+  setHistoryCount: (n: number) => void
 
   // Dictionary
   dictionary: DictionaryEntry[]
@@ -239,6 +242,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   history: [],
   setHistory: (history) => set({ history }),
+  historyCount: 0,
+  setHistoryCount: (historyCount) => set({ historyCount }),
 
   dictionary: [],
   setDictionary: (dictionary) => set({ dictionary }),

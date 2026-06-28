@@ -68,10 +68,10 @@ export function Recordings() {
     [t],
   )
 
-  useEffect(() => {
-    for (const r of recordings) loadAudio(r)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordings])
+  // Audio is loaded lazily, on first play of a row (see RecordingPlayer's
+  // onRequestLoad). Eagerly loading every recording mounted ~100 simultaneous
+  // WebKitGTK media pipelines, most of which never became playable — the cause
+  // of play buttons silently doing nothing.
 
   // Revoke all blob URLs when the screen unmounts.
   useEffect(() => {
@@ -257,9 +257,11 @@ export function Recordings() {
                           {t('recordings.retranscribing')}
                         </p>
                       )}
-                      {audioSrc[entry.id] && (
-                        <RecordingPlayer src={audioSrc[entry.id]} durationMs={entry.duration_ms} />
-                      )}
+                      <RecordingPlayer
+                        src={audioSrc[entry.id]}
+                        durationMs={entry.duration_ms}
+                        onRequestLoad={() => loadAudio(entry)}
+                      />
                     </motion.div>
                   ))}
                 </div>

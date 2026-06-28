@@ -276,6 +276,15 @@ impl HistoryStore {
         Ok(entries)
     }
 
+    /// Total number of history rows, independent of any page limit. Used for
+    /// the "total recordings" stat, which must reflect the real count rather
+    /// than the capped size of a `list()` page.
+    pub async fn count(&self) -> Result<u32> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let total: u32 = conn.query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))?;
+        Ok(total)
+    }
+
     /// List history rows that have a saved audio file, newest first.
     pub async fn list_recordings(&self, limit: u32, offset: u32) -> Result<Vec<HistoryEntry>> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());

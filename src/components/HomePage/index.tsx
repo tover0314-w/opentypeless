@@ -9,6 +9,7 @@ import { useRoute } from '../../lib/router'
 export function HomePage() {
   const config = useAppStore((s) => s.config)
   const history = useAppStore((s) => s.history)
+  const historyCount = useAppStore((s) => s.historyCount)
   const { navigate } = useRoute()
   const { user, plan, sttSecondsUsed, sttSecondsLimit, llmTokensUsed, llmTokensLimit } =
     useAuthStore()
@@ -45,7 +46,7 @@ export function HomePage() {
           <p className="text-[11px] text-text-tertiary uppercase tracking-wider mb-1">
             {t('home.totalRecordings')}
           </p>
-          <p className="text-[22px] font-semibold">{history.length}</p>
+          <p className="text-[22px] font-semibold">{historyCount}</p>
         </div>
         <div className="rounded-[18px] p-4 jelly-card">
           <p className="text-[11px] text-text-tertiary uppercase tracking-wider mb-1">

@@ -10,6 +10,13 @@ pub async fn get_history(
 }
 
 #[tauri::command]
+pub async fn get_history_count(
+    state: tauri::State<'_, storage::HistoryStore>,
+) -> Result<u32, String> {
+    state.count().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn clear_history(state: tauri::State<'_, storage::HistoryStore>) -> Result<(), String> {
     state.clear().await.map_err(|e| e.to_string())
 }
