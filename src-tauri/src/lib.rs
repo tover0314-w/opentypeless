@@ -8,6 +8,7 @@ mod linux_x11;
 pub mod llm;
 pub mod output;
 pub mod pipeline;
+pub mod sound;
 pub mod storage;
 pub mod stt;
 pub mod tray;

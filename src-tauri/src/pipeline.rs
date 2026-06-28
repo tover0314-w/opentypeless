@@ -1518,6 +1518,11 @@ impl PipelineHandle {
         }
 
         let _ = self.app_handle.emit("pipeline:target_app", app_name);
+
+        // Audible confirmation that the transcription was delivered. Detached and
+        // best-effort, so it never delays or affects the pipeline.
+        crate::sound::play_completion();
+
         Ok(())
     }
 
