@@ -46,7 +46,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost blob:; connect-src 'self' https://*.opentypeless.com https://accounts.google.com https://github.com",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; media-src 'self' asset: http://asset.localhost blob: http://127.0.0.1:*; connect-src 'self' https://*.opentypeless.com https://accounts.google.com https://github.com",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/recordings/*", "$APPDATA/recordings/**"]

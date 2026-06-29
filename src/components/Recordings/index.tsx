@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { Search, RefreshCw, Trash2, Loader2 } from 'lucide-react'
@@ -6,7 +6,7 @@ import { spring } from '../../lib/animations'
 import type { RecordingEntry } from '../../stores/appStore'
 import {
   getRecordings,
-  readRecordingBytes,
+  getRecordingsServerPort,
   retranscribeRecording,
   deleteRecording,
 } from '../../lib/tauri'
@@ -15,27 +15,17 @@ import { RecordingPlayer } from './RecordingPlayer'
 
 const PAGE_SIZE = 200
 
-/** Map a saved-file format to the MIME type for blob playback. */
-function mimeForFormat(format: string | null | undefined): string {
-  switch ((format || '').toLowerCase()) {
-    case 'wav':
-      return 'audio/wav'
-    case 'flac':
-      return 'audio/flac'
-    default:
-      return 'audio/mpeg' // mp3
-  }
+/** Last path segment of a stored recording file path. */
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() || ''
 }
 
 export function Recordings() {
   const { t } = useTranslation()
   const [recordings, setRecordings] = useState<RecordingEntry[]>([])
-  const [audioSrc, setAudioSrc] = useState<Record<number, string>>({})
+  const [serverPort, setServerPort] = useState<number | null>(null)
   const [retranscribingId, setRetranscribingId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
-
-  // Blob URLs created per recording, so we can revoke them on unmount/delete.
-  const blobUrls = useRef<Map<number, string>>(new Map())
 
   // Load recordings on mount (Recordings are fetched here, not preloaded in App)
   useEffect(() => {
@@ -45,40 +35,20 @@ export function Recordings() {
         console.error('Failed to load recordings:', e)
         toast.error(t('recordings.failedToLoad'))
       })
+    getRecordingsServerPort()
+      .then(setServerPort)
+      .catch((e) => console.error('Failed to get recordings server port:', e))
   }, [t])
 
-  // Resolve audio lazily per row, on first play (see RecordingPlayer's
-  // onRequestLoad). WebKitGTK's <audio> only accepts http/file/blob sources —
-  // it rejects Tauri's asset:// scheme as a media source (err 4) — so we fetch
-  // the bytes over IPC and play from a blob: URL (allowed by the CSP). Lazy
-  // loading keeps us from mounting ~100 media pipelines at once.
-  const loadAudio = useCallback(
-    (entry: RecordingEntry) => {
-      if (blobUrls.current.has(entry.id)) return
-      blobUrls.current.set(entry.id, '') // reserve so concurrent calls dedupe
-      readRecordingBytes(entry.id)
-        .then((buf) => {
-          const url = URL.createObjectURL(new Blob([buf], { type: mimeForFormat(entry.format) }))
-          blobUrls.current.set(entry.id, url)
-          setAudioSrc((prev) => ({ ...prev, [entry.id]: url }))
-        })
-        .catch((e) => {
-          blobUrls.current.delete(entry.id)
-          console.error('Failed to load recording audio:', e)
-          toast.error(t('recordings.failedToLoadAudio'))
-        })
-    },
-    [t],
+  // Build the playback URL. WebKitGTK on Linux can't play asset:// or blob:
+  // media (err 4), but plays http:// fine, so recordings are streamed from a
+  // localhost server (see recordings_server.rs). preload="none" on the element
+  // means no pipeline opens until the user actually presses play.
+  const srcFor = useCallback(
+    (entry: RecordingEntry): string | undefined =>
+      serverPort ? `http://127.0.0.1:${serverPort}/${basename(entry.recording_file)}` : undefined,
+    [serverPort],
   )
-
-  // Revoke all blob URLs when the screen unmounts.
-  useEffect(() => {
-    const urls = blobUrls.current
-    return () => {
-      for (const url of urls.values()) if (url) URL.revokeObjectURL(url)
-      urls.clear()
-    }
-  }, [])
 
   const filtered = useMemo(
     () =>
@@ -127,14 +97,6 @@ export function Recordings() {
     if (!window.confirm(t('recordings.deleteConfirm'))) return
     try {
       await deleteRecording(id)
-      const url = blobUrls.current.get(id)
-      if (url) URL.revokeObjectURL(url)
-      blobUrls.current.delete(id)
-      setAudioSrc((prev) => {
-        const next = { ...prev }
-        delete next[id]
-        return next
-      })
       setRecordings((prev) => prev.filter((r) => r.id !== id))
     } catch (e) {
       console.error('Failed to delete recording:', e)
@@ -253,11 +215,7 @@ export function Recordings() {
                           {t('recordings.retranscribing')}
                         </p>
                       )}
-                      <RecordingPlayer
-                        src={audioSrc[entry.id]}
-                        durationMs={entry.duration_ms}
-                        onRequestLoad={() => loadAudio(entry)}
-                      />
+                      <RecordingPlayer src={srcFor(entry)} durationMs={entry.duration_ms} />
                     </motion.div>
                   ))}
                 </div>

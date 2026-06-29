@@ -34,6 +34,10 @@ cpal = "0.15"
 # Plays the short completion chime. Built on cpal 0.15 (same as above); WAV
 # decoding only to keep the dependency lean.
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
+# Tiny localhost HTTP server for recording playback. WebKitGTK on Linux can't
+# play asset:// or blob: media (GStreamer has no handler for them), but plays
+# http:// fine — so we serve saved recordings over 127.0.0.1.
+tiny_http = "0.12"
 enigo = "0.2"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }

@@ -10,28 +10,24 @@ function fmtTime(s: number): string {
 }
 
 interface RecordingPlayerProps {
-  /** Blob URL for the audio, or undefined until it has been lazily loaded. */
+  /** Playback URL (localhost http stream), or undefined until the server port
+   *  is known. */
   src: string | undefined
   /** Known duration from the backend (ms). Authoritative when the raw MP3
    *  stream carries no duration header and the media element reports Infinity. */
   durationMs: number | null | undefined
-  /** Request the parent to load this recording's audio (first play). */
-  onRequestLoad: () => void
 }
 
 /**
  * Compact, on-brand audio player for a saved recording.
  *
- * Raw MP3 streams (no Xing/LAME header) make WebKitGTK report `Infinity`
- * duration and break the native seekbar. We rely on the backend-stored
- * `durationMs` for the timeline, and force a one-time end-seek so the element
- * establishes a real, seekable duration before the user scrubs.
+ * Audio is streamed from a localhost http server (WebKitGTK on Linux can't play
+ * asset://blob media). preload="none" means no media pipeline opens until the
+ * user presses play. Raw MP3 streams carry no duration header, so we rely on the
+ * backend-stored `durationMs` for the timeline.
  */
-export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPlayerProps) {
+export function RecordingPlayer({ src, durationMs }: RecordingPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
-  // Set when the user pressed play before the audio was loaded; once `src`
-  // arrives we auto-start playback.
-  const pendingPlay = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [current, setCurrent] = useState(0)
   const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
@@ -40,14 +36,6 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
   useEffect(() => {
     if (durationMs) setDuration((d) => (d > 0 ? d : durationMs / 1000))
   }, [durationMs])
-
-  // When audio finishes lazy-loading after a play press, start it.
-  useEffect(() => {
-    if (src && pendingPlay.current) {
-      pendingPlay.current = false
-      audioRef.current?.play().catch((e) => console.error('Audio play failed:', e))
-    }
-  }, [src])
 
   const handleLoadedMetadata = useCallback(() => {
     const a = audioRef.current
@@ -63,17 +51,11 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
   }, [])
 
   const togglePlay = useCallback(() => {
-    // Not loaded yet: request the bytes and remember to play once they arrive.
-    if (!src) {
-      pendingPlay.current = true
-      onRequestLoad()
-      return
-    }
     const a = audioRef.current
-    if (!a) return
+    if (!a || !src) return
     if (a.paused) a.play().catch((e) => console.error('Audio play failed:', e))
     else a.pause()
-  }, [src, onRequestLoad])
+  }, [src])
 
   const handleSeek = useCallback((value: number) => {
     const a = audioRef.current
@@ -90,7 +72,7 @@ export function RecordingPlayer({ src, durationMs, onRequestLoad }: RecordingPla
       <audio
         ref={audioRef}
         src={src}
-        preload="metadata"
+        preload="none"
         onError={() => {
           const code = audioRef.current?.error?.code ?? -1
           setErrorCode(code)

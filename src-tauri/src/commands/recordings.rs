@@ -54,6 +54,15 @@ pub async fn get_recordings(
     Ok(rows.into_iter().map(RecordingEntry::from_history).collect())
 }
 
+/// Port of the localhost server that streams recordings for in-app playback.
+/// The frontend builds `http://127.0.0.1:<port>/<filename>` audio URLs from it.
+#[tauri::command]
+pub fn get_recordings_server_port(
+    port: tauri::State<'_, crate::RecordingsServerPort>,
+) -> u16 {
+    port.0
+}
+
 /// Return the absolute path to a recording's audio file.
 #[tauri::command]
 pub async fn get_recording_path(

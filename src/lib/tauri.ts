@@ -111,6 +111,11 @@ export async function getRecordings(limit: number, offset: number): Promise<Reco
   return invoke('get_recordings', { limit, offset })
 }
 
+/** Port of the localhost server that streams recordings for playback. */
+export async function getRecordingsServerPort(): Promise<number> {
+  return invoke('get_recordings_server_port')
+}
+
 export async function getRecordingPath(id: number): Promise<string> {
   return invoke('get_recording_path', { id })
 }

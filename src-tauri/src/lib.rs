@@ -8,6 +8,7 @@ mod linux_x11;
 pub mod llm;
 pub mod output;
 pub mod pipeline;
+pub mod recordings_server;
 pub mod sound;
 pub mod storage;
 pub mod stt;
@@ -43,6 +44,9 @@ pub struct CloseToTrayCache(pub Arc<Mutex<bool>>);
 /// Session token for cloud providers. Set by the frontend after Better Auth login.
 /// The Rust pipeline reads this when creating cloud STT/LLM providers.
 pub struct SessionTokenStore(pub Arc<Mutex<String>>);
+
+/// Port of the localhost recordings playback server (0 if it failed to start).
+pub struct RecordingsServerPort(pub u16);
 
 /// Persisted window position and size.
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -169,6 +173,22 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("opentypeless.db");
+
+            // Localhost server for recording playback (WebKitGTK can't play
+            // asset://blob media on Linux — see recordings_server). The port is
+            // exposed to the frontend via get_recordings_server_port.
+            let recordings_dir = data_dir.join("recordings");
+            std::fs::create_dir_all(&recordings_dir)?;
+            match recordings_server::spawn(recordings_dir) {
+                Ok(port) => {
+                    tracing::info!("Recordings server listening on 127.0.0.1:{port}");
+                    app.manage(RecordingsServerPort(port));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to start recordings server: {e}");
+                    app.manage(RecordingsServerPort(0));
+                }
+            }
 
             // Initialize stores
             let config_manager = storage::ConfigManager::new(app_handle.clone());
@@ -463,6 +483,7 @@ pub fn run() {
             commands::history::get_history_count,
             commands::history::clear_history,
             commands::recordings::get_recordings,
+            commands::recordings::get_recordings_server_port,
             commands::recordings::get_recording_path,
             commands::recordings::read_recording_bytes,
             commands::recordings::retranscribe_recording,
