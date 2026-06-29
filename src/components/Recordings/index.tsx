@@ -6,15 +6,26 @@ import { spring } from '../../lib/animations'
 import type { RecordingEntry } from '../../stores/appStore'
 import {
   getRecordings,
-  getRecordingPath,
+  readRecordingBytes,
   retranscribeRecording,
   deleteRecording,
 } from '../../lib/tauri'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { toast } from '../Toast'
 import { RecordingPlayer } from './RecordingPlayer'
 
 const PAGE_SIZE = 200
+
+/** Map a saved-file format to the MIME type for blob playback. */
+function mimeForFormat(format: string | null | undefined): string {
+  switch ((format || '').toLowerCase()) {
+    case 'wav':
+      return 'audio/wav'
+    case 'flac':
+      return 'audio/flac'
+    default:
+      return 'audio/mpeg' // mp3
+  }
+}
 
 export function Recordings() {
   const { t } = useTranslation()
@@ -23,8 +34,8 @@ export function Recordings() {
   const [retranscribingId, setRetranscribingId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
 
-  // Track which recordings have had their audio source resolved (lazy load).
-  const loadedIds = useRef<Set<number>>(new Set())
+  // Blob URLs created per recording, so we can revoke them on unmount/delete.
+  const blobUrls = useRef<Map<number, string>>(new Map())
 
   // Load recordings on mount (Recordings are fetched here, not preloaded in App)
   useEffect(() => {
@@ -37,27 +48,37 @@ export function Recordings() {
   }, [t])
 
   // Resolve audio lazily per row, on first play (see RecordingPlayer's
-  // onRequestLoad). We serve the file through Tauri's asset protocol
-  // (convertFileSrc → http://asset.localhost/...), which supports HTTP range
-  // requests so WebKitGTK's media backend can actually play it. Blob URLs load
-  // but stall (the element reports "playing" while the pipeline never advances),
-  // and eagerly resolving every row mounted ~100 media pipelines at once.
+  // onRequestLoad). WebKitGTK's <audio> only accepts http/file/blob sources —
+  // it rejects Tauri's asset:// scheme as a media source (err 4) — so we fetch
+  // the bytes over IPC and play from a blob: URL (allowed by the CSP). Lazy
+  // loading keeps us from mounting ~100 media pipelines at once.
   const loadAudio = useCallback(
     (entry: RecordingEntry) => {
-      if (loadedIds.current.has(entry.id)) return
-      loadedIds.current.add(entry.id)
-      getRecordingPath(entry.id)
-        .then((path) => {
-          setAudioSrc((prev) => ({ ...prev, [entry.id]: convertFileSrc(path) }))
+      if (blobUrls.current.has(entry.id)) return
+      blobUrls.current.set(entry.id, '') // reserve so concurrent calls dedupe
+      readRecordingBytes(entry.id)
+        .then((buf) => {
+          const url = URL.createObjectURL(new Blob([buf], { type: mimeForFormat(entry.format) }))
+          blobUrls.current.set(entry.id, url)
+          setAudioSrc((prev) => ({ ...prev, [entry.id]: url }))
         })
         .catch((e) => {
-          loadedIds.current.delete(entry.id)
+          blobUrls.current.delete(entry.id)
           console.error('Failed to load recording audio:', e)
           toast.error(t('recordings.failedToLoadAudio'))
         })
     },
     [t],
   )
+
+  // Revoke all blob URLs when the screen unmounts.
+  useEffect(() => {
+    const urls = blobUrls.current
+    return () => {
+      for (const url of urls.values()) if (url) URL.revokeObjectURL(url)
+      urls.clear()
+    }
+  }, [])
 
   const filtered = useMemo(
     () =>
@@ -106,7 +127,9 @@ export function Recordings() {
     if (!window.confirm(t('recordings.deleteConfirm'))) return
     try {
       await deleteRecording(id)
-      loadedIds.current.delete(id)
+      const url = blobUrls.current.get(id)
+      if (url) URL.revokeObjectURL(url)
+      blobUrls.current.delete(id)
       setAudioSrc((prev) => {
         const next = { ...prev }
         delete next[id]
