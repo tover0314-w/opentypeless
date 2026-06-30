@@ -93,6 +93,13 @@
       "minimumSystemVersion": "10.15",
       "entitlements": "./Entitlements.plist",
       "infoPlist": "./Info.plist"
+    },
+    "linux": {
+      "appimage": {
+        "files": {
+          "icons/icon.png": ".DirIcon"
+        }
+      }
     }
   }
 }
