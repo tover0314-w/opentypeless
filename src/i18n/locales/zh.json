@@ -37,7 +37,7 @@
     "stt_failed": "语音识别失败。{{details}}",
     "stt_quota_exceeded": "云端语音识别额度已用完。请升级到 Pro 或切换到 BYOK 模式。",
     "stt_no_speech_detected": "未检测到语音，请重试。",
-    "output_fallback_clipboard": "文本输出失败，结果已改为复制到剪贴板。{{details}}",
+    "output_fallback_clipboard": "已复制到剪贴板，可手动粘贴。{{details}}",
     "output_wayland_unsupported": "Wayland 暂不支持键盘输出，结果已改为复制到剪贴板。",
     "llm_failed": "AI 润色失败，已改为输出原始文本。{{details}}",
     "llm_quota_exceeded": "云端 AI 额度已用完。请升级到 Pro 或切换到 BYOK 模式。",

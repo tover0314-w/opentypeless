@@ -56,13 +56,19 @@ impl TextOutput for ClipboardOutput {
                         "-e",
                         r#"tell application "System Events" to keystroke "v" using command down"#,
                     ])
-                    .status()
-                    .map_err(|e| AppError::Output(format!("osascript error: {}", e)))?;
-                if !status.success() {
-                    return Err(AppError::Output(format!(
-                        "osascript paste failed with exit code: {:?}",
-                        status.code()
-                    )));
+                    .status();
+
+                match status {
+                    Ok(status) if status.success() => {}
+                    Ok(status) => {
+                        tracing::warn!(
+                            "Auto-paste failed with exit code {:?}; text remains copied",
+                            status.code()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("Auto-paste failed: {}; text remains copied", e);
+                    }
                 }
             }
 
