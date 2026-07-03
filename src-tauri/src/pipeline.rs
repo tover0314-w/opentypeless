@@ -121,7 +121,7 @@ const CLIPBOARD_COPY_SETTLE_MS: u64 = 100;
 /// Interval for polling audio volume during recording.
 const VOLUME_POLL_INTERVAL_MS: u64 = 50;
 /// Timeout for STT finalization after recording stops.
-const STT_FINALIZE_TIMEOUT_SECS: u64 = 120;
+const STT_FINALIZE_TIMEOUT_SECS: u64 = 420;
 
 fn generate_cloud_operation_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -827,7 +827,20 @@ impl PipelineHandle {
                     chunk = audio_rx.recv() => {
                         match chunk {
                             Some(data) => {
-                                let _ = provider.send_audio(&data).await;
+                                if let Err(e) = provider.send_audio(&data).await {
+                                    tracing::error!("STT send audio error: {}", e);
+                                    if should_finalize_stt_task(
+                                        abort_flag_ref.as_ref(),
+                                        active_session_id_ref.as_ref(),
+                                        stt_control.id,
+                                    ) {
+                                        let user_error = e.to_user_error();
+                                        *stt_error_ref.lock().unwrap_or_else(|e| e.into_inner()) =
+                                            Some((stt_control.id, user_error.clone()));
+                                        let _ = app_handle.emit("pipeline:error", user_error);
+                                    }
+                                    break;
+                                }
                             }
                             None => {
                                 // Audio channel closed — disconnect and capture final transcript
@@ -1358,13 +1371,18 @@ impl PipelineHandle {
             OutputMode::Clipboard
         };
 
-        if mode == OutputMode::Keyboard && !is_accessibility_trusted() {
-            anyhow::bail!("ACCESSIBILITY_REQUIRED");
-        }
-
         // Linux: check keyboard availability before attempting
         let effective_mode = if mode == OutputMode::Keyboard {
-            if let Err(reason) = output::keyboard::check_keyboard_available() {
+            if !is_accessibility_trusted() {
+                tracing::warn!("Accessibility permission missing, falling back to clipboard");
+                let ue = crate::error::UserError {
+                    code: "output_fallback_clipboard".to_string(),
+                    details: None,
+                    retry_count: 0,
+                };
+                let _ = self.app_handle.emit("pipeline:warning", &ue);
+                OutputMode::Clipboard
+            } else if let Err(reason) = output::keyboard::check_keyboard_available() {
                 if reason == "wayland_unsupported" {
                     tracing::warn!(
                         "Keyboard output not supported on Wayland, falling back to clipboard"

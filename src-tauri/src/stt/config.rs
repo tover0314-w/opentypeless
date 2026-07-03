@@ -19,6 +19,7 @@ pub struct SttProviderConfig {
     pub endpoint: &'static str,
     pub model: &'static str,
     pub extra_fields: &'static [(&'static str, &'static str)],
+    pub max_request_duration_secs: Option<f64>,
 }
 
 /// Returns the endpoint, model name, and any extra form fields for a given
@@ -29,21 +30,25 @@ pub fn get_whisper_config(provider: &str) -> Option<SttProviderConfig> {
             endpoint: "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions",
             model: "glm-asr-2512",
             extra_fields: &[("stream", "false")],
+            max_request_duration_secs: Some(super::whisper_compat::GLM_ASR_SAFE_CHUNK_SECS),
         }),
         "openai-whisper" => Some(SttProviderConfig {
             endpoint: "https://api.openai.com/v1/audio/transcriptions",
             model: "whisper-1",
             extra_fields: &[],
+            max_request_duration_secs: None,
         }),
         "groq-whisper" => Some(SttProviderConfig {
             endpoint: "https://api.groq.com/openai/v1/audio/transcriptions",
             model: "whisper-large-v3-turbo",
             extra_fields: &[],
+            max_request_duration_secs: None,
         }),
         "siliconflow" => Some(SttProviderConfig {
             endpoint: "https://api.siliconflow.cn/v1/audio/transcriptions",
             model: "FunAudioLLM/SenseVoiceSmall",
             extra_fields: &[],
+            max_request_duration_secs: None,
         }),
         _ => None,
     }
@@ -83,6 +88,7 @@ pub fn build_custom_whisper_config(
         model: model.to_string(),
         extra_fields: vec![],
         api_key_required: false,
+        max_request_duration_secs: None,
     })
 }
 
@@ -98,6 +104,7 @@ pub fn build_known_whisper_config(provider: &str) -> Option<WhisperCompatConfig>
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         api_key_required: true,
+        max_request_duration_secs: cfg.max_request_duration_secs,
     })
 }
 
