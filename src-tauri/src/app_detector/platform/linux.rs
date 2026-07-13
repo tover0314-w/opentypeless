@@ -50,9 +50,7 @@ impl ContextSignalSource for LinuxContextSource {
                 path.file_name()
                     .map(|value| value.to_string_lossy().to_string())
             });
-        let is_supported_browser = process_alias
-            .as_deref()
-            .is_some_and(|name| is_supported_browser(name));
+        let is_supported_browser = process_alias.as_deref().is_some_and(is_supported_browser);
 
         Some(ContextSignals {
             process_id: Some(process_id),

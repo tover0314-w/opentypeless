@@ -82,9 +82,7 @@ unsafe fn collect_foreground_context() -> Option<ContextSignals> {
     let mut process_id = 0u32;
     windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, &mut process_id);
     let process_alias = process_name(process_id);
-    let supported_browser = process_alias
-        .as_deref()
-        .is_some_and(|name| is_supported_browser(name));
+    let supported_browser = process_alias.as_deref().is_some_and(is_supported_browser);
 
     Some(ContextSignals {
         process_id: (process_id != 0).then_some(process_id),
