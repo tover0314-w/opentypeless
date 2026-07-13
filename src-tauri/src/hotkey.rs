@@ -1334,22 +1334,19 @@ mod tests {
 
         #[cfg(target_os = "windows")]
         {
-            assert!(plan.native.iter().any(|entry| {
-                entry.role == HotkeyRole::Dictation
-                    && entry.trigger == crate::native_hotkey::NativeHotkeyTrigger::RightAlt
-            }));
-            assert!(plan.native.iter().any(|entry| {
-                entry.role == HotkeyRole::Ask
-                    && entry.trigger == crate::native_hotkey::NativeHotkeyTrigger::RightAltSpace
-            }));
-            assert!(plan.native.iter().any(|entry| {
-                entry.role == HotkeyRole::TranslateSelection
-                    && entry.trigger == crate::native_hotkey::NativeHotkeyTrigger::RightAltLeftShift
-            }));
-            assert!(!plan
+            assert!(plan
                 .global
                 .iter()
                 .any(|entry| entry.role == HotkeyRole::Dictation));
+            assert!(plan
+                .global
+                .iter()
+                .any(|entry| entry.role == HotkeyRole::Ask));
+            assert!(plan
+                .global
+                .iter()
+                .any(|entry| entry.role == HotkeyRole::TranslateSelection));
+            assert!(plan.native.is_empty());
         }
 
         #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]

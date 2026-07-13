@@ -62,8 +62,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libxdo-dev
 
       - run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml
 
   audit:
     runs-on: ubuntu-latest
