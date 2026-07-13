@@ -1261,7 +1261,7 @@ mod tests {
             dictation_mode: "toggle".to_string(),
         };
 
-        let plan = hotkey_registration_plan_from_config(&config).unwrap();
+        let plan = hotkey_registration_plan_from_config_for_platform(&config, "macos").unwrap();
 
         assert!(plan.global.is_empty());
         assert!(plan.native.iter().any(|entry| {
@@ -1302,7 +1302,7 @@ mod tests {
         };
 
         assert_eq!(
-            hotkey_registration_plan_from_config(&config).unwrap_err(),
+            hotkey_registration_plan_from_config_for_platform(&config, "macos").unwrap_err(),
             HotkeyPairError::ConflictingHotkeys
         );
     }

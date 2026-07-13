@@ -630,7 +630,7 @@ fn config_requires_accessibility_permission(
 
 fn config_uses_macos_native_hotkey(config: &storage::AppConfig) -> bool {
     let hotkeys = effective_hotkey_config(config);
-    crate::hotkey::hotkey_registration_plan_from_config(&hotkeys)
+    crate::hotkey::hotkey_registration_plan_from_config_for_platform(&hotkeys, "macos")
         .map(|plan| {
             plan.native.iter().any(|registered| {
                 registered.trigger == crate::native_hotkey::NativeHotkeyTrigger::Fn
@@ -1111,6 +1111,7 @@ mod tests {
         let config = storage::AppConfig {
             hotkey: "Ctrl+/".to_string(),
             ask_hotkey: "Ctrl+.".to_string(),
+            hotkeys: storage::HotkeyConfig::from_legacy("Ctrl+/", "Ctrl+.", "hold"),
             ..storage::AppConfig::default()
         };
 
