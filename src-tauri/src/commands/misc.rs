@@ -1147,6 +1147,7 @@ mod tests {
         let config = storage::AppConfig {
             hotkey: "Ctrl+/".to_string(),
             ask_hotkey: "Ctrl+.".to_string(),
+            hotkeys: storage::HotkeyConfig::from_legacy("Ctrl+/", "Ctrl+.", "hold"),
             ..storage::AppConfig::default()
         };
         let caps = platform::PlatformCapabilities {
