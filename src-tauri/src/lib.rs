@@ -731,7 +731,40 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == "toggle") {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(state) = app_handle.try_state::<pipeline::PipelineHandle>() {
+                        if matches!(state.current_state(), pipeline::PipelineState::Idle) {
+                            let _ = state.start().await;
+                        } else {
+                            let _ = state.stop().await;
+                        }
+                    }
+                });
+                return;
+            }
+            if args.iter().any(|arg| arg == "ask") {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager;
+                    let ask_state = app_handle.state::<commands::ask::AskDictationState>();
+                    let config_state = app_handle.state::<storage::ConfigManager>();
+                    let token_store = app_handle.state::<SessionTokenStore>();
+                    let client = app_handle.state::<reqwest::Client>();
+                    let _ = commands::ask::start_ask_flow(
+                        app_handle.clone(),
+                        ask_state,
+                        config_state,
+                        token_store,
+                        client,
+                    )
+                    .await;
+                });
+                return;
+            }
+
             // Deep-link URL forwarding is handled automatically by the
             // "deep-link" feature of single-instance plugin.
             // Just focus the main window so the user sees the result.
