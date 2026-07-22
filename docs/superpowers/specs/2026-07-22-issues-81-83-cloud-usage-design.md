@@ -17,8 +17,9 @@ The approved direction is:
 
 - start microphone capture and STT connection concurrently, and do not report recording readiness before the platform audio stream is actually running;
 - replace the global 30-second rule with a Rust-owned provider capability resolver and an `Auto (recommended)` or custom user setting;
-- make the TalkMore Cloud product limit 10 minutes for the current PCM/WAV upload path;
+- make the TalkMore Cloud product limit 10 minutes through a hybrid managed-upload path: preserve WAV for short recordings and use bounded Ogg/Opus for long recordings;
 - replace fixed subscription polling with a persisted local account snapshot, server-returned usage snapshots, and refreshes only at meaningful product events;
+- hide Neon scale-to-zero wake-up latency behind active Cloud recording time instead of keeping Neon awake while the desktop is idle;
 - preserve Neon as the billing source of truth and make quota mutations atomic and idempotent without adding Redis;
 - deploy server changes before desktop changes and retain backward-compatible response fields for existing clients;
 - require Windows, macOS, and Linux runtime verification before closing the issues.
@@ -78,10 +79,11 @@ No audio payload is stored in Neon. The dominant optimization target is compute 
 1. Capture the first spoken audio once the user starts recording, including on a cold first use.
 2. Make the displayed and enforced recording limit match the selected STT provider and current transport.
 3. Give users a visible `Auto (recommended)` choice and safe custom duration choices.
-4. Keep TalkMore Cloud recordings at or below 10 minutes for the current WAV path.
+4. Keep TalkMore Cloud recordings at or below 10 minutes while preserving the current WAV path for ordinary short recordings.
 5. Stop gracefully at a limit and submit the recorded audio instead of discarding it.
 6. Use the same behavior for hold-to-talk, toggle recording, dictation, and Ask recording.
 7. Make limit enforcement independent of WebView visibility and timer throttling.
+8. Make a 10-minute managed upload fit below the deployed Vercel Function request-body limit without temporary object storage.
 
 ### 3.2 Cloud and Cost Goals
 
@@ -92,6 +94,7 @@ No audio payload is stored in Neon. The dominant optimization target is compute 
 5. Reduce business-data work for `/api/subscription/status` to one read-only database round trip after authentication.
 6. Reduce each quota state transition to one atomic business-data statement or transaction round trip.
 7. Avoid Redis, personalized CDN caching, and cron jobs that wake Neon while idle.
+8. Wake Neon only for real account activity or an in-progress managed-cloud operation, and overlap that wake-up with time the user is already speaking.
 
 ### 3.3 User-Experience Goals
 
@@ -101,10 +104,12 @@ No audio payload is stored in Neon. The dominant optimization target is compute 
 4. Reflect purchases and license activations promptly, including when the payment webhook is delayed.
 5. Avoid duplicate warnings or inconsistent quota displays across main, capsule, and Ask windows.
 6. Keep current clients compatible throughout the rollout.
+7. Do not regress common short-recording stop-to-transcript latency, transcription quality, capture reliability, or battery/CPU behavior.
 
 ## 4. Non-Goals
 
-- Do not add FLAC encoding, audio chunking, resumable uploads, or recordings longer than the approved provider/product caps in this work.
+- Do not add FLAC encoding, audio chunking, resumable uploads, temporary object-storage handoffs, or recordings longer than the approved provider/product caps in this work.
+- Do not transcode BYOK or direct provider uploads in this work. Ogg/Opus is limited to the TalkMore managed-cloud transport.
 - Do not store audio or transcripts in Neon as part of usage accounting.
 - Do not introduce Redis, a WebSocket entitlement service, or a new always-on worker.
 - Do not change plan prices, monthly quota amounts, AppSumo tiers, or the definition of billable words.
@@ -136,7 +141,7 @@ Custom choices include applicable values from 30 seconds, 1 minute, 2 minutes, 5
 |---|---:|---:|---|
 | GLM-ASR file upload | 30 s | 30 s | Provider duration limit |
 | Apple Speech local buffered recognition | 60 s | 60 s | Apple one-minute recognition guidance |
-| TalkMore Cloud managed upload | 600 s | 600 s | Managed product policy and server enforcement |
+| TalkMore Cloud managed upload | 600 s | 600 s | Managed product policy plus the server-advertised hybrid WAV/Ogg transport |
 | Groq upload | 600 s | 720 s | Current 24 MiB client buffer and Groq upload size |
 | OpenAI-compatible upload | 600 s | 720 s | Current 24 MiB client buffer |
 | SiliconFlow upload | 600 s | 720 s | Current 24 MiB client buffer is lower than provider limit |
@@ -157,9 +162,9 @@ Relevant provider references at design time:
 - SiliconFlow transcription: <https://docs.siliconflow.cn/cn/api-reference/audio/create-audio-transcriptions>
 - Volcengine streaming ASR: <https://www.volcengine.com/docs/6348/1807452?lang=zh>
 
-### 5.3 Encoding Boundary
+### 5.3 Managed-Cloud Encoding Boundary
 
-This release keeps 16 kHz, 16-bit, mono PCM/WAV for file and managed-cloud uploads.
+Direct/BYOK file-upload providers continue to use the current 16 kHz, 16-bit, mono PCM/WAV path. TalkMore Cloud uses a hybrid transport because the deployed Next.js API runs as a Vercel Function, whose request body has a non-configurable 4.5 MB payload limit. The route's current 25 MiB application constant cannot expand that platform limit; oversized requests are rejected before route code runs.
 
 The approximate WAV payload size is:
 
@@ -167,11 +172,38 @@ The approximate WAV payload size is:
 bytes = seconds * 16,000 samples/s * 2 bytes/sample + 44-byte header
 ```
 
-- 600 seconds is approximately 19,200,044 bytes;
+- 600 seconds is approximately 19,200,044 bytes and cannot pass through the current Vercel route;
 - 720 seconds is approximately 23,040,044 bytes;
 - the current 24 MiB client buffer is 25,165,824 bytes.
 
-The 10-minute TalkMore cap therefore leaves safe room below the desktop buffer and current multipart limits without adding a user-visible transcoding step. The 12-minute upload-provider hard cap leaves headroom under the client buffer. Compression and chunking are explicitly deferred.
+Managed Cloud therefore selects its payload by audio-part byte size:
+
+- when the WAV audio part is at most `3,500,000` bytes, send the original WAV exactly as today;
+- above that threshold, send Ogg/Opus encoded as mono speech at constant 48 kbit/s and a 10-minute duration cap;
+- cap the encoded audio part at `4,000,000` bytes and the complete multipart request at `4,200,000` bytes, leaving explicit headroom below Vercel's 4.5 MB platform boundary;
+- a 600-second, 48 kbit/s payload is approximately 3,600,000 bytes before small Ogg overhead and remains below the encoded-file cap when constant bitrate and normal page aggregation are used;
+- never select an encoding solely from a filename or MIME string; the server validates the container and duration.
+
+This is deliberately not “compress everything.” Common short recordings retain WAV's current latency and lossless signal. Only recordings that cannot safely traverse the managed route as WAV use Opus. Groq accepts Ogg uploads, while direct/BYOK upload providers keep their existing path and limits.
+
+The desktop must use one pinned, bundled Opus implementation on Windows, macOS, and Linux. It must not depend on ffmpeg, GStreamer, AVFoundation, Media Foundation, or a system-installed `libopus`. The implementation plan must document the codec's license, static/bundled artifacts, supported architectures, and release packaging impact before adopting a crate.
+
+The 12-minute direct upload-provider hard cap continues to leave headroom under the existing 24 MiB PCM client buffer. Compression and chunking for those providers remain deferred.
+
+Design-time platform references:
+
+- Vercel Function request-body limit: <https://vercel.com/docs/functions/limitations>
+- Vercel large-upload guidance: <https://vercel.com/kb/guide/how-to-bypass-vercel-body-size-limit-serverless-functions>
+- Groq accepted formats and file limits: <https://console.groq.com/docs/speech-to-text>
+
+### 5.4 Managed Upload Alternatives Considered
+
+The selected hybrid path is preferred over the following alternatives:
+
+- **Compress every managed recording:** simpler selection logic, but it spends CPU and introduces lossy input on the short recordings that dominate usage even though they already fit. This conflicts with the no-regression goal.
+- **Upload WAV to temporary object storage and pass Groq a signed URL:** preserves lossless audio and bypasses Vercel's body limit, but adds an upload/token/storage lifecycle, temporarily persists user audio, and can add an extra network hop. It remains a future fallback, not the primary path.
+- **Operate a dedicated media proxy outside Vercel:** preserves the current WAV client but adds always-on infrastructure, regional routing, security, observability, and operational cost disproportionate to this issue.
+- **Cap TalkMore Cloud near 109 seconds:** requires the least engineering, but does not meet the approved 10-minute managed-cloud product behavior.
 
 ## 6. Desktop Recording Architecture
 
@@ -219,7 +251,7 @@ effective maximum = min(
 )
 ```
 
-For TalkMore Cloud, the desktop has a built-in 600-second fallback and takes the lower of that fallback and the current server-advertised maximum. A missing or malformed server capability must never expand the local fallback.
+For TalkMore Cloud, the desktop has a built-in 600-second product ceiling but does not treat that ceiling as proof that the deployed server supports the version-2 transport. It takes the lower of the local policy and the negotiated server format/duration/byte policy. Missing or incompatible capability metadata resolves to the historical 30-second Cloud fallback; a server response may narrow, but never expand, the local product ceiling.
 
 ### 6.2 Config Compatibility and Migration
 
@@ -259,7 +291,7 @@ At audio-capture start, Rust snapshots:
 
 Rules:
 
-- provider/config changes do not alter an in-progress recording;
+- provider/config changes do not alter an in-progress recording; the sole exception is a newer authenticated managed-server capability that narrows transport safety, which may only shorten the active Cloud deadline;
 - a stale timer from a previous session cannot stop a newer session;
 - the deadline continues to run while the pipeline is still in `Preparing`, and an expiry during slow STT startup becomes a single deferred/graceful stop as soon as startup ownership is established;
 - reaching the deadline performs the same graceful stop/finalization path as a manual stop;
@@ -275,31 +307,89 @@ User notifications:
 - on automatic stop, identify the source, for example `Reached the Groq recording limit (10 minutes)` or `GLM-ASR supports recordings up to 30 seconds`;
 - automatic stop is not presented as an error when finalization succeeds.
 
-### 6.4 Managed-Cloud Server Validation
+### 6.4 Managed-Cloud Payload Builder
 
-TalkMore must not trust the desktop timer or `Content-Length` alone.
+Only `CloudSttProvider` creates the additional Ogg payload. The provider continues to retain the 16 kHz mono PCM needed by the current pipeline and feeds a dedicated encoder worker from the same ordered chunks. Encoding must never run in the CPAL callback, on the WebView thread, or as blocking work on a Tauri async executor thread.
+
+The encoder uses 20 ms frames, a constant 48 kbit/s mono speech profile, and an in-memory Ogg container. The muxer aggregates packets into normal Ogg pages instead of flushing one page per 20 ms packet, because per-packet page overhead would consume the Vercel safety margin. The queue between the provider and encoder is bounded. Each recording owns its encoder, payload state, sample count, and cancellation token; no process-global encoder or cross-recording buffer is allowed.
+
+At stop:
+
+1. derive duration from the captured sample count, not wall-clock time or compressed bytes;
+2. if the generated WAV audio part is at most `3,500,000` bytes, discard the unused encoded payload and send WAV;
+3. otherwise finalize Ogg/Opus and verify both the encoded-file cap and the managed 600-second cap before creating multipart data;
+4. select an adaptive request timeout from payload bytes and duration, without changing the current 60-second timeout for recordings of 60 seconds or less;
+5. clear both PCM and encoded buffers after success, terminal error, or cancellation.
+
+The long-request timeout is:
+
+```text
+timeoutSeconds = if durationSeconds <= 60 {
+  60
+} else {
+  clamp(60 + ceil(payloadBytes / 32,000), 60, 180)
+}
+```
+
+This gives a 3.6 MB payload approximately 173 seconds on a very slow 256 kbit/s uplink while preserving the current 60-second behavior for ordinary short uploads. The TalkMore route must have at least 210 seconds of deployed function duration, leaving server cleanup/response headroom beyond the 180-second client cap. Capability version 2 must not be advertised if the deployed environment cannot sustain that duration. Connect/TLS failures remain independently bounded and retry policy remains idempotent through the existing operation/stage key.
+
+Failure rules:
+
+- encoder initialization failure does not prevent recording; it immediately lowers that session's effective Cloud deadline to the 109-second WAV-safe duration and explains that the extended Cloud format is unavailable;
+- an encoder queue overflow or mid-recording error is recorded as an encoder failure, never as a silently dropped audio frame;
+- below the WAV threshold, an encoder failure still submits WAV normally;
+- above the WAV threshold, the provider may perform one bounded re-encode from retained PCM on the dedicated worker; if that also fails, it returns a stable retryable `managed_audio_encode_failed` error and must not send an oversized WAV;
+- an unexpectedly early encoded-byte cap performs one graceful automatic stop and submits the valid encoded prefix; it does not produce a Vercel 413 or discard the entire session;
+- an automatic stop caused by local transport safety is distinguished from the provider's duration limit in both logs and user copy.
+
+The encoder path is release-blocked unless it can process continuously without causing the existing CPAL `try_send` path to drop chunks on representative low-end Windows, macOS, and Linux devices.
+
+### 6.5 Managed-Cloud Server Validation
+
+TalkMore must not trust the desktop timer, filename, MIME type, or `Content-Length` alone.
 
 `/api/proxy/stt` must:
 
-- retain the existing multipart byte limit;
-- parse the WAV duration;
-- reject invalid or unsupported audio encoding;
-- reject actual duration above 600 seconds with a stable `audio_duration_exceeded` error;
-- include `maxRecordingSeconds: 600` in the error metadata;
-- perform duration validation before reserving quota or calling Groq.
+- replace the misleading 25 MiB application limit with a `4,000,000`-byte audio-part cap and reject a complete request above `4,200,000` bytes when it reaches application code;
+- accept only validated 16 kHz mono PCM WAV and Ogg containing a single valid mono Opus logical stream;
+- calculate WAV duration from RIFF chunks; for Ogg/Opus, sum validated packet durations from Opus TOC data and require consistency with monotonic granule positions and pre-skip rather than trusting a client-supplied final granule alone;
+- reject zero, malformed, truncated, chained, multi-track, or unsupported audio before quota reservation or Groq;
+- reject actual duration above 600 seconds with stable code `audio_duration_exceeded` and include `maxRecordingSeconds: 600`;
+- reject an oversized audio part with stable code `audio_payload_exceeded` and include `maxUploadBytes: 4000000`;
+- forward the validated file to Groq with its real filename and content type instead of naming every payload `audio.wav`;
+- use the server-validated duration to size the initial reservation for both legacy dual-meter and cloud-word plans; the current fixed 30-second estimate is not sufficient for a long upload;
+- configure and verify a deployed function duration of at least 210 seconds and preserve idempotent reserve/release/settle behavior across timeouts and retries;
+- perform byte, container, and duration validation before reserving quota or calling Groq.
 
-The status/account snapshot advertises a static managed capability without an additional database query:
+The status/account snapshot advertises a static managed capability without an additional database query. Advertisement is controlled by a global server deployment flag so the long-format feature can be disabled without removing parser compatibility:
 
 ```json
 {
   "managedSttCapabilities": {
-    "version": 1,
+    "version": 2,
     "maxRecordingSeconds": 600,
-    "maxUploadBytes": 26214400,
-    "acceptedEncodings": ["audio/wav"]
+    "maxMultipartBytes": 4200000,
+    "formats": [
+      {
+        "mimeType": "audio/wav",
+        "maxAudioBytes": 4000000,
+        "preferredClientSwitchBytes": 3500000
+      },
+      {
+        "mimeType": "audio/ogg; codecs=opus",
+        "maxAudioBytes": 4000000,
+        "bitrateBitsPerSecond": 48000
+      }
+    ]
   }
 }
 ```
+
+The server's 4.0 MB WAV acceptance cap is intentionally wider than the new desktop's 3.5 MB switch threshold. That preserves existing two-minute WAV clients (approximately 3.84 MB) while giving new clients more multipart and container headroom before choosing Ogg.
+
+Managed capability is a negotiated protocol, not merely presentation metadata. The 600-second Cloud recommendation is enabled only when an authenticated server snapshot generated within the previous 24 hours advertises capability version 2 with a compatible Ogg/Opus policy. If the capability is absent, older than 24 hours, from a version-1 server, malformed, or narrower than the built-in policy, the desktop takes the lower safe result. With no fresh compatible capability, Cloud retains the historical 30-second fallback; it must never assume that an older deployment accepts long uploads.
+
+Once a version-2 desktop has been released, TalkMore rollback policy keeps the Ogg parser and byte-compatible request handling in place even if the global flag stops advertising the extended capability. Capability withdrawal prevents new long sessions after refresh; it is not permission to remove parsing needed by already-released or already-recording clients. A newer authenticated response may shorten an active managed session for transport safety, even though ordinary provider/config changes do not otherwise mutate an in-progress deadline. If the shortened deadline has passed, the desktop performs one graceful stop with the safest payload it can submit.
 
 ## 7. Issue #83 Recording Startup Architecture
 
@@ -367,10 +457,21 @@ Conceptual account snapshot:
     "resetAt": "2026-08-01T00:00:00.000Z"
   },
   "managedSttCapabilities": {
-    "version": 1,
+    "version": 2,
     "maxRecordingSeconds": 600,
-    "maxUploadBytes": 26214400,
-    "acceptedEncodings": ["audio/wav"]
+    "maxMultipartBytes": 4200000,
+    "formats": [
+      {
+        "mimeType": "audio/wav",
+        "maxAudioBytes": 4000000,
+        "preferredClientSwitchBytes": 3500000
+      },
+      {
+        "mimeType": "audio/ogg; codecs=opus",
+        "maxAudioBytes": 4000000,
+        "bitrateBitsPerSecond": 48000
+      }
+    ]
   },
   "generatedAt": "2026-07-22T10:00:00.000Z"
 }
@@ -416,6 +517,7 @@ Responsibilities:
 - persist only plan/quota/capability metadata, never the session token, audio, transcript, or prompt;
 - expose a local `get_account_snapshot` command;
 - perform `refresh_account_snapshot(reason)` with single-flight deduplication;
+- track successful managed-server/Neon activity for the current process without treating a persisted timestamp as proof that Neon is still awake;
 - apply newer `usageSnapshot` values received by Rust cloud providers;
 - emit one `account:snapshot-updated` event after accepting a snapshot;
 - mark a snapshot stale without clearing its last known values;
@@ -433,7 +535,8 @@ Refresh at:
 - checkout or license activation return;
 - Account/Usage page entry;
 - explicit user refresh;
-- main-window focus only when the last successful server snapshot is older than 30 minutes.
+- main-window focus only when the last successful server snapshot is older than 30 minutes;
+- the beginning of a managed Cloud recording or Ask interaction, subject to the active-intent policy below.
 
 Do not refresh on:
 
@@ -442,11 +545,30 @@ Do not refresh on:
 - every Ask-window show;
 - Capsule show/hide;
 - ordinary BYOK recording;
-- prewarm HEAD requests.
+- transport-only prewarm HEAD requests.
 
 All triggers use one coordinator so startup, focus, account-page entry, and deep links cannot produce duplicate in-flight status requests.
 
-### 9.2 Startup and Offline Behavior
+### 9.2 Managed-Cloud Intent Warming
+
+Removing five-minute polling allows Neon to suspend, which is necessary for Compute savings but can add a few hundred milliseconds to the first database-backed request after inactivity. The existing startup `HEAD /api/proxy/stt` only warms DNS/TLS/Vercel routing; the route exports no authenticated `HEAD` handler and that request does not touch Neon. It is not a database warm-up mechanism.
+
+The coordinator therefore reuses the authenticated, read-only account snapshot query as an active-intent warm-up:
+
+- when a signed-in user begins a TalkMore Cloud recording, start one background refresh if there has been no successful authenticated status or cloud-operation response in the current process during the previous four minutes;
+- never await this refresh before opening the microphone, publishing `Preparing`, or accepting audio;
+- use the normal single-flight path, so startup/session refresh and recording intent cannot duplicate the same request;
+- update the local snapshot if a newer one is returned, but do not reserve quota or create a quota row;
+- while the same Cloud recording remains active, reevaluate at four and eight minutes; issue a refresh only when the last successful managed activity is at least four minutes old;
+- cancel future active-recording warm-ups immediately when recording stops, fails, or switches away from managed Cloud;
+- when a signed-in user opens a managed Ask interaction, apply the same one-shot four-minute freshness rule; do not introduce an Ask-window interval;
+- never run this policy for BYOK, local STT, direct provider uploads, an idle Capsule, tray visibility, or an unauthenticated user.
+
+At most, a ten-minute Cloud recording generates status warm-ups near start, minute four, and minute eight, and some or all are skipped when another real cloud operation has already touched Neon. These requests are attributable to active use; an idle signed-in desktop still generates no periodic database traffic.
+
+Warm-up failure is silent outside Account/Usage: retain cached state and continue recording. The real operation remains server-authoritative and may perform the Neon wake itself. The warm-up is an overlap optimization, never an authorization dependency.
+
+### 9.3 Startup and Offline Behavior
 
 - local application data and the main shell load independently of TalkMore;
 - once user identity is known, a matching persisted account snapshot is applied immediately;
@@ -456,7 +578,7 @@ All triggers use one coordinator so startup, focus, account-page entry, and deep
 - if no matching snapshot exists, Account/Home plan-dependent sections show an account-loading placeholder and suppress plan-specific upgrade claims until the server or existing authenticated data establishes the plan;
 - BYOK features remain available regardless of snapshot freshness.
 
-### 9.3 Window Behavior
+### 9.4 Window Behavior
 
 - the main window owns threshold warning toasts;
 - Capsule and Ask receive operation errors through their existing pipeline events;
@@ -685,6 +807,7 @@ For an upgraded idle desktop:
 - before: approximately 12 status calls per hour while signed in;
 - after: zero fixed-interval calls;
 - typical day: one startup refresh plus only meaningful focus/account/purchase actions;
+- managed Cloud use may add a deduplicated status warm-up at user intent and, only for recordings longer than four minutes, at active-use boundaries;
 - real cloud operations carry usage in their existing responses and do not trigger a follow-up status call.
 
 Old clients continue their existing polling behavior. Compute savings therefore increase with desktop-version adoption. The server cannot safely suppress personalized old-client status responses without either stale authorization data or another durable cache.
@@ -693,11 +816,29 @@ Old clients continue their existing polling behavior. Compute savings therefore 
 
 - main application shell readiness does not wait for the status endpoint;
 - BYOK record start adds no TalkMore request;
+- managed Cloud record start launches any required Neon warm-up in parallel and never waits for it before audio capture;
+- managed Cloud recordings whose WAV part is at most 3.5 MB use the current WAV upload; recordings of 60 seconds or less retain the current 60-second timeout, while longer payloads use the byte-derived timeout;
+- only larger managed recordings pay Opus container finalization, and normal success must not perform full-recording transcoding after the user stops;
+- no object-storage upload/download hop is added to the primary path;
+- the atomic quota reservation completes before Groq starts; unlike the current cached-session parallel branch, correctness no longer spends upstream quota before authorization, so intent warming and the one-round-trip reserve are required to keep this serial boundary below the short-recording latency gate;
 - Cloud LLM first-token latency is not delayed by settlement work;
 - STT and Ask do not make a second status request after success;
 - returned snapshots come from quota mutation `RETURNING` data rather than an extra SELECT;
 - status business data is fetched in one read-only round trip;
 - no implementation may restore per-request explicit flushing while also claiming that an in-memory cache batches writes.
+
+Expected managed upload sizes at the current 16 kHz mono input are:
+
+| Duration | WAV | 48 kbit/s Ogg/Opus before small container overhead | Selected managed format |
+|---:|---:|---:|---|
+| 30 seconds | 0.96 MB | 0.18 MB | WAV |
+| 60 seconds | 1.92 MB | 0.36 MB | WAV |
+| About 109 seconds | 3.50 MB | 0.66 MB | WAV boundary |
+| 10 minutes | 19.20 MB | 3.60 MB | Ogg/Opus |
+
+On a controlled 2 Mbit/s uplink, transferring 3.6 MB takes approximately 14.4 seconds before protocol overhead; 19.2 MB would take approximately 76.8 seconds and would also be rejected by Vercel. The compressed long path therefore reduces rather than increases the dominant user-network component. Groq documents WAV as the lower-latency format, which is why short recordings do not switch.
+
+The intent warm-up deliberately trades a small number of real-use queries for latency. [Neon's scale-to-zero documentation](https://neon.com/docs/introduction/scale-to-zero) states that an inactive compute suspends after five minutes and reactivates within a few hundred milliseconds. A short Cloud recording normally hides that wake during speech. A ten-minute recording can issue warm-ups near start, minute four, and minute eight, keeping the database ready at stop; the five-minute post-activity suspension tail is accepted only for real Cloud use, not idle app presence.
 
 ### 14.3 Measurement
 
@@ -710,7 +851,12 @@ Capture a pre-release baseline and compare after deployment:
 - Neon suspend/resume frequency;
 - quota reserve/settle/release failure counts;
 - `usageSyncPending` count;
-- cloud STT/LLM/Ask error rate and p95 latency.
+- cloud STT/LLM/Ask error rate and p95 latency;
+- `record_stop_to_request_start_ms`, upload duration, server auth/quota duration, upstream STT duration, and `record_stop_to_transcript_ms`;
+- `record_stop_to_final_output_ms` when Cloud LLM polish follows STT;
+- warm versus cold managed request outcome, using infrastructure state only and no user content;
+- managed-intent warm-up attempted/skipped/succeeded counts by reason and recording-duration bucket;
+- managed encoder queue high-water mark, frame-processing p50/p95/p99, failure count, payload bytes, format selection, and capture dropped-chunk count.
 
 Do not log tokens, audio, transcripts, questions, selected text, or prompts. Client version, route, timing, quota model, stable result code, and anonymous operation outcome are sufficient.
 
@@ -721,9 +867,16 @@ Success indicators:
 - one business query after auth for status;
 - one business-data round trip for each quota state transition;
 - over a seven-day version-matched cohort, cloud request success rate does not fall by more than 0.5 percentage points;
+- for managed recordings of 60 seconds or less, warm and cold `record_stop_to_transcript_ms` p50 do not regress by more than the greater of 50 ms or 5%, and p95 does not regress by more than the greater of 150 ms or 10%;
 - over the same cohort, Cloud LLM first-token p95 does not regress by more than the greater of 100 ms or 10% from baseline;
+- on controlled 10 Mbit/s and 2 Mbit/s links, a 10-minute encoded upload completes the client-upload phase within 6 and 20 seconds p95 respectively;
+- a paired, private long-form speech corpus shows no more than 0.5 percentage-point aggregate WER/CER regression from WAV and no language cohort regresses by more than 1.0 percentage point;
+- a ten-minute Cloud recording has zero capture dropped chunks, encoder p99 work per 20 ms frame below 5 ms, and no more than five percentage points of average process CPU increase on the defined low-end device set;
+- incremental encoding adds no more than 8 MiB peak resident memory over the same-duration managed WAV baseline, excluding test instrumentation;
 - local shell readiness and BYOK recording start add zero new network dependencies;
 - Neon active time trends downward as upgraded-client share increases.
+
+The baseline must be captured from the current released desktop against the same TalkMore deployment and network profiles. Warm and scale-to-zero-cold runs are reported separately; averaging them together is not acceptable. If the short-recording, first-token, quality, or capture gates fail, the managed long-format capability remains disabled even if functional tests pass.
 
 ## 15. Rollout and Compatibility
 
@@ -732,13 +885,18 @@ This document is the cross-repository contract, not a requirement for one large 
 ### Phase 1: Additive TalkMore Compatibility Foundation
 
 - add the nested account/usage snapshot types while retaining all existing response fields;
-- add managed STT capability metadata;
-- add actual WAV-duration validation;
+- add version-2 managed STT capability metadata while leaving missing metadata safe for old clients;
+- lower route-level file/request limits below the deployed Vercel boundary;
+- accept and validate both existing WAV and the new Ogg/Opus format, forward the correct media type/filename, and reject malformed or over-duration audio before quota work;
+- configure and verify the STT function duration for the adaptive client timeout;
+- add a global capability-advertisement kill switch that does not remove WAV/Ogg parser compatibility;
 - make status read-only and collapse its business reads;
 - return a correct post-settlement snapshot from existing quota paths;
 - allow a temporary final quota-row read when the existing mutation cannot yet return the complete snapshot, because this happens only during real cloud usage and avoids a separate desktop status call;
 - expand server contract tests;
 - deploy and verify old desktop clients before changing desktop polling.
+
+Deployment order inside this phase is parser/limits with capability advertisement off, old-client verification, staging format/timeout verification, and only then production capability advertisement before the version-2 desktop release.
 
 Rollback: old fields and route behavior remain available; new fields are optional and can be ignored.
 
@@ -750,6 +908,7 @@ Rollback: old fields and route behavior remain available; new fields are optiona
 - centralize and deduplicate refresh triggers;
 - remove hidden Ask auth initialization;
 - remove the five-minute interval;
+- add deduplicated, non-blocking managed-intent warming at Cloud recording/Ask start and active long-recording boundaries;
 - retain the status endpoint for startup, account, focus-stale, and purchase flows;
 - confirm the idle upgraded-client request reduction before starting the quota rewrite.
 
@@ -769,11 +928,13 @@ Rollback: additive columns remain in place. Route handlers can return to the Pha
 ### Phase 4: Provider-Aware Recording Limits
 
 - add the Rust capability registry and config migration;
+- add the managed-only bundled Opus encoder worker and byte-based WAV/Ogg selector;
 - expose resolved capabilities to Settings and Capsule;
 - move authoritative deadlines to Rust and anchor them to audio readiness;
 - add graceful warnings and auto-stop reason;
 - apply the same resolver to dictation and Ask;
-- validate the managed-cloud 10-minute contract end to end.
+- negotiate capability version 2 and retain the 30-second Cloud fallback against older/malformed server capability;
+- validate the managed-cloud 10-minute contract, adaptive timeout, payload limits, quality, and short-recording latency end to end.
 
 Rollback: the provider-resolved `max_recording_seconds` mirror remains readable and safe for older versions.
 
@@ -797,7 +958,15 @@ Provider limits:
 - Auto returns the provider recommendation;
 - Custom clamps to the hard maximum;
 - Cloud takes the lower of built-in and server values;
-- malformed/missing server capability never expands the local limit;
+- version-2 Cloud capability enables the negotiated Ogg limit;
+- version-1, malformed, missing, or incompatible Cloud capability resolves to the historical 30-second fallback and never expands the local limit;
+- a version-2 capability older than 24 hours resolves to the fallback until an authenticated refresh succeeds;
+- a newer narrower managed capability can shorten, but never lengthen, an active Cloud session and produces at most one graceful stop;
+- WAV/Ogg selection changes at the exact `3,500,000`-byte boundary;
+- 600 seconds at the pinned encoder settings remains within the `4,000,000`-byte file cap;
+- encoded-byte overflow causes one graceful stop before multipart creation;
+- encoder initialization, queue, finalization, and re-encode failures follow the defined fallback/error paths without sending oversized WAV;
+- adaptive timeout remains 60 seconds through 60 seconds of audio and clamps every longer managed request at 180 seconds;
 - provider switches do not mutate an active session deadline;
 - stale session timers cannot stop a newer recording;
 - sleep/resume expiration produces one graceful stop;
@@ -827,7 +996,12 @@ Account snapshots:
 - lower revision cannot overwrite a higher revision;
 - malformed optional snapshot does not fail successful content;
 - logout/session invalidation clears account-scoped state;
-- hidden-window getter returns the latest Rust value.
+- hidden-window getter returns the latest Rust value;
+- Cloud recording/Ask intent starts at most one non-blocking warm-up after four minutes of managed inactivity;
+- startup/status/intent refreshes are single-flight;
+- minute-four and minute-eight warm-ups run only while the same Cloud recording remains active;
+- stopping, failing, switching provider, logout, and BYOK sessions cancel or suppress future warm-ups;
+- intent warm-up failure cannot block audio readiness or authorize a cloud request.
 
 Cloud protocol:
 
@@ -842,6 +1016,8 @@ Cloud protocol:
 - Settings shows Auto with the resolved provider value;
 - presets above the provider maximum are absent/disabled;
 - Custom validation explains and clamps invalid values;
+- Cloud shows 10 minutes only with compatible version-2 capability and shows the safe fallback otherwise;
+- an encoder-unavailable session explains its lowered WAV-safe limit without presenting it as an upstream provider restriction;
 - GLM and Apple limits are labeled as provider/system restrictions;
 - automatic stop warnings occur at the approved times;
 - startup uses a matching persisted snapshot without a Free/zero flicker;
@@ -851,6 +1027,7 @@ Cloud protocol:
 - Account entry refreshes in the background;
 - checkout retry stops when the expected entitlement arrives;
 - no five-minute interval exists;
+- no active-recording warm-up survives after recording ends;
 - Ask rendering does not initialize the auth store.
 
 ### 16.3 TalkMore Contract Tests
@@ -860,9 +1037,14 @@ Cloud protocol:
 - the business snapshot query handles free, Pro, direct lifetime, and all AppSumo tiers;
 - active, pending, refunded, and deactivated licenses resolve correctly;
 - old STT, LLM, and Ask clients ignore new response fields;
-- WAV duration above 600 seconds is rejected before quota or Groq;
-- valid 600-second WAV is accepted below byte limits;
-- malformed WAV is rejected without quota usage;
+- existing short WAV remains accepted with unchanged response semantics;
+- WAV or Ogg duration above 600 seconds is rejected before quota or Groq;
+- a valid 600-second, 48 kbit/s Ogg file is accepted below byte limits;
+- WAV or Ogg above 4.0 MB, and a complete multipart request above 4.2 MB, are rejected with stable size metadata when the request reaches application code;
+- malformed/truncated WAV, invalid OpusHead, non-monotonic granules, chained Ogg streams, and unsupported/multi-track audio are rejected without quota usage;
+- a validated Ogg payload is forwarded to Groq as Ogg rather than renamed to WAV;
+- capability version 2 exactly matches deployed parser and byte policy;
+- withdrawing capability advertisement does not remove version-2 parsing required by released clients;
 - SSE content order is deltas, usage event, `[DONE]`;
 - stream cancellation settles partial usage without duplicate charge.
 
@@ -895,7 +1077,10 @@ Run at least one signed/debug build on each platform with a real input device:
 | Auto-stop submits audio once | Required | Required | Required |
 | Provider switch clamps UI when idle | Required | Required | Required |
 | Offline/cold account snapshot behavior | Required | Required | Required |
-| Cloud 10-minute boundary | Required | Required | Required |
+| Cold Neon wake overlapped with Cloud recording | Required | Required | Required |
+| Short Cloud WAV latency baseline | Required | Required | Required |
+| Cloud 10-minute Ogg boundary and adaptive timeout | Required | Required | Required |
+| Encoder CPU, queue, memory, and zero dropped chunks | Required | Required | Required |
 
 Platform coverage:
 
@@ -914,6 +1099,7 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 - GLM-ASR remains capped at 30 seconds with a clear provider explanation;
 - Apple Speech remains capped at one minute on macOS;
 - TalkMore Cloud is enforced at 10 minutes in both desktop and server;
+- TalkMore Cloud uses WAV for short recordings, Ogg/Opus only when required by the managed-route byte budget, and falls back to 30 seconds against an incompatible server;
 - automatic stop is Rust-authoritative, idempotent, and submits existing audio;
 - hold, toggle, dictation, and Ask use the same resolver;
 - Windows, macOS, and Linux runtime matrix passes;
@@ -933,11 +1119,13 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 
 - TalkMore additive schema and response changes are deployed first;
 - upgraded desktop clients generate no fixed five-minute status traffic;
+- idle upgraded clients perform no Cloud intent warm-ups, while real Cloud recording/Ask intent overlaps Neon wake-up without blocking capture;
 - successful cloud operations update visible usage without a follow-up status request;
 - status GET performs no quota write;
 - quota transitions pass real-PostgreSQL idempotency and concurrency tests;
 - cached/offline startup, purchase propagation, session invalidation, and multiple-window behavior pass UX tests;
 - monitoring shows the expected request reduction without higher user-visible error rates;
+- short-recording latency, first-token latency, long-upload, quality, CPU, and dropped-audio release gates pass;
 - old supported desktop clients still complete status, STT, LLM, and Ask requests.
 
 ## 18. Risks and Mitigations
@@ -945,6 +1133,7 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 | Risk | Mitigation |
 |---|---|
 | Old clients continue to wake Neon | Optimize the server query, measure by client version, and let savings grow with upgrade adoption; do not break compatibility. |
+| Removing idle polling exposes Neon scale-to-zero wake latency | Start a deduplicated authenticated warm-up at real Cloud intent, overlap it with speech, and renew only during an active long recording. |
 | Cached plan is stale after external revocation | Server enforces every cloud call; quota/auth error updates or invalidates the client immediately; focus/account refresh remains. |
 | Purchase webhook arrives late | Use bounded checkout-specific retries and a manual refresh path. |
 | Concurrent responses regress displayed quota | Compare `periodStart` and atomic `usage_revision`. |
@@ -952,7 +1141,11 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 | Late settlement failure loses user content | Preserve content, mark usage pending, retain conservative reservation, and reconcile on later mutation. |
 | Provider changes published limits | Keep a versioned Rust registry and revalidate documentation when changing it. |
 | Custom endpoint has an unknown limit | Use a conservative two-minute Auto value and a client-bound custom maximum with an explicit warning. |
-| Long WAV approaches byte limits | Keep 10-minute managed and 12-minute upload caps with measured byte headroom. |
+| Vercel rejects a 10-minute managed WAV before route code | Preserve short WAV, negotiate version-2 Ogg/Opus for long managed recordings, and keep complete multipart bodies below 4.2 MB. |
+| Opus adds CPU load or changes recognition quality | Encode off the capture callback with one bundled codec, retain WAV for short audio, and block rollout on dropped-chunk, CPU, WER, and CER gates. |
+| Codec packaging differs across operating systems | Pin and bundle one implementation, avoid system codecs, build all supported architectures, and run real-device packaging/runtime tests. |
+| A larger upload exceeds the desktop's current 60-second timeout | Keep 60 seconds through 60 seconds of audio and use a byte-derived timeout capped at 180 seconds for longer managed uploads. |
+| Server/client format rollout is out of order | Deploy parser and capability version 2 first; new desktops retain a 30-second managed fallback until compatible metadata is authenticated. |
 | Atomic SQL rewrite changes billing behavior | Preserve existing billing formulas and operation ids; use real PostgreSQL concurrency tests and server-first rollout. |
 
 ## 19. Definition of Done
@@ -960,11 +1153,13 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 The combined work is done only when:
 
 - all approved product limits and migration rules are implemented;
+- TalkMore Cloud 10-minute audio crosses the deployed Vercel route within the documented byte budget, while short recordings remain on WAV;
 - #83 startup behavior is implemented and cross-platform verified;
 - TalkMore is backward compatible and server-first deployed;
 - desktop account state is event-driven and locally resilient;
 - quota mutation is atomic, idempotent, and snapshot-returning;
 - no fixed subscription polling remains in the upgraded desktop;
+- idle Compute savings do not expose a release-gate regression in Cloud stop-to-transcript or first-token latency;
 - cloud content remains responsive and is not discarded by late usage-sync failures;
 - no audio/transcript content is added to Neon or telemetry;
 - automated suites, production builds, contract tests, PostgreSQL concurrency tests, and the three-platform manual matrix pass;
