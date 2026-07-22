@@ -1,7 +1,7 @@
 # Issues #81/#83, STT Recording Limits, and Cloud Usage Efficiency Design
 
 - Date: 2026-07-22
-- Status: Design approved in discussion; written spec awaiting final user review
+- Status: Reviewed and approved for phased implementation
 - Repositories: `opentypeless` desktop and `talkmore` cloud service
 - Issues: [OpenTypeless #81](https://github.com/tover0314-w/opentypeless/issues/81), [OpenTypeless #83](https://github.com/tover0314-w/opentypeless/issues/83)
 
@@ -190,7 +190,17 @@ Managed Cloud therefore selects its payload by audio-part byte size:
 
 This is deliberately not “compress everything.” Common short recordings retain WAV's current latency and lossless signal. Only recordings that cannot safely traverse the managed route as WAV use Opus. Groq accepts Ogg uploads, while direct/BYOK upload providers keep their existing path and limits.
 
-The desktop must use one pinned, bundled Opus implementation on Windows, macOS, and Linux. It must not depend on ffmpeg, GStreamer, AVFoundation, Media Foundation, or a system-installed `libopus`. The implementation plan must document the codec's license, static/bundled artifacts, supported architectures, and release packaging impact before adopting a crate.
+The desktop must use one pinned, bundled Opus implementation on Windows, macOS, and Linux. It must not depend on ffmpeg, GStreamer, AVFoundation, Media Foundation, or a system-installed `libopus`.
+
+Implementation review selected:
+
+- `opusic-c = 1.6.1` with its default `bundled` feature, resolving `opusic-sys = 0.7.3` and statically building the vendored Opus 1.6.1 source;
+- `ogg = 0.9.2` for pure-Rust Ogg packet/page writing and reading;
+- Rust 1.82 or newer and CMake 3.16 or newer on build/CI machines; end-user machines receive the statically linked codec and need no codec installation;
+- BSD-3-Clause notices for `opusic-c`, `opusic-sys`, the vendored Opus source, and `ogg` in a shipped `THIRD_PARTY_NOTICES.md`;
+- CI and release builds for `x86_64-pc-windows-msvc`, `aarch64-apple-darwin`, `x86_64-apple-darwin`, and `x86_64-unknown-linux-gnu` before enabling capability version 2.
+
+TalkMore validates WAV and Ogg/Opus with a focused TypeScript container parser in `src/lib/audio-container.ts`. It does not install ffmpeg or a server-side native codec package: the parser walks RIFF chunks or Ogg pages, verifies page structure and CRC, reconstructs Opus packets, derives packet durations from TOC data, and checks granule/pre-skip consistency before quota reservation.
 
 The 12-minute direct upload-provider hard cap continues to leave headroom under the existing 24 MiB PCM client buffer. Compression and chunking for those providers remain deferred.
 
@@ -619,7 +629,17 @@ Implementations may differ in counters, but they share:
 
 For managed cloud words, `operationId` and `${operationId}:${stage}` remain the idempotency keys.
 
-The additive schema includes `quota.usage_revision`, `cloud_usage_operation_stage.reservation_expires_at`, and `cloud_usage_operation_stage.replay_count`. Existing rows migrate with revision/replay count zero; existing reserved stages receive an expiry derived from their creation time. The operation keeps its existing logical expiry/retention role.
+The additive schema includes:
+
+- `quota.usage_revision bigint NOT NULL DEFAULT 0`;
+- `cloud_usage_operation.quota_model text NOT NULL DEFAULT 'cloud_words'`;
+- `cloud_usage_operation_stage.customer_meter text NOT NULL DEFAULT 'cloud_words'`, where values are `cloud_words`, `stt_seconds`, or `llm_tokens`;
+- `cloud_usage_operation_stage.reserved_customer_units integer NOT NULL DEFAULT 0`;
+- `cloud_usage_operation_stage.settled_customer_units integer NOT NULL DEFAULT 0`;
+- `cloud_usage_operation_stage.reservation_expires_at timestamp`;
+- `cloud_usage_operation_stage.replay_count integer NOT NULL DEFAULT 0`.
+
+Existing cloud-word stages backfill the generic unit columns from `reserved_cloud_words` and the prior settled delta, then retain the old cloud-word columns for rollback compatibility until a later cleanup release. Existing rows migrate with revision/replay count zero; existing reserved stages receive an expiry derived from their creation time. The operation keeps its existing logical expiry/retention role. A `(user_id, expires_at)` operation index and a partial stage expiry index support user-scoped piggyback reconciliation without global scans.
 
 Reserve must atomically:
 
@@ -886,6 +906,8 @@ The baseline must be captured from the current released desktop against the same
 ## 15. Rollout and Compatibility
 
 This document is the cross-repository contract, not a requirement for one large pull request. Implementation planning must preserve the following independently testable and rollbackable phases.
+
+Because the contract spans three independently reviewable subsystems, execution uses three plans: Issue #83 startup readiness; TalkMore account/quota efficiency; and provider-aware recording limits plus managed audio transport. The server portions of the latter two plans deploy before their desktop consumers.
 
 ### Phase 1: Additive TalkMore Compatibility Foundation
 
