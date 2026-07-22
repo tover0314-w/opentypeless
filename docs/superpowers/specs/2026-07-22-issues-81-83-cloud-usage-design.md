@@ -1,0 +1,971 @@
+# Issues #81/#83, STT Recording Limits, and Cloud Usage Efficiency Design
+
+- Date: 2026-07-22
+- Status: Design approved in discussion; written spec awaiting final user review
+- Repositories: `opentypeless` desktop and `talkmore` cloud service
+- Issues: [OpenTypeless #81](https://github.com/tover0314-w/opentypeless/issues/81), [OpenTypeless #83](https://github.com/tover0314-w/opentypeless/issues/83)
+
+## 1. Executive Summary
+
+This design addresses three related problems without trading away the current desktop experience:
+
+1. Issue #83: the beginning of a user's first recording can be lost while the microphone and STT provider initialize.
+2. Issue #81: the desktop applies one global 30-second recording limit even though STT providers have different constraints.
+3. TalkMore cloud usage: the desktop polls subscription status every five minutes, which creates unnecessary Neon database activity and can prevent compute from scaling to zero.
+
+The approved direction is:
+
+- start microphone capture and STT connection concurrently, and do not report recording readiness before the platform audio stream is actually running;
+- replace the global 30-second rule with a Rust-owned provider capability resolver and an `Auto (recommended)` or custom user setting;
+- make the TalkMore Cloud product limit 10 minutes for the current PCM/WAV upload path;
+- replace fixed subscription polling with a persisted local account snapshot, server-returned usage snapshots, and refreshes only at meaningful product events;
+- preserve Neon as the billing source of truth and make quota mutations atomic and idempotent without adding Redis;
+- deploy server changes before desktop changes and retain backward-compatible response fields for existing clients;
+- require Windows, macOS, and Linux runtime verification before closing the issues.
+
+The desktop must remain usable while TalkMore or Neon is cold, slow, or temporarily unavailable. Cached account data is presentation-only; all managed-cloud authorization and quota decisions remain server-side.
+
+## 2. Current Evidence
+
+### 2.1 Issue #81
+
+The current desktop config stores one `max_recording_seconds` value, defaulting to 30 seconds. `src/components/Capsule/DurationTimer.tsx` uses a WebView interval to call `stop_recording` when that value is reached.
+
+This creates two problems:
+
+- 30 seconds is a real limit for GLM-ASR, but it is not a universal limit for Groq, OpenAI-compatible upload providers, streaming providers, or TalkMore Cloud;
+- a frontend timer is not a reliable authority when a window is hidden, throttled, or suspended differently by Windows WebView2, macOS WKWebView, and Linux WebKitGTK.
+
+The current file-upload providers buffer 16 kHz, 16-bit, mono PCM and build a WAV file when recording ends. Both `src-tauri/src/stt/whisper_compat.rs` and `src-tauri/src/stt/cloud.rs` use a 24 MiB audio safety buffer. This client constraint is as important as an upstream provider's published limit.
+
+### 2.2 Issue #83
+
+Issue #83 occurs because the UI can enter a recording state while platform audio capture and the STT connection are still becoming ready. A fixed platform delay would be unreliable and would slow every recording.
+
+The approved behavior is already represented in the current uncommitted desktop worktree:
+
+- audio capture has `Starting`, `Recording`, and `Idle` states;
+- capture reports ready only after CPAL `stream.play()` succeeds;
+- audio initialization and STT connection are awaited concurrently;
+- the audio channel buffers up to 60 seconds of 20 ms chunks while the provider connects;
+- dictation and Ask recording use the same startup barrier.
+
+This spec does not treat those changes as shipped. They still require review, committed tests, and real-device verification on all three supported operating-system families.
+
+### 2.3 TalkMore and Neon
+
+The desktop currently:
+
+- initializes authentication in the main WebView;
+- refreshes `/api/subscription/status` every five minutes while a user is signed in;
+- also refreshes on focus with a 30-second throttle;
+- initializes the same auth store again in the hidden Ask WebView.
+
+The main WebView remains alive while the app is hidden to the tray. Consequently, an idle signed-in desktop can generate approximately 12 status requests per hour or 288 per day.
+
+The TalkMore status route currently performs authentication, effective-entitlement lookups, and `getOrCreateQuota`. The entitlement lookup reads subscription and license state in multiple queries, while `getOrCreateQuota` can write during a GET request.
+
+Read-only production inspection found a small database but very high cumulative statement activity. In particular, a seven-row AppSumo license table had more than one million sequential scans. A sequential scan of seven rows is not itself expensive; the evidence points to excessive request frequency and round trips rather than table size.
+
+Current cloud quota flows also issue several statements for reserve, settle, or release. Legacy quota code uses in-memory entries but explicitly flushes them after requests, removing most batching benefit.
+
+No audio payload is stored in Neon. The dominant optimization target is compute activity and database round trips, not storage volume.
+
+## 3. Goals
+
+### 3.1 Recording and Provider Goals
+
+1. Capture the first spoken audio once the user starts recording, including on a cold first use.
+2. Make the displayed and enforced recording limit match the selected STT provider and current transport.
+3. Give users a visible `Auto (recommended)` choice and safe custom duration choices.
+4. Keep TalkMore Cloud recordings at or below 10 minutes for the current WAV path.
+5. Stop gracefully at a limit and submit the recorded audio instead of discarding it.
+6. Use the same behavior for hold-to-talk, toggle recording, dictation, and Ask recording.
+7. Make limit enforcement independent of WebView visibility and timer throttling.
+
+### 3.2 Cloud and Cost Goals
+
+1. Remove the five-minute desktop subscription polling loop for upgraded clients.
+2. Let an idle signed-in app stop generating TalkMore database traffic.
+3. Show quota changes immediately after successful managed-cloud STT, LLM, or Ask calls.
+4. Preserve correct entitlement and quota enforcement under retries, concurrent requests, and multiple devices.
+5. Reduce business-data work for `/api/subscription/status` to one read-only database round trip after authentication.
+6. Reduce each quota state transition to one atomic business-data statement or transaction round trip.
+7. Avoid Redis, personalized CDN caching, and cron jobs that wake Neon while idle.
+
+### 3.3 User-Experience Goals
+
+1. Never block the local application shell or BYOK recording on a TalkMore status refresh.
+2. Never temporarily show a returning paid user as Free merely because Neon is cold or the network is offline.
+3. Preserve streaming text latency and already-delivered content when usage synchronization fails late.
+4. Reflect purchases and license activations promptly, including when the payment webhook is delayed.
+5. Avoid duplicate warnings or inconsistent quota displays across main, capsule, and Ask windows.
+6. Keep current clients compatible throughout the rollout.
+
+## 4. Non-Goals
+
+- Do not add FLAC encoding, audio chunking, resumable uploads, or recordings longer than the approved provider/product caps in this work.
+- Do not store audio or transcripts in Neon as part of usage accounting.
+- Do not introduce Redis, a WebSocket entitlement service, or a new always-on worker.
+- Do not change plan prices, monthly quota amounts, AppSumo tiers, or the definition of billable words.
+- Do not redesign the entire Settings, Account, Capsule, or Ask UI.
+- Do not use a Vercel process-local cache as the correctness authority for subscriptions or quota.
+- Do not force-upgrade old desktop clients solely to obtain the Compute savings.
+- Do not claim Issue #81 or #83 is closed before release and cross-platform runtime verification.
+
+## 5. Product Decisions
+
+### 5.1 Recording Setting
+
+The setting has two modes:
+
+- `Auto (recommended)`: use the current provider's recommended maximum;
+- `Custom`: use a user-selected value that is no greater than the provider/client hard maximum.
+
+The Settings UI shows the resolved value next to Auto, for example:
+
+- `Auto (recommended) — 10 minutes` for Groq;
+- `Auto (recommended) — 30 seconds` for GLM-ASR;
+- `Auto (recommended) — 1 minute` for Apple Speech.
+
+Custom choices include applicable values from 30 seconds, 1 minute, 2 minutes, 5 minutes, 10 minutes, 30 minutes, and 60 minutes, plus a custom numeric entry. Values above the resolved hard maximum are not selectable. The custom field must state the allowed range and clamp invalid persisted values after explaining the correction.
+
+### 5.2 Initial Capability Matrix
+
+| Provider/transport | Auto | Hard maximum | Governing reason |
+|---|---:|---:|---|
+| GLM-ASR file upload | 30 s | 30 s | Provider duration limit |
+| Apple Speech local buffered recognition | 60 s | 60 s | Apple one-minute recognition guidance |
+| TalkMore Cloud managed upload | 600 s | 600 s | Managed product policy and server enforcement |
+| Groq upload | 600 s | 720 s | Current 24 MiB client buffer and Groq upload size |
+| OpenAI-compatible upload | 600 s | 720 s | Current 24 MiB client buffer |
+| SiliconFlow upload | 600 s | 720 s | Current 24 MiB client buffer is lower than provider limit |
+| Custom Whisper-compatible upload | 120 s | 720 s | Unknown upstream behavior; client buffer remains authoritative |
+| Deepgram streaming | 600 s | 3600 s | Product safety cap for a long-running stream |
+| AssemblyAI streaming | 600 s | 3600 s | Product safety cap below the provider's three-hour session maximum |
+| Volcengine streaming | 600 s | 3600 s | Product safety cap below current upstream duration resources |
+
+The matrix is a versioned product registry, not an eternal assertion about upstream providers. Provider documentation must be rechecked when this table changes.
+
+Relevant provider references at design time:
+
+- GLM-ASR: <https://docs.bigmodel.cn/cn/guide/models/sound-and-video/glm-asr-2512>
+- Apple Speech: <https://developer.apple.com/documentation/speech/sfspeechrecognizer>
+- Groq Speech-to-Text: <https://console.groq.com/docs/speech-to-text>
+- AssemblyAI streaming sessions: <https://www.assemblyai.com/docs/streaming/message-sequence>
+- Deepgram live-stream recovery: <https://developers.deepgram.com/docs/recovering-from-connection-errors-and-timeouts-when-live-streaming-audio>
+- SiliconFlow transcription: <https://docs.siliconflow.cn/cn/api-reference/audio/create-audio-transcriptions>
+- Volcengine streaming ASR: <https://www.volcengine.com/docs/6348/1807452?lang=zh>
+
+### 5.3 Encoding Boundary
+
+This release keeps 16 kHz, 16-bit, mono PCM/WAV for file and managed-cloud uploads.
+
+The approximate WAV payload size is:
+
+```text
+bytes = seconds * 16,000 samples/s * 2 bytes/sample + 44-byte header
+```
+
+- 600 seconds is approximately 19,200,044 bytes;
+- 720 seconds is approximately 23,040,044 bytes;
+- the current 24 MiB client buffer is 25,165,824 bytes.
+
+The 10-minute TalkMore cap therefore leaves safe room below the desktop buffer and current multipart limits without adding a user-visible transcoding step. The 12-minute upload-provider hard cap leaves headroom under the client buffer. Compression and chunking are explicitly deferred.
+
+## 6. Desktop Recording Architecture
+
+### 6.1 Provider Capability Registry
+
+Rust owns one registry and exposes the resolved capability to the frontend. TypeScript must not maintain a duplicate provider limit table.
+
+Conceptual model:
+
+```rust
+enum SttTransport {
+    FileUpload,
+    Streaming,
+    LocalBuffered,
+    ManagedUpload,
+}
+
+enum RecordingLimitSource {
+    Provider,
+    ManagedProduct,
+    ClientBuffer,
+    ProductSafety,
+    UnknownUpstream,
+}
+
+struct SttRecordingCapability {
+    provider_id: String,
+    transport: SttTransport,
+    recommended_max_seconds: u32,
+    hard_max_seconds: u32,
+    max_upload_bytes: Option<u64>,
+    source: RecordingLimitSource,
+    explanation_key: String,
+}
+```
+
+The resolver returns both the raw capability and `effective_max_seconds` for the current config.
+
+```text
+effective maximum = min(
+  mode-selected duration,
+  provider hard maximum,
+  client transport safety maximum,
+  managed-server maximum when applicable
+)
+```
+
+For TalkMore Cloud, the desktop has a built-in 600-second fallback and takes the lower of that fallback and the current server-advertised maximum. A missing or malformed server capability must never expand the local fallback.
+
+### 6.2 Config Compatibility and Migration
+
+Add `recording_limit_mode` (`auto` or `custom`) and `custom_recording_limit_seconds`. Keep the existing `max_recording_seconds` as a compatibility mirror of the resolved effective value, not as the new source of user intent. Rust recomputes the mirror whenever the provider, mode, server capability, or custom duration is persisted. An older desktop therefore receives a safe value for the provider that was selected when the config was last saved.
+
+Load rules for configs without `recording_limit_mode`:
+
+- `max_recording_seconds == 30`: migrate to `auto` with a 600-second custom fallback, because 30 seconds was the historical default;
+- any other valid value: migrate to `custom` and copy it into `custom_recording_limit_seconds`, preserving clear evidence that the user changed it;
+- zero or an invalid value: migrate to `auto` and set the custom fallback to 600 seconds.
+
+New installs store `recording_limit_mode = auto`, `custom_recording_limit_seconds = 600`, and a `max_recording_seconds` compatibility mirror resolved for the default provider.
+
+When a custom value exceeds the newly selected provider's maximum:
+
+- do not silently persist a destructive replacement while the user is recording;
+- on provider selection or Settings load, show that the previous value is unavailable for this provider;
+- clamp the effective value immediately for safety;
+- persist the clamped custom value only when the user saves the setting.
+
+A downgrade to a version that does not know the new fields continues to see a safe provider-resolved `max_recording_seconds`. If that old version changes providers it may remain conservatively capped until upgrading again, but it cannot expand beyond the last safe mirror. The new fields resume as the source of intent after re-upgrade unless the old version replaced the config, in which case the migration rules run again.
+
+### 6.3 Authoritative Deadline
+
+Rust owns the recording deadline. `DurationTimer` displays elapsed and remaining time but is not the only component capable of stopping a recording.
+
+The authoritative start time is the instant when CPAL `stream.play()` succeeds, not the later instant when the STT connection also becomes ready. The capture-ready signal therefore carries or records that monotonic instant. This prevents provider connection time from extending a 30-second or 10-minute limit.
+
+At audio-capture start, Rust snapshots:
+
+- provider id and transport;
+- resolved capability;
+- selected limit mode;
+- effective maximum;
+- a monotonic start time and deadline;
+- a recording session id.
+
+Rules:
+
+- provider/config changes do not alter an in-progress recording;
+- a stale timer from a previous session cannot stop a newer session;
+- the deadline continues to run while the pipeline is still in `Preparing`, and an expiry during slow STT startup becomes a single deferred/graceful stop as soon as startup ownership is established;
+- reaching the deadline performs the same graceful stop/finalization path as a manual stop;
+- the existing audio-buffer guard remains a second safety layer;
+- if the safety guard is reached first, the pipeline stops and submits buffered audio rather than returning an error that discards the recording;
+- after system sleep, an expired monotonic deadline triggers exactly one stop when the process resumes;
+- the frontend may request stop at the displayed deadline as a responsiveness optimization, but duplicate stop requests must be idempotent.
+
+User notifications:
+
+- for limits of at least five minutes, notify at 60 seconds and 10 seconds remaining;
+- for every supported limit below five minutes, notify once at 10 seconds remaining;
+- on automatic stop, identify the source, for example `Reached the Groq recording limit (10 minutes)` or `GLM-ASR supports recordings up to 30 seconds`;
+- automatic stop is not presented as an error when finalization succeeds.
+
+### 6.4 Managed-Cloud Server Validation
+
+TalkMore must not trust the desktop timer or `Content-Length` alone.
+
+`/api/proxy/stt` must:
+
+- retain the existing multipart byte limit;
+- parse the WAV duration;
+- reject invalid or unsupported audio encoding;
+- reject actual duration above 600 seconds with a stable `audio_duration_exceeded` error;
+- include `maxRecordingSeconds: 600` in the error metadata;
+- perform duration validation before reserving quota or calling Groq.
+
+The status/account snapshot advertises a static managed capability without an additional database query:
+
+```json
+{
+  "managedSttCapabilities": {
+    "version": 1,
+    "maxRecordingSeconds": 600,
+    "maxUploadBytes": 26214400,
+    "acceptedEncodings": ["audio/wav"]
+  }
+}
+```
+
+## 7. Issue #83 Recording Startup Architecture
+
+### 7.1 Startup Barrier
+
+The microphone and STT provider start concurrently:
+
+```text
+user starts recording
+  ├─ start CPAL input on its platform audio thread
+  └─ connect/prepare STT provider
+          ↓
+wait until both report ready
+          ↓
+publish the fully-ready recording state
+```
+
+Audio readiness means the input stream was built and `stream.play()` succeeded. Merely spawning the capture thread is not readiness.
+
+The existing `Preparing` acknowledgement is emitted immediately after the hotkey transition, so the UI never appears unresponsive while the barrier is pending. The microphone begins capturing as soon as its backend permits, even if the STT connection is still pending. The bounded channel preserves those initial chunks until the provider consumer is ready. The eventual recording event and timer use the original audio-ready timestamp, so elapsed time and provider limits include the buffered startup audio.
+
+### 7.2 Buffer and Failure Rules
+
+- channel capacity is derived from chunk duration and represents 60 seconds at the default 20 ms chunk size;
+- the buffer is bounded to prevent an unresponsive provider from growing memory indefinitely;
+- the combined startup barrier has a 30-second timeout, after which both sides are cancelled and the existing retryable startup error is shown;
+- if audio initialization fails, cancel provider startup and return the existing microphone/device error path;
+- if provider initialization fails, stop capture, release the device, and return the provider error;
+- if both fail, expose one deterministic primary error and log the secondary failure without duplicate user notifications;
+- cancel and stop remain valid while startup is in progress;
+- no platform-specific fixed sleep is introduced.
+
+CPAL's `stream.play()` boundary is shared by CoreAudio, WASAPI, ALSA, and PipeWire backends, but runtime behavior must still be validated on representative devices.
+
+## 8. Account and Usage Snapshot Contract
+
+### 8.1 Snapshot Types
+
+The server retains all existing flat status and proxy response fields. New clients prefer optional nested snapshots.
+
+Conceptual account snapshot:
+
+```json
+{
+  "schemaVersion": 1,
+  "userId": "user-id",
+  "plan": "appsumo_tier1",
+  "source": "appsumo",
+  "displayName": "AppSumo Tier 1",
+  "subscriptionEnd": null,
+  "subscriptionStatus": null,
+  "licenseStatus": "active",
+  "quotaModel": "cloud_words",
+  "usage": {
+    "periodStart": "2026-07-01T00:00:00.000Z",
+    "revision": "42",
+    "displayWordsUsedEstimate": 0,
+    "displayWordsLimit": 0,
+    "sttSecondsUsed": 0,
+    "sttSecondsLimit": 0,
+    "llmTokensUsed": 0,
+    "llmTokensLimit": 0,
+    "cloudWordsUsed": 1200,
+    "cloudWordsLimit": 200000,
+    "resetAt": "2026-08-01T00:00:00.000Z"
+  },
+  "managedSttCapabilities": {
+    "version": 1,
+    "maxRecordingSeconds": 600,
+    "maxUploadBytes": 26214400,
+    "acceptedEncodings": ["audio/wav"]
+  },
+  "generatedAt": "2026-07-22T10:00:00.000Z"
+}
+```
+
+`revision` is serialized as a decimal string to avoid JavaScript integer precision problems.
+
+Cloud operation responses add an optional `usageSnapshot`. They do not need to repeat all entitlement fields on every request.
+
+### 8.2 Snapshot Ordering
+
+The `quota` table adds a non-null `usage_revision` bigint with default zero. Every successful mutation of displayed quota counters or limits increments it in the same transaction.
+
+Client acceptance rules:
+
+1. Reject snapshots whose `userId` does not match the current authenticated user.
+2. Prefer a newer `periodStart` over an older period regardless of revision.
+3. Within one period, accept only a greater or equal revision.
+4. An equal revision may refresh metadata but cannot reduce counters.
+5. Clear the current-user association on logout or session invalidation.
+
+These rules prevent an older network response from overwriting a newer concurrent STT/LLM result.
+
+### 8.3 Status Query
+
+After authentication, `/api/subscription/status` performs one read-only business-data query that obtains:
+
+- the latest relevant subscription;
+- the preferred active license, or latest license when no active license exists;
+- the current-period quota row if present.
+
+Entitlement resolution remains a pure function over the returned rows. A missing quota row is represented as zero usage with entitlement-derived limits. GET must not insert or update quota.
+
+Do not force an entitlement index merely because PostgreSQL chooses a sequential scan for a seven-row table. Check the combined account query with realistic data before changing subscription/license indexes. Add a `(user_id, expires_at)` operation index for the required per-user expiration/reconciliation path and verify that query with `EXPLAIN (ANALYZE, BUFFERS)` in staging.
+
+## 9. Desktop AccountSnapshotCoordinator
+
+Rust owns a device-wide `AccountSnapshotCoordinator` shared by every Tauri window.
+
+Responsibilities:
+
+- load the last successful snapshot for the authenticated `userId`;
+- persist only plan/quota/capability metadata, never the session token, audio, transcript, or prompt;
+- expose a local `get_account_snapshot` command;
+- perform `refresh_account_snapshot(reason)` with single-flight deduplication;
+- apply newer `usageSnapshot` values received by Rust cloud providers;
+- emit one `account:snapshot-updated` event after accepting a snapshot;
+- mark a snapshot stale without clearing its last known values;
+- clear account-scoped state on logout or invalid session.
+
+The persisted snapshot must be keyed by user id. The UI displays it only after Better Auth identifies the same user. This avoids showing one account's plan during another account's login.
+
+### 9.1 Refresh Policy
+
+Refresh at:
+
+- application startup after session identity is known;
+- successful login or deep-link token authentication;
+- password/session token rotation when current behavior already refreshes access;
+- checkout or license activation return;
+- Account/Usage page entry;
+- explicit user refresh;
+- main-window focus only when the last successful server snapshot is older than 30 minutes.
+
+Do not refresh on:
+
+- a fixed timer;
+- every tray show;
+- every Ask-window show;
+- Capsule show/hide;
+- ordinary BYOK recording;
+- prewarm HEAD requests.
+
+All triggers use one coordinator so startup, focus, account-page entry, and deep links cannot produce duplicate in-flight status requests.
+
+### 9.2 Startup and Offline Behavior
+
+- local application data and the main shell load independently of TalkMore;
+- once user identity is known, a matching persisted account snapshot is applied immediately;
+- the server refresh runs in the background;
+- refresh failure preserves the snapshot and current cloud controls;
+- a stale presentation does not authorize a cloud request; the server still decides;
+- if no matching snapshot exists, Account/Home plan-dependent sections show an account-loading placeholder and suppress plan-specific upgrade claims until the server or existing authenticated data establishes the plan;
+- BYOK features remain available regardless of snapshot freshness.
+
+### 9.3 Window Behavior
+
+- the main window owns threshold warning toasts;
+- Capsule and Ask receive operation errors through their existing pipeline events;
+- hidden windows may miss or delay JavaScript events without affecting correctness;
+- any window that becomes visible reads the current Rust snapshot before rendering account-sensitive UI;
+- the Ask WebView no longer calls `useAuthStore.initialize()` because it does not own account presentation or cloud authorization.
+
+## 10. Cloud Quota Service
+
+### 10.1 Interface
+
+Both legacy dual-meter plans and cloud-word plans use one conceptual quota interface:
+
+```ts
+interface QuotaService {
+  reserve(context: OperationContext, estimate: UsageEstimate): Promise<Reservation>
+  settle(reservation: Reservation, actual: ActualUsage): Promise<UsageSnapshot>
+  release(reservation: Reservation): Promise<UsageSnapshot | null>
+}
+```
+
+Implementations may differ in counters, but they share:
+
+- server-side entitlement resolution;
+- an idempotent operation/stage key;
+- atomic conditional reservation;
+- monotonic settlement;
+- atomic release;
+- a returned snapshot from the mutation itself;
+- stable error envelopes.
+
+### 10.2 Atomicity and Idempotency
+
+For managed cloud words, `operationId` and `${operationId}:${stage}` remain the idempotency keys.
+
+The additive schema includes `quota.usage_revision`, `cloud_usage_operation_stage.reservation_expires_at`, and `cloud_usage_operation_stage.replay_count`. Existing rows migrate with revision/replay count zero; existing reserved stages receive an expiry derived from their creation time. The operation keeps its existing logical expiry/retention role.
+
+Reserve must atomically:
+
+- resolve or validate the current entitlement;
+- create the current-period quota row when real usage first requires it;
+- create or find the operation and stage;
+- reject expired or invalid operations;
+- conditionally reserve without exceeding the limit;
+- increment revision when counters change;
+- return the current snapshot.
+
+Settle must atomically:
+
+- find and lock the intended operation/stage;
+- return the previous settlement for an already-settled retry;
+- calculate only the monotonic delta;
+- apply additional usage or refund excess reservation;
+- update internal provider/billable counters;
+- mark the stage settled;
+- increment revision;
+- return the current snapshot.
+
+Release must atomically:
+
+- do nothing for an already settled or released stage;
+- refund a still-reserved amount exactly once;
+- mark the stage released;
+- increment revision when displayed usage changes;
+- return the current snapshot when available.
+
+The target is one business-data database round trip per state transition. Authentication may still be served by Better Auth or its existing short-lived session cache. Correctness must not depend on the cache.
+
+### 10.3 Abandoned Operations
+
+Do not add a periodic cleanup cron solely for usage operations.
+
+Each reserved stage receives a 15-minute reservation expiry. The parent operation remains available for idempotency for 24 hours, and terminal operation metadata is retained for seven days before bounded piggyback deletion.
+
+At the beginning of a real quota mutation, reconcile expired reserved stages for that user inside the active transaction:
+
+- refund still-reserved amounts exactly once;
+- mark them released;
+- retain operation/stage idempotency data for the full 24-hour retry window;
+- delete terminal operations older than seven days only as bounded piggyback maintenance.
+
+State transitions are explicit:
+
+- `reserved -> settled` applies actual usage once;
+- `reserved -> released` refunds once;
+- a repeated settle or release of the same terminal state returns its prior outcome;
+- retrying a previously released HTTP operation must pass through a conditional `released -> reserved` transition and a new quota check before calling the upstream provider;
+- settling a released stage without that re-reservation returns stable HTTP 409 `invalid_quota_transition`;
+- an already-settled stage may authorize at most two same-operation transport replays during the first five minutes, matching the desktop's existing three-total-attempt retry ceiling. These replays do not charge the user twice, are still subject to rate limits, and increment a persisted replay counter. Further reuse returns HTTP 409 `operation_already_completed`. A user-initiated retry creates a new operation id.
+
+If a user never returns, old rows do not wake compute. Cleanup may also run during an already-active administrative maintenance operation, but not through a new always-on scheduler.
+
+## 11. Cloud Response Data Flow
+
+### 11.1 Non-Streaming STT and Ask
+
+Successful responses remain backward compatible:
+
+```json
+{
+  "text": "transcription",
+  "usageSnapshot": {
+    "userId": "user-id",
+    "periodStart": "2026-07-01T00:00:00.000Z",
+    "revision": "43",
+    "quotaModel": "cloud_words",
+    "cloudWordsUsed": 1248,
+    "cloudWordsLimit": 200000,
+    "resetAt": "2026-08-01T00:00:00.000Z"
+  }
+}
+```
+
+Ask uses `answer` instead of `text`. Old clients ignore the optional field.
+
+Rust parses the snapshot after it has secured the primary content. A malformed optional snapshot is logged and ignored; it cannot turn a successful transcription or answer into a failure.
+
+### 11.2 Streaming LLM
+
+The TalkMore proxy must not forward the upstream final marker before settlement metadata is ready.
+
+Order:
+
+1. forward content deltas without waiting for settlement;
+2. intercept the upstream `[DONE]` marker;
+3. settle usage;
+4. emit an internal SSE usage event;
+5. emit the final `[DONE]` marker and close.
+
+Conceptual event:
+
+```text
+event: opentypeless_usage
+data: {"usageSnapshot":{...}}
+
+data: [DONE]
+```
+
+Existing desktop parsers ignore JSON events without an OpenRouter `choices[].delta.content` field. The new parser recognizes `opentypeless_usage`. Content streaming and first-token latency are unchanged because reserve already occurs before the upstream request and settlement remains at stream completion.
+
+If the client cancels a stream, TalkMore settles partial usage as it does today. Because the connection is gone, no usage event can be delivered; the next successful operation or explicit account refresh corrects the device snapshot.
+
+### 11.3 Error Responses
+
+Stable error envelopes may include a `usageSnapshot` when server truth is available:
+
+```json
+{
+  "code": "cloud_quota_exceeded",
+  "error": "Cloud words used up. Please switch to BYOK mode or wait until reset.",
+  "usageSnapshot": {
+    "userId": "user-id",
+    "periodStart": "2026-07-01T00:00:00.000Z",
+    "revision": "44",
+    "quotaModel": "cloud_words",
+    "cloudWordsUsed": 200000,
+    "cloudWordsLimit": 200000,
+    "resetAt": "2026-08-01T00:00:00.000Z"
+  }
+}
+```
+
+The desktop applies the snapshot before showing the error. Authentication-invalid responses still clear cloud identity through the current typed invalidation path.
+
+## 12. Failure Semantics
+
+### 12.1 Status Refresh
+
+- timeout, offline, 429, or 5xx: retain the current snapshot, mark it stale, and do not show a disruptive global error outside Account/Usage;
+- 401 with the stable invalid-session code: clear cloud identity and the matching snapshot, then show the existing sign-in message;
+- malformed optional fields: use compatible legacy fields or the last valid value;
+- a refresh must never reset quota fields to zero merely because a new field is absent.
+
+### 12.2 Reservation and Upstream Failure
+
+- reservation failure occurs before upstream cost is incurred;
+- quota exhaustion is non-retryable until a newer entitlement or reset is observed;
+- transient database or provider connection failures use bounded retries with existing user-facing retry behavior;
+- upstream failure releases the reservation idempotently;
+- a release failure is logged and reconciled on the next real mutation.
+
+### 12.3 Settlement Failure After Content Exists
+
+User content takes priority once the upstream provider has successfully produced it.
+
+- make three total idempotent settlement attempts, with 100 ms and 300 ms delays before the second and third attempts;
+- do not discard a transcription, Ask answer, or already-streamed LLM text after those retries fail;
+- return/emit `usageSyncPending: true` without presenting a false new snapshot;
+- keep the conservative reservation as server truth until a later mutation reconciles it;
+- mark the local snapshot stale but retain its displayed values;
+- record a metric for pending settlement and operation id, without recording content.
+
+Normal success still waits for settlement exactly as current non-streaming paths do. This fallback exists only for a late infrastructure failure.
+
+### 12.4 Purchase and License Propagation
+
+Checkout and license activation do not use the ordinary 30-minute freshness rule.
+
+On return:
+
+- refresh immediately;
+- if the expected entitlement is not visible, retry at 2, 5, and 10 seconds after the immediate attempt;
+- stop as soon as the expected plan/license is present;
+- stop after the bounded window and keep a visible manual refresh action;
+- do not keep polling after the purchase flow ends.
+
+These rare, user-initiated requests are acceptable because they protect a high-value experience and do not create continuous idle compute.
+
+## 13. Warning and Presentation Rules
+
+- use one shared reducer to apply status and operation snapshots to the frontend auth/account store;
+- preserve the existing quota model distinction between legacy dual meters and cloud words;
+- show a 90% warning only when crossing from below the threshold to at-or-above it;
+- loading a persisted snapshot at startup does not repeat the warning;
+- only the main window owns proactive threshold toasts;
+- a pipeline that receives an exhausted-quota error still shows its current concise Capsule/Ask error;
+- Account/Usage may show `Last updated` or `Offline` when stale, but ordinary Home and recording surfaces remain uncluttered;
+- no background refresh displays a blocking spinner over local features.
+
+## 14. Cost and Performance Design
+
+### 14.1 Expected Request Reduction
+
+For an upgraded idle desktop:
+
+- before: approximately 12 status calls per hour while signed in;
+- after: zero fixed-interval calls;
+- typical day: one startup refresh plus only meaningful focus/account/purchase actions;
+- real cloud operations carry usage in their existing responses and do not trigger a follow-up status call.
+
+Old clients continue their existing polling behavior. Compute savings therefore increase with desktop-version adoption. The server cannot safely suppress personalized old-client status responses without either stale authorization data or another durable cache.
+
+### 14.2 Latency Rules
+
+- main application shell readiness does not wait for the status endpoint;
+- BYOK record start adds no TalkMore request;
+- Cloud LLM first-token latency is not delayed by settlement work;
+- STT and Ask do not make a second status request after success;
+- returned snapshots come from quota mutation `RETURNING` data rather than an extra SELECT;
+- status business data is fetched in one read-only round trip;
+- no implementation may restore per-request explicit flushing while also claiming that an in-memory cache batches writes.
+
+### 14.3 Measurement
+
+Capture a pre-release baseline and compare after deployment:
+
+- `/api/subscription/status` calls by desktop version;
+- status and quota route p50/p95 duration;
+- business-data statement count per route;
+- Neon compute active hours and CU-hours;
+- Neon suspend/resume frequency;
+- quota reserve/settle/release failure counts;
+- `usageSyncPending` count;
+- cloud STT/LLM/Ask error rate and p95 latency.
+
+Do not log tokens, audio, transcripts, questions, selected text, or prompts. Client version, route, timing, quota model, stable result code, and anonymous operation outcome are sufficient.
+
+Success indicators:
+
+- no five-minute cadence from upgraded clients;
+- more than 90% reduction in status requests for an idle upgraded-client cohort;
+- one business query after auth for status;
+- one business-data round trip for each quota state transition;
+- over a seven-day version-matched cohort, cloud request success rate does not fall by more than 0.5 percentage points;
+- over the same cohort, Cloud LLM first-token p95 does not regress by more than the greater of 100 ms or 10% from baseline;
+- local shell readiness and BYOK recording start add zero new network dependencies;
+- Neon active time trends downward as upgraded-client share increases.
+
+## 15. Rollout and Compatibility
+
+This document is the cross-repository contract, not a requirement for one large pull request. Implementation planning must preserve the following independently testable and rollbackable phases.
+
+### Phase 1: Additive TalkMore Compatibility Foundation
+
+- add the nested account/usage snapshot types while retaining all existing response fields;
+- add managed STT capability metadata;
+- add actual WAV-duration validation;
+- make status read-only and collapse its business reads;
+- return a correct post-settlement snapshot from existing quota paths;
+- allow a temporary final quota-row read when the existing mutation cannot yet return the complete snapshot, because this happens only during real cloud usage and avoids a separate desktop status call;
+- expand server contract tests;
+- deploy and verify old desktop clients before changing desktop polling.
+
+Rollback: old fields and route behavior remain available; new fields are optional and can be ignored.
+
+### Phase 2: Desktop Event-Driven Account Sync
+
+- add `AccountSnapshotCoordinator` and account-scoped persistence;
+- parse optional snapshots in Cloud STT, LLM, and Ask;
+- update frontend stores through Rust events/local getters;
+- centralize and deduplicate refresh triggers;
+- remove hidden Ask auth initialization;
+- remove the five-minute interval;
+- retain the status endpoint for startup, account, focus-stale, and purchase flows;
+- confirm the idle upgraded-client request reduction before starting the quota rewrite.
+
+Rollback: a desktop rollback continues using the unchanged legacy flat status fields. The server compatibility foundation remains safe for old and new clients.
+
+### Phase 3: Atomic Quota and Active-Usage Compute Reduction
+
+- add `usage_revision`, stage reservation expiry/replay count, and the operation reconciliation indexes;
+- move both legacy dual-meter and cloud-word paths behind the unified quota interface;
+- implement atomic reserve, settle, release, replay, and expired-reservation reconciliation;
+- return snapshots directly from mutation results and remove the Phase 1 temporary final reads;
+- remove contradictory in-memory batching/explicit-flush behavior;
+- run real-PostgreSQL concurrency and idempotency tests before deployment.
+
+Rollback: additive columns remain in place. Route handlers can return to the Phase 1 compatibility implementation without changing desktop contracts.
+
+### Phase 4: Provider-Aware Recording Limits
+
+- add the Rust capability registry and config migration;
+- expose resolved capabilities to Settings and Capsule;
+- move authoritative deadlines to Rust and anchor them to audio readiness;
+- add graceful warnings and auto-stop reason;
+- apply the same resolver to dictation and Ask;
+- validate the managed-cloud 10-minute contract end to end.
+
+Rollback: the provider-resolved `max_recording_seconds` mirror remains readable and safe for older versions.
+
+### Phase 5: Issue #83 Integration and Release QA
+
+- review and commit the existing startup-barrier implementation separately from the design commit;
+- run unit, integration, build, lint, and cross-platform CI;
+- test real microphone devices on Windows, macOS, and Linux;
+- publish release notes that distinguish provider restrictions from the former global 30-second behavior;
+- monitor before closing Issues #81 and #83.
+
+The phases may be separate commits, pull requests, and deployments. Server compatibility must land before a desktop release that consumes snapshots. The atomic quota phase must not be bundled into the polling removal if that would delay or increase the rollback risk of the idle-Compute improvement.
+
+## 16. Test Strategy
+
+### 16.1 Rust Unit and Integration Tests
+
+Provider limits:
+
+- every supported provider resolves to the approved matrix;
+- Auto returns the provider recommendation;
+- Custom clamps to the hard maximum;
+- Cloud takes the lower of built-in and server values;
+- malformed/missing server capability never expands the local limit;
+- provider switches do not mutate an active session deadline;
+- stale session timers cannot stop a newer recording;
+- sleep/resume expiration produces one graceful stop;
+- buffer guard finalizes instead of discarding audio.
+
+Config migration:
+
+- absent mode plus 30 seconds becomes Auto;
+- absent mode plus a non-default value becomes Custom;
+- invalid values become a safe Auto configuration;
+- serialization retains provider-resolved `max_recording_seconds` and the independent custom intent field for downgrade compatibility.
+
+Issue #83:
+
+- state remains `Starting` before the ready signal;
+- ready is emitted only after the backend signal;
+- audio and STT futures are polled concurrently;
+- the 30-second startup timeout cancels audio/provider setup exactly once;
+- audio failure, STT failure, and cancellation clean up both sides;
+- the bounded queue capacity is derived correctly;
+- dictation and Ask share the startup helper.
+
+Account snapshots:
+
+- cross-user snapshots are rejected;
+- newer period wins;
+- lower revision cannot overwrite a higher revision;
+- malformed optional snapshot does not fail successful content;
+- logout/session invalidation clears account-scoped state;
+- hidden-window getter returns the latest Rust value.
+
+Cloud protocol:
+
+- STT and Ask parse content before optional usage;
+- SSE usage event is applied before final completion;
+- old OpenRouter content frames remain unchanged;
+- unknown SSE events remain ignorable;
+- quota error snapshots are applied before error presentation.
+
+### 16.2 Frontend Tests
+
+- Settings shows Auto with the resolved provider value;
+- presets above the provider maximum are absent/disabled;
+- Custom validation explains and clamps invalid values;
+- GLM and Apple limits are labeled as provider/system restrictions;
+- automatic stop warnings occur at the approved times;
+- startup uses a matching persisted snapshot without a Free/zero flicker;
+- refresh failure retains previous values;
+- concurrent triggers result in one status request;
+- threshold warnings fire once on crossing, not on cache hydration;
+- Account entry refreshes in the background;
+- checkout retry stops when the expected entitlement arrives;
+- no five-minute interval exists;
+- Ask rendering does not initialize the auth store.
+
+### 16.3 TalkMore Contract Tests
+
+- old status fields and plan compatibility behavior remain unchanged;
+- status with no quota row returns zero usage and performs no insert;
+- the business snapshot query handles free, Pro, direct lifetime, and all AppSumo tiers;
+- active, pending, refunded, and deactivated licenses resolve correctly;
+- old STT, LLM, and Ask clients ignore new response fields;
+- WAV duration above 600 seconds is rejected before quota or Groq;
+- valid 600-second WAV is accepted below byte limits;
+- malformed WAV is rejected without quota usage;
+- SSE content order is deltas, usage event, `[DONE]`;
+- stream cancellation settles partial usage without duplicate charge.
+
+### 16.4 Real PostgreSQL Concurrency Tests
+
+Mocks are insufficient for billing correctness. Run integration tests against PostgreSQL for:
+
+- two concurrent reservations near the quota boundary cannot oversubscribe;
+- retrying the same operation/stage cannot reserve twice;
+- settling twice returns the same result;
+- release after settle is a no-op;
+- settle after release returns `invalid_quota_transition` unless reserve first completed the conditional `released -> reserved` transition;
+- a partial refund and additional charge update counters exactly once;
+- revision increases with every visible mutation;
+- monthly period rollover cannot accept an old-period response as current;
+- expired reservations reconcile exactly once;
+- transaction rollback leaves quota, operation, and stage consistent.
+
+### 16.5 Cross-Platform Runtime Matrix
+
+Run at least one signed/debug build on each platform with a real input device:
+
+| Scenario | Windows | macOS | Linux |
+|---|---|---|---|
+| First recording after clean launch captures first spoken syllable | Required | Required | Required |
+| Hold and toggle recording | Required | Required | Required |
+| Ask recording startup | Required | Required | Required |
+| Window hidden to tray during recording | Required | Required | Required |
+| System sleep past deadline, then resume | Required | Required | Required |
+| Auto-stop submits audio once | Required | Required | Required |
+| Provider switch clamps UI when idle | Required | Required | Required |
+| Offline/cold account snapshot behavior | Required | Required | Required |
+| Cloud 10-minute boundary | Required | Required | Required |
+
+Platform coverage:
+
+- Windows: WASAPI through CPAL and WebView2 window lifecycle;
+- macOS: CoreAudio through CPAL, WKWebView hidden-window behavior, and Apple Speech's one-minute rule;
+- Linux: ALSA and/or PipeWire through CPAL and WebKitGTK lifecycle on a supported distribution.
+
+Cross-compilation alone is not runtime verification. A Windows check blocked by a missing MSVC SDK header and an absent Linux target must not be reported as passing those platforms; CI runners or real machines are required.
+
+## 17. Acceptance Criteria
+
+### 17.1 Issue #81 May Be Closed When
+
+- a Groq user on Auto is no longer stopped at 30 seconds and can record up to the approved 10-minute recommendation;
+- safe custom durations are visible and enforced;
+- GLM-ASR remains capped at 30 seconds with a clear provider explanation;
+- Apple Speech remains capped at one minute on macOS;
+- TalkMore Cloud is enforced at 10 minutes in both desktop and server;
+- automatic stop is Rust-authoritative, idempotent, and submits existing audio;
+- hold, toggle, dictation, and Ask use the same resolver;
+- Windows, macOS, and Linux runtime matrix passes;
+- release notes/documentation explain Auto and provider constraints.
+
+### 17.2 Issue #83 May Be Closed When
+
+- the startup barrier implementation is reviewed and committed;
+- recording UI does not report ready before the audio backend succeeds;
+- first spoken audio is preserved while STT connects;
+- device/provider failures clean up without a stuck recording state;
+- focused automated tests pass;
+- real-device first-recording tests pass on Windows, macOS, and Linux;
+- the fixed behavior is included in a published desktop release.
+
+### 17.3 Cloud Efficiency Is Complete When
+
+- TalkMore additive schema and response changes are deployed first;
+- upgraded desktop clients generate no fixed five-minute status traffic;
+- successful cloud operations update visible usage without a follow-up status request;
+- status GET performs no quota write;
+- quota transitions pass real-PostgreSQL idempotency and concurrency tests;
+- cached/offline startup, purchase propagation, session invalidation, and multiple-window behavior pass UX tests;
+- monitoring shows the expected request reduction without higher user-visible error rates;
+- old supported desktop clients still complete status, STT, LLM, and Ask requests.
+
+## 18. Risks and Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Old clients continue to wake Neon | Optimize the server query, measure by client version, and let savings grow with upgrade adoption; do not break compatibility. |
+| Cached plan is stale after external revocation | Server enforces every cloud call; quota/auth error updates or invalidates the client immediately; focus/account refresh remains. |
+| Purchase webhook arrives late | Use bounded checkout-specific retries and a manual refresh path. |
+| Concurrent responses regress displayed quota | Compare `periodStart` and atomic `usage_revision`. |
+| Hidden WebView misses events | Rust is shared state; visible windows read through a local command. |
+| Late settlement failure loses user content | Preserve content, mark usage pending, retain conservative reservation, and reconcile on later mutation. |
+| Provider changes published limits | Keep a versioned Rust registry and revalidate documentation when changing it. |
+| Custom endpoint has an unknown limit | Use a conservative two-minute Auto value and a client-bound custom maximum with an explicit warning. |
+| Long WAV approaches byte limits | Keep 10-minute managed and 12-minute upload caps with measured byte headroom. |
+| Atomic SQL rewrite changes billing behavior | Preserve existing billing formulas and operation ids; use real PostgreSQL concurrency tests and server-first rollout. |
+
+## 19. Definition of Done
+
+The combined work is done only when:
+
+- all approved product limits and migration rules are implemented;
+- #83 startup behavior is implemented and cross-platform verified;
+- TalkMore is backward compatible and server-first deployed;
+- desktop account state is event-driven and locally resilient;
+- quota mutation is atomic, idempotent, and snapshot-returning;
+- no fixed subscription polling remains in the upgraded desktop;
+- cloud content remains responsive and is not discarded by late usage-sync failures;
+- no audio/transcript content is added to Neon or telemetry;
+- automated suites, production builds, contract tests, PostgreSQL concurrency tests, and the three-platform manual matrix pass;
+- issue closure occurs only after the behavior is present in a published release.
