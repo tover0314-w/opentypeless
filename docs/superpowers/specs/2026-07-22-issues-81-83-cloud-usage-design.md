@@ -55,6 +55,10 @@ This spec does not treat those changes as shipped. They still require review, co
 
 ### 2.3 TalkMore and Neon
 
+The production TalkMore project is on Vercel Pro. This removes the plan-level blocker for the design's 210-second function-duration requirement: Vercel documents a maximum of at least 300 seconds for Pro without Fluid Compute and up to 800 seconds with Fluid Compute. The STT route must still declare and verify its duration explicitly rather than relying on a project default.
+
+Vercel Pro does not raise the 4.5 MB Function request-body limit. The hybrid managed-upload design remains necessary even though the execution-duration budget is available.
+
 The desktop currently:
 
 - initializes authentication in the main WebView;
@@ -193,6 +197,7 @@ The 12-minute direct upload-provider hard cap continues to leave headroom under 
 Design-time platform references:
 
 - Vercel Function request-body limit: <https://vercel.com/docs/functions/limitations>
+- Vercel Function duration limits by plan and Fluid Compute setting: <https://vercel.com/docs/functions/limitations#max-duration>
 - Vercel large-upload guidance: <https://vercel.com/kb/guide/how-to-bypass-vercel-body-size-limit-serverless-functions>
 - Groq accepted formats and file limits: <https://console.groq.com/docs/speech-to-text>
 
@@ -331,7 +336,7 @@ timeoutSeconds = if durationSeconds <= 60 {
 }
 ```
 
-This gives a 3.6 MB payload approximately 173 seconds on a very slow 256 kbit/s uplink while preserving the current 60-second behavior for ordinary short uploads. The TalkMore route must have at least 210 seconds of deployed function duration, leaving server cleanup/response headroom beyond the 180-second client cap. Capability version 2 must not be advertised if the deployed environment cannot sustain that duration. Connect/TLS failures remain independently bounded and retry policy remains idempotent through the existing operation/stage key.
+This gives a 3.6 MB payload approximately 173 seconds on a very slow 256 kbit/s uplink while preserving the current 60-second behavior for ordinary short uploads. The TalkMore route must have at least 210 seconds of deployed function duration, leaving server cleanup/response headroom beyond the 180-second client cap. Vercel Pro supports that setting with or without Fluid Compute, but deployment verification must record the effective route duration and whether Fluid Compute is enabled. Capability version 2 must not be advertised if the deployed environment cannot sustain that duration. Connect/TLS failures remain independently bounded and retry policy remains idempotent through the existing operation/stage key.
 
 Failure rules:
 
