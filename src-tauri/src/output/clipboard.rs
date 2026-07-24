@@ -58,19 +58,40 @@ impl TextOutput for ClipboardOutput {
 
             #[cfg(not(target_os = "macos"))]
             {
-                use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-                let mut enigo = Enigo::new(&Settings::default())
-                    .map_err(|e| AppError::Output(format!("Failed to create Enigo: {:?}", e)))?;
+                // On Wayland, simulating Ctrl+V goes through the RemoteDesktop
+                // portal, which pops a "Remote Desktop / Allow Remote
+                // Interaction" permission dialog on every paste (a fresh input
+                // session each time). The compositor forbids seamless input
+                // injection anyway, so skip the auto-paste and leave the text
+                // on the clipboard for a manual Ctrl+V — mirroring how keyboard
+                // output is disabled on Wayland (see output/keyboard.rs).
+                #[cfg(target_os = "linux")]
+                let skip_paste = std::env::var("XDG_SESSION_TYPE")
+                    .map(|s| s.eq_ignore_ascii_case("wayland"))
+                    .unwrap_or(false);
+                #[cfg(not(target_os = "linux"))]
+                let skip_paste = false;
 
-                enigo
-                    .key(Key::Control, Direction::Press)
-                    .map_err(|e| AppError::Output(format!("Key press error: {:?}", e)))?;
-                enigo
-                    .key(Key::Unicode('v'), Direction::Click)
-                    .map_err(|e| AppError::Output(format!("Key click error: {:?}", e)))?;
-                enigo
-                    .key(Key::Control, Direction::Release)
-                    .map_err(|e| AppError::Output(format!("Key release error: {:?}", e)))?;
+                if skip_paste {
+                    tracing::info!(
+                        "Wayland: skipping simulated paste; transcript left on clipboard"
+                    );
+                } else {
+                    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+                    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {
+                        AppError::Output(format!("Failed to create Enigo: {:?}", e))
+                    })?;
+
+                    enigo
+                        .key(Key::Control, Direction::Press)
+                        .map_err(|e| AppError::Output(format!("Key press error: {:?}", e)))?;
+                    enigo
+                        .key(Key::Unicode('v'), Direction::Click)
+                        .map_err(|e| AppError::Output(format!("Key click error: {:?}", e)))?;
+                    enigo
+                        .key(Key::Control, Direction::Release)
+                        .map_err(|e| AppError::Output(format!("Key release error: {:?}", e)))?;
+                }
             }
 
             Ok(())
