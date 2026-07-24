@@ -76,6 +76,27 @@ pub fn build_shortcut_handler(
     }
 }
 
+/// Toggle recording (idle -> start, otherwise -> stop).
+///
+/// Used by the external GNOME custom-shortcut bridge: on GNOME/Wayland the
+/// compositor owns the keyboard and Tauri's own global-shortcut grab never
+/// sees the keys, so a second `opentypeless --toggle-recording` launch is
+/// forwarded here by the single-instance plugin to drive recording instead.
+pub fn toggle_recording(app_handle: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let pipeline = app_handle.state::<pipeline::PipelineHandle>();
+        if pipeline.current_state() == pipeline::PipelineState::Idle {
+            if let Err(e) = pipeline.start().await {
+                tracing::error!("Failed to start recording: {}", e);
+                let _ = app_handle.emit("pipeline:error", e.to_string());
+            }
+        } else if let Err(e) = pipeline.stop().await {
+            tracing::error!("Failed to stop recording: {}", e);
+            let _ = app_handle.emit("pipeline:error", e.to_string());
+        }
+    });
+}
+
 pub fn parse_hotkey(s: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
     if parts.is_empty() {

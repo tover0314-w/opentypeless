@@ -145,7 +145,15 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // GNOME/Wayland bridge: the compositor owns global hotkeys, so a
+            // GNOME custom shortcut runs `opentypeless --toggle-recording`,
+            // which the single-instance plugin forwards here to toggle
+            // recording without stealing focus.
+            if args.iter().any(|a| a == "--toggle-recording") {
+                hotkey::toggle_recording(app.clone());
+                return;
+            }
             // Deep-link URL forwarding is handled automatically by the
             // "deep-link" feature of single-instance plugin.
             // Just focus the main window so the user sees the result.
