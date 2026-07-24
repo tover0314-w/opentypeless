@@ -827,6 +827,7 @@
     "stt": {
       "deepgram": "Deepgram Nova-3",
       "assemblyai": "AssemblyAI",
+      "aliyunQwen3Asr": "阿里云 Qwen3 实时语音识别",
       "volcengineDoubao": "火山引擎豆包实时语音识别",
       "glmAsr": "智谱 GLM-ASR",
       "openaiWhisper": "OpenAI Whisper",

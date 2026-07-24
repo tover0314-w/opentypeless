@@ -100,6 +100,28 @@ async fn check_volcengine_doubao_connection(
     Ok(())
 }
 
+async fn check_aliyun_qwen3_connection(api_key: &str) -> Result<(), String> {
+    let mut provider = stt::aliyun_qwen3_asr::AliyunQwen3AsrProvider::new();
+    let config = stt::SttConfig {
+        api_key: api_key.to_string(),
+        language: Some("zh".to_string()),
+        smart_format: true,
+        sample_rate: 16_000,
+        resource_id: None,
+        operation_id: None,
+        managed_audio: None,
+    };
+    provider
+        .connect(&config)
+        .await
+        .map_err(|error| error.to_string())?;
+    provider
+        .disconnect()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn has_managed_cloud_access(body: &serde_json::Value) -> bool {
     if matches!(
         body["licenseStatus"].as_str(),
@@ -182,6 +204,10 @@ fn build_remote_stt_diagnostics(provider: &str, api_key: &str) -> SttProviderDia
             stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => (
                 Some("wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".to_string()),
                 None,
+            ),
+            stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => (
+                Some(stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_URL.to_string()),
+                Some("qwen3-asr-flash-realtime".to_string()),
             ),
             _ => (None, None),
         }
@@ -299,7 +325,10 @@ fn build_stt_provider_diagnostics(
                 },
             }
         }
-        "deepgram" | "assemblyai" | stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
+        "deepgram"
+        | "assemblyai"
+        | stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
+        | stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
             build_remote_stt_diagnostics(provider, api_key)
         }
         _ if stt::config::build_known_whisper_config(provider).is_some() => {
@@ -433,6 +462,9 @@ pub async fn test_stt_connection(
         )
         .await
         .is_ok()),
+        stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            Ok(check_aliyun_qwen3_connection(&api_key).await.is_ok())
+        }
         stt::config::APPLE_SPEECH_PROVIDER => {
             let authorization = stt::apple_speech::request_apple_speech_authorization()
                 .map_err(|e| e.to_string())?;
@@ -551,6 +583,22 @@ mod tests {
         assert!(diagnostics.requires_api_key);
         assert!(!diagnostics.ready);
         assert_eq!(diagnostics.issues.len(), 1);
+        assert_eq!(diagnostics.issues[0].code, "missing_api_key");
+    }
+
+    #[test]
+    fn aliyun_qwen3_diagnostics_exposes_realtime_endpoint() {
+        let diagnostics = build_stt_provider_diagnostics("aliyun-qwen3-asr", "", None, None);
+
+        assert_eq!(diagnostics.kind, "byokRemote");
+        assert_eq!(
+            diagnostics.endpoint.as_deref(),
+            Some(stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_URL)
+        );
+        assert_eq!(
+            diagnostics.model.as_deref(),
+            Some("qwen3-asr-flash-realtime")
+        );
         assert_eq!(diagnostics.issues[0].code, "missing_api_key");
     }
 
@@ -728,6 +776,11 @@ pub async fn bench_stt_connection(
         stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
             let t0 = std::time::Instant::now();
             check_volcengine_doubao_connection(&api_key, volcengine_resource_id).await?;
+            Ok(t0.elapsed().as_millis() as u32)
+        }
+        stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            let t0 = std::time::Instant::now();
+            check_aliyun_qwen3_connection(&api_key).await?;
             Ok(t0.elapsed().as_millis() as u32)
         }
         stt::config::APPLE_SPEECH_PROVIDER => {

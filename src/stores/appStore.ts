@@ -16,6 +16,7 @@ export type VoiceMode = 'dictate' | 'ask' | 'translate'
 export type SttProvider =
   | 'deepgram'
   | 'assemblyai'
+  | 'aliyun-qwen3-asr'
   | 'volcengine-doubao'
   | 'glm-asr'
   | 'openai-whisper'

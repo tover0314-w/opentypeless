@@ -73,6 +73,7 @@ vi.mock('react-i18next', () => ({
         'settings.volcengineResourceId': 'Volcengine ASR resource',
         'settings.volcengineResourceSeedAsr': 'SeedASR 2.0',
         'settings.volcengineResourceBigAsr': 'BigASR 1.0',
+        'providers.stt.aliyunQwen3Asr': 'Aliyun Qwen3 Realtime ASR',
         'providers.stt.volcengineDoubao': 'Volcengine Doubao Realtime ASR',
         'providers.stt.appleSpeech': 'Apple Speech (Local)',
       }
@@ -226,6 +227,13 @@ describe('SttPane', () => {
       render(<SttPane />)
       expect(screen.getByRole('option', { name: 'Volcengine Doubao Realtime ASR' })).toHaveValue(
         'volcengine-doubao',
+      )
+    })
+
+    it('lists Aliyun Qwen3 realtime ASR as an STT provider', () => {
+      render(<SttPane />)
+      expect(screen.getByRole('option', { name: 'Aliyun Qwen3 Realtime ASR' })).toHaveValue(
+        'aliyun-qwen3-asr',
       )
     })
 
