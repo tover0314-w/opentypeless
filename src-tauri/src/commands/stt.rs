@@ -113,6 +113,72 @@ pub async fn test_stt_connection(
     }
 }
 
+/// Strip a trailing `/v1` (and slashes) from a Whisper base URL to get the
+/// server root, e.g. `http://localhost:8000/v1` -> `http://localhost:8000`.
+fn local_server_root(base_url: &str) -> String {
+    base_url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Query the local STT server's model/GPU status (GET /health).
+/// Only meaningful for the local `custom-whisper` server; returns its JSON.
+#[tauri::command]
+pub async fn local_stt_status(
+    base_url: String,
+    client: tauri::State<'_, reqwest::Client>,
+) -> Result<serde_json::Value, String> {
+    let root = local_server_root(&base_url);
+    let resp = client
+        .get(format!("{}/health", root))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Load the model into VRAM on the local STT server (POST /v1/local/load).
+#[tauri::command]
+pub async fn local_stt_load(
+    base_url: String,
+    client: tauri::State<'_, reqwest::Client>,
+) -> Result<serde_json::Value, String> {
+    let root = local_server_root(&base_url);
+    let resp = client
+        .post(format!("{}/v1/local/load", root))
+        .timeout(std::time::Duration::from_secs(180))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Free the model from VRAM on the local STT server (POST /v1/local/unload).
+#[tauri::command]
+pub async fn local_stt_unload(
+    base_url: String,
+    client: tauri::State<'_, reqwest::Client>,
+) -> Result<serde_json::Value, String> {
+    let root = local_server_root(&base_url);
+    let resp = client
+        .post(format!("{}/v1/local/unload", root))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

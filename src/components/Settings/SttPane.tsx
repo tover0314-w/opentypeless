@@ -10,6 +10,7 @@ import {
 } from '../../lib/constants'
 import { benchSttConnection } from '../../lib/tauri'
 import { FormField } from './shared/FormField'
+import { LocalModelControl } from './LocalModelControl'
 import { CheckCircle2, XCircle, Loader2, Crown } from 'lucide-react'
 
 export function SttPane() {
@@ -155,6 +156,10 @@ export function SttPane() {
                   {t('settings.customSttSetupHint')}
                 </p>
               </FormField>
+
+              {/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(
+                config.stt_custom_base_url.trim(),
+              ) && <LocalModelControl baseUrl={config.stt_custom_base_url.trim()} />}
             </>
           )}
 

@@ -66,6 +66,33 @@ export async function benchSttConnection(
   })
 }
 
+// --- Local STT server (custom-whisper) GPU model management ---
+
+export interface LocalSttStatus {
+  status: string
+  loaded: boolean
+  model: string
+  device: string
+  compute: string
+  gpu: { used_mib: number; total_mib: number } | null
+  // present on load/unload responses
+  load_seconds?: number
+  reused?: boolean
+  freed?: boolean
+}
+
+export async function localSttStatus(baseUrl: string): Promise<LocalSttStatus> {
+  return invoke('local_stt_status', { baseUrl })
+}
+
+export async function localSttLoad(baseUrl: string): Promise<LocalSttStatus> {
+  return invoke('local_stt_load', { baseUrl })
+}
+
+export async function localSttUnload(baseUrl: string): Promise<LocalSttStatus> {
+  return invoke('local_stt_unload', { baseUrl })
+}
+
 export async function benchLlmConnection(
   apiKey: string,
   provider: string,

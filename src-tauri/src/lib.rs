@@ -99,10 +99,13 @@ fn apply_linux_workarounds() {
         // backend (e.g. the user exported GDK_BACKEND=broadway) is left alone.
         let gdk_backend = std::env::var("GDK_BACKEND").unwrap_or_default();
         let user_pinned_non_wayland = !gdk_backend.is_empty() && !gdk_backend.contains("wayland");
-        let x_server_available =
-            std::env::var("DISPLAY").map(|d| !d.is_empty()).unwrap_or(false);
+        let x_server_available = std::env::var("DISPLAY")
+            .map(|d| !d.is_empty())
+            .unwrap_or(false);
         if session == "wayland" && !user_pinned_non_wayland && x_server_available {
-            tracing::info!("Wayland session: forcing GDK_BACKEND=x11 (XWayland) for capsule positioning");
+            tracing::info!(
+                "Wayland session: forcing GDK_BACKEND=x11 (XWayland) for capsule positioning"
+            );
             std::env::set_var("GDK_BACKEND", "x11");
         }
     }
@@ -486,6 +489,9 @@ pub fn run() {
             commands::llm::test_llm_connection,
             commands::llm::bench_llm_connection,
             commands::stt::bench_stt_connection,
+            commands::stt::local_stt_status,
+            commands::stt::local_stt_load,
+            commands::stt::local_stt_unload,
             commands::llm::fetch_llm_models,
             commands::history::get_history,
             commands::history::get_history_count,
