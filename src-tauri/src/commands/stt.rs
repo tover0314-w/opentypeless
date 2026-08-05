@@ -179,6 +179,31 @@ pub async fn local_stt_unload(
         .map_err(|e| e.to_string())
 }
 
+/// Pin the local STT server to a device (POST /v1/local/device).
+///
+/// `mode` is `auto` (GPU with CPU fallback on VRAM exhaustion), `gpu` (GPU
+/// only), or `cpu` (CPU only — keeps dictation working while a game owns the
+/// GPU). Pinning to `cpu` also frees the model from VRAM server-side.
+#[tauri::command]
+pub async fn local_stt_set_device(
+    base_url: String,
+    mode: String,
+    client: tauri::State<'_, reqwest::Client>,
+) -> Result<serde_json::Value, String> {
+    let root = local_server_root(&base_url);
+    let form = reqwest::multipart::Form::new().text("mode", mode);
+    let resp = client
+        .post(format!("{}/v1/local/device", root))
+        .multipart(form)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

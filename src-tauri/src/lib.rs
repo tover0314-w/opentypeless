@@ -492,6 +492,7 @@ pub fn run() {
             commands::stt::local_stt_status,
             commands::stt::local_stt_load,
             commands::stt::local_stt_unload,
+            commands::stt::local_stt_set_device,
             commands::llm::fetch_llm_models,
             commands::history::get_history,
             commands::history::get_history_count,

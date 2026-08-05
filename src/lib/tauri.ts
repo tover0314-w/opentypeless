@@ -68,6 +68,9 @@ export async function benchSttConnection(
 
 // --- Local STT server (custom-whisper) GPU model management ---
 
+/** Where the server should run transcription. */
+export type SttDeviceMode = 'auto' | 'gpu' | 'cpu'
+
 export interface LocalSttStatus {
   status: string
   loaded: boolean
@@ -75,10 +78,20 @@ export interface LocalSttStatus {
   device: string
   compute: string
   gpu: { used_mib: number; total_mib: number } | null
+  device_mode?: SttDeviceMode
+  cpu_fallback?: {
+    enabled: boolean
+    loaded: boolean
+    compute: string
+    threads: number
+    gpu_cooldown_seconds: number
+  }
   // present on load/unload responses
   load_seconds?: number
   reused?: boolean
   freed?: boolean
+  // present on set-device responses
+  freed_vram?: boolean
 }
 
 export async function localSttStatus(baseUrl: string): Promise<LocalSttStatus> {
@@ -91,6 +104,13 @@ export async function localSttLoad(baseUrl: string): Promise<LocalSttStatus> {
 
 export async function localSttUnload(baseUrl: string): Promise<LocalSttStatus> {
   return invoke('local_stt_unload', { baseUrl })
+}
+
+export async function localSttSetDevice(
+  baseUrl: string,
+  mode: SttDeviceMode,
+): Promise<LocalSttStatus> {
+  return invoke('local_stt_set_device', { baseUrl, mode })
 }
 
 export async function benchLlmConnection(
