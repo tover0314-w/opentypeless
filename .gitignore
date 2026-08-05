@@ -50,3 +50,7 @@ docs/superpowers/
 
 # Local isolated worktrees
 .worktrees/
+
+# Local device helpers (machine-specific paths)
+/otl-toggle.sh
+/run-dev.sh
