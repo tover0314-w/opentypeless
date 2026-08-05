@@ -557,10 +557,7 @@ mod tests {
         assert!(rows[0].recording_file.is_none());
         assert!(store.list_recordings(10, 0).await.unwrap().is_empty());
 
-        store
-            .set_recording_file(id, "/tmp/rec.flac")
-            .await
-            .unwrap();
+        store.set_recording_file(id, "/tmp/rec.flac").await.unwrap();
         let found = store.find_by_id(id).await.unwrap().unwrap();
         assert_eq!(found.recording_file.as_deref(), Some("/tmp/rec.flac"));
         assert_eq!(found.duration_ms, Some(1234));
@@ -571,7 +568,13 @@ mod tests {
 
         // Clearing the file keeps the transcript row.
         store.clear_recording_file(id).await.unwrap();
-        assert!(store.find_by_id(id).await.unwrap().unwrap().recording_file.is_none());
+        assert!(store
+            .find_by_id(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .recording_file
+            .is_none());
         assert_eq!(store.list(10, 0).await.unwrap().len(), 1);
     }
 

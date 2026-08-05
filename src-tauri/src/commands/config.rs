@@ -26,10 +26,7 @@ fn config_patch_between(previous: &storage::AppConfig, next: &storage::AppConfig
         patch.insert("save_recordings".to_string(), json!(next.save_recordings));
     }
     if previous.recording_format != next.recording_format {
-        patch.insert(
-            "recording_format".to_string(),
-            json!(next.recording_format),
-        );
+        patch.insert("recording_format".to_string(), json!(next.recording_format));
     }
     if previous.max_saved_recordings != next.max_saved_recordings {
         patch.insert(

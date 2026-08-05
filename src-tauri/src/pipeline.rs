@@ -227,11 +227,7 @@ fn write_recording_file(
     let dir = app_handle.path().app_data_dir()?.join("recordings");
     std::fs::create_dir_all(&dir)?;
 
-    let filename = format!(
-        "{}.{}",
-        chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ"),
-        ext
-    );
+    let filename = format!("{}.{}", chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ"), ext);
     let path = dir.join(filename);
     std::fs::write(&path, &bytes)?;
 
@@ -1165,7 +1161,8 @@ impl PipelineHandle {
                     self.save_history("", "", &app_ctx, duration_ms, recording_file)
                         .await;
                     if config.max_saved_recordings > 0 {
-                        self.prune_saved_recordings(config.max_saved_recordings).await;
+                        self.prune_saved_recordings(config.max_saved_recordings)
+                            .await;
                     }
                 }
                 if let Some(control) = &stt_control {
@@ -1238,13 +1235,20 @@ impl PipelineHandle {
             .unwrap_or_else(|e| e.into_inner())
             .take();
         let saved_new_recording = recording_file.is_some();
-        self.save_history(&raw_text, &final_text, &app_ctx, duration_ms, recording_file)
-            .await;
+        self.save_history(
+            &raw_text,
+            &final_text,
+            &app_ctx,
+            duration_ms,
+            recording_file,
+        )
+        .await;
 
         // Enforce the saved-recordings cap (0 = unlimited). Only runs when a new
         // file was just written, since that is the only time the count grows.
         if saved_new_recording && config.max_saved_recordings > 0 {
-            self.prune_saved_recordings(config.max_saved_recordings).await;
+            self.prune_saved_recordings(config.max_saved_recordings)
+                .await;
         }
 
         if let Some(control) = &stt_control {

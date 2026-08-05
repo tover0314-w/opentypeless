@@ -76,8 +76,9 @@ fn encode_flac(pcm: &[u8], sample_rate: u32) -> Result<Vec<u8>> {
     };
 
     let source = flacenc::source::MemSource::from_samples(
-        &samples, 1, // channels (mono)
-        16,          // bits per sample
+        &samples,
+        1,  // channels (mono)
+        16, // bits per sample
         sample_rate as usize,
     );
 
@@ -151,12 +152,18 @@ mod tests {
 
     #[test]
     fn from_config_str_parses_known_formats() {
-        assert_eq!(RecordingFormat::from_config_str("wav"), RecordingFormat::Wav);
+        assert_eq!(
+            RecordingFormat::from_config_str("wav"),
+            RecordingFormat::Wav
+        );
         assert_eq!(
             RecordingFormat::from_config_str("FLAC"),
             RecordingFormat::Flac
         );
-        assert_eq!(RecordingFormat::from_config_str("mp3"), RecordingFormat::Mp3);
+        assert_eq!(
+            RecordingFormat::from_config_str("mp3"),
+            RecordingFormat::Mp3
+        );
     }
 
     #[test]

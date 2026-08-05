@@ -30,7 +30,12 @@ pub fn spawn(recordings_dir: PathBuf) -> std::io::Result<u16> {
 }
 
 fn content_type(name: &str) -> &'static str {
-    match name.rsplit('.').next().map(|e| e.to_ascii_lowercase()).as_deref() {
+    match name
+        .rsplit('.')
+        .next()
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("mp3") => "audio/mpeg",
         Some("wav") => "audio/wav",
         Some("flac") => "audio/flac",
@@ -41,8 +46,7 @@ fn content_type(name: &str) -> &'static str {
 
 fn header(field: &str, value: &str) -> tiny_http::Header {
     // Safe to unwrap: all callers pass static ASCII field names and simple values.
-    tiny_http::Header::from_bytes(field.as_bytes(), value.as_bytes())
-        .expect("valid header")
+    tiny_http::Header::from_bytes(field.as_bytes(), value.as_bytes()).expect("valid header")
 }
 
 /// Parse a single-range `Range: bytes=...` value into inclusive (start, end).

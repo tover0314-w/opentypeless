@@ -57,9 +57,7 @@ pub async fn get_recordings(
 /// Port of the localhost server that streams recordings for in-app playback.
 /// The frontend builds `http://127.0.0.1:<port>/<filename>` audio URLs from it.
 #[tauri::command]
-pub fn get_recordings_server_port(
-    port: tauri::State<'_, crate::RecordingsServerPort>,
-) -> u16 {
+pub fn get_recordings_server_port(port: tauri::State<'_, crate::RecordingsServerPort>) -> u16 {
     port.0
 }
 
@@ -171,8 +169,14 @@ mod tests {
 
     #[test]
     fn format_from_path_extracts_extension() {
-        assert_eq!(format_from_path("/data/rec/abc.flac").as_deref(), Some("flac"));
-        assert_eq!(format_from_path("/data/rec/abc.MP3").as_deref(), Some("mp3"));
+        assert_eq!(
+            format_from_path("/data/rec/abc.flac").as_deref(),
+            Some("flac")
+        );
+        assert_eq!(
+            format_from_path("/data/rec/abc.MP3").as_deref(),
+            Some("mp3")
+        );
         assert_eq!(format_from_path("/data/rec/abc").as_deref(), None);
     }
 

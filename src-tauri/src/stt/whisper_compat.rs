@@ -219,7 +219,9 @@ impl WhisperCompatProvider {
                 // Retry on timeout only for cloud providers (transient network
                 // blips). A local timeout means the server is slow, not failing —
                 // retrying just re-sends the clip and compounds the backlog.
-                Err(e) if e.is_timeout() && attempt < 2 && self.provider_config.api_key_required => {
+                Err(e)
+                    if e.is_timeout() && attempt < 2 && self.provider_config.api_key_required =>
+                {
                     tracing::warn!(
                         "{} timeout (attempt {}/3)",
                         self.provider_config.provider_name,
