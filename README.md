@@ -311,9 +311,10 @@ Select **Azure OpenAI** as the AI Polish provider. In Azure, the `model` field i
 | Model | your chat deployment name, e.g. `gpt-4o-mini` |
 | API key | your Azure OpenAI key — or leave blank to sign in with Microsoft Entra ID |
 
-For speech-to-text, choose **Local / Custom Whisper** and the **Azure OpenAI** preset. Azure does not serve
-transcriptions from the OpenAI-compatible `/openai/v1` surface, so the preset uses the classic deployment
-route, which requires an `api-version`:
+For speech-to-text, choose **Local / Custom Whisper** and the **Azure OpenAI** preset, or pick **Azure OpenAI**
+directly in the Speech Recognition step during onboarding. Azure does not serve transcriptions from the
+OpenAI-compatible `/openai/v1` surface, so the preset uses the classic deployment route, which requires an
+`api-version`:
 
 ```
 https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/audio/transcriptions?api-version=2025-03-01-preview
