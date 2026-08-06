@@ -156,8 +156,8 @@ Most desktop dictation tools stop at transcription. OpenTypeless adds the AI rew
 | AI rewriting      | App-aware writing, local per-app style mappings, polish styles, streaming polish, selected-text context, and custom instructions             |
 | Ask Anything      | One-shot voice question flow: record in the capsule, think, then show a small answer note with copy support                                 |
 | Voice actions     | Deterministic English, Simplified Chinese, and Traditional Chinese routing for editing, translation, Ask, and supported actions              |
-| STT providers     | Cloud STT, Apple Speech on macOS, Deepgram, AssemblyAI, GLM-ASR, OpenAI Whisper, Groq Whisper, SiliconFlow, Volcengine Doubao, custom endpoints |
-| LLM providers     | Cloud LLM or OpenAI-compatible APIs including OpenAI, DeepSeek, Claude via OpenRouter, Gemini, Groq, Qwen, Moonshot, Ollama, and more       |
+| STT providers     | Cloud STT, Apple Speech on macOS, Deepgram, AssemblyAI, GLM-ASR, OpenAI Whisper, Groq Whisper, SiliconFlow, Volcengine Doubao, Azure OpenAI, custom endpoints |
+| LLM providers     | Cloud LLM or OpenAI-compatible APIs including OpenAI, Azure OpenAI (API key or Microsoft Entra ID), DeepSeek, Claude via OpenRouter, Gemini, Groq, Qwen, Moonshot, Ollama, and more |
 | Output            | Keyboard simulation, clipboard paste/copy-only, Windows SendInput, clipboard restore, and output-failure diagnostics                       |
 | Language          | Auto-detect speech, dedicated translation shortcut, switchable target languages, and 20+ translation targets                                |
 | Dictionary        | Custom terms, import/export, and local correction rules for recurring transcription mistakes                                                 |
@@ -300,6 +300,37 @@ All settings are accessible from the in-app Settings panel:
 - **Account / Upgrade** — sign in, check cloud words, manage Pro or Lifetime Starter access
 
 API keys are stored locally in the OS credential vault where available, with a local fallback for unsupported environments. No BYOK keys are sent to OpenTypeless servers — STT/LLM requests go directly to the provider you configure.
+
+### Azure OpenAI
+
+Select **Azure OpenAI** as the AI Polish provider. In Azure, the `model` field is your *deployment* name, not the underlying model name.
+
+| Setting | Value |
+| ------- | ----- |
+| Base URL | `https://YOUR-RESOURCE.openai.azure.com/openai/v1` |
+| Model | your chat deployment name, e.g. `gpt-4o-mini` |
+| API key | your Azure OpenAI key — or leave blank to sign in with Microsoft Entra ID |
+
+For speech-to-text, choose **Local / Custom Whisper** and the **Azure OpenAI** preset. Azure does not serve
+transcriptions from the OpenAI-compatible `/openai/v1` surface, so the preset uses the classic deployment
+route, which requires an `api-version`:
+
+```
+https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/audio/transcriptions?api-version=2025-03-01-preview
+```
+
+#### Microsoft Entra ID
+
+Tenants that set `disableLocalAuth=true` on their Azure AI resources have no API keys at all. **Leave the API
+key blank** and OpenTypeless authenticates with Entra ID instead, taking tokens from the
+[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) sign-in you already have:
+
+```bash
+az login
+```
+
+Tokens are cached in memory and renewed automatically before they expire. Entra ID is only used when the key
+field is empty, so key-based setups need no Azure CLI. The same applies to the STT endpoint above.
 
 ### Cloud Option
 

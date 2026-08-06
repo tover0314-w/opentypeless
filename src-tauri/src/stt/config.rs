@@ -10,6 +10,7 @@ use super::whisper_compat::WhisperCompatConfig;
 pub const APPLE_SPEECH_PROVIDER: &str = "apple-speech";
 pub const CUSTOM_WHISPER_PROVIDER: &str = "custom-whisper";
 pub const CUSTOM_WHISPER_PRESET_SPEACHES: &str = "speaches";
+pub const CUSTOM_WHISPER_PRESET_AZURE_OPENAI: &str = "azure-openai";
 pub const CUSTOM_WHISPER_PRESET_CUSTOM: &str = "custom";
 pub const DEFAULT_CUSTOM_WHISPER_BASE_URL: &str = "http://localhost:8000/v1";
 pub const DEFAULT_CUSTOM_WHISPER_MODEL: &str = "Systran/faster-whisper-large-v3";
@@ -51,22 +52,28 @@ pub fn get_whisper_config(provider: &str) -> Option<SttProviderConfig> {
 }
 
 pub fn normalize_custom_whisper_endpoint(base_url: &str) -> Result<String, String> {
-    let trimmed = base_url.trim().trim_end_matches('/');
+    let trimmed = base_url.trim();
     if trimmed.is_empty() {
         return Err("Base URL is required for Local / Custom Whisper".to_string());
     }
 
-    let parsed =
+    let mut parsed =
         url::Url::parse(trimmed).map_err(|_| "Base URL must be a valid URL".to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Base URL must start with http:// or https://".to_string());
     }
 
-    if trimmed.ends_with("/audio/transcriptions") {
-        Ok(trimmed.to_string())
+    // Inspect the path only. Azure OpenAI requires `?api-version=...` on the classic
+    // deployment route, and a query string must neither be dropped nor mistaken for
+    // the end of the path when deciding whether the suffix is already present.
+    let path = parsed.path().trim_end_matches('/').to_string();
+    if path.ends_with("/audio/transcriptions") {
+        parsed.set_path(&path);
     } else {
-        Ok(format!("{}/audio/transcriptions", trimmed))
+        parsed.set_path(&format!("{path}/audio/transcriptions"));
     }
+
+    Ok(parsed.to_string())
 }
 
 pub fn build_custom_whisper_config(
@@ -189,6 +196,45 @@ mod tests {
     fn test_custom_whisper_rejects_empty_base_url() {
         let err = normalize_custom_whisper_endpoint("   ").unwrap_err();
         assert!(err.contains("Base URL is required"));
+    }
+
+    #[test]
+    fn test_normalize_preserves_azure_api_version_query() {
+        // Azure OpenAI only serves transcriptions from the classic deployment route,
+        // which requires an api-version query string. The suffix must be detected on
+        // the path so the query is neither dropped nor treated as part of it.
+        let endpoint = normalize_custom_whisper_endpoint(
+            "https://res.openai.azure.com/openai/deployments/whisper/audio/transcriptions?api-version=2025-03-01-preview",
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint,
+            "https://res.openai.azure.com/openai/deployments/whisper/audio/transcriptions?api-version=2025-03-01-preview"
+        );
+    }
+
+    #[test]
+    fn test_normalize_appends_suffix_before_azure_query() {
+        let endpoint = normalize_custom_whisper_endpoint(
+            "https://res.openai.azure.com/openai/deployments/whisper?api-version=2025-03-01-preview",
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint,
+            "https://res.openai.azure.com/openai/deployments/whisper/audio/transcriptions?api-version=2025-03-01-preview"
+        );
+    }
+
+    #[test]
+    fn test_normalize_tolerates_trailing_slash_with_query() {
+        let endpoint = normalize_custom_whisper_endpoint(
+            "https://res.openai.azure.com/openai/deployments/whisper/?api-version=2025-03-01-preview",
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint,
+            "https://res.openai.azure.com/openai/deployments/whisper/audio/transcriptions?api-version=2025-03-01-preview"
+        );
     }
 
     #[test]

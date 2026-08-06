@@ -102,6 +102,15 @@ export const CUSTOM_STT_PRESETS = [
     model: CUSTOM_STT_DEFAULTS.model,
   },
   {
+    value: 'azure-openai',
+    labelKey: 'settings.customSttPresetAzureOpenAi',
+    // Azure OpenAI does not serve transcriptions from its OpenAI-compatible /openai/v1
+    // surface, so this points at the classic deployment route, which requires api-version.
+    baseUrl:
+      'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/audio/transcriptions?api-version=2025-03-01-preview',
+    model: 'gpt-4o-mini-transcribe',
+  },
+  {
     value: 'custom',
     labelKey: 'settings.customSttPresetCustom',
   },
@@ -144,6 +153,7 @@ export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'deepseek', labelKey: 'providers.llm.deepseek' },
   { value: 'siliconflow', labelKey: 'providers.llm.siliconflow' },
   { value: 'openai', labelKey: 'providers.llm.openai' },
+  { value: 'azure', labelKey: 'providers.llm.azure' },
   { value: 'gemini', labelKey: 'providers.llm.gemini' },
   { value: 'moonshot', labelKey: 'providers.llm.moonshot' },
   { value: 'doubao', labelKey: 'providers.llm.doubao' },
@@ -164,6 +174,10 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   deepseek: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   siliconflow: { baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  azure: {
+    baseUrl: 'https://YOUR-RESOURCE.openai.azure.com/openai/v1',
+    model: 'gpt-4o-mini',
+  },
   gemini: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     model: 'gemini-2.0-flash',
@@ -182,7 +196,10 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
 }
 
 export function llmProviderRequiresApiKey(provider: string): boolean {
-  return provider.trim().toLowerCase() !== 'ollama'
+  const normalized = provider.trim().toLowerCase()
+  // Ollama is unauthenticated. Azure is optional-key: tenants with disableLocalAuth
+  // have no keys at all, and an empty key means "sign in with Microsoft Entra ID".
+  return normalized !== 'ollama' && normalized !== 'azure'
 }
 
 export const LANGUAGES: { value: string; label?: string; labelKey?: string }[] = [

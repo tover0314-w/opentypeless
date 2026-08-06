@@ -102,7 +102,8 @@ impl LlmProvider for OpenAiProvider {
                 .client
                 .post(format!("{}/chat/completions", config.base_url))
                 .header("Content-Type", "application/json");
-            match super::apply_provider_auth_header(request, &config.provider, &config.api_key)
+            match super::authorize_request(request, &config.provider, &config.api_key)
+                .await?
                 .json(&body)
                 .timeout(std::time::Duration::from_secs(15))
                 .send()

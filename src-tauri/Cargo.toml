@@ -32,7 +32,7 @@ cpal = "0.15"
 enigo = "0.2"
 ogg = "=0.9.2"
 opusic-c = "=1.6.1"
-tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }
+tokio = { version = "1", features = ["rt", "macros", "process", "sync", "time", "test-util"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 anyhow = "1"

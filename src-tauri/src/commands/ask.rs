@@ -849,8 +849,10 @@ async fn ask_via_byok(
         )?)
         .timeout(std::time::Duration::from_secs(30));
 
-    if !api_key.trim().is_empty() {
-        request = request.header("Authorization", format!("Bearer {}", api_key));
+    if !api_key.trim().is_empty() || crate::llm::is_azure_provider(&config.llm_provider) {
+        request = crate::llm::authorize_request(request, &config.llm_provider, api_key)
+            .await
+            .map_err(|e| e.to_string())?;
     }
 
     let resp = request.send().await.map_err(|e| e.to_string())?;

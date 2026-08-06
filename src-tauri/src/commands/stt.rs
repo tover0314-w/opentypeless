@@ -513,9 +513,9 @@ pub async fn test_stt_connection(
                 .multipart(form)
                 .timeout(std::time::Duration::from_secs(15));
 
-            if !api_key.trim().is_empty() {
-                request = request.header("Authorization", format!("Bearer {}", api_key));
-            }
+            request = crate::azure::authorize_audio_request(request, &api_key, &cfg.endpoint)
+                .await
+                .map_err(|e| e.to_string())?;
 
             let resp = request.send().await.map_err(|e| e.to_string())?;
             Ok(resp.status().is_success())
@@ -846,9 +846,9 @@ pub async fn bench_stt_connection(
                 .multipart(form)
                 .timeout(std::time::Duration::from_secs(15));
 
-            if !api_key.trim().is_empty() {
-                request = request.header("Authorization", format!("Bearer {}", api_key));
-            }
+            request = crate::azure::authorize_audio_request(request, &api_key, &cfg.endpoint)
+                .await
+                .map_err(|e| e.to_string())?;
 
             let resp = request.send().await.map_err(|e| e.to_string())?;
             let elapsed = t0.elapsed().as_millis() as u32;
