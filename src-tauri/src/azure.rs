@@ -127,7 +127,8 @@ pub async fn authorize_audio_request(
 }
 
 async fn acquire_token() -> Result<CachedToken, AppError> {
-    let output = tokio::process::Command::new(azure_cli_program())
+    let program = azure_cli_program()?;
+    let output = tokio::process::Command::new(&program)
         .args([
             "account",
             "get-access-token",
@@ -157,13 +158,64 @@ async fn acquire_token() -> Result<CachedToken, AppError> {
 }
 
 #[cfg(target_os = "windows")]
-fn azure_cli_program() -> &'static str {
-    "az.cmd"
-}
+const AZURE_CLI_BINARY: &str = "az.cmd";
 
 #[cfg(not(target_os = "windows"))]
-fn azure_cli_program() -> &'static str {
-    "az"
+const AZURE_CLI_BINARY: &str = "az";
+
+/// Well-known Azure CLI install locations.
+///
+/// A desktop app launched from Finder or a `.desktop` entry inherits a minimal `PATH`
+/// that excludes Homebrew and most package-manager prefixes, so resolving the binary by
+/// name alone fails in exactly the case that matters — the shipped app, not `tauri dev`.
+#[cfg(target_os = "macos")]
+const AZURE_CLI_FALLBACK_PATHS: &[&str] = &[
+    "/opt/homebrew/bin/az",
+    "/usr/local/bin/az",
+    "/opt/local/bin/az",
+];
+
+#[cfg(target_os = "linux")]
+const AZURE_CLI_FALLBACK_PATHS: &[&str] = &[
+    "/usr/bin/az",
+    "/usr/local/bin/az",
+    "/snap/bin/az",
+    "/home/linuxbrew/.linuxbrew/bin/az",
+];
+
+#[cfg(target_os = "windows")]
+const AZURE_CLI_FALLBACK_PATHS: &[&str] = &[
+    r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+    r"C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin\az.cmd",
+];
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+const AZURE_CLI_FALLBACK_PATHS: &[&str] = &[];
+
+fn azure_cli_program() -> Result<std::path::PathBuf, AppError> {
+    if let Some(found) = find_on_path(AZURE_CLI_BINARY) {
+        return Ok(found);
+    }
+
+    for candidate in AZURE_CLI_FALLBACK_PATHS {
+        let path = std::path::Path::new(candidate);
+        if path.is_file() {
+            return Ok(path.to_path_buf());
+        }
+    }
+
+    Err(AppError::Config(
+        "Could not find the Azure CLI. Install it and run `az login`, or enter an \
+         Azure OpenAI API key instead."
+            .to_string(),
+    ))
+}
+
+fn find_on_path(binary: &str) -> Option<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(binary))
+        .find(|candidate| candidate.is_file())
 }
 
 fn parse_token_response(stdout: &str) -> Result<CachedToken, AppError> {
@@ -338,6 +390,31 @@ mod tests {
         .unwrap();
 
         assert!(request.headers().get("Authorization").is_none());
+    }
+
+    #[test]
+    fn resolves_azure_cli_outside_path_like_a_gui_launched_app() {
+        // Simulates the minimal PATH a Finder-launched app inherits: the binary must
+        // still be found via the well-known install locations.
+        let found_on_path = find_on_path(AZURE_CLI_BINARY).is_some();
+        let found_in_fallbacks = AZURE_CLI_FALLBACK_PATHS
+            .iter()
+            .any(|p| std::path::Path::new(p).is_file());
+
+        if !found_on_path && !found_in_fallbacks {
+            // Azure CLI genuinely absent (e.g. CI): resolution must fail with guidance.
+            let err = azure_cli_program().unwrap_err().to_string();
+            assert!(err.contains("Azure CLI"), "unhelpful error: {err}");
+            return;
+        }
+
+        let resolved = azure_cli_program().expect("azure cli should resolve");
+        assert!(resolved.is_file(), "resolved to a non-file: {resolved:?}");
+    }
+
+    #[test]
+    fn find_on_path_returns_none_for_unknown_binaries() {
+        assert!(find_on_path("definitely-not-a-real-binary-xyz").is_none());
     }
 
     #[test]
