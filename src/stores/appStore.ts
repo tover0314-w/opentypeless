@@ -32,6 +32,7 @@ export type LlmProvider =
   | 'deepseek'
   | 'siliconflow'
   | 'openai'
+  | 'azure'
   | 'gemini'
   | 'moonshot'
   | 'doubao'
@@ -192,7 +193,7 @@ export interface AppConfig {
   stt_provider: SttProvider
   stt_api_key: string
   stt_custom_api_key: string
-  stt_custom_preset: 'speaches' | 'custom'
+  stt_custom_preset: 'speaches' | 'azure-openai' | 'custom'
   stt_custom_base_url: string
   stt_custom_model: string
   stt_volcengine_resource_id: string

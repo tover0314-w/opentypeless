@@ -157,15 +157,18 @@ impl SttProvider for WhisperCompatProvider {
                 form = form.text(key.clone(), value.clone());
             }
 
-            let mut request = self
+            let request = self
                 .client
                 .post(&self.provider_config.endpoint)
                 .multipart(form)
                 .timeout(std::time::Duration::from_secs(60));
 
-            if !config.api_key.trim().is_empty() {
-                request = request.header("Authorization", format!("Bearer {}", config.api_key));
-            }
+            let request = crate::azure::authorize_audio_request(
+                request,
+                &config.api_key,
+                &self.provider_config.endpoint,
+            )
+            .await?;
 
             let resp_result = request.send().await;
 

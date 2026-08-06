@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Azure OpenAI as an AI polish provider, using the `api-key` header Azure expects.
+- Azure OpenAI speech-to-text through a Custom Whisper preset, selectable during onboarding alongside the endpoint and deployment it needs.
+- Microsoft Entra ID sign-in for Azure OpenAI: leave the API key blank and tokens are taken from the Azure CLI sign-in, cached in memory and renewed before expiry. This is the only option for tenants that set `disableLocalAuth=true`.
+
+### Fixed
+- Custom Whisper endpoints that carry a query string are no longer corrupted. `/audio/transcriptions?api-version=...` previously had a second `/audio/transcriptions` appended, which broke every Azure OpenAI transcription URL.
+
 ## [1.1.48] - 2026-07-08
 
 ### Added

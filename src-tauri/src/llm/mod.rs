@@ -88,8 +88,22 @@ pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
 }
 
+pub const AZURE_PROVIDER: &str = "azure";
+
+/// Providers that can operate without a pasted API key.
+///
+/// `ollama` runs locally and is unauthenticated. `azure` is keyless-capable for a different
+/// reason: tenants that set `disableLocalAuth=true` have no API keys at all, so an empty key
+/// means "authenticate with Microsoft Entra ID" rather than "no auth".
 pub fn provider_requires_api_key(provider: &str) -> bool {
-    !matches!(provider.trim().to_ascii_lowercase().as_str(), "ollama")
+    !matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "ollama" | AZURE_PROVIDER
+    )
+}
+
+pub fn is_azure_provider(provider: &str) -> bool {
+    provider.trim().eq_ignore_ascii_case(AZURE_PROVIDER)
 }
 
 pub fn has_usable_provider_credentials(provider: &str, api_key: &str) -> bool {
@@ -102,11 +116,37 @@ pub fn apply_provider_auth_header(
     api_key: &str,
 ) -> reqwest::RequestBuilder {
     let api_key = api_key.trim();
+    if is_azure_provider(provider) {
+        // Azure OpenAI authenticates data-plane calls with its own header, which is accepted
+        // by both the v1 surface and the classic deployment routes.
+        return if api_key.is_empty() {
+            request
+        } else {
+            request.header("api-key", api_key)
+        };
+    }
     if provider_requires_api_key(provider) || !api_key.is_empty() {
         request.header("Authorization", format!("Bearer {}", api_key))
     } else {
         request
     }
+}
+
+/// Attaches credentials to an outgoing LLM request.
+///
+/// Prefer this over [`apply_provider_auth_header`]: for Azure with no API key it acquires a
+/// Microsoft Entra ID token, which cannot be done synchronously.
+pub async fn authorize_request(
+    request: reqwest::RequestBuilder,
+    provider: &str,
+    api_key: &str,
+) -> Result<reqwest::RequestBuilder, AppError> {
+    if is_azure_provider(provider) && api_key.trim().is_empty() {
+        let token = crate::azure::shared().access_token().await?;
+        return Ok(request.header("Authorization", format!("Bearer {token}")));
+    }
+
+    Ok(apply_provider_auth_header(request, provider, api_key))
 }
 
 pub fn create_provider(
@@ -131,6 +171,70 @@ mod provider_capability_tests {
         assert!(!provider_requires_api_key(" Ollama "));
         assert!(provider_requires_api_key("openai"));
         assert!(provider_requires_api_key("custom-openai-compatible"));
+    }
+
+    #[test]
+    fn azure_is_keyless_capable_because_tenants_may_disable_local_auth() {
+        assert!(!provider_requires_api_key("azure"));
+        assert!(!provider_requires_api_key(" Azure "));
+        assert!(has_usable_provider_credentials("azure", ""));
+        assert!(has_usable_provider_credentials("azure", "azure-secret"));
+    }
+
+    #[test]
+    fn azure_is_detected_case_insensitively() {
+        assert!(is_azure_provider("azure"));
+        assert!(is_azure_provider(" Azure "));
+        assert!(!is_azure_provider("openai"));
+        assert!(!is_azure_provider("azure-openai-compatible"));
+    }
+
+    #[test]
+    fn azure_key_auth_uses_api_key_header_not_bearer() {
+        let request = apply_provider_auth_header(
+            reqwest::Client::new().get("https://res.openai.azure.com/openai/v1/models"),
+            "azure",
+            "azure-secret",
+        )
+        .build()
+        .unwrap();
+
+        assert_eq!(request.headers().get("api-key").unwrap(), "azure-secret");
+        assert!(request.headers().get("Authorization").is_none());
+    }
+
+    #[test]
+    fn azure_without_key_sends_no_static_credential() {
+        // The Entra token is attached by `authorize_request`; the sync helper must not
+        // fall back to an empty bearer, which Azure would reject as malformed.
+        let request = apply_provider_auth_header(
+            reqwest::Client::new().get("https://res.openai.azure.com/openai/v1/models"),
+            "azure",
+            "",
+        )
+        .build()
+        .unwrap();
+
+        assert!(request.headers().get("api-key").is_none());
+        assert!(request.headers().get("Authorization").is_none());
+    }
+
+    #[tokio::test]
+    async fn authorize_request_passes_through_non_azure_providers() {
+        let request = authorize_request(
+            reqwest::Client::new().get("https://api.openai.com/v1/models"),
+            "openai",
+            "sk-test",
+        )
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers().get("Authorization").unwrap(),
+            "Bearer sk-test"
+        );
     }
 
     #[test]

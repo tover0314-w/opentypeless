@@ -117,7 +117,9 @@ pub async fn test_llm_connection(
     });
 
     let request = client.post(&url).header("Content-Type", "application/json");
-    let resp = crate::llm::apply_provider_auth_header(request, &provider, &api_key)
+    let resp = crate::llm::authorize_request(request, &provider, &api_key)
+        .await
+        .map_err(|e| e.to_string())?
         .json(&body)
         .timeout(std::time::Duration::from_secs(15))
         .send()
@@ -127,13 +129,15 @@ pub async fn test_llm_connection(
     Ok(resp.status().is_success())
 }
 
-fn build_fetch_models_request(
+async fn build_fetch_models_request(
     client: &reqwest::Client,
     provider: &str,
     api_key: &str,
     url: &str,
-) -> reqwest::RequestBuilder {
-    crate::llm::apply_provider_auth_header(client.get(url), provider, api_key)
+) -> Result<reqwest::RequestBuilder, String> {
+    crate::llm::authorize_request(client.get(url), provider, api_key)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -159,6 +163,7 @@ pub async fn fetch_llm_models(
     let url = format!("{}/models", base_url.trim_end_matches('/'));
 
     let resp = build_fetch_models_request(&client, &provider, &api_key, &url)
+        .await?
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -239,28 +244,32 @@ mod tests {
         assert!(has_managed_cloud_access(&lifetime_cloud_words));
     }
 
-    #[test]
-    fn model_request_omits_authorization_for_keyless_ollama() {
+    #[tokio::test]
+    async fn model_request_omits_authorization_for_keyless_ollama() {
         let request = build_fetch_models_request(
             &reqwest::Client::new(),
             "ollama",
             "",
             "http://localhost:11434/v1/models",
         )
+        .await
+        .unwrap()
         .build()
         .unwrap();
 
         assert!(request.headers().get("Authorization").is_none());
     }
 
-    #[test]
-    fn model_request_keeps_authorization_for_keyed_providers() {
+    #[tokio::test]
+    async fn model_request_keeps_authorization_for_keyed_providers() {
         let request = build_fetch_models_request(
             &reqwest::Client::new(),
             "openai",
             "sk-test",
             "https://api.openai.com/v1/models",
         )
+        .await
+        .unwrap()
         .build()
         .unwrap();
 
@@ -268,6 +277,24 @@ mod tests {
             request.headers().get("Authorization").unwrap(),
             "Bearer sk-test"
         );
+    }
+
+    #[tokio::test]
+    async fn model_request_uses_azure_api_key_header() {
+        let request = build_fetch_models_request(
+            &reqwest::Client::new(),
+            "azure",
+            "azure-secret",
+            "https://res.openai.azure.com/openai/v1/models",
+        )
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+        // Azure authenticates with its own header, not an OpenAI-style bearer token.
+        assert_eq!(request.headers().get("api-key").unwrap(), "azure-secret");
+        assert!(request.headers().get("Authorization").is_none());
     }
 }
 
@@ -344,9 +371,18 @@ pub async fn bench_llm_connection(
         "max_tokens": 1
     });
 
+    // Authorize before starting the clock: acquiring an Entra ID token can spawn a
+    // subprocess, and that cost is not part of the LLM round trip being measured.
+    let request = crate::llm::authorize_request(
+        client.post(&url).header("Content-Type", "application/json"),
+        &provider,
+        &api_key,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
     let t0 = std::time::Instant::now();
-    let request = client.post(&url).header("Content-Type", "application/json");
-    let resp = crate::llm::apply_provider_auth_header(request, &provider, &api_key)
+    let resp = request
         .json(&body)
         .timeout(std::time::Duration::from_secs(15))
         .send()

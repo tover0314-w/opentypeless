@@ -94,12 +94,23 @@ export const CUSTOM_STT_DEFAULTS = {
   model: 'Systran/faster-whisper-large-v3',
 } as const
 
+export const CUSTOM_STT_PRESET_AZURE_OPENAI = 'azure-openai' as const
+
 export const CUSTOM_STT_PRESETS = [
   {
     value: 'speaches',
     labelKey: 'settings.customSttPresetSpeaches',
     baseUrl: CUSTOM_STT_DEFAULTS.baseUrl,
     model: CUSTOM_STT_DEFAULTS.model,
+  },
+  {
+    value: CUSTOM_STT_PRESET_AZURE_OPENAI,
+    labelKey: 'settings.customSttPresetAzureOpenAi',
+    // Azure OpenAI does not serve transcriptions from its OpenAI-compatible /openai/v1
+    // surface, so this points at the classic deployment route, which requires api-version.
+    baseUrl:
+      'https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/audio/transcriptions?api-version=2025-03-01-preview',
+    model: 'gpt-4o-mini-transcribe',
   },
   {
     value: 'custom',
@@ -139,11 +150,26 @@ export const ONBOARDING_STT_PROVIDERS = STT_PROVIDERS.filter(
     provider.value !== 'cloud',
 )
 
+/// Azure OpenAI is reached through the custom-whisper transport rather than a provider of
+/// its own, so onboarding offers it under the preset id and maps the selection back to
+/// `custom-whisper` + preset. Every Azure tenant has its own hostname and deployment names,
+/// so this option needs endpoint inputs the other onboarding providers don't.
+export const ONBOARDING_AZURE_STT_VALUE = CUSTOM_STT_PRESET_AZURE_OPENAI
+
+export const ONBOARDING_STT_OPTIONS: { value: string; labelKey: string }[] = [
+  ...ONBOARDING_STT_PROVIDERS,
+  {
+    value: ONBOARDING_AZURE_STT_VALUE,
+    labelKey: 'settings.customSttPresetAzureOpenAi',
+  },
+]
+
 export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'zhipu', labelKey: 'providers.llm.zhipu' },
   { value: 'deepseek', labelKey: 'providers.llm.deepseek' },
   { value: 'siliconflow', labelKey: 'providers.llm.siliconflow' },
   { value: 'openai', labelKey: 'providers.llm.openai' },
+  { value: 'azure', labelKey: 'providers.llm.azure' },
   { value: 'gemini', labelKey: 'providers.llm.gemini' },
   { value: 'moonshot', labelKey: 'providers.llm.moonshot' },
   { value: 'doubao', labelKey: 'providers.llm.doubao' },
@@ -164,6 +190,10 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   deepseek: { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   siliconflow: { baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-7B-Instruct' },
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  azure: {
+    baseUrl: 'https://YOUR-RESOURCE.openai.azure.com/openai/v1',
+    model: 'gpt-4o-mini',
+  },
   gemini: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     model: 'gemini-2.0-flash',
@@ -182,7 +212,10 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
 }
 
 export function llmProviderRequiresApiKey(provider: string): boolean {
-  return provider.trim().toLowerCase() !== 'ollama'
+  const normalized = provider.trim().toLowerCase()
+  // Ollama is unauthenticated. Azure is optional-key: tenants with disableLocalAuth
+  // have no keys at all, and an empty key means "sign in with Microsoft Entra ID".
+  return normalized !== 'ollama' && normalized !== 'azure'
 }
 
 export const LANGUAGES: { value: string; label?: string; labelKey?: string }[] = [

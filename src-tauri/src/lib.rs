@@ -1,5 +1,6 @@
 pub mod app_detector;
 pub mod audio;
+pub mod azure;
 pub mod commands;
 pub mod credentials;
 pub mod dictionary_io;
