@@ -450,6 +450,9 @@
     "failedToLoad": "Caricamento delle registrazioni non riuscito",
     "failedToLoadAudio": "Caricamento dell'audio non riuscito",
     "failedToRetranscribe": "Ritrascrizione non riuscita",
-    "failedToDelete": "Eliminazione della registrazione non riuscita"
+    "failedToDelete": "Eliminazione della registrazione non riuscita",
+    "copy": "Copia",
+    "copied": "Copiato",
+    "failedToCopy": "Copia negli appunti non riuscita"
   }
 }

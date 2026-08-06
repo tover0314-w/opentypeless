@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
-import { Search, RefreshCw, Trash2, Loader2 } from 'lucide-react'
+import { Search, RefreshCw, Trash2, Loader2, Copy } from 'lucide-react'
 import { spring } from '../../lib/animations'
 import type { RecordingEntry } from '../../stores/appStore'
 import {
@@ -25,6 +25,7 @@ export function Recordings() {
   const [recordings, setRecordings] = useState<RecordingEntry[]>([])
   const [serverPort, setServerPort] = useState<number | null>(null)
   const [retranscribingId, setRetranscribingId] = useState<number | null>(null)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
 
   // Load recordings on mount (Recordings are fetched here, not preloaded in App)
@@ -76,6 +77,18 @@ export function Recordings() {
     }
     return map
   }, [filtered, t])
+
+  const handleCopy = (id: number, text: string) => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopiedId(id)
+        setTimeout(() => setCopiedId(null), 1500)
+      })
+      .catch(() => {
+        toast.error(t('recordings.failedToCopy'))
+      })
+  }
 
   const handleRetranscribe = async (id: number) => {
     if (retranscribingId !== null) return
@@ -177,6 +190,24 @@ export function Recordings() {
                           </p>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {copiedId === entry.id && (
+                            <span className="text-[11px] text-success self-center mr-1">
+                              {t('recordings.copied')}
+                            </span>
+                          )}
+                          <motion.button
+                            onClick={() =>
+                              handleCopy(entry.id, entry.polished_text || entry.raw_text)
+                            }
+                            disabled={!(entry.polished_text || entry.raw_text).trim()}
+                            whileTap={{ scaleX: 1.1, scaleY: 0.9 }}
+                            transition={spring.jelly}
+                            className="p-1.5 rounded-[6px] hover:bg-bg-tertiary transition-all duration-200 bg-transparent border-none cursor-pointer text-text-tertiary hover:text-accent disabled:opacity-50 disabled:cursor-default"
+                            aria-label={t('recordings.copy')}
+                            title={t('recordings.copy')}
+                          >
+                            <Copy size={13} />
+                          </motion.button>
                           <motion.button
                             onClick={() => handleRetranscribe(entry.id)}
                             disabled={retranscribingId !== null}

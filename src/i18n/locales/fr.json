@@ -450,6 +450,9 @@
     "failedToLoad": "Échec du chargement des enregistrements",
     "failedToLoadAudio": "Échec du chargement de l'audio",
     "failedToRetranscribe": "Échec de la re-transcription",
-    "failedToDelete": "Échec de la suppression de l'enregistrement"
+    "failedToDelete": "Échec de la suppression de l'enregistrement",
+    "copy": "Copier",
+    "copied": "Copié",
+    "failedToCopy": "Impossible de copier dans le presse-papiers"
   }
 }

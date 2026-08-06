@@ -455,6 +455,9 @@
     "failedToLoadAudio": "Failed to load audio",
     "failedToRetranscribe": "Failed to re-transcribe recording",
     "failedToDelete": "Failed to delete recording",
-    "failedNeedsRetranscribe": "⚠ Failed — re-transcribe"
+    "failedNeedsRetranscribe": "⚠ Failed — re-transcribe",
+    "copy": "Copy",
+    "copied": "Copied",
+    "failedToCopy": "Failed to copy to clipboard"
   }
 }

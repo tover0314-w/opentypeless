@@ -450,6 +450,9 @@
     "failedToLoad": "Falha ao carregar gravações",
     "failedToLoadAudio": "Falha ao carregar áudio",
     "failedToRetranscribe": "Falha ao retranscrever",
-    "failedToDelete": "Falha ao excluir gravação"
+    "failedToDelete": "Falha ao excluir gravação",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "failedToCopy": "Falha ao copiar para a área de transferência"
   }
 }

@@ -450,6 +450,9 @@
     "failedToLoad": "加载录音失败",
     "failedToLoadAudio": "加载音频失败",
     "failedToRetranscribe": "重新转录失败",
-    "failedToDelete": "删除录音失败"
+    "failedToDelete": "删除录音失败",
+    "copy": "复制",
+    "copied": "已复制",
+    "failedToCopy": "复制到剪贴板失败"
   }
 }

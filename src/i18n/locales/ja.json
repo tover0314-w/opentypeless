@@ -450,6 +450,9 @@
     "failedToLoad": "録音の読み込みに失敗しました",
     "failedToLoadAudio": "音声の読み込みに失敗しました",
     "failedToRetranscribe": "再文字起こしに失敗しました",
-    "failedToDelete": "録音の削除に失敗しました"
+    "failedToDelete": "録音の削除に失敗しました",
+    "copy": "コピー",
+    "copied": "コピーしました",
+    "failedToCopy": "クリップボードへのコピーに失敗しました"
   }
 }

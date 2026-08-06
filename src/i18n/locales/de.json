@@ -450,6 +450,9 @@
     "failedToLoad": "Aufnahmen konnten nicht geladen werden",
     "failedToLoadAudio": "Audio konnte nicht geladen werden",
     "failedToRetranscribe": "Neu-Transkription fehlgeschlagen",
-    "failedToDelete": "Aufnahme konnte nicht gelöscht werden"
+    "failedToDelete": "Aufnahme konnte nicht gelöscht werden",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "failedToCopy": "Kopieren in die Zwischenablage fehlgeschlagen"
   }
 }

@@ -450,6 +450,9 @@
     "failedToLoad": "Error al cargar las grabaciones",
     "failedToLoadAudio": "Error al cargar el audio",
     "failedToRetranscribe": "Error al volver a transcribir",
-    "failedToDelete": "Error al eliminar la grabación"
+    "failedToDelete": "Error al eliminar la grabación",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "failedToCopy": "Error al copiar al portapapeles"
   }
 }

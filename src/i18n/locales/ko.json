@@ -450,6 +450,9 @@
     "failedToLoad": "녹음을 불러오지 못했습니다",
     "failedToLoadAudio": "오디오를 불러오지 못했습니다",
     "failedToRetranscribe": "다시 전사하지 못했습니다",
-    "failedToDelete": "녹음을 삭제하지 못했습니다"
+    "failedToDelete": "녹음을 삭제하지 못했습니다",
+    "copy": "복사",
+    "copied": "복사됨",
+    "failedToCopy": "클립보드 복사에 실패했습니다"
   }
 }
