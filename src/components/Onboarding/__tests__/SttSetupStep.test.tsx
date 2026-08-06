@@ -9,6 +9,7 @@ const mockStore = {
     stt_custom_api_key: '',
     stt_custom_base_url: 'http://localhost:8000/v1',
     stt_custom_model: 'Systran/faster-whisper-large-v3',
+    stt_custom_preset: 'speaches',
   },
   updateConfig: vi.fn(),
   sttTestStatus: 'idle',
@@ -47,6 +48,7 @@ beforeEach(() => {
     stt_custom_api_key: '',
     stt_custom_base_url: 'http://localhost:8000/v1',
     stt_custom_model: 'Systran/faster-whisper-large-v3',
+    stt_custom_preset: 'speaches',
   }
   mockStore.updateConfig = vi.fn()
   mockStore.sttTestStatus = 'idle'
@@ -100,5 +102,67 @@ describe('SttSetupStep', () => {
         'local-large-v3',
       )
     })
+  })
+
+  it('offers Azure OpenAI during onboarding', () => {
+    render(<SttSetupStep />)
+
+    const providerSelect = screen.getByRole('combobox')
+    expect(providerSelect.querySelector('option[value="azure-openai"]')).not.toBeNull()
+  })
+
+  it('maps an Azure selection onto the custom-whisper transport', () => {
+    render(<SttSetupStep />)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'azure-openai' } })
+
+    expect(mockStore.updateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stt_provider: 'custom-whisper',
+        stt_custom_preset: 'azure-openai',
+        // A stale local Speaches URL must not survive the switch to Azure.
+        stt_custom_base_url: '',
+      }),
+    )
+  })
+
+  it('collects the per-tenant endpoint and deployment Azure requires', () => {
+    mockStore.config = {
+      ...mockStore.config,
+      stt_provider: 'custom-whisper',
+      stt_custom_preset: 'azure-openai',
+      stt_custom_base_url: '',
+      stt_custom_model: '',
+    }
+
+    render(<SttSetupStep />)
+
+    // Azure stays switchable in the dropdown rather than collapsing to the
+    // read-only summary used for endpoints configured outside onboarding.
+    expect(screen.getByRole('combobox')).toBeInTheDocument()
+    expect(screen.getByText('onboarding.stt.endpointLabel')).toBeInTheDocument()
+    expect(screen.getByText('onboarding.stt.deploymentLabel')).toBeInTheDocument()
+    // The placeholders must show the Azure URL shape, since the classic
+    // deployment route with api-version is the only one that serves audio.
+    expect(
+      screen.getByPlaceholderText(/openai\/deployments\/.*audio\/transcriptions\?api-version=/),
+    ).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('gpt-4o-mini-transcribe')).toBeInTheDocument()
+  })
+
+  it('keeps the Azure API key optional so Entra ID sign-in stays available', () => {
+    mockStore.config = {
+      ...mockStore.config,
+      stt_provider: 'custom-whisper',
+      stt_custom_preset: 'azure-openai',
+      stt_custom_api_key: '',
+      stt_custom_base_url:
+        'https://r.openai.azure.com/openai/deployments/d/audio/transcriptions?api-version=2025-03-01-preview',
+      stt_custom_model: 'gpt-4o-mini-transcribe',
+    }
+
+    render(<SttSetupStep />)
+
+    expect(screen.getByRole('button', { name: 'Test' })).not.toBeDisabled()
   })
 })

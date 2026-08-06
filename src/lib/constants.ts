@@ -94,6 +94,8 @@ export const CUSTOM_STT_DEFAULTS = {
   model: 'Systran/faster-whisper-large-v3',
 } as const
 
+export const CUSTOM_STT_PRESET_AZURE_OPENAI = 'azure-openai' as const
+
 export const CUSTOM_STT_PRESETS = [
   {
     value: 'speaches',
@@ -102,7 +104,7 @@ export const CUSTOM_STT_PRESETS = [
     model: CUSTOM_STT_DEFAULTS.model,
   },
   {
-    value: 'azure-openai',
+    value: CUSTOM_STT_PRESET_AZURE_OPENAI,
     labelKey: 'settings.customSttPresetAzureOpenAi',
     // Azure OpenAI does not serve transcriptions from its OpenAI-compatible /openai/v1
     // surface, so this points at the classic deployment route, which requires api-version.
@@ -147,6 +149,20 @@ export const ONBOARDING_STT_PROVIDERS = STT_PROVIDERS.filter(
     provider.value !== APPLE_SPEECH_PROVIDER &&
     provider.value !== 'cloud',
 )
+
+/// Azure OpenAI is reached through the custom-whisper transport rather than a provider of
+/// its own, so onboarding offers it under the preset id and maps the selection back to
+/// `custom-whisper` + preset. Every Azure tenant has its own hostname and deployment names,
+/// so this option needs endpoint inputs the other onboarding providers don't.
+export const ONBOARDING_AZURE_STT_VALUE = CUSTOM_STT_PRESET_AZURE_OPENAI
+
+export const ONBOARDING_STT_OPTIONS: { value: string; labelKey: string }[] = [
+  ...ONBOARDING_STT_PROVIDERS,
+  {
+    value: ONBOARDING_AZURE_STT_VALUE,
+    labelKey: 'settings.customSttPresetAzureOpenAi',
+  },
+]
 
 export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'zhipu', labelKey: 'providers.llm.zhipu' },
