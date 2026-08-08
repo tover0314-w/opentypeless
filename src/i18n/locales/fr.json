@@ -8,9 +8,6 @@
     "ask": "Demander",
     "settings": "Paramètres",
     "history": "Historique",
-    "account": "Compte",
-    "upgrade": "Passer à Pro",
-    "pro": "Pro",
     "mainNavigation": "Navigation principale"
   },
   "ask": {
@@ -40,16 +37,16 @@
   },
   "errors": {
     "stt_timeout": "La reconnaissance vocale a expiré. Veuillez réessayer.",
-    "stt_invalid_key": "L'accès vocal cloud a échoué. Reconnectez-vous ou vérifiez votre clé API.",
+    "stt_invalid_key": "Your STT provider rejected the credential. Check the configured BYOK API key.",
     "stt_failed": "La reconnaissance vocale a échoué. {{details}}",
-    "stt_quota_exceeded": "Le quota de reconnaissance vocale cloud est dépassé. Passez à Pro ou utilisez le mode BYOK.",
+    "stt_quota_exceeded": "Your STT provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "stt_no_speech_detected": "Aucune parole détectée. Veuillez réessayer.",
     "output_fallback_clipboard": "La sortie de texte a échoué. Le résultat a été copié dans le presse-papiers. {{details}}",
     "output_wayland_unsupported": "La sortie clavier n'est pas prise en charge sur Wayland. Le résultat a été copié dans le presse-papiers.",
     "accessibility_required": "L'autorisation d'accessibilité manque. Le résultat a été copié dans le presse-papiers.",
     "output_streaming_partial": "L'insertion en streaming s'est arrêtée trop tôt. Le texte inséré a été conservé. {{details}}",
     "llm_failed": "Le polissage IA a échoué. Le texte original a été sorti à la place. {{details}}",
-    "llm_quota_exceeded": "Le quota IA cloud est dépassé. Passez à Pro ou utilisez le mode BYOK.",
+    "llm_quota_exceeded": "Your LLM provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "output_wayland_clipboard_copy_only": "Copied to clipboard. Paste manually on Wayland."
   },
   "home": {
@@ -57,18 +54,13 @@
     "description": "Maintenez {{hotkey}} pour démarrer l'enregistrement vocal. Votre parole sera transcrite et éventuellement améliorée par l'IA.",
     "totalRecordings": "Enregistrements totaux",
     "today": "Aujourd'hui",
-    "proPlan": "Plan Pro",
-    "freePlan": "Plan Gratuit",
-    "upgradeToPro": "Passer à Pro",
     "currentConfig": "Configuration actuelle",
     "sttProvider": "Fournisseur STT",
     "llmProvider": "Fournisseur LLM",
     "aiPolish": "Amélioration IA",
     "enabled": "Activé",
     "disabled": "Désactivé",
-    "outputMode": "Mode de sortie",
-    "wordsRemaining": "Mots restants",
-    "wordsReset": "Réinitialisation le {{date}}"
+    "outputMode": "Mode de sortie"
   },
   "onboarding": {
     "speakToWrite": "Parlez pour écrire — transformez votre voix en texte amélioré en temps réel",
@@ -120,10 +112,6 @@
     "steps": {
       "welcome": "Bienvenue",
       "welcomeSub": "Configurez OpenTypeless en quelques étapes",
-      "signIn": "Connexion",
-      "signInSub": "Connectez votre compte pour commencer",
-      "chooseMode": "Choisir le mode",
-      "chooseModeSub": "Sélectionnez comment vous souhaitez utiliser OpenTypeless",
       "speechRecognition": "Reconnaissance vocale",
       "speechRecognitionSub": "Configurez votre service STT",
       "aiPolish": "Amélioration IA",
@@ -134,36 +122,6 @@
       "howItWorksSub": "Essayez un rapide test d'enregistrement",
       "setupComplete": "Configuration terminée",
       "getStarted": "Commencer"
-    },
-    "account": {
-      "signIn": "Connexion",
-      "signUp": "Inscription",
-      "name": "Nom",
-      "namePlaceholder": "Votre nom",
-      "email": "E-mail",
-      "emailPlaceholder": "votre@email.com",
-      "password": "Mot de passe",
-      "or": "ou",
-      "signedInAs": "Connecté en tant que",
-      "freePlan": "Plan Gratuit",
-      "freePlanQuota": "quota restant",
-      "checkEmail": "Consultez votre e-mail",
-      "verificationSent": "Nous avons envoyé un lien de vérification à",
-      "resendVerification": "Renvoyer la vérification",
-      "backToSignIn": "Retour à la connexion",
-      "completingSignIn": "Finalisation de la connexion...",
-      "finishSignIn": "Terminer la connexion",
-      "oauthPendingHint": "Si votre navigateur affiche « Load failed », copiez l’adresse du navigateur et utilisez Terminer depuis le presse-papiers ci-dessous.",
-      "completeFromClipboard": "Terminer depuis le presse-papiers",
-      "oauthClipboardInvalid": "Aucun lien de connexion valide trouvé.",
-      "cancel": "Annuler",
-      "nameRequired": "Le nom est requis",
-      "passwordTooShort": "Le mot de passe doit contenir au moins 8 caractères",
-      "signInTimedOut": "La connexion a expiré",
-      "failedToStart": "Échec du démarrage",
-      "verificationResent": "E-mail de vérification envoyé !",
-      "continueWithGoogle": "Continuer avec Google",
-      "continueWithGithub": "Continuer avec GitHub"
     },
     "done": {
       "title": "Tout est prêt !",
@@ -203,18 +161,6 @@
         "needed": "Requis",
         "later": "Plus tard"
       }
-    },
-    "mode": {
-      "cloud": "Cloud",
-      "recommended": "Recommandé",
-      "zeroConfig": "Zéro configuration",
-      "cloudVoice": "Reconnaissance vocale dans le cloud",
-      "cloudTokens": "Mots cloud inclus",
-      "oneTimeCredit": "Crédit unique à l'inscription",
-      "byok": "Apportez votre propre clé",
-      "byokDesc": "Utilisez vos propres clés API",
-      "unlimitedUsage": "Utilisation illimitée avec vos clés",
-      "providersSupported": "Plusieurs fournisseurs pris en charge"
     },
     "layout": {
       "skip": "Ignorer",
@@ -259,8 +205,6 @@
       "openMainWindow": "Ouvrir la fenêtre principale",
       "settings": "Paramètres",
       "history": "Historique",
-      "account": "Compte",
-      "upgrade": "Passer à Pro",
       "exit": "Quitter"
     }
   },
@@ -314,14 +258,9 @@
     "startMinimized": "Démarrer minimisé dans la barre système",
     "language": "Langue",
     "provider": "Fournisseur",
-    "cloudSttPro": "STT Cloud (Pro)",
-    "cloudLlmPro": "LLM Cloud (Pro)",
     "askAnything": "Ask Anything",
     "askAnythingDesc": "Question vocale, réponse unique. Aucun historique de chat.",
     "tryAsk": "Essayer Ask",
-    "sttSignInHint": "Connectez-vous et abonnez-vous à Pro pour utiliser les mots cloud/mois officiels.",
-    "sttUpgradeHint": "Passez à Pro pour des mots cloud/mois dans 99 langues. Aucune clé API nécessaire.",
-    "sttProActive": "Pro actif — STT en millisecondes, 99 langues. Aucune clé API nécessaire.",
     "customSttPreset": "Preset",
     "customSttPresetSpeaches": "Speaches",
     "customSttPresetCustom": "Custom OpenAI-compatible",
@@ -344,9 +283,6 @@
     "volcengineResourceSeedAsr": "SeedASR 2.0",
     "volcengineResourceBigAsr": "BigASR 1.0",
     "customSttConnectionFailed": "Local STT server is not reachable. Check that it is running and the port is correct.",
-    "llmSignInHint": "Connectez-vous et abonnez-vous a Pro pour utiliser la reecriture IA dans le cloud. Aucune cle API requise.",
-    "llmUpgradeHint": "Passez a Pro pour la reecriture IA dans le cloud et un quota mensuel. Aucune cle API requise.",
-    "llmProActive": "Pro est actif - la reecriture IA dans le cloud est prete. Aucune cle API requise.",
     "apiKey": "Clé API",
     "enterApiKey": "Entrez la clé API...",
     "test": "Tester",
@@ -522,13 +458,10 @@
     "exportFailed": "Impossible d'exporter le dictionnaire"
   },
   "scenes": {
-    "signInToBrowse": "Connectez-vous pour parcourir les packs de scènes.",
     "failedToLoad": "Impossible de charger les scènes.",
     "retry": "Réessayer",
     "noScenes": "Aucun pack de scènes disponible pour l'instant.",
     "all": "Tout",
-    "pro": "PRO",
-    "upgradeToUse": "Passez à Pro pour utiliser ce pack de scènes.",
     "promptTemplate": "Modèle de prompt",
     "copyPrompt": "Copier le prompt",
     "copied": "Copié",
@@ -542,9 +475,6 @@
     "noCustomScenesDesc": "Create a local scene to save a reusable AI polish prompt.",
     "newScene": "New scene",
     "builtInScenes": "Built-in Scenes",
-    "cloudPacks": "Cloud Packs",
-    "refresh": "Refresh",
-    "noCloudPacks": "No cloud scene packs available yet. You can still create local custom scenes above.",
     "failedToSave": "Failed to save scene.",
     "export": "Export",
     "import": "Import",
@@ -645,7 +575,7 @@
     "failedToCreateCorrection": "Impossible de créer la correction",
     "needsBrowserAccess": "accès navigateur requis",
     "providers": {
-      "managed_cloud": "Cloud",
+      "managed_cloud": "Legacy cloud (history)",
       "byok": "BYOK",
       "local": "Local"
     },
@@ -655,137 +585,10 @@
       "clipboardFallback": "Copied to clipboard"
     }
   },
-  "upgrade": {
-    "title": "Upgrade",
-    "subtitle": "Abonnez-vous chaque mois pour une reconnaissance vocale rapide et la réécriture IA avec 100 000 mots cloud par mois.",
-    "currentPlan": "Plan actuel : {{plan}}",
-    "pro": "Pro mensuel",
-    "lifetime": "Lifetime Starter",
-    "lifetimeBadge": "Meilleur choix",
-    "lifetimeSave": "Rentable apres 18 mois",
-    "lifetimeUpgradeSave": "Inclut votre credit mensuel actuel",
-    "free": "Gratuit",
-    "usageThisMonth": "Utilisation ce mois-ci",
-    "stt": "STT",
-    "llm": "LLM",
-    "thankYou": "Votre plan est actif — merci pour votre soutien !",
-    "monthlyActive": "Pro est actif.",
-    "signInFirst": "Connectez-vous d'abord depuis la page Compte pour vous abonner.",
-    "subscribeToPro": "S'abonner à Pro",
-    "buyLifetime": "Acheter lifetime",
-    "month": "mois",
-    "oneTime": "paiement unique",
-    "planDescriptions": {
-      "pro": "Accès mensuel flexible avec 100 000 mots cloud/mois.",
-      "lifetime": "Un paiement pour l'accès lifetime avec 100 000 mots cloud chaque mois."
-    },
-    "benefits": {
-      "title": "Ce que vous obtenez",
-      "cloudWords": "100 000 mots cloud/mois pour voix et IA",
-      "stt": "Mots cloud/mois pour la reconnaissance vocale",
-      "llm": "Mots cloud/mois pour la correction et la réécriture IA",
-      "noApiKey": "Aucune clé API requise en mode cloud",
-      "backupScenes": "Cloud backup and curated scene packs"
-    },
-    "features": {
-      "sttTitle": "STT Cloud",
-      "sttDetail": "Reconnaissance vocale premium",
-      "llmTitle": "LLM Cloud",
-      "llmDetail": "Amélioration de texte par IA",
-      "backupTitle": "Sauvegarde Cloud",
-      "backupDetail": "Synchronisez vos paramètres et historique",
-      "scenesTitle": "Cloud Scene Packs",
-      "scenesDetail": "Curated prompt templates and future scene sync",
-      "zeroConfigTitle": "Zéro configuration",
-      "zeroConfigDetail": "Aucune clé API nécessaire"
-    }
-  },
-  "account": {
-    "title": "Compte",
-    "subtitle": "Connectez-vous pour synchroniser vos données et gérer votre abonnement",
-    "signIn": "Connexion",
-    "signUp": "Inscription",
-    "name": "Nom",
-    "email": "E-mail",
-    "password": "Mot de passe",
-    "nameRequired": "Le nom est requis",
-    "passwordMinLength": "Le mot de passe doit contenir au moins 8 caractères",
-    "orContinueWith": "ou continuer avec",
-    "continueWithGoogle": "Continuer avec Google",
-    "continueWithGithub": "Continuer avec GitHub",
-    "plan": "Plan",
-    "renews": "Renouvellement",
-    "usageThisMonth": "Utilisation ce mois-ci",
-    "cloudBackup": "Sauvegarde Cloud",
-    "backup": "Sauvegarder",
-    "restore": "Restaurer",
-    "opening": "Ouverture...",
-    "manageSubscription": "Gérer l'abonnement",
-    "signOut": "Déconnexion",
-    "oauthPendingTitle": "Finalisation de la connexion...",
-    "oauthPendingDesc": "Terminez la connexion dans votre navigateur. Vous serez redirigé automatiquement.",
-    "oauthPendingHint": "Si votre navigateur affiche « Load failed », copiez l’adresse du navigateur et utilisez Terminer depuis le presse-papiers ci-dessous.",
-    "oauthTimeout": "La connexion a expiré. Veuillez réessayer.",
-    "cancel": "Annuler",
-    "oauthFailed": "Échec du démarrage de la connexion",
-    "completeFromClipboard": "Terminer depuis le presse-papiers",
-    "oauthClipboardInvalid": "Aucun lien de connexion valide trouvé.",
-    "toast": {
-      "backupOk": "Sauvegarde réussie",
-      "backupFail": "Échec de la sauvegarde",
-      "restoreOk": "Restauration réussie",
-      "restoreFail": "Échec de la restauration",
-      "subscriptionFail": "Impossible de charger l'abonnement"
-    },
-    "sttQuotaWarning": "Le quota STT dépasse 90 %. Pensez à passer en mode BYOK.",
-    "llmQuotaWarning": "Le quota LLM dépasse 90 %. Pensez à passer en mode BYOK.",
-    "quotaHours": "heures",
-    "quotaTokens": "k tokens",
-    "quotaUsage": "Utilisation {{label}} : {{used}} sur {{limit}} {{unit}}",
-    "backToSignIn": "Retour à la connexion",
-    "freeCredit": "Crédit gratuit",
-    "resendVerification": "Renvoyer l'email de vérification",
-    "sending": "Envoi en cours...",
-    "verificationResent": "Email de vérification renvoyé !",
-    "verifyEmailTitle": "Vérifiez votre email",
-    "quotaMin": "min",
-    "forgotPassword": "Forgot password?",
-    "forgotPasswordTitle": "Forgot your password?",
-    "forgotPasswordDescription": "Enter your email and we will send a secure reset link.",
-    "sendResetLink": "Send reset link",
-    "resetLinkSent": "Check your email",
-    "resetLinkSentDesc": "If an account exists for that email, a password reset link is on its way.",
-    "newPassword": "New password",
-    "confirmPassword": "Confirm password",
-    "currentPassword": "Current password",
-    "passwordMismatch": "Passwords do not match",
-    "passwordTooShort": "Password must be 8 to 128 characters",
-    "resetPassword": "Reset password",
-    "resetPasswordSuccess": "Your password has been reset",
-    "invalidOrExpiredResetLink": "This reset link is invalid or expired",
-    "requestNewLink": "Request a new link",
-    "security": "Security",
-    "changePassword": "Change password",
-    "setPassword": "Set password",
-    "passwordChanged": "Password updated",
-    "passwordChangeFailed": "Failed to update password",
-    "currentPasswordRequired": "Current password is required",
-    "sessionExpired": "Your cloud session expired. Sign in again.",
-    "showPassword": "Show {{label}}",
-    "hidePassword": "Hide {{label}}"
-  },
   "error": {
     "somethingWentWrong": "Un problème est survenu",
     "unexpectedError": "Une erreur inattendue s'est produite.",
     "reload": "Recharger"
-  },
-  "updates": {
-    "availableTitle": "Mise à jour disponible",
-    "availableBody": "La version {{version}} est prête à être installée.",
-    "install": "Installer la mise à jour",
-    "installing": "Installation...",
-    "dismiss": "Fermer",
-    "error": "La mise à jour a échoué. Téléchargez la dernière version depuis le site web."
   },
   "common": {
     "save": "Enregistrer",
@@ -804,8 +607,6 @@
     "secondsUnit": "s",
     "allowedRange": "Plage prise en charge : {{min}} à {{max}}.",
     "allowedRangeWithReason": "Plage : {{min}} à {{max}}. {{reason}}",
-    "allowedCloudRange": "Plage : {{min}} à {{max}}. Définie par la capacité Cloud actuelle.",
-    "currentSelectionWithCloudMax": "Réglage actuel : {{current}}. Le cloud prend en charge jusqu’à {{max}}.",
     "currentSelectionWithLimit": "Sélection : {{current}} ; limite de l’app : {{max}}. {{reason}}",
     "providerFixedLimit": "Ce fournisseur autorise jusqu’à {{max}} par enregistrement.",
     "corrected": "Ce fournisseur utilisera {{duration}}.",
@@ -821,10 +622,7 @@
       "clientBuffer": "Limité par le tampon audio local sécurisé de l’application.",
       "unknownUpstream": "La limite du serveur personnalisé est inconnue ; une valeur prudente est utilisée.",
       "unknownProvider": "Ce fournisseur n’est pas encore reconnu ; une limite sûre est utilisée.",
-      "productSafety": "Une limite prudente de l’application pour ce fournisseur de streaming.",
-      "managedCapability": "Réglé automatiquement pour OpenTypeless Cloud.",
-      "encoderFallback": "L’encodeur audio géré était indisponible ; cette session a utilisé la limite WAV locale plus courte.",
-      "managedFallback": "Les capacités Cloud sont absentes ou obsolètes ; la limite sûre de 30 secondes est utilisée."
+      "productSafety": "Une limite prudente de l’application pour ce fournisseur de streaming."
     }
   },
   "providers": {
@@ -838,8 +636,7 @@
       "groqWhisper": "Groq Whisper",
       "siliconflow": "SiliconFlow",
       "appleSpeech": "Apple Speech (Local)",
-      "customWhisper": "Local / Custom Whisper",
-      "cloud": "OpenTypeless Cloud"
+      "customWhisper": "Local / Custom Whisper"
     },
     "llm": {
       "zhipu": "Zhipu",
@@ -853,8 +650,7 @@
       "groq": "Groq",
       "claude": "Claude",
       "ollama": "Ollama (Local)",
-      "openrouter": "OpenRouter",
-      "cloud": "OpenTypeless Cloud"
+      "openrouter": "OpenRouter"
     }
   }
 }

@@ -4,7 +4,6 @@ use crate::CloseToTrayCache;
 use crate::HotkeyModeCache;
 use crate::HotkeyRegistrationError;
 use crate::HotkeyRoleCache;
-use crate::SessionTokenStore;
 use serde_json::{json, Map, Value};
 use tauri::Emitter;
 
@@ -307,15 +306,6 @@ pub async fn set_capsule_auto_hide(
     enabled: bool,
 ) -> Result<(), String> {
     save_capsule_auto_hide(&app, &state, enabled).await
-}
-
-#[tauri::command]
-pub async fn set_session_token(
-    state: tauri::State<'_, SessionTokenStore>,
-    token: String,
-) -> Result<(), String> {
-    *state.0.lock().unwrap_or_else(|e| e.into_inner()) = token;
-    Ok(())
 }
 
 #[cfg(test)]

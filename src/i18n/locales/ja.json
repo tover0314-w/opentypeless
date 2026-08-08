@@ -8,9 +8,6 @@
     "ask": "質問",
     "settings": "設定",
     "history": "履歴",
-    "account": "アカウント",
-    "upgrade": "アップグレード",
-    "pro": "Pro",
     "mainNavigation": "メインナビゲーション"
   },
   "ask": {
@@ -40,16 +37,16 @@
   },
   "errors": {
     "stt_timeout": "音声認識がタイムアウトしました。もう一度お試しください。",
-    "stt_invalid_key": "クラウド音声アクセスに失敗しました。再度サインインするか、APIキーを確認してください。",
+    "stt_invalid_key": "Your STT provider rejected the credential. Check the configured BYOK API key.",
     "stt_failed": "音声認識に失敗しました。{{details}}",
-    "stt_quota_exceeded": "クラウド音声認識の利用枠を超えました。Proにアップグレードするか、BYOKモードに切り替えてください。",
+    "stt_quota_exceeded": "Your STT provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "stt_no_speech_detected": "音声が検出されませんでした。もう一度お試しください。",
     "output_fallback_clipboard": "テキスト出力に失敗しました。代わりに結果をクリップボードにコピーしました。{{details}}",
     "output_wayland_unsupported": "Waylandではキーボード出力に対応していません。結果をクリップボードにコピーしました。",
     "accessibility_required": "アクセシビリティ権限がありません。結果をクリップボードにコピーしました。",
     "output_streaming_partial": "ストリーミング挿入が途中で停止しました。挿入済みのテキストは保持されました。{{details}}",
     "llm_failed": "AIによる整形に失敗しました。代わりに元のテキストを出力しました。{{details}}",
-    "llm_quota_exceeded": "クラウドAIの利用枠を超えました。Proにアップグレードするか、BYOKモードに切り替えてください。",
+    "llm_quota_exceeded": "Your LLM provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "output_wayland_clipboard_copy_only": "Copied to clipboard. Paste manually on Wayland."
   },
   "home": {
@@ -57,18 +54,13 @@
     "description": "{{hotkey}}を長押しして音声録音を開始します。音声が文字起こしされ、AIによる整形が行われます。",
     "totalRecordings": "総録音回数",
     "today": "今日",
-    "proPlan": "Proプラン",
-    "freePlan": "無料プラン",
-    "upgradeToPro": "Proにアップグレード",
     "currentConfig": "現在の設定",
     "sttProvider": "STTプロバイダー",
     "llmProvider": "LLMプロバイダー",
     "aiPolish": "AI整形",
     "enabled": "有効",
     "disabled": "無効",
-    "outputMode": "出力モード",
-    "wordsRemaining": "残り words",
-    "wordsReset": "{{date}} にリセット"
+    "outputMode": "出力モード"
   },
   "onboarding": {
     "speakToWrite": "話して書く — 音声をリアルタイムで整形されたテキストに変換します",
@@ -120,10 +112,6 @@
     "steps": {
       "welcome": "ようこそ",
       "welcomeSub": "いくつかのステップでOpenTypelessを設定しましょう",
-      "signIn": "サインイン",
-      "signInSub": "アカウントに接続して始めましょう",
-      "chooseMode": "モードを選択",
-      "chooseModeSub": "OpenTypelessの使用方法を選択してください",
       "speechRecognition": "音声認識",
       "speechRecognitionSub": "STTサービスを設定します",
       "aiPolish": "AI整形",
@@ -134,36 +122,6 @@
       "howItWorksSub": "簡単な録音テストを試しましょう",
       "setupComplete": "セットアップ完了",
       "getStarted": "始める"
-    },
-    "account": {
-      "signIn": "サインイン",
-      "signUp": "サインアップ",
-      "name": "名前",
-      "namePlaceholder": "お名前",
-      "email": "メールアドレス",
-      "emailPlaceholder": "your@email.com",
-      "password": "パスワード",
-      "or": "または",
-      "signedInAs": "サインイン中",
-      "freePlan": "無料プラン",
-      "freePlanQuota": "残り枠",
-      "checkEmail": "メールを確認してください",
-      "verificationSent": "確認リンクを送信しました",
-      "resendVerification": "確認メールを再送信",
-      "backToSignIn": "サインインに戻る",
-      "completingSignIn": "サインインを完了中...",
-      "finishSignIn": "サインインを完了する",
-      "oauthPendingHint": "ブラウザに「Load failed」と表示された場合は、ブラウザのアドレスをコピーし、下の「クリップボードから完了」を使ってください。",
-      "completeFromClipboard": "クリップボードから完了",
-      "oauthClipboardInvalid": "有効なサインインリンクが見つかりません。",
-      "cancel": "キャンセル",
-      "nameRequired": "名前は必須です",
-      "passwordTooShort": "パスワードは8文字以上必要です",
-      "signInTimedOut": "サインインがタイムアウトしました",
-      "failedToStart": "開始に失敗しました",
-      "verificationResent": "確認メールを送信しました！",
-      "continueWithGoogle": "Googleで続行",
-      "continueWithGithub": "GitHubで続行"
     },
     "done": {
       "title": "準備が完了しました！",
@@ -203,18 +161,6 @@
         "needed": "必要",
         "later": "後で"
       }
-    },
-    "mode": {
-      "cloud": "クラウド",
-      "recommended": "おすすめ",
-      "zeroConfig": "設定不要",
-      "cloudVoice": "クラウド音声認識",
-      "cloudTokens": "クラウド words 枠を含む",
-      "oneTimeCredit": "サインアップ時に一回限りクレジット",
-      "byok": "独自キーを使用",
-      "byokDesc": "独自のAPIキーを使用します",
-      "unlimitedUsage": "独自キーで使い放題",
-      "providersSupported": "複数プロバイダー対応"
     },
     "layout": {
       "skip": "スキップ",
@@ -259,8 +205,6 @@
       "openMainWindow": "メインウィンドウを開く",
       "settings": "設定",
       "history": "履歴",
-      "account": "アカウント",
-      "upgrade": "アップグレード",
       "exit": "終了"
     }
   },
@@ -314,14 +258,9 @@
     "startMinimized": "トレイに最小化して起動",
     "language": "言語",
     "provider": "プロバイダー",
-    "cloudSttPro": "クラウドSTT (Pro)",
-    "cloudLlmPro": "クラウドLLM (Pro)",
     "askAnything": "Ask Anything",
     "askAnythingDesc": "音声で質問し、1回だけ回答します。チャット履歴は使いません。",
     "tryAsk": "Ask を試す",
-    "sttSignInHint": "サインインしてProに登録すると、公式クラウド words/月を利用できます。",
-    "sttUpgradeHint": "Proにアップグレードして、99言語対応のクラウド words/月を利用できます。APIキー不要。",
-    "sttProActive": "Pro有効 — ミリ秒STT、99言語対応。APIキー不要。",
     "customSttPreset": "Preset",
     "customSttPresetSpeaches": "Speaches",
     "customSttPresetCustom": "Custom OpenAI-compatible",
@@ -344,9 +283,6 @@
     "volcengineResourceSeedAsr": "SeedASR 2.0",
     "volcengineResourceBigAsr": "BigASR 1.0",
     "customSttConnectionFailed": "Local STT server is not reachable. Check that it is running and the port is correct.",
-    "llmSignInHint": "サインインしてProに登録すると、クラウドAI整形を利用できます。APIキーは不要です。",
-    "llmUpgradeHint": "Proにアップグレードすると、クラウドAI整形と月間利用枠を利用できます。APIキーは不要です。",
-    "llmProActive": "Proが有効です。クラウドAI整形を利用できます。APIキーは不要です。",
     "apiKey": "APIキー",
     "enterApiKey": "APIキーを入力...",
     "test": "テスト",
@@ -522,13 +458,10 @@
     "exportFailed": "辞書のエクスポートに失敗しました"
   },
   "scenes": {
-    "signInToBrowse": "シーンパックを閲覧するにはサインインしてください。",
     "failedToLoad": "シーンの読み込みに失敗しました。",
     "retry": "再試行",
     "noScenes": "利用可能なシーンパックはまだありません。",
     "all": "すべて",
-    "pro": "PRO",
-    "upgradeToUse": "このシーンパックを使用するにはProにアップグレードしてください。",
     "promptTemplate": "プロンプトテンプレート",
     "copyPrompt": "プロンプトをコピー",
     "copied": "コピーしました",
@@ -542,9 +475,6 @@
     "noCustomScenesDesc": "Create a local scene to save a reusable AI polish prompt.",
     "newScene": "New scene",
     "builtInScenes": "Built-in Scenes",
-    "cloudPacks": "Cloud Packs",
-    "refresh": "Refresh",
-    "noCloudPacks": "No cloud scene packs available yet. You can still create local custom scenes above.",
     "failedToSave": "Failed to save scene.",
     "export": "Export",
     "import": "Import",
@@ -645,7 +575,7 @@
     "failedToCreateCorrection": "修正ルールの作成に失敗しました",
     "needsBrowserAccess": "ブラウザアクセスが必要",
     "providers": {
-      "managed_cloud": "Cloud",
+      "managed_cloud": "Legacy cloud (history)",
       "byok": "BYOK",
       "local": "Local"
     },
@@ -655,137 +585,10 @@
       "clipboardFallback": "Copied to clipboard"
     }
   },
-  "upgrade": {
-    "title": "アップグレード",
-    "subtitle": "月額プランで高速音声認識とAIリライトを利用できます。毎月100,000 cloud wordsが含まれます。",
-    "currentPlan": "現在のプラン：{{plan}}",
-    "pro": "Pro 月額",
-    "lifetime": "Lifetime Starter",
-    "lifetimeBadge": "最もお得",
-    "lifetimeSave": "18か月で元が取れます",
-    "lifetimeUpgradeSave": "現在の月額クレジットを含みます",
-    "free": "無料",
-    "usageThisMonth": "今月の使用量",
-    "stt": "STT",
-    "llm": "LLM",
-    "thankYou": "プランが有効です。ご支援ありがとうございます！",
-    "monthlyActive": "Pro が有効です。",
-    "signInFirst": "サブスクライブするには、まずアカウントページからサインインしてください。",
-    "subscribeToPro": "Proにサブスクライブ",
-    "buyLifetime": "lifetimeを購入",
-    "month": "月",
-    "oneTime": "一括",
-    "planDescriptions": {
-      "pro": "100,000 cloud words/月を含む柔軟な月額アクセス。",
-      "lifetime": "一括払いでlifetimeアクセス。毎月100,000 cloud wordsを含みます。"
-    },
-    "benefits": {
-      "title": "主な特典",
-      "cloudWords": "音声とAIに使える毎月100,000 cloud words",
-      "stt": "音声認識用クラウド words/月",
-      "llm": "AI校正・リライト用クラウド words/月",
-      "noApiKey": "クラウドモードではAPIキー不要",
-      "backupScenes": "Cloud backup and curated scene packs"
-    },
-    "features": {
-      "sttTitle": "クラウドSTT",
-      "sttDetail": "プレミアム音声認識",
-      "llmTitle": "クラウドLLM",
-      "llmDetail": "AIテキスト整形",
-      "backupTitle": "クラウドバックアップ",
-      "backupDetail": "設定と履歴を同期",
-      "scenesTitle": "Cloud Scene Packs",
-      "scenesDetail": "Curated prompt templates and future scene sync",
-      "zeroConfigTitle": "設定不要",
-      "zeroConfigDetail": "APIキー不要"
-    }
-  },
-  "account": {
-    "title": "アカウント",
-    "subtitle": "サインインしてデータを同期し、サブスクリプションを管理します",
-    "signIn": "サインイン",
-    "signUp": "サインアップ",
-    "name": "名前",
-    "email": "メールアドレス",
-    "password": "パスワード",
-    "nameRequired": "名前は必須です",
-    "passwordMinLength": "パスワードは8文字以上必要です",
-    "orContinueWith": "または次の方法で続行",
-    "continueWithGoogle": "Googleで続行",
-    "continueWithGithub": "GitHubで続行",
-    "plan": "プラン",
-    "renews": "更新日",
-    "usageThisMonth": "今月の使用量",
-    "cloudBackup": "クラウドバックアップ",
-    "backup": "バックアップ",
-    "restore": "復元",
-    "opening": "開いています...",
-    "manageSubscription": "サブスクリプションを管理",
-    "signOut": "サインアウト",
-    "oauthFailed": "ログインの開始に失敗しました",
-    "oauthPendingTitle": "サインインを完了中...",
-    "oauthPendingDesc": "ブラウザでサインインを完了してください。自動的にリダイレクトされます。",
-    "oauthPendingHint": "ブラウザに「Load failed」と表示された場合は、ブラウザのアドレスをコピーし、下の「クリップボードから完了」を使ってください。",
-    "oauthTimeout": "サインインがタイムアウトしました。もう一度お試しください。",
-    "cancel": "キャンセル",
-    "completeFromClipboard": "クリップボードから完了",
-    "oauthClipboardInvalid": "有効なサインインリンクが見つかりません。",
-    "toast": {
-      "backupOk": "バックアップに成功しました",
-      "backupFail": "バックアップに失敗しました",
-      "restoreOk": "復元に成功しました",
-      "restoreFail": "復元に失敗しました",
-      "subscriptionFail": "サブスクリプションの読み込みに失敗しました"
-    },
-    "sttQuotaWarning": "音声認識の使用量が90%を超えています。BYOKモードへの切り替えをご検討ください。",
-    "llmQuotaWarning": "AIの使用量が90%を超えています。BYOKモードへの切り替えをご検討ください。",
-    "quotaHours": "時間",
-    "quotaTokens": "千トークン",
-    "quotaUsage": "{{label}}使用量: {{used}} / {{limit}} {{unit}}",
-    "backToSignIn": "ログインに戻る",
-    "freeCredit": "無料クレジット",
-    "resendVerification": "確認メールを再送信",
-    "sending": "送信中...",
-    "verificationResent": "確認メールを送信しました！",
-    "verifyEmailTitle": "メールを確認してください",
-    "quotaMin": "分",
-    "forgotPassword": "Forgot password?",
-    "forgotPasswordTitle": "Forgot your password?",
-    "forgotPasswordDescription": "Enter your email and we will send a secure reset link.",
-    "sendResetLink": "Send reset link",
-    "resetLinkSent": "Check your email",
-    "resetLinkSentDesc": "If an account exists for that email, a password reset link is on its way.",
-    "newPassword": "New password",
-    "confirmPassword": "Confirm password",
-    "currentPassword": "Current password",
-    "passwordMismatch": "Passwords do not match",
-    "passwordTooShort": "Password must be 8 to 128 characters",
-    "resetPassword": "Reset password",
-    "resetPasswordSuccess": "Your password has been reset",
-    "invalidOrExpiredResetLink": "This reset link is invalid or expired",
-    "requestNewLink": "Request a new link",
-    "security": "Security",
-    "changePassword": "Change password",
-    "setPassword": "Set password",
-    "passwordChanged": "Password updated",
-    "passwordChangeFailed": "Failed to update password",
-    "currentPasswordRequired": "Current password is required",
-    "sessionExpired": "Your cloud session expired. Sign in again.",
-    "showPassword": "Show {{label}}",
-    "hidePassword": "Hide {{label}}"
-  },
   "error": {
     "somethingWentWrong": "問題が発生しました",
     "unexpectedError": "予期しないエラーが発生しました。",
     "reload": "再読み込み"
-  },
-  "updates": {
-    "availableTitle": "アップデートがあります",
-    "availableBody": "バージョン {{version}} をインストールできます。",
-    "install": "アップデートをインストール",
-    "installing": "インストール中...",
-    "dismiss": "閉じる",
-    "error": "アップデートに失敗しました。Web サイトから最新バージョンをダウンロードしてください。"
   },
   "common": {
     "save": "保存",
@@ -804,8 +607,6 @@
     "secondsUnit": "秒",
     "allowedRange": "設定可能範囲：{{min}}～{{max}}",
     "allowedRangeWithReason": "範囲：{{min}}～{{max}}。{{reason}}",
-    "allowedCloudRange": "範囲：{{min}}～{{max}}。現在のクラウド機能に基づきます。",
-    "currentSelectionWithCloudMax": "現在は{{current}}に設定されています。クラウドでは最大{{max}}まで録音できます。",
     "currentSelectionWithLimit": "選択：{{current}}、上限：{{max}}。{{reason}}",
     "providerFixedLimit": "このプロバイダーでは1回最大{{max}}まで録音できます。",
     "corrected": "このプロバイダーでは {{duration}} が使用されます。",
@@ -821,10 +622,7 @@
       "clientBuffer": "アプリの安全なローカル音声バッファによる制限です。",
       "unknownUpstream": "カスタムサーバーの上限が不明なため、安全な既定値を使用します。",
       "unknownProvider": "未認識のプロバイダーのため、安全な上限を使用します。",
-      "productSafety": "ストリーミングプロバイダー向けの安全なアプリ上限です。",
-      "managedCapability": "OpenTypeless Cloud に合わせて自動設定されています。",
-      "encoderFallback": "管理対象の音声エンコーダーを利用できなかったため、この録音には短いローカル WAV 安全上限を使用しました。",
-      "managedFallback": "クラウド機能情報がないか古いため、安全な 30 秒上限を使用します。"
+      "productSafety": "ストリーミングプロバイダー向けの安全なアプリ上限です。"
     }
   },
   "providers": {
@@ -838,8 +636,7 @@
       "groqWhisper": "Groq Whisper",
       "siliconflow": "SiliconFlow",
       "appleSpeech": "Apple Speech (Local)",
-      "customWhisper": "Local / Custom Whisper",
-      "cloud": "OpenTypeless Cloud"
+      "customWhisper": "Local / Custom Whisper"
     },
     "llm": {
       "zhipu": "Zhipu",
@@ -853,8 +650,7 @@
       "groq": "Groq",
       "claude": "Claude",
       "ollama": "Ollama (ローカル)",
-      "openrouter": "OpenRouter",
-      "cloud": "OpenTypeless Cloud"
+      "openrouter": "OpenRouter"
     }
   }
 }

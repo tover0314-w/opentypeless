@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenTypeless</string>
+    <string name="ime_name">OpenTypeless Voice Keyboard</string>
+    <string name="ime_subtype_en">OpenTypeless multilingual voice input</string>
+    <string name="polish_enabled">Polish transcript with an OpenAI-compatible LLM</string>
+    <string name="status_ready">Ready</string>
+    <string name="action_speak">🎙  Speak</string>
+    <string name="action_stop">■  Stop</string>
+</resources>

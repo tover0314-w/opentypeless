@@ -3,9 +3,9 @@
   "promptVersion": "context-v1",
   "models": [
     {
-      "provider": "cloud",
-      "baseUrl": "https://www.opentypeless.com/api/proxy",
-      "model": "default",
+      "provider": "openrouter",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "google/gemini-2.5-flash",
       "capability": "certified"
     }
   ]

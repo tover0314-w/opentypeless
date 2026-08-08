@@ -18,7 +18,6 @@ struct TrayLabels {
     keep_capsule_visible: &'static str,
     settings: &'static str,
     history: &'static str,
-    account: &'static str,
     about: &'static str,
     quit: &'static str,
 }
@@ -34,7 +33,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "保持胶囊可见",
             settings: "设置",
             history: "历史记录",
-            account: "账户",
             about: "关于 OpenTypeless",
             quit: "退出",
         },
@@ -47,7 +45,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "カプセルを表示したままにする",
             settings: "設定",
             history: "履歴",
-            account: "アカウント",
             about: "OpenTypeless について",
             quit: "終了",
         },
@@ -60,7 +57,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "캡슐 항상 표시",
             settings: "설정",
             history: "기록",
-            account: "계정",
             about: "OpenTypeless 정보",
             quit: "종료",
         },
@@ -73,7 +69,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Garder la capsule visible",
             settings: "Paramètres",
             history: "Historique",
-            account: "Compte",
             about: "À propos d'OpenTypeless",
             quit: "Quitter",
         },
@@ -86,7 +81,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Kapsel sichtbar lassen",
             settings: "Einstellungen",
             history: "Verlauf",
-            account: "Konto",
             about: "Über OpenTypeless",
             quit: "Beenden",
         },
@@ -99,7 +93,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Mantener cápsula visible",
             settings: "Configuración",
             history: "Historial",
-            account: "Cuenta",
             about: "Acerca de OpenTypeless",
             quit: "Salir",
         },
@@ -112,7 +105,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Manter cápsula visível",
             settings: "Configurações",
             history: "Histórico",
-            account: "Conta",
             about: "Sobre o OpenTypeless",
             quit: "Sair",
         },
@@ -125,7 +117,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Оставлять капсулу видимой",
             settings: "Настройки",
             history: "История",
-            account: "Аккаунт",
             about: "О программе OpenTypeless",
             quit: "Выход",
         },
@@ -138,7 +129,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Mantieni capsula visibile",
             settings: "Impostazioni",
             history: "Cronologia",
-            account: "Account",
             about: "Informazioni su OpenTypeless",
             quit: "Esci",
         },
@@ -151,7 +141,6 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             keep_capsule_visible: "Keep Capsule Visible",
             settings: "Settings",
             history: "History",
-            account: "Account",
             about: "About OpenTypeless",
             quit: "Quit",
         },
@@ -237,7 +226,6 @@ pub fn build_tray_menu(
     let sep2 = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", labels.settings, true, None::<&str>)?;
     let history = MenuItem::with_id(app, "history", labels.history, true, None::<&str>)?;
-    let account = MenuItem::with_id(app, "account", labels.account, true, None::<&str>)?;
     let sep3 = PredefinedMenuItem::separator(app)?;
     let about = MenuItem::with_id(app, "about", labels.about, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", labels.quit, true, None::<&str>)?;
@@ -252,7 +240,6 @@ pub fn build_tray_menu(
             &sep2,
             &settings,
             &history,
-            &account,
             &sep3,
             &about,
             &quit,

@@ -373,7 +373,6 @@ pub struct AppConfig {
     pub recording_limit_mode: crate::stt::capabilities::RecordingLimitMode,
     pub custom_recording_limit_seconds: u32,
     pub max_recording_seconds: u32,
-    pub managed_stt_capability_state: Option<crate::stt::capabilities::ManagedSttCapabilityState>,
     pub history_enabled: bool,
     pub history_retention_days: u32,
     pub history_max_entries: u32,
@@ -430,7 +429,6 @@ impl Default for AppConfig {
             recording_limit_mode: crate::stt::capabilities::RecordingLimitMode::Auto,
             custom_recording_limit_seconds: 600,
             max_recording_seconds: 30,
-            managed_stt_capability_state: None,
             history_enabled: true,
             history_retention_days: 0,
             history_max_entries: DEFAULT_HISTORY_MAX_ENTRIES,
@@ -557,6 +555,16 @@ impl AppConfig {
     }
 
     pub(crate) fn normalize_values(&mut self) {
+        // Commercial cloud providers were removed in the BYOK fork. Migrate
+        // existing installations to editable, OpenAI-compatible defaults.
+        if self.stt_provider == "cloud" {
+            self.stt_provider = "openai-whisper".to_string();
+        }
+        if self.llm_provider == "cloud" {
+            self.llm_provider = "openrouter".to_string();
+            self.llm_base_url = "https://openrouter.ai/api/v1".to_string();
+            self.llm_model = "google/gemini-2.5-flash".to_string();
+        }
         if !matches!(
             self.stt_aliyun_qwen_region.as_str(),
             crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND
@@ -632,11 +640,7 @@ impl AppConfig {
     }
 
     pub(crate) fn recompute_recording_limit_mirror(&mut self) {
-        let resolved = crate::stt::capabilities::resolve_recording_limit(
-            self,
-            None,
-            chrono::Utc::now().timestamp(),
-        );
+        let resolved = crate::stt::capabilities::resolve_recording_limit(self);
         self.max_recording_seconds = resolved.effective_max_seconds;
     }
 
@@ -1251,7 +1255,8 @@ pub struct HistoryEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryProviderKind {
-    ManagedCloud,
+    #[serde(rename = "managed_cloud")]
+    LegacyManagedCloud,
     Byok,
     Local,
 }
@@ -1259,7 +1264,7 @@ pub enum HistoryProviderKind {
 impl HistoryProviderKind {
     fn as_db_value(self) -> &'static str {
         match self {
-            Self::ManagedCloud => "managed_cloud",
+            Self::LegacyManagedCloud => "managed_cloud",
             Self::Byok => "byok",
             Self::Local => "local",
         }
@@ -1267,7 +1272,7 @@ impl HistoryProviderKind {
 
     fn from_db_value(value: &str) -> Self {
         match value {
-            "managed_cloud" => Self::ManagedCloud,
+            "managed_cloud" => Self::LegacyManagedCloud,
             "byok" => Self::Byok,
             _ => Self::Local,
         }
@@ -1494,7 +1499,7 @@ impl HistoryStore {
         Ok(())
     }
 
-    /// Restores cloud backup sections in one SQLite transaction. Dictionary and
+    /// Restores imported backup sections in one SQLite transaction. Dictionary and
     /// correction rows live in the same database, so using the history
     /// connection here prevents a partially restored local data set.
     pub async fn restore_backup_data(
@@ -3594,7 +3599,7 @@ mod tests {
         entry.context_label = "GitHub".to_string();
         entry.context_icon_key = "github".to_string();
         entry.context_family = ContextFamily::DeveloperCollaboration;
-        entry.provider_kind = HistoryProviderKind::ManagedCloud;
+        entry.provider_kind = HistoryProviderKind::LegacyManagedCloud;
         store.add(entry).await.unwrap();
 
         let entries = store.list(10, 0).await.unwrap();
@@ -3603,7 +3608,10 @@ mod tests {
             entries[0].context_family,
             ContextFamily::DeveloperCollaboration
         );
-        assert_eq!(entries[0].provider_kind, HistoryProviderKind::ManagedCloud);
+        assert_eq!(
+            entries[0].provider_kind,
+            HistoryProviderKind::LegacyManagedCloud
+        );
 
         let conn = store.conn.lock().unwrap();
         let raw_values: (String, String) = conn

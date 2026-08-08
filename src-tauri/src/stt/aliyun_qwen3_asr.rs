@@ -410,7 +410,6 @@ mod tests {
             sample_rate: 16_000,
             resource_id: None,
             operation_id: None,
-            managed_audio: None,
             provider_region: None,
         }
     }

@@ -44,6 +44,13 @@ jelly-reference*.png
 .codex-target-clippy/
 /output/
 
+# Android
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
+
 # Local release artifacts
 .release-assets/
 

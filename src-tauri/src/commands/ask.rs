@@ -3,7 +3,7 @@ use crate::audio::{AudioCaptureHandle, AudioConfig};
 use crate::credentials::{
     resolve_llm_config_secret, resolve_stt_config_secret, SystemCredentialVault,
 };
-use crate::error::{emit_cloud_session_invalid, managed_cloud_error, AppError};
+use crate::error::AppError;
 use crate::pipeline::PipelineState;
 use crate::storage;
 use crate::stt::{self, SttConfig, TranscriptEvent};
@@ -11,7 +11,6 @@ use crate::voice_intent::{
     SearchProvider, SpeechLanguageMode, VoiceIntent, VoiceIntentKind, VoiceIntentRouter, VoiceMode,
     VoiceRouteRequest, VoiceRoutingFlags,
 };
-use crate::{api_base_url, with_desktop_client_version, SessionTokenStore};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -579,44 +578,11 @@ pub fn build_byok_ask_body_with_selected_text(
     build_byok_ask_body_for_context(question, model, Some(selected_text))
 }
 
-fn build_cloud_ask_body(
-    question: &str,
-    selected_text: Option<&str>,
-    operation_id: &str,
-    voice_intent: &VoiceIntent,
-) -> Result<serde_json::Value, String> {
-    let question = validate_ask_question(question)?;
-    let selected_text = selected_text.and_then(sanitize_selected_text_for_ask);
-    let stage_key = format!("{operation_id}:ask");
-    let routed_question = build_ask_user_content_from_sanitized(&question, selected_text.as_ref());
-
-    Ok(json!({
-        "question": routed_question,
-        "voiceIntentMetadata": crate::voice_intent::VoiceIntentMetadata::from(voice_intent),
-        "context": {
-            "operationId": operation_id,
-            "stageKey": stage_key,
-            "requestType": "ask_anything",
-            "askIntent": voice_intent.kind.as_str(),
-            "hasSelectedText": selected_text.is_some(),
-            "selectedTextTruncated": selected_text.as_ref().is_some_and(|value| value.truncated),
-            "clientVersion": crate::desktop_client_version()
-        }
-    }))
-}
-
 fn should_use_byok(config: &storage::AppConfig, llm_api_key: &str) -> bool {
-    if config.llm_provider == "cloud" {
-        return false;
-    }
     if config.llm_base_url.trim().is_empty() || config.llm_model.trim().is_empty() {
         return false;
     }
     crate::llm::has_usable_provider_credentials(&config.llm_provider, llm_api_key)
-}
-
-fn should_use_cloud(config: &storage::AppConfig) -> bool {
-    config.llm_provider == "cloud"
 }
 
 fn build_ask_stt_config(
@@ -639,31 +605,13 @@ fn build_ask_stt_config(
             None
         },
         operation_id: Some(operation_id),
-        managed_audio: stt::capabilities::managed_audio_encoding_config(
-            config,
-            chrono::Utc::now().timestamp(),
-        ),
         provider_region: (config.stt_provider == stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER)
             .then(|| config.stt_aliyun_qwen_region.clone()),
     }
 }
 
-fn ask_stt_api_key(
-    config: &storage::AppConfig,
-    token_store: &SessionTokenStore,
-) -> Result<String, String> {
-    if config.stt_provider == "cloud" {
-        return Ok(token_store
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone());
-    }
+fn ask_stt_api_key(config: &storage::AppConfig) -> Result<String, String> {
     resolve_stt_config_secret(config, &SystemCredentialVault).map_err(|e| e.to_string())
-}
-
-fn cloud_auth_required_message() -> String {
-    "Sign in to use Cloud Ask, or switch to BYOK.".to_string()
 }
 
 fn map_audio_capture_error(message: &str) -> String {
@@ -702,18 +650,11 @@ fn append_final_transcript(transcript: &Arc<Mutex<String>>, text: &str) -> Strin
 async fn answer_question(
     config: &storage::AppConfig,
     client: &reqwest::Client,
-    token_store: &SessionTokenStore,
     question: &str,
     selected_text: Option<&str>,
-    operation_id: Option<&str>,
-    voice_intent: &VoiceIntent,
 ) -> Result<String, AppError> {
-    let llm_api_key = if config.llm_provider == "cloud" {
-        String::new()
-    } else {
-        resolve_llm_config_secret(config, &SystemCredentialVault)
-            .map_err(|e| AppError::Config(e.to_string()))?
-    };
+    let llm_api_key = resolve_llm_config_secret(config, &SystemCredentialVault)
+        .map_err(|e| AppError::Config(e.to_string()))?;
 
     if should_use_byok(config, &llm_api_key) {
         return ask_via_byok(client, config, &llm_api_key, question, selected_text)
@@ -721,20 +662,8 @@ async fn answer_question(
             .map_err(AppError::Config);
     }
 
-    if should_use_cloud(config) {
-        return ask_via_cloud(
-            client,
-            token_store,
-            question,
-            selected_text,
-            operation_id,
-            voice_intent,
-        )
-        .await;
-    }
-
     Err(AppError::Config(
-        "Configure a BYOK LLM provider or choose Cloud LLM to use Ask.".to_string(),
+        "Configure a BYOK LLM provider to use Ask.".to_string(),
     ))
 }
 
@@ -743,83 +672,14 @@ fn response_error(status: reqwest::StatusCode, text: String) -> String {
     format!("Ask request failed ({}): {}", status.as_u16(), sanitized)
 }
 
-fn cloud_response_error(status: reqwest::StatusCode, text: String) -> AppError {
-    if let Some(error) = managed_cloud_error(status.as_u16(), &text) {
-        return error;
-    }
-    let parsed = serde_json::from_str::<serde_json::Value>(&text).ok();
-    let message = parsed
-        .as_ref()
-        .and_then(extract_cloud_error_message)
-        .or_else(|| {
-            let trimmed = text.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        });
-
-    if status.as_u16() == 401 {
-        return AppError::Auth(cloud_auth_required_message());
-    }
-
-    if status.as_u16() == 403 {
-        let quota_message = message
-            .as_deref()
-            .filter(|value| contains_quota_marker(value))
-            .map(ToString::to_string);
-        return quota_message
-            .map(AppError::LlmQuota)
-            .unwrap_or_else(|| AppError::Auth(cloud_auth_required_message()));
-    }
-
-    if status.as_u16() >= 500 {
-        return AppError::Config("Ask service error. Please try again.".to_string());
-    }
-
-    let sanitized: String = message
-        .unwrap_or_else(|| "Ask request failed. Please try again.".to_string())
-        .chars()
-        .take(160)
-        .collect();
-    AppError::Config(format!(
-        "Ask request failed ({}): {}",
-        status.as_u16(),
-        sanitized
-    ))
-}
-
 fn ask_app_error_message(error: AppError) -> String {
     match error {
         AppError::Auth(message)
         | AppError::Quota(message)
         | AppError::LlmQuota(message)
         | AppError::Config(message) => message,
-        AppError::CloudSessionInvalid => cloud_auth_required_message(),
         other => other.to_string(),
     }
-}
-
-fn contains_quota_marker(value: &str) -> bool {
-    let value = value.to_ascii_lowercase();
-    value.contains("quota")
-        || value.contains("limit exceeded")
-        || value.contains("usage exceeded")
-        || value.contains("cloud words")
-        || value.contains("byok")
-}
-
-fn extract_cloud_error_message(value: &serde_json::Value) -> Option<String> {
-    for field in ["error", "message"] {
-        match value.get(field) {
-            Some(serde_json::Value::String(message)) => return Some(message.clone()),
-            Some(nested) => {
-                if let Some(message) = extract_cloud_error_message(nested) {
-                    return Some(message);
-                }
-            }
-            None => {}
-        }
-    }
-
-    None
 }
 
 async fn ask_via_byok(
@@ -875,82 +735,17 @@ fn extract_byok_ask_answer(body: &serde_json::Value) -> Result<String, String> {
     validate_ask_answer(message["reasoning_content"].as_str().unwrap_or(""))
 }
 
-async fn ask_via_cloud(
-    client: &reqwest::Client,
-    token_store: &SessionTokenStore,
-    question: &str,
-    selected_text: Option<&str>,
-    operation_id: Option<&str>,
-    voice_intent: &VoiceIntent,
-) -> Result<String, AppError> {
-    let token = token_store
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    if token.trim().is_empty() {
-        return Err(AppError::Auth(cloud_auth_required_message()));
-    }
-
-    let operation_id = operation_id
-        .map(str::to_string)
-        .unwrap_or_else(synthetic_operation_id);
-    let body = build_cloud_ask_body(question, selected_text, &operation_id, voice_intent)
-        .map_err(AppError::Config)?;
-
-    let resp =
-        with_desktop_client_version(client.post(format!("{}/api/proxy/ask", api_base_url())))
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(45))
-            .send()
-            .await
-            .map_err(AppError::from)?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(cloud_response_error(status, text));
-    }
-
-    let body: serde_json::Value = resp.json().await.map_err(AppError::from)?;
-    validate_ask_answer(body["answer"].as_str().unwrap_or("")).map_err(AppError::Config)
-}
-
 #[tauri::command]
 pub async fn ask_anything(
-    app: tauri::AppHandle,
     question: String,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<String, String> {
     let question = validate_ask_question(&question)?;
     let config = config_state.load().await.map_err(|e| e.to_string())?;
-    let voice_intent = route_ask_intent(
-        &question,
-        false,
-        &config.stt_language,
-        config.voice_routing_flags,
-    );
-
-    match answer_question(
-        &config,
-        &client,
-        &token_store,
-        &question,
-        None,
-        None,
-        &voice_intent,
-    )
-    .await
-    {
+    match answer_question(&config, &client, &question, None).await {
         Ok(answer) => Ok(answer),
-        Err(error) => {
-            emit_cloud_session_invalid(&app, &error);
-            Err(ask_app_error_message(error))
-        }
+        Err(error) => Err(ask_app_error_message(error)),
     }
 }
 
@@ -959,14 +754,13 @@ pub async fn start_ask_dictation(
     app: tauri::AppHandle,
     state: tauri::State<'_, AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<AskDictationStartResult, String> {
     if !state.try_begin_starting() {
         return Ok(AskDictationStartResult::empty());
     }
 
-    start_reserved_ask_dictation(app, state, config_state, token_store, client, false).await
+    start_reserved_ask_dictation(app, state, config_state, client, false).await
 }
 
 #[tauri::command]
@@ -974,17 +768,15 @@ pub async fn start_ask_flow(
     app: tauri::AppHandle,
     state: tauri::State<'_, AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<(), String> {
     if !state.try_begin_starting() {
         return Ok(());
     }
 
-    let result =
-        start_reserved_ask_dictation(app.clone(), state, config_state, token_store, client, true)
-            .await
-            .map(|_| ());
+    let result = start_reserved_ask_dictation(app.clone(), state, config_state, client, true)
+        .await
+        .map(|_| ());
     if let Err(message) = &result {
         let _ = show_error_window(&app, message.clone());
     }
@@ -995,7 +787,6 @@ pub(crate) async fn start_reserved_ask_dictation(
     app: tauri::AppHandle,
     state: tauri::State<'_, AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
     include_selected_text: bool,
 ) -> Result<AskDictationStartResult, String> {
@@ -1014,7 +805,7 @@ pub(crate) async fn start_reserved_ask_dictation(
             tracing::info!("Ask shortcut captured selected text context");
         }
 
-        let stt_api_key = ask_stt_api_key(&config, &token_store)?;
+        let stt_api_key = ask_stt_api_key(&config)?;
         if stt::config::stt_provider_requires_api_key(&config.stt_provider)
             && stt_api_key.is_empty()
         {
@@ -1035,11 +826,6 @@ pub(crate) async fn start_reserved_ask_dictation(
         };
         let operation_id = synthetic_operation_id();
         let stt_config = build_ask_stt_config(&config, stt_api_key, operation_id.clone());
-        let managed_cloud_session_token =
-            (config.stt_provider == "cloud").then(|| stt_config.api_key.clone());
-        if let Some(session_token) = managed_cloud_session_token.clone() {
-            stt::cloud::warm_managed_cloud_on_intent(client.inner().clone(), session_token);
-        }
         let mut provider = stt::create_provider(
             &config.stt_provider,
             custom_whisper_config,
@@ -1069,11 +855,7 @@ pub(crate) async fn start_reserved_ask_dictation(
             }
         };
         let recording_session_id = ASK_RECORDING_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let resolved_limit = stt::capabilities::resolve_recording_limit(
-            &config,
-            None,
-            chrono::Utc::now().timestamp(),
-        );
+        let resolved_limit = stt::capabilities::resolve_recording_limit(&config);
         let effective_max_seconds = provider
             .recording_limit_override_seconds()
             .map_or(resolved_limit.effective_max_seconds, |override_seconds| {
@@ -1131,38 +913,6 @@ pub(crate) async fn start_reserved_ask_dictation(
         let state_inner = state.0.clone();
         let deadline_state_inner = state.0.clone();
         let deadline_app = app.clone();
-        if let Some(session_token) = managed_cloud_session_token {
-            let warmup_client = client.inner().clone();
-            let warmup_state_inner = state.0.clone();
-            tauri::async_runtime::spawn(async move {
-                for elapsed_seconds in [240u64, 480] {
-                    if elapsed_seconds >= u64::from(effective_max_seconds) {
-                        break;
-                    }
-                    tokio::time::sleep_until(tokio::time::Instant::from_std(
-                        capture_ready_at.monotonic
-                            + std::time::Duration::from_secs(elapsed_seconds),
-                    ))
-                    .await;
-                    let is_active = warmup_state_inner
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .session
-                        .as_ref()
-                        .is_some_and(|session| {
-                            session.recording_session_id == recording_session_id
-                        });
-                    if !is_active {
-                        break;
-                    }
-                    stt::cloud::warm_managed_cloud_on_intent(
-                        warmup_client.clone(),
-                        session_token.clone(),
-                    );
-                }
-            });
-        }
-
         tauri::async_runtime::spawn(async move {
             loop {
                 tokio::select! {
@@ -1170,7 +920,6 @@ pub(crate) async fn start_reserved_ask_dictation(
                         match chunk {
                             Some(data) => {
                                 if let Err(e) = provider.send_audio(&data).await {
-                                    emit_cloud_session_invalid(&app, &e);
                                     let message = e.to_string();
                                     *error.lock().unwrap_or_else(|err| err.into_inner()) = Some(message.clone());
                                     surface_async_recording_error(
@@ -1190,7 +939,6 @@ pub(crate) async fn start_reserved_ask_dictation(
                                     }
                                     Ok(None) => {}
                                     Err(e) => {
-                                        emit_cloud_session_invalid(&app, &e);
                                         let message = e.to_string();
                                         *error.lock().unwrap_or_else(|err| err.into_inner()) = Some(message.clone());
                                         surface_async_recording_error(
@@ -1225,7 +973,6 @@ pub(crate) async fn start_reserved_ask_dictation(
                                 break;
                             }
                             Err(e) => {
-                                emit_cloud_session_invalid(&app, &e);
                                 let message = e.to_string();
                                 *error.lock().unwrap_or_else(|err| err.into_inner()) = Some(message.clone());
                                 surface_async_recording_error(
@@ -1292,13 +1039,11 @@ pub(crate) async fn start_reserved_ask_dictation(
             if reached {
                 let ask_state = deadline_app.state::<AskDictationState>();
                 let config_state = deadline_app.state::<storage::ConfigManager>();
-                let token_store = deadline_app.state::<SessionTokenStore>();
                 let client = deadline_app.state::<reqwest::Client>();
                 if let Err(error) = stop_ask_flow(
                     deadline_app.clone(),
                     ask_state,
                     config_state,
-                    token_store,
                     client,
                 )
                 .await
@@ -1323,7 +1068,6 @@ pub async fn stop_ask_dictation(
     app: tauri::AppHandle,
     state: tauri::State<'_, AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<AskDictationResult, String> {
     let mut session = {
@@ -1458,17 +1202,11 @@ pub async fn stop_ask_dictation(
         let answer = answer_question(
             &config,
             &client,
-            &token_store,
             &question,
             session.selected_text.as_deref(),
-            Some(&session.operation_id),
-            &voice_intent,
         )
         .await
-        .map_err(|error| {
-            emit_cloud_session_invalid(&app, &error);
-            ask_app_error_message(error)
-        })?;
+        .map_err(ask_app_error_message)?;
 
         Ok(AskDictationResult::new(
             question,
@@ -1490,14 +1228,13 @@ pub async fn stop_ask_flow(
     app: tauri::AppHandle,
     state: tauri::State<'_, AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<(), String> {
     if !state.is_recording() {
         return Ok(());
     }
 
-    match stop_ask_dictation(app.clone(), state, config_state, token_store, client).await {
+    match stop_ask_dictation(app.clone(), state, config_state, client).await {
         Ok(result) if result.should_show_window() => show_answer_window(&app, result),
         Ok(_) => Ok(()),
         Err(message) => show_error_window(&app, message),
@@ -1584,36 +1321,6 @@ mod tests {
         assert_eq!(ASK_MAX_SELECTED_TEXT_CHARS, 4_000);
         assert_eq!(captured.chars().count(), ASK_MAX_SELECTED_TEXT_CHARS);
         assert!(user_content.contains("Selected text was truncated to 4000 characters"));
-    }
-
-    #[test]
-    fn cloud_ask_body_reports_selected_text_truncation() {
-        let voice_intent =
-            route_ask_intent("Summarize this", true, "en", VoiceRoutingFlags::default());
-        let body = build_cloud_ask_body(
-            "Summarize this",
-            Some(&"a".repeat(ASK_MAX_SELECTED_TEXT_CHARS + 1)),
-            "operation-1",
-            &voice_intent,
-        )
-        .unwrap();
-
-        assert_eq!(body["context"]["hasSelectedText"], true);
-        assert_eq!(body["context"]["selectedTextTruncated"], true);
-        assert_eq!(body["context"]["askIntent"], "ask_selection");
-        assert_eq!(
-            body["voiceIntentMetadata"],
-            serde_json::json!({
-                "kind": "ask_selection",
-                "placement": "popup_answer",
-                "grammarLocale": "en",
-                "confidenceBand": "exact"
-            })
-        );
-        let serialized_metadata = body["voiceIntentMetadata"].to_string();
-        for forbidden in ["payload", "utterance", "selectedText", "query", "searchUrl"] {
-            assert!(!serialized_metadata.contains(forbidden));
-        }
     }
 
     #[test]
@@ -1819,59 +1526,19 @@ mod tests {
     }
 
     #[test]
-    fn ask_dictation_stt_config_uses_cloud_token_and_multi_language() {
+    fn ask_dictation_stt_config_uses_byok_key_and_multi_language() {
         let config = storage::AppConfig {
-            stt_provider: "cloud".to_string(),
+            stt_provider: "openai-whisper".to_string(),
             stt_language: "multi".to_string(),
             ..Default::default()
         };
 
-        let stt_config = build_ask_stt_config(
-            &config,
-            "session-token".to_string(),
-            "operation-1".to_string(),
-        );
+        let stt_config =
+            build_ask_stt_config(&config, "byok-key".to_string(), "operation-1".to_string());
 
-        assert_eq!(stt_config.api_key, "session-token");
+        assert_eq!(stt_config.api_key, "byok-key");
         assert_eq!(stt_config.language, None);
         assert_eq!(stt_config.operation_id.as_deref(), Some("operation-1"));
-    }
-
-    #[test]
-    fn cloud_ask_errors_are_short_and_actionable() {
-        let quota = cloud_response_error(
-            reqwest::StatusCode::FORBIDDEN,
-            r#"{"code":"cloud_quota_exceeded","error":"Cloud words used up. Please switch to BYOK mode or wait until reset."}"#.to_string(),
-        );
-        assert_eq!(
-            ask_app_error_message(quota),
-            "Cloud words used up. Please switch to BYOK mode or wait until reset."
-        );
-
-        let auth = cloud_response_error(reqwest::StatusCode::UNAUTHORIZED, String::new());
-        assert_eq!(
-            ask_app_error_message(auth),
-            "Sign in to use Cloud Ask, or switch to BYOK."
-        );
-
-        let service = cloud_response_error(
-            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            "upstream failed".to_string(),
-        );
-        assert_eq!(
-            ask_app_error_message(service),
-            "Ask service error. Please try again."
-        );
-    }
-
-    #[test]
-    fn cloud_session_invalid_response_uses_typed_error() {
-        let error = cloud_response_error(
-            reqwest::StatusCode::UNAUTHORIZED,
-            r#"{"error":{"code":"AUTH_SESSION_INVALID","message":"Session expired"}}"#.to_string(),
-        );
-
-        assert!(matches!(error, crate::error::AppError::CloudSessionInvalid));
     }
 
     #[test]

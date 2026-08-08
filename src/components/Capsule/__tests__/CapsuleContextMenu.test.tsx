@@ -14,8 +14,6 @@ vi.mock('react-i18next', () => ({
           'capsule.menu.openMainWindow': 'Open Main Window',
           'capsule.menu.settings': 'Settings',
           'capsule.menu.history': 'History',
-          'capsule.menu.account': 'Account',
-          'capsule.menu.upgrade': 'Upgrade',
           'capsule.menu.exit': 'Exit',
         }) as Record<string, string>
       )[key] ?? key,

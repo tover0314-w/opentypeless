@@ -227,28 +227,6 @@ vi.mock('../../../components/toast-service', () => ({
 // ─── Mock @tauri-apps/plugin-opener ─────────────────────────────────────────
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
-// ─── Mock stores/authStore ────────────────────────────────────────────────────
-const mockAuthState = {
-  user: null,
-  plan: 'free',
-  source: 'free',
-  cloudWordsLimit: 0,
-  licenseStatus: null,
-}
-
-vi.mock('../../../stores/authStore', () => ({
-  hasManagedCloudAccess: (state: typeof mockAuthState) =>
-    state.licenseStatus !== 'refunded' &&
-    state.licenseStatus !== 'deactivated' &&
-    ((state.source === 'creem' && state.cloudWordsLimit > 0) ||
-      (state.source === 'appsumo' &&
-        state.cloudWordsLimit > 0 &&
-        state.licenseStatus === 'active') ||
-      state.plan === 'pro'),
-  useAuthStore: (selector: any) =>
-    typeof selector === 'function' ? selector(mockAuthState) : mockAuthState,
-}))
-
 // ─── Import components AFTER mocks ───────────────────────────────────────────
 import { Settings } from '../index'
 import {

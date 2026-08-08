@@ -8,9 +8,6 @@
     "ask": "Спросить",
     "settings": "Настройки",
     "history": "История",
-    "account": "Аккаунт",
-    "upgrade": "Обновить",
-    "pro": "Pro",
     "mainNavigation": "Основная навигация"
   },
   "ask": {
@@ -40,16 +37,16 @@
   },
   "errors": {
     "stt_timeout": "Время распознавания речи истекло. Попробуйте еще раз.",
-    "stt_invalid_key": "Доступ к облачной речи не удался. Войдите снова или проверьте API-ключ.",
+    "stt_invalid_key": "Your STT provider rejected the credential. Check the configured BYOK API key.",
     "stt_failed": "Распознавание речи не удалось. {{details}}",
-    "stt_quota_exceeded": "Квота облачного распознавания речи исчерпана. Обновитесь до Pro или переключитесь в режим BYOK.",
+    "stt_quota_exceeded": "Your STT provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "stt_no_speech_detected": "Речь не обнаружена. Попробуйте еще раз.",
     "output_fallback_clipboard": "Не удалось вывести текст. Результат скопирован в буфер обмена. {{details}}",
     "output_wayland_unsupported": "Клавиатурный вывод не поддерживается в Wayland. Результат скопирован в буфер обмена.",
     "accessibility_required": "Нет разрешения на универсальный доступ. Результат скопирован в буфер обмена.",
     "output_streaming_partial": "Потоковая вставка остановилась раньше времени. Вставленный текст сохранен. {{details}}",
     "llm_failed": "ИИ-обработка не удалась. Вместо нее выведен исходный текст. {{details}}",
-    "llm_quota_exceeded": "Квота облачного ИИ исчерпана. Обновитесь до Pro или переключитесь в режим BYOK.",
+    "llm_quota_exceeded": "Your LLM provider quota is exhausted. Check that provider or choose another BYOK endpoint.",
     "output_wayland_clipboard_copy_only": "Copied to clipboard. Paste manually on Wayland."
   },
   "home": {
@@ -57,18 +54,13 @@
     "description": "Удерживайте {{hotkey}}, чтобы начать запись голоса. Ваша речь будет распознана и при необходимости обработана ИИ.",
     "totalRecordings": "Всего записей",
     "today": "Сегодня",
-    "proPlan": "План Pro",
-    "freePlan": "Бесплатный план",
-    "upgradeToPro": "Обновить до Pro",
     "currentConfig": "Текущая конфигурация",
     "sttProvider": "Провайдер распознавания речи",
     "llmProvider": "Провайдер LLM",
     "aiPolish": "Обработка ИИ",
     "enabled": "Включено",
     "disabled": "Отключено",
-    "outputMode": "Режим вывода",
-    "wordsRemaining": "Осталось слов",
-    "wordsReset": "Сброс {{date}}"
+    "outputMode": "Режим вывода"
   },
   "onboarding": {
     "speakToWrite": "Говорите, чтобы писать — превращайте голос в обработанный текст в реальном времени",
@@ -120,10 +112,6 @@
     "steps": {
       "welcome": "Добро пожаловать",
       "welcomeSub": "Настройте OpenTypeless за несколько шагов",
-      "signIn": "Войти",
-      "signInSub": "Подключите аккаунт для начала работы",
-      "chooseMode": "Выберите режим",
-      "chooseModeSub": "Выберите, как вы хотите использовать OpenTypeless",
       "speechRecognition": "Распознавание речи",
       "speechRecognitionSub": "Настройте службу STT",
       "aiPolish": "Обработка ИИ",
@@ -134,36 +122,6 @@
       "howItWorksSub": "Попробуйте тестовую запись",
       "setupComplete": "Настройка завершена",
       "getStarted": "Начать"
-    },
-    "account": {
-      "signIn": "Войти",
-      "signUp": "Регистрация",
-      "name": "Имя",
-      "namePlaceholder": "Ваше имя",
-      "email": "Электронная почта",
-      "emailPlaceholder": "your@email.com",
-      "password": "Пароль",
-      "or": "или",
-      "signedInAs": "Вы вошли как",
-      "freePlan": "Бесплатный план",
-      "freePlanQuota": "квота осталась",
-      "checkEmail": "Проверьте электронную почту",
-      "verificationSent": "Мы отправили ссылку для подтверждения на",
-      "resendVerification": "Отправить подтверждение повторно",
-      "backToSignIn": "Вернуться к входу",
-      "completingSignIn": "Завершение входа...",
-      "finishSignIn": "Завершить вход",
-      "oauthPendingHint": "Если браузер показывает “Load failed”, скопируйте адрес из браузера и используйте Завершить из буфера обмена ниже.",
-      "completeFromClipboard": "Завершить из буфера обмена",
-      "oauthClipboardInvalid": "Действительная ссылка для входа не найдена.",
-      "cancel": "Отмена",
-      "nameRequired": "Имя обязательно",
-      "passwordTooShort": "Пароль должен содержать не менее 8 символов",
-      "signInTimedOut": "Время входа истекло",
-      "failedToStart": "Не удалось начать",
-      "verificationResent": "Письмо для подтверждения отправлено!",
-      "continueWithGoogle": "Продолжить с Google",
-      "continueWithGithub": "Продолжить с GitHub"
     },
     "done": {
       "title": "Всё готово!",
@@ -203,18 +161,6 @@
         "needed": "Нужно",
         "later": "Позже"
       }
-    },
-    "mode": {
-      "cloud": "Облако",
-      "recommended": "Рекомендуется",
-      "zeroConfig": "Без настройки",
-      "cloudVoice": "Облачное распознавание голоса",
-      "cloudTokens": "Облачные слова включены",
-      "oneTimeCredit": "Разовый кредит при регистрации",
-      "byok": "Свой API-ключ",
-      "byokDesc": "Используйте свои API-ключи",
-      "unlimitedUsage": "Неограниченное использование с вашими ключами",
-      "providersSupported": "Поддерживается несколько провайдеров"
     },
     "layout": {
       "skip": "Пропустить",
@@ -259,8 +205,6 @@
       "openMainWindow": "Открыть главное окно",
       "settings": "Настройки",
       "history": "История",
-      "account": "Аккаунт",
-      "upgrade": "Обновить",
       "exit": "Выход"
     }
   },
@@ -314,14 +258,9 @@
     "startMinimized": "Запускать свёрнутым в трей",
     "language": "Язык",
     "provider": "Провайдер",
-    "cloudSttPro": "Облачный STT (Pro)",
-    "cloudLlmPro": "Облачный LLM (Pro)",
     "askAnything": "Ask Anything",
     "askAnythingDesc": "Голосовой вопрос, один ответ. Без истории чата.",
     "tryAsk": "Попробовать Ask",
-    "sttSignInHint": "Войдите и оформите Pro, чтобы использовать официальные облачные слова/месяц.",
-    "sttUpgradeHint": "Перейдите на Pro для облачных слов/месяц на 99 языках. API-ключ не нужен.",
-    "sttProActive": "Pro активен — миллисекундное распознавание речи, 99 языков. API-ключ не нужен.",
     "customSttPreset": "Preset",
     "customSttPresetSpeaches": "Speaches",
     "customSttPresetCustom": "Custom OpenAI-compatible",
@@ -344,9 +283,6 @@
     "volcengineResourceSeedAsr": "SeedASR 2.0",
     "volcengineResourceBigAsr": "BigASR 1.0",
     "customSttConnectionFailed": "Local STT server is not reachable. Check that it is running and the port is correct.",
-    "llmSignInHint": "Войдите и оформите Pro, чтобы использовать облачную AI-правку. API-ключ не нужен.",
-    "llmUpgradeHint": "Перейдите на Pro для облачной AI-правки и месячного лимита. API-ключ не нужен.",
-    "llmProActive": "Pro активен — облачная AI-правка готова. API-ключ не нужен.",
     "apiKey": "API-ключ",
     "enterApiKey": "Введите API-ключ...",
     "test": "Проверить",
@@ -522,13 +458,10 @@
     "exportFailed": "Не удалось экспортировать словарь"
   },
   "scenes": {
-    "signInToBrowse": "Войдите, чтобы просмотреть наборы сцен.",
     "failedToLoad": "Не удалось загрузить сцены.",
     "retry": "Повторить",
     "noScenes": "Пока нет доступных наборов сцен.",
     "all": "Все",
-    "pro": "PRO",
-    "upgradeToUse": "Обновитесь до Pro для использования этого набора сцен.",
     "promptTemplate": "Шаблон промпта",
     "copyPrompt": "Копировать промпт",
     "copied": "Скопировано",
@@ -542,9 +475,6 @@
     "noCustomScenesDesc": "Create a local scene to save a reusable AI polish prompt.",
     "newScene": "New scene",
     "builtInScenes": "Built-in Scenes",
-    "cloudPacks": "Cloud Packs",
-    "refresh": "Refresh",
-    "noCloudPacks": "No cloud scene packs available yet. You can still create local custom scenes above.",
     "failedToSave": "Failed to save scene.",
     "export": "Export",
     "import": "Import",
@@ -645,7 +575,7 @@
     "failedToCreateCorrection": "Не удалось создать исправление",
     "needsBrowserAccess": "нужен доступ к браузеру",
     "providers": {
-      "managed_cloud": "Cloud",
+      "managed_cloud": "Legacy cloud (history)",
       "byok": "BYOK",
       "local": "Local"
     },
@@ -655,137 +585,10 @@
       "clipboardFallback": "Copied to clipboard"
     }
   },
-  "upgrade": {
-    "title": "Обновить",
-    "subtitle": "Оформите месячную подписку для быстрого распознавания речи и AI-переписывания с 100 000 облачных слов в месяц.",
-    "currentPlan": "Текущий план: {{plan}}",
-    "pro": "Pro ежемесячно",
-    "lifetime": "Lifetime Starter",
-    "lifetimeBadge": "Лучшее предложение",
-    "lifetimeSave": "Окупается через 18 месяцев",
-    "lifetimeUpgradeSave": "Включает текущий месячный кредит",
-    "free": "Бесплатный",
-    "usageThisMonth": "Использование в этом месяце",
-    "stt": "STT",
-    "llm": "LLM",
-    "thankYou": "Ваш план активен — спасибо за вашу поддержку!",
-    "monthlyActive": "Pro активен.",
-    "signInFirst": "Сначала войдите на странице Аккаунт, чтобы оформить подписку.",
-    "subscribeToPro": "Оформить подписку Pro",
-    "buyLifetime": "Купить lifetime",
-    "month": "месяц",
-    "oneTime": "разовый платеж",
-    "planDescriptions": {
-      "pro": "Гибкий месячный доступ с 100 000 облачных слов/месяц.",
-      "lifetime": "Один платеж за lifetime-доступ с 100 000 облачных слов каждый месяц."
-    },
-    "benefits": {
-      "title": "Что вы получаете",
-      "cloudWords": "100 000 облачных слов/месяц для голоса и ИИ",
-      "stt": "Облачные слова/месяц для распознавания речи",
-      "llm": "Облачные слова/месяц для AI-редактирования и рерайта",
-      "noApiKey": "API-ключи не нужны в облачном режиме",
-      "backupScenes": "Cloud backup and curated scene packs"
-    },
-    "features": {
-      "sttTitle": "Облачный STT",
-      "sttDetail": "Премиальное распознавание речи",
-      "llmTitle": "Облачный LLM",
-      "llmDetail": "Обработка текста ИИ",
-      "backupTitle": "Облачное резервное копирование",
-      "backupDetail": "Синхронизация настроек и истории",
-      "scenesTitle": "Cloud Scene Packs",
-      "scenesDetail": "Curated prompt templates and future scene sync",
-      "zeroConfigTitle": "Без настройки",
-      "zeroConfigDetail": "API-ключи не нужны"
-    }
-  },
-  "account": {
-    "title": "Аккаунт",
-    "subtitle": "Войдите, чтобы синхронизировать данные и управлять подпиской",
-    "signIn": "Войти",
-    "signUp": "Регистрация",
-    "name": "Имя",
-    "email": "Электронная почта",
-    "password": "Пароль",
-    "nameRequired": "Имя обязательно",
-    "passwordMinLength": "Пароль должен содержать не менее 8 символов",
-    "orContinueWith": "или продолжить через",
-    "continueWithGoogle": "Продолжить через Google",
-    "continueWithGithub": "Продолжить через GitHub",
-    "plan": "План",
-    "renews": "Продление",
-    "usageThisMonth": "Использование в этом месяце",
-    "cloudBackup": "Облачное резервное копирование",
-    "backup": "Резервная копия",
-    "restore": "Восстановить",
-    "opening": "Открытие...",
-    "manageSubscription": "Управление подпиской",
-    "signOut": "Выйти",
-    "oauthPendingTitle": "Завершение входа...",
-    "oauthPendingDesc": "Завершите вход в браузере. Вы будете перенаправлены автоматически.",
-    "oauthPendingHint": "Если браузер показывает “Load failed”, скопируйте адрес из браузера и используйте Завершить из буфера обмена ниже.",
-    "oauthTimeout": "Время входа истекло. Пожалуйста, попробуйте снова.",
-    "oauthFailed": "Не удалось начать вход",
-    "cancel": "Отмена",
-    "completeFromClipboard": "Завершить из буфера обмена",
-    "oauthClipboardInvalid": "Действительная ссылка для входа не найдена.",
-    "toast": {
-      "backupOk": "Резервная копия создана",
-      "backupFail": "Не удалось создать резервную копию",
-      "restoreOk": "Восстановление выполнено",
-      "restoreFail": "Не удалось восстановить",
-      "subscriptionFail": "Не удалось загрузить подписку"
-    },
-    "sttQuotaWarning": "Квота STT превышает 90 %. Рассмотрите переход в режим BYOK.",
-    "llmQuotaWarning": "Квота LLM превышает 90 %. Рассмотрите переход в режим BYOK.",
-    "quotaHours": "часов",
-    "quotaTokens": "к токенов",
-    "quotaUsage": "Использование {{label}}: {{used}} из {{limit}} {{unit}}",
-    "backToSignIn": "Вернуться к входу",
-    "freeCredit": "Бесплатный кредит",
-    "resendVerification": "Повторная отправка письма",
-    "sending": "Отправка...",
-    "verificationResent": "Письмо отправлено повторно!",
-    "verifyEmailTitle": "Проверьте вашу почту",
-    "quotaMin": "мин",
-    "forgotPassword": "Forgot password?",
-    "forgotPasswordTitle": "Forgot your password?",
-    "forgotPasswordDescription": "Enter your email and we will send a secure reset link.",
-    "sendResetLink": "Send reset link",
-    "resetLinkSent": "Check your email",
-    "resetLinkSentDesc": "If an account exists for that email, a password reset link is on its way.",
-    "newPassword": "New password",
-    "confirmPassword": "Confirm password",
-    "currentPassword": "Current password",
-    "passwordMismatch": "Passwords do not match",
-    "passwordTooShort": "Password must be 8 to 128 characters",
-    "resetPassword": "Reset password",
-    "resetPasswordSuccess": "Your password has been reset",
-    "invalidOrExpiredResetLink": "This reset link is invalid or expired",
-    "requestNewLink": "Request a new link",
-    "security": "Security",
-    "changePassword": "Change password",
-    "setPassword": "Set password",
-    "passwordChanged": "Password updated",
-    "passwordChangeFailed": "Failed to update password",
-    "currentPasswordRequired": "Current password is required",
-    "sessionExpired": "Your cloud session expired. Sign in again.",
-    "showPassword": "Show {{label}}",
-    "hidePassword": "Hide {{label}}"
-  },
   "error": {
     "somethingWentWrong": "Что-то пошло не так",
     "unexpectedError": "Произошла непредвиденная ошибка.",
     "reload": "Перезагрузить"
-  },
-  "updates": {
-    "availableTitle": "Доступно обновление",
-    "availableBody": "Версия {{version}} готова к установке.",
-    "install": "Установить обновление",
-    "installing": "Установка...",
-    "dismiss": "Закрыть",
-    "error": "Не удалось обновить приложение. Загрузите последнюю версию с сайта."
   },
   "common": {
     "save": "Сохранить",
@@ -804,8 +607,6 @@
     "secondsUnit": "с",
     "allowedRange": "Допустимый диапазон: {{min}}–{{max}}.",
     "allowedRangeWithReason": "Диапазон: {{min}}–{{max}}. {{reason}}",
-    "allowedCloudRange": "Диапазон: {{min}}–{{max}}. Определяется текущими возможностями облака.",
-    "currentSelectionWithCloudMax": "Текущее значение: {{current}}. Облако поддерживает до {{max}}.",
     "currentSelectionWithLimit": "Выбрано: {{current}}; лимит приложения: {{max}}. {{reason}}",
     "providerFixedLimit": "Этот провайдер разрешает до {{max}} на одну запись.",
     "corrected": "Для этого провайдера будет использовано {{duration}}.",
@@ -821,10 +622,7 @@
       "clientBuffer": "Ограничено безопасным локальным аудиобуфером приложения.",
       "unknownUpstream": "Лимит пользовательского сервера неизвестен; используется безопасное значение.",
       "unknownProvider": "Провайдер пока не распознан; используется безопасное ограничение.",
-      "productSafety": "Безопасное ограничение приложения для потокового провайдера.",
-      "managedCapability": "Установлено автоматически для OpenTypeless Cloud.",
-      "encoderFallback": "Управляемый аудиокодер был недоступен; для этого сеанса применён более короткий локальный WAV-лимит.",
-      "managedFallback": "Данные возможностей Cloud недоступны или устарели; используется безопасный лимит 30 секунд."
+      "productSafety": "Безопасное ограничение приложения для потокового провайдера."
     }
   },
   "providers": {
@@ -838,8 +636,7 @@
       "groqWhisper": "Groq Whisper",
       "siliconflow": "SiliconFlow",
       "appleSpeech": "Apple Speech (Local)",
-      "customWhisper": "Local / Custom Whisper",
-      "cloud": "OpenTypeless Cloud"
+      "customWhisper": "Local / Custom Whisper"
     },
     "llm": {
       "zhipu": "Zhipu",
@@ -853,8 +650,7 @@
       "groq": "Groq",
       "claude": "Claude",
       "ollama": "Ollama (Локальный)",
-      "openrouter": "OpenRouter",
-      "cloud": "OpenTypeless Cloud"
+      "openrouter": "OpenRouter"
     }
   }
 }

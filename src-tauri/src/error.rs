@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::time::Duration;
 use tauri::Emitter;
 
@@ -23,44 +23,6 @@ pub enum AppError {
     LlmQuota(String),
     Output(String),
     Config(String),
-    CloudSessionInvalid,
-}
-
-const CLOUD_SESSION_INVALID_EVENT: &str = "auth:session-invalid";
-
-#[derive(Debug, Deserialize)]
-struct ManagedCloudErrorEnvelope {
-    error: ManagedCloudErrorBody,
-}
-
-#[derive(Debug, Deserialize)]
-struct ManagedCloudErrorBody {
-    code: String,
-}
-
-pub fn managed_cloud_error(status: u16, body: &str) -> Option<AppError> {
-    if status != 401 {
-        return None;
-    }
-    let envelope = serde_json::from_str::<ManagedCloudErrorEnvelope>(body).ok()?;
-    (envelope.error.code == "AUTH_SESSION_INVALID").then_some(AppError::CloudSessionInvalid)
-}
-
-pub fn notify_cloud_session_invalid<F>(error: &AppError, notify: F) -> bool
-where
-    F: FnOnce(&'static str),
-{
-    if !matches!(error, AppError::CloudSessionInvalid) {
-        return false;
-    }
-    notify(CLOUD_SESSION_INVALID_EVENT);
-    true
-}
-
-pub fn emit_cloud_session_invalid(app_handle: &tauri::AppHandle, error: &AppError) -> bool {
-    notify_cloud_session_invalid(error, |event| {
-        let _ = app_handle.emit(event, ());
-    })
 }
 
 impl AppError {
@@ -74,7 +36,6 @@ impl AppError {
             AppError::LlmQuota(_) => false,
             AppError::Output(_) => false,
             AppError::Config(_) => false,
-            AppError::CloudSessionInvalid => false,
         }
     }
 
@@ -94,7 +55,6 @@ impl AppError {
             AppError::LlmQuota(msg) => ("llm_quota_exceeded".to_string(), Some(msg.clone())),
             AppError::Output(msg) => ("output_fallback_clipboard".to_string(), Some(msg.clone())),
             AppError::Config(msg) => ("stt_failed".to_string(), Some(msg.clone())),
-            AppError::CloudSessionInvalid => ("stt_failed".to_string(), None),
         };
         UserError {
             code,
@@ -121,7 +81,6 @@ impl std::fmt::Display for AppError {
             AppError::LlmQuota(msg) => write!(f, "LLM quota error: {}", msg),
             AppError::Output(msg) => write!(f, "Output error: {}", msg),
             AppError::Config(msg) => write!(f, "Config error: {}", msg),
-            AppError::CloudSessionInvalid => write!(f, "Managed cloud session is invalid"),
         }
     }
 }
@@ -289,43 +248,6 @@ mod tests {
         };
         let ue = err.to_user_error();
         assert_eq!(ue.code, "stt_invalid_key");
-    }
-
-    #[test]
-    fn cloud_session_invalid_envelope_requires_exact_401_code() {
-        let body = r#"{"error":{"code":"AUTH_SESSION_INVALID","message":"Session expired"}}"#;
-
-        assert!(matches!(
-            managed_cloud_error(401, body),
-            Some(AppError::CloudSessionInvalid)
-        ));
-        assert!(managed_cloud_error(403, body).is_none());
-        assert!(managed_cloud_error(
-            401,
-            r#"{"error":{"code":"AUTH_REQUIRED","message":"Authentication required"}}"#
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn cloud_session_invalid_event_is_emitted_once_per_boundary_call() {
-        let mut events = Vec::new();
-        let emitted = notify_cloud_session_invalid(&AppError::CloudSessionInvalid, |event| {
-            events.push(event.to_string());
-        });
-
-        assert!(emitted);
-        assert_eq!(events, vec!["auth:session-invalid"]);
-
-        let mut byok_events = Vec::new();
-        let byok = AppError::Api {
-            status: 401,
-            body: "invalid provider key".to_string(),
-        };
-        assert!(!notify_cloud_session_invalid(&byok, |event| {
-            byok_events.push(event.to_string());
-        }));
-        assert!(byok_events.is_empty());
     }
 
     #[test]

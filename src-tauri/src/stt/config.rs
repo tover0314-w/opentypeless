@@ -103,10 +103,7 @@ pub fn build_known_whisper_config(provider: &str) -> Option<WhisperCompatConfig>
 }
 
 pub fn stt_provider_requires_api_key(provider: &str) -> bool {
-    !matches!(
-        provider,
-        "cloud" | CUSTOM_WHISPER_PROVIDER | APPLE_SPEECH_PROVIDER
-    )
+    !matches!(provider, CUSTOM_WHISPER_PROVIDER | APPLE_SPEECH_PROVIDER)
 }
 
 #[cfg(test)]
@@ -158,11 +155,6 @@ mod tests {
     #[test]
     fn test_assemblyai_not_in_whisper_config() {
         assert!(get_whisper_config("assemblyai").is_none());
-    }
-
-    #[test]
-    fn test_cloud_not_in_whisper_config() {
-        assert!(get_whisper_config("cloud").is_none());
     }
 
     #[test]
