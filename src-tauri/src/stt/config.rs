@@ -51,22 +51,31 @@ pub fn get_whisper_config(provider: &str) -> Option<SttProviderConfig> {
 }
 
 pub fn normalize_custom_whisper_endpoint(base_url: &str) -> Result<String, String> {
-    let trimmed = base_url.trim().trim_end_matches('/');
+    let trimmed = base_url.trim();
     if trimmed.is_empty() {
         return Err("Base URL is required for Local / Custom Whisper".to_string());
     }
 
-    let parsed =
+    let mut parsed =
         url::Url::parse(trimmed).map_err(|_| "Base URL must be a valid URL".to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Base URL must start with http:// or https://".to_string());
     }
-
-    if trimmed.ends_with("/audio/transcriptions") {
-        Ok(trimmed.to_string())
-    } else {
-        Ok(format!("{}/audio/transcriptions", trimmed))
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Base URL must not include credentials".to_string());
     }
+    if parsed.fragment().is_some() {
+        return Err("Base URL must not include a fragment".to_string());
+    }
+
+    let normalized_path = parsed.path().trim_end_matches('/').to_string();
+    if normalized_path.ends_with("/audio/transcriptions") {
+        parsed.set_path(&normalized_path);
+    } else {
+        parsed.set_path(&format!("{normalized_path}/audio/transcriptions"));
+    }
+
+    Ok(parsed.to_string())
 }
 
 pub fn build_custom_whisper_config(
@@ -183,6 +192,42 @@ mod tests {
             normalize_custom_whisper_endpoint("http://localhost:8000/v1/audio/transcriptions")
                 .unwrap();
         assert_eq!(endpoint, "http://localhost:8000/v1/audio/transcriptions");
+    }
+
+    #[test]
+    fn custom_whisper_appends_transcription_path_before_query() {
+        let endpoint =
+            normalize_custom_whisper_endpoint("https://example.com/openai?api-version=2026-01-01")
+                .unwrap();
+
+        assert_eq!(
+            endpoint,
+            "https://example.com/openai/audio/transcriptions?api-version=2026-01-01"
+        );
+    }
+
+    #[test]
+    fn custom_whisper_preserves_query_on_full_endpoint() {
+        let endpoint = normalize_custom_whisper_endpoint(
+            "https://example.com/v1/audio/transcriptions?api-version=2026-01-01",
+        )
+        .unwrap();
+
+        assert_eq!(
+            endpoint,
+            "https://example.com/v1/audio/transcriptions?api-version=2026-01-01"
+        );
+    }
+
+    #[test]
+    fn custom_whisper_rejects_embedded_credentials_and_fragments() {
+        let credentials =
+            normalize_custom_whisper_endpoint("https://user:secret@example.com/v1").unwrap_err();
+        let fragment =
+            normalize_custom_whisper_endpoint("https://example.com/v1#section").unwrap_err();
+
+        assert!(credentials.contains("credentials"));
+        assert!(fragment.contains("fragment"));
     }
 
     #[test]
