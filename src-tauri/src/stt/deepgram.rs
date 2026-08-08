@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashSet;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::error::AppError;
@@ -11,6 +12,7 @@ type WsStream =
 
 pub struct DeepgramProvider {
     ws: Option<WsStream>,
+    final_segments: FinalSegmentTracker,
 }
 
 impl Default for DeepgramProvider {
@@ -21,7 +23,10 @@ impl Default for DeepgramProvider {
 
 impl DeepgramProvider {
     pub fn new() -> Self {
-        Self { ws: None }
+        Self {
+            ws: None,
+            final_segments: FinalSegmentTracker::default(),
+        }
     }
 
     fn build_url(config: &SttConfig) -> String {
@@ -43,13 +48,52 @@ impl DeepgramProvider {
     }
 }
 
-fn parse_transcript_message(text: &str) -> Result<Option<TranscriptEvent>, AppError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeepgramFinalSegment {
+    text: String,
+    start_millis: i64,
+    duration_millis: i64,
+}
+
+impl DeepgramFinalSegment {
+    fn key(&self) -> String {
+        format!(
+            "{}:{}:{}",
+            self.start_millis, self.duration_millis, self.text
+        )
+    }
+}
+
+#[derive(Default)]
+struct FinalSegmentTracker {
+    seen: HashSet<String>,
+}
+
+impl FinalSegmentTracker {
+    fn record(&mut self, segment: &DeepgramFinalSegment) -> bool {
+        self.seen.insert(segment.key())
+    }
+}
+
+struct ParsedDeepgramMessage {
+    event: Option<TranscriptEvent>,
+    final_segment: Option<DeepgramFinalSegment>,
+}
+
+fn seconds_to_millis(value: Option<f64>) -> i64 {
+    (value.unwrap_or_default() * 1000.0).round() as i64
+}
+
+fn parse_deepgram_message(text: &str) -> Result<ParsedDeepgramMessage, AppError> {
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| AppError::Config(e.to_string()))?;
 
     if v.get("type").and_then(|t| t.as_str()) == Some("Error") {
         let msg = v["message"].as_str().unwrap_or("Unknown error").to_string();
-        return Ok(Some(TranscriptEvent::Error { message: msg }));
+        return Ok(ParsedDeepgramMessage {
+            event: Some(TranscriptEvent::Error { message: msg }),
+            final_segment: None,
+        });
     }
 
     let transcript = v["channel"]["alternatives"][0]["transcript"]
@@ -58,7 +102,10 @@ fn parse_transcript_message(text: &str) -> Result<Option<TranscriptEvent>, AppEr
         .to_string();
 
     if transcript.is_empty() {
-        return Ok(None);
+        return Ok(ParsedDeepgramMessage {
+            event: None,
+            final_segment: None,
+        });
     }
 
     let is_final = v["is_final"].as_bool().unwrap_or(false);
@@ -68,13 +115,25 @@ fn parse_transcript_message(text: &str) -> Result<Option<TranscriptEvent>, AppEr
             .as_f64()
             .unwrap_or(0.0) as f32;
 
-        return Ok(Some(TranscriptEvent::Final {
-            text: transcript,
-            confidence,
-        }));
+        let segment = DeepgramFinalSegment {
+            text: transcript.clone(),
+            start_millis: seconds_to_millis(v["start"].as_f64()),
+            duration_millis: seconds_to_millis(v["duration"].as_f64()),
+        };
+
+        return Ok(ParsedDeepgramMessage {
+            event: Some(TranscriptEvent::Final {
+                text: transcript,
+                confidence,
+            }),
+            final_segment: Some(segment),
+        });
     }
 
-    Ok(Some(TranscriptEvent::Partial { text: transcript }))
+    Ok(ParsedDeepgramMessage {
+        event: Some(TranscriptEvent::Partial { text: transcript }),
+        final_segment: None,
+    })
 }
 
 #[async_trait]
@@ -133,7 +192,17 @@ impl SttProvider for DeepgramProvider {
         };
 
         match ws.next().await {
-            Some(Ok(Message::Text(text))) => parse_transcript_message(&text),
+            Some(Ok(Message::Text(text))) => {
+                let message = parse_deepgram_message(&text)?;
+                if message
+                    .final_segment
+                    .as_ref()
+                    .is_some_and(|segment| !self.final_segments.record(segment))
+                {
+                    return Ok(None);
+                }
+                Ok(message.event)
+            }
             Some(Ok(Message::Close(_))) => {
                 tracing::info!("Deepgram WebSocket closed");
                 Ok(None)
@@ -168,6 +237,23 @@ impl SttProvider for DeepgramProvider {
 mod tests {
     use super::*;
 
+    fn final_message(text: &str, start: f64, duration: f64) -> String {
+        serde_json::json!({
+            "type": "Results",
+            "start": start,
+            "duration": duration,
+            "is_final": true,
+            "speech_final": true,
+            "channel": {
+                "alternatives": [{
+                    "transcript": text,
+                    "confidence": 0.97
+                }]
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn parses_speech_final_message_as_final_transcript() {
         let message = serde_json::json!({
@@ -182,7 +268,7 @@ mod tests {
         })
         .to_string();
 
-        let event = parse_transcript_message(&message).unwrap();
+        let event = parse_deepgram_message(&message).unwrap().event;
 
         match event {
             Some(TranscriptEvent::Final { text, confidence }) => {
@@ -207,6 +293,31 @@ mod tests {
         })
         .to_string();
 
-        assert!(parse_transcript_message(&message).unwrap().is_none());
+        assert!(parse_deepgram_message(&message).unwrap().event.is_none());
+    }
+
+    #[test]
+    fn final_segment_key_is_stable_for_equivalent_json_numbers() {
+        let first = parse_deepgram_message(&final_message("tail", 1.25, 0.5)).unwrap();
+        let second =
+            parse_deepgram_message(&final_message("tail", 1.250_000_1, 0.500_000_1)).unwrap();
+
+        assert_eq!(
+            first.final_segment.unwrap().key(),
+            second.final_segment.unwrap().key()
+        );
+    }
+
+    #[test]
+    fn tracker_returns_each_final_segment_once() {
+        let mut tracker = FinalSegmentTracker::default();
+        let segment = DeepgramFinalSegment {
+            text: "last words".to_string(),
+            start_millis: 1250,
+            duration_millis: 500,
+        };
+
+        assert!(tracker.record(&segment));
+        assert!(!tracker.record(&segment));
     }
 }
