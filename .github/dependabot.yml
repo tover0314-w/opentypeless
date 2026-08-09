@@ -16,6 +16,11 @@ updates:
     schedule:
       interval: weekly
 
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

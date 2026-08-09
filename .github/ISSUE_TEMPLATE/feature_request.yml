@@ -18,6 +18,8 @@ body:
         - History
         - Onboarding
         - Settings
+        - Android IME / speech service
+        - Android personalization
         - Packaging / installation
         - Other
     validations:

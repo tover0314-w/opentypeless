@@ -588,8 +588,10 @@ describe('SttPane', () => {
           'Systran/faster-whisper-large-v3',
         )
       })
-      expect(screen.getByText('Local endpoint ready')).toBeInTheDocument()
-      expect(screen.getByText('http://localhost:8000/v1/audio/transcriptions')).toBeInTheDocument()
+      expect(await screen.findByText('Local endpoint ready')).toBeInTheDocument()
+      expect(
+        await screen.findByText('http://localhost:8000/v1/audio/transcriptions'),
+      ).toBeInTheDocument()
     })
 
     it('shows a quiet setup status when local endpoint config is invalid', async () => {

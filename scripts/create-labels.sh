@@ -2,7 +2,7 @@
 # Run this script after authenticating: gh auth login
 # Usage: bash scripts/create-labels.sh
 
-REPO="tover0314-w/opentypeless"
+REPO="dengxuezhao/opentypeless"
 
 # Labels that likely already exist (update color/description)
 gh label edit "bug" --color "d73a4a" --description "Something isn't working" --repo "$REPO" 2>/dev/null || gh label create "bug" --color "d73a4a" --description "Something isn't working" --repo "$REPO"

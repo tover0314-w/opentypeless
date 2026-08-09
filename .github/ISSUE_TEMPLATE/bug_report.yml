@@ -52,6 +52,8 @@ body:
         - macOS 15 (Sequoia)
         - macOS 14 (Sonoma)
         - Ubuntu 24.04
+        - Android 15
+        - Android 14 or older
         - Other Linux
         - Other
     validations:
@@ -76,7 +78,7 @@ body:
         - GLM-ASR
         - SiliconFlow
         - Local / Custom Whisper
-        - Cloud (Pro)
+        - Custom / self-hosted
         - N/A
     validations:
       required: true
@@ -93,7 +95,7 @@ body:
         - Moonshot
         - Groq
         - Ollama
-        - Cloud (Pro)
+        - Custom / self-hosted
         - N/A
         - Other
     validations:

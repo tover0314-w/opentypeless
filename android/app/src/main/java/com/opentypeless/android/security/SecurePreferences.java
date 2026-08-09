@@ -1,5 +1,6 @@
 package com.opentypeless.android.security;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
@@ -8,6 +9,7 @@ import android.util.Base64;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.util.Map;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -20,6 +22,7 @@ public final class SecurePreferences {
     private static final String KEY_ALIAS = "opentypeless_api_key_v1";
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final int TAG_BITS = 128;
+    private static volatile SecretKey cachedKey;
 
     private final SharedPreferences preferences;
 
@@ -28,20 +31,46 @@ public final class SecurePreferences {
     }
 
     public void put(String name, String value) {
-        if (value == null || value.trim().isEmpty()) {
-            preferences.edit().remove(name).apply();
-            return;
-        }
+        commitPrepared(Map.of(name, prepare(value)));
+    }
+
+    /** Encrypts a value without changing persistent state. An empty value means removal. */
+    public String prepare(String value) {
+        if (value == null || value.trim().isEmpty()) return "";
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
             byte[] ciphertext = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-            String encoded = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)
+            return Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)
                     + "."
                     + Base64.encodeToString(ciphertext, Base64.NO_WRAP);
-            preferences.edit().putString(name, encoded).apply();
         } catch (Exception error) {
             throw new IllegalStateException("Unable to protect API key", error);
+        }
+    }
+
+    /** Returns only the encrypted preference representation for a recovery journal. */
+    public String storedValue(String name) {
+        String encoded = preferences.getString(name, "");
+        return encoded == null ? "" : encoded;
+    }
+
+    /** Commits already encrypted values together, throwing if durable storage rejects the write. */
+    @SuppressLint("ApplySharedPref") // Durable commit is part of the cross-store transaction.
+    public void commitPrepared(Map<String, String> values) {
+        if (values == null) throw new IllegalArgumentException("Protected values are required");
+        SharedPreferences.Editor editor = preferences.edit();
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            String name = entry.getKey();
+            if (name == null || name.isBlank()) {
+                throw new IllegalArgumentException("Protected value name is required");
+            }
+            String encoded = entry.getValue();
+            if (encoded == null || encoded.isBlank()) editor.remove(name);
+            else editor.putString(name, encoded);
+        }
+        if (!editor.commit()) {
+            throw new IllegalStateException("Unable to store protected settings");
         }
     }
 
@@ -63,11 +92,16 @@ public final class SecurePreferences {
         }
     }
 
-    private SecretKey getOrCreateKey() throws Exception {
+    private static synchronized SecretKey getOrCreateKey() throws Exception {
+        SecretKey cached = cachedKey;
+        if (cached != null) return cached;
         KeyStore keyStore = KeyStore.getInstance(KEYSTORE);
         keyStore.load(null);
         SecretKey existing = (SecretKey) keyStore.getKey(KEY_ALIAS, null);
-        if (existing != null) return existing;
+        if (existing != null) {
+            cachedKey = existing;
+            return existing;
+        }
 
         KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
         generator.init(new KeyGenParameterSpec.Builder(
@@ -77,6 +111,8 @@ public final class SecurePreferences {
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setRandomizedEncryptionRequired(true)
                 .build());
-        return generator.generateKey();
+        SecretKey generated = generator.generateKey();
+        cachedKey = generated;
+        return generated;
     }
 }

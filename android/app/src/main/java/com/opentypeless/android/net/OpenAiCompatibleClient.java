@@ -19,9 +19,14 @@ public final class OpenAiCompatibleClient {
     private static final int CONNECT_TIMEOUT_MS = 20_000;
     private static final int READ_TIMEOUT_MS = 120_000;
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_AUDIO_BYTES = 32 * 1024 * 1024;
+    private static final int MAX_PROVIDER_TEXT_CODE_POINTS = 20_000;
     private final AtomicReference<HttpURLConnection> activeConnection = new AtomicReference<>();
 
-    public String transcribe(byte[] wav, AppSettings settings) throws Exception {
+    public String transcribe(byte[] wav, AppSettings settings, String prompt) throws Exception {
+        if (wav == null || wav.length == 0 || wav.length > MAX_AUDIO_BYTES) {
+            throw new IllegalArgumentException("Recorded audio has an invalid size");
+        }
         String endpoint = EndpointNormalizer.endpoint(settings.sttBaseUrl(), "audio/transcriptions");
         String boundary = "----OpenTypeless" + UUID.randomUUID().toString().replace("-", "");
         HttpURLConnection connection = open(endpoint, settings.sttApiKey());
@@ -29,10 +34,16 @@ public final class OpenAiCompatibleClient {
             connection.setDoOutput(true);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+            connection.setChunkedStreamingMode(8_192);
             try (OutputStream output = connection.getOutputStream()) {
-                writeField(output, boundary, "model", settings.sttModel());
+                writeField(output, boundary, "model",
+                        headerSafe(settings.sttModel(), 200, "STT model"));
                 if (!settings.language().trim().isEmpty()) {
-                    writeField(output, boundary, "language", settings.language().trim());
+                    writeField(output, boundary, "language",
+                            headerSafe(settings.language(), 40, "Language"));
+                }
+                if (prompt != null && !prompt.trim().isEmpty()) {
+                    writeField(output, boundary, "prompt", limitText(prompt.trim(), 2_000));
                 }
                 output.write(("--" + boundary + "\r\n"
                         + "Content-Disposition: form-data; name=\"file\"; filename=\"recording.wav\"\r\n"
@@ -43,23 +54,26 @@ public final class OpenAiCompatibleClient {
             JSONObject body = new JSONObject(readResponse(connection));
             String text = body.optString("text", "").trim();
             if (text.isEmpty()) throw new IOException("STT response did not contain text");
-            return text;
+            return boundedProviderText(text, "STT transcript");
         } finally {
             close(connection);
         }
     }
 
-    public String polish(String transcript, AppSettings settings) throws Exception {
+    public String complete(String systemPrompt, String userPrompt, AppSettings settings) throws Exception {
+        String safeSystemPrompt = boundedPrompt(systemPrompt, 40_000, "System prompt");
+        String safeUserPrompt = boundedPrompt(userPrompt, 40_000, "User prompt");
         JSONObject body = new JSONObject();
-        body.put("model", settings.llmModel());
+        body.put("model", headerSafe(settings.llmModel(), 200, "LLM model"));
         body.put("temperature", 0.1);
+        body.put("max_tokens", 4096);
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject()
                 .put("role", "system")
-                .put("content", PolishPrompt.systemPrompt()));
+                .put("content", safeSystemPrompt));
         messages.put(new JSONObject()
                 .put("role", "user")
-                .put("content", "<transcription>" + transcript + "</transcription>"));
+                .put("content", safeUserPrompt));
         body.put("messages", messages);
 
         String endpoint = EndpointNormalizer.endpoint(settings.llmBaseUrl(), "chat/completions");
@@ -68,28 +82,33 @@ public final class OpenAiCompatibleClient {
             connection.setDoOutput(true);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            byte[] encodedBody = body.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(encodedBody.length);
             try (OutputStream output = connection.getOutputStream()) {
-                output.write(body.toString().getBytes(StandardCharsets.UTF_8));
+                output.write(encodedBody);
             }
             JSONObject response = new JSONObject(readResponse(connection));
             JSONObject message = response.getJSONArray("choices").getJSONObject(0).getJSONObject("message");
             String text = message.optString("content", "").trim();
             if (text.isEmpty()) text = message.optString("reasoning_content", "").trim();
             if (text.isEmpty()) throw new IOException("LLM response did not contain text");
-            return text;
+            return boundedProviderText(text, "LLM output");
         } finally {
             close(connection);
         }
     }
 
     private HttpURLConnection open(String endpoint, String apiKey) throws IOException {
+        EndpointNormalizer.requireCredentialSafeTransport(endpoint, apiKey);
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
         connection.setReadTimeout(READ_TIMEOUT_MS);
         connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(false);
         connection.setRequestProperty("Accept", "application/json");
         if (apiKey != null && !apiKey.trim().isEmpty()) {
-            connection.setRequestProperty("Authorization", "Bearer " + apiKey.trim());
+            connection.setRequestProperty(
+                    "Authorization", "Bearer " + headerSafe(apiKey, 4_096, "API key"));
         }
         activeConnection.set(connection);
         return connection;
@@ -120,10 +139,14 @@ public final class OpenAiCompatibleClient {
                 : connection.getErrorStream();
         String body = stream == null ? "" : readLimited(stream);
         if (status < 200 || status >= 300) {
-            String compact = body.replaceAll("\\s+", " ").trim();
-            if (compact.length() > 300) compact = compact.substring(0, 300) + "…";
-            throw new IOException("Provider returned HTTP " + status
-                    + (compact.isEmpty() ? "" : ": " + compact));
+            String requestId = connection.getHeaderField("x-request-id");
+            String suffix = requestId == null || requestId.isBlank()
+                    ? ""
+                    : " (request " + limitText(requestId.replaceAll("[^A-Za-z0-9._:-]", ""), 80) + ")";
+            if (status >= 300 && status < 400) {
+                throw new IOException("Provider redirect was rejected" + suffix);
+            }
+            throw new IOException("Provider returned HTTP " + status + suffix);
         }
         return body;
     }
@@ -140,5 +163,36 @@ public final class OpenAiCompatibleClient {
             }
             return bytes.toString(StandardCharsets.UTF_8.name());
         }
+    }
+
+    private static String limitText(String value, int maximum) {
+        return value.length() <= maximum ? value : value.substring(0, maximum);
+    }
+
+    private static String headerSafe(String value, int maximumCodePoints, String label) {
+        String clean = value == null ? "" : value.trim();
+        if (clean.isEmpty()) throw new IllegalArgumentException(label + " is required");
+        if (clean.indexOf('\r') >= 0 || clean.indexOf('\n') >= 0 || clean.indexOf('\u0000') >= 0) {
+            throw new IllegalArgumentException(label + " contains unsupported control characters");
+        }
+        if (clean.codePointCount(0, clean.length()) > maximumCodePoints) {
+            throw new IllegalArgumentException(label + " is too long");
+        }
+        return clean;
+    }
+
+    private static String boundedPrompt(String value, int maximumCodePoints, String label) {
+        String clean = value == null ? "" : value;
+        if (clean.codePointCount(0, clean.length()) > maximumCodePoints) {
+            throw new IllegalArgumentException(label + " is too long");
+        }
+        return clean;
+    }
+
+    private static String boundedProviderText(String value, String label) throws IOException {
+        if (value.codePointCount(0, value.length()) > MAX_PROVIDER_TEXT_CODE_POINTS) {
+            throw new IOException(label + " is too long");
+        }
+        return value;
     }
 }

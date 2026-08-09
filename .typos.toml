@@ -19,6 +19,9 @@ extend-exclude = [
   "node_modules/",
   "target/",
   "dist/",
+  # Generated from dependency metadata and verbatim upstream license text.
+  "THIRD_PARTY_INVENTORY.md",
+  "THIRD_PARTY_LICENSES.txt",
   "src/i18n/locales/*.json",
   "*.min.js",
   "*.min.css",

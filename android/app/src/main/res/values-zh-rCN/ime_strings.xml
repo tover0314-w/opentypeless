@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 语音键盘按键与无障碍朗读文本。 -->
+    <string name="ime_key_space">空格</string>
+    <string name="ime_key_undo">撤销</string>
+    <string name="ime_key_raw">原文</string>
+    <string name="ime_key_teach">学习</string>
+    <string name="ime_key_cancel">取消</string>
+    <string name="ime_key_app_profile">应用配置</string>
+    <string name="ime_key_settings">设置</string>
+
+    <string name="ime_cd_start_voice_input">开始语音输入</string>
+    <string name="ime_cd_stop_voice_recording">停止录音</string>
+    <string name="ime_cd_delete">删除</string>
+    <string name="ime_cd_insert_space">插入空格</string>
+    <string name="ime_cd_enter">换行或执行编辑器操作</string>
+    <string name="ime_cd_switch_keyboard">切换键盘</string>
+    <string name="ime_cd_undo">撤销上一次语音插入</string>
+    <string name="ime_cd_restore_raw">恢复原始转写</string>
+    <string name="ime_cd_teach">明确教给键盘一条纠错</string>
+    <string name="ime_cd_cancel">取消语音输入</string>
+    <string name="ime_cd_app_profile">配置当前应用的语音行为</string>
+    <string name="ime_cd_settings">打开 OpenTypeless 设置</string>
+
+    <!-- 麦克风控件的 TalkBack 状态描述。 -->
+    <string name="ime_state_idle">空闲</string>
+    <string name="ime_state_recording">正在录音</string>
+    <string name="ime_state_transcribing">正在转写</string>
+    <string name="ime_state_polishing">正在整理</string>
+
+    <!-- 语音键盘状态与错误信息。 -->
+    <string name="ime_status_cancelled">已取消</string>
+    <string name="ime_status_sensitive_disabled">敏感字段中已禁用语音输入</string>
+    <string name="ime_status_sensitive_field">当前敏感字段已禁用语音输入</string>
+    <string name="ime_status_finishing_recording">正在结束录音…</string>
+    <string name="ime_status_processing_cancel_hint">语音仍在处理；如需放弃，请点按“取消”</string>
+    <string name="ime_status_preparing_cancel_hint">正在准备语音输入；如需放弃，请点按“取消”</string>
+    <string name="ime_status_microphone_permission">请在 OpenTypeless 设置中授予麦克风权限</string>
+    <string name="ime_status_preparing_local_data">正在准备本地设置和词汇…</string>
+    <string name="ime_status_configure_backend">请先配置已选语音识别后端</string>
+    <string name="ime_status_target_changed_cancelled">输入目标已更改；为保证安全，已取消语音输入</string>
+    <string name="ime_status_session_active">已有另一个语音会话正在进行</string>
+    <string name="ime_status_live">实时：%1$s</string>
+    <string name="ime_status_field_unavailable">当前文本字段已不可用</string>
+    <string name="ime_status_no_active_field">没有活动的文本字段</string>
+    <string name="ime_status_selection_too_long">所选文本过长；请最多选择 4,000 个字符</string>
+    <string name="ime_status_target_changed_discarded">输入目标已更改；为保证安全，已丢弃识别结果</string>
+    <string name="ime_status_no_text">未生成文本</string>
+    <string name="ime_status_result_connection_failed">文本连接失败；请确认结果是否已插入</string>
+    <string name="ime_status_result_rejected">当前应用拒绝了语音结果</string>
+    <string name="ime_status_nothing_to_undo">当前字段中没有可安全撤销的内容</string>
+    <string name="ime_status_undo_target_changed">文本或光标已更改；未执行撤销</string>
+    <string name="ime_status_insertion_removed">已删除语音插入内容</string>
+    <string name="ime_status_selection_restored">已恢复原始选中内容</string>
+    <string name="ime_status_raw_unavailable">此结果无法恢复原始转写</string>
+    <string name="ime_status_raw_already_matches">已插入文本与原始转写相同</string>
+    <string name="ime_status_raw_target_changed">文本或光标已更改；未恢复原始转写</string>
+    <string name="ime_status_raw_restored">已恢复原始转写</string>
+    <string name="ime_status_teach_requires_insertion">请先插入一次语音结果，再教给键盘纠错</string>
+    <string name="ime_status_learning_disallowed">此字段不允许个性化学习</string>
+    <string name="ime_operation_undo">撤销</string>
+    <string name="ime_operation_raw_restore">恢复原始转写</string>
+    <string name="ime_status_operation_rejected_unchanged">当前应用拒绝了%1$s；文本保持不变</string>
+    <string name="ime_status_operation_rejected_restored">当前应用拒绝了%1$s；已恢复语音文本</string>
+    <string name="ime_status_operation_connection_failed">在%1$s期间文本连接失败；继续前请检查字段</string>
+    <string name="ime_status_delete_rejected">当前应用拒绝了删除操作</string>
+    <string name="ime_status_delete_connection_failed">删除期间文本连接失败</string>
+    <string name="ime_status_key_rejected">当前应用拒绝了按键操作</string>
+    <string name="ime_status_typing_connection_failed">输入时文本连接失败</string>
+    <string name="ime_status_editor_action_failed">执行编辑器操作时文本连接失败</string>
+    <string name="ime_status_finish_before_mode_change">请先结束或取消当前录音，再更改模式</string>
+    <string name="ime_status_mode_selected">已选择%1$s模式</string>
+    <string name="ime_status_ready_mode">就绪 · %1$s模式</string>
+    <string name="ime_status_cursor_moved_cancelled">光标已移动；为保证安全，已取消语音输入</string>
+    <string name="ime_status_voice_input_failed">语音输入失败</string>
+</resources>

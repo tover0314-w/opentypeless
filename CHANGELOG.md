@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-08-09
+
+### Added
+- Android Voice Studio 0.2 with an independent IME, `RecognitionService`, and `RecognizerIntent` entry point.
+- Android on-device/system recognition plus explicit BYOK OpenAI-compatible STT, optional LLM editing, per-app profiles, deterministic personal terms, corrections, and encrypted opt-in history.
+- Target-bound Android commits, selection preservation, undo/raw restore, explicit Teach, fact-integrity checks, adaptive VAD, and cancellation-safe recording.
+- Portable desktop/Android vocabulary import and export, Android model support/download checks, and English/Simplified Chinese IME localization.
+- Android JVM, lint, minified-build, real SQLite/Keystore/Recognition emulator tests, and CI artifacts.
+- Reproducible desktop dependency inventory, complete offline license material, and finished-artifact legal-file verification.
+
+### Changed
+- The fork is BYOK-only; account, subscription, checkout, quota, donation, managed-cloud proxy, and upstream update paths remain removed.
+- Desktop release numbering now continues above the inherited `v1.1.53` tag line to prevent update-order regressions.
+- Release/support/security metadata now points to this maintained fork.
+- Desktop updater artifacts are disabled consistently across configuration and release workflows; signed platform releases remain fail-closed on missing maintainer credentials.
+
+### Security
+- Android API keys and optional history text are protected with separate Android Keystore AES-GCM keys; backup and device transfer are disabled.
+- AI output is rejected when protected facts or the selected-edit target cannot be preserved.
+- Provider redirects, oversized responses, unsafe public HTTP endpoints, stale editor commits, and late cancelled callbacks are rejected.
+
 ## [1.1.48] - 2026-07-08
 
 ### Added

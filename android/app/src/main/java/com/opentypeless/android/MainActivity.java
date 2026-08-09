@@ -2,136 +2,682 @@ package com.opentypeless.android;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.opentypeless.android.net.EndpointNormalizer;
+import com.opentypeless.android.data.PersonalizationSnapshot;
+import com.opentypeless.android.recognition.SystemSpeechRecognizer;
+import com.opentypeless.android.recognition.SystemRecognitionSupport;
+import com.opentypeless.android.recognition.StandardRecognitionSettings;
 import com.opentypeless.android.settings.AppSettings;
+import com.opentypeless.android.settings.ProcessingMode;
+import com.opentypeless.android.settings.RecognitionBackend;
+import com.opentypeless.android.settings.SettingsFormDraft;
 import com.opentypeless.android.settings.SettingsRepository;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
     private static final int MICROPHONE_PERMISSION_REQUEST = 100;
+    private static final String STATE_PREFIX = "settings_draft_";
+    private static final String STATE_HAS_DRAFT = STATE_PREFIX + "present";
+
     private SettingsRepository repository;
+    private StandardRecognitionSettings standardRecognitionSettings;
+    private Spinner recognitionBackend;
+    private Spinner defaultMode;
+    private LinearLayout networkSttFields;
+    private TextView systemBackendNote;
+    private TextView languageSupportStatus;
+    private Button checkLanguageSupport;
+    private Button downloadLanguageModel;
+    private CheckBox standardSpeechEnabled;
+    private EditText standardSpeechCallers;
     private EditText sttBaseUrl;
     private EditText sttApiKey;
     private EditText sttModel;
     private EditText language;
+    private EditText maxRecordingSeconds;
     private CheckBox polishEnabled;
+    private LinearLayout llmFields;
+    private LinearLayout translationFields;
     private EditText llmBaseUrl;
     private EditText llmApiKey;
     private EditText llmModel;
+    private EditText targetLanguage;
+    private EditText customInstructions;
+    private CheckBox personalizationEnabled;
+    private CheckBox historyEnabled;
+    private CheckBox sendContext;
     private TextView permissionStatus;
+    private SystemRecognitionSupport.Operation supportOperation;
+    private SystemRecognitionSupport.Operation downloadOperation;
+    private RecognitionBackend supportBackend;
+    private long supportGeneration;
+    private boolean languageDownloadAvailable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         repository = new SettingsRepository(this);
-        setContentView(buildContent(repository.load()));
+        standardRecognitionSettings = new StandardRecognitionSettings(this);
+        AppSettings persisted = repository.load();
+        setContentView(buildContent(persisted));
+        Object retained = getLastNonConfigurationInstance();
+        if (retained instanceof SettingsFormDraft draft) {
+            applyDraft(draft);
+        } else if (savedInstanceState != null
+                && savedInstanceState.getBoolean(STATE_HAS_DRAFT, false)) {
+            applyDraft(readPersistentDraft(savedInstanceState).withSecrets(
+                    persisted.sttApiKey(),
+                    persisted.llmApiKey()));
+        }
         refreshPermissionStatus();
+    }
+
+    @Override
+    public Object onRetainNonConfigurationInstance() {
+        // Keep unsaved API keys in memory across rotation/fold changes, never in saved-state Bundles.
+        return recognitionBackend == null ? null : captureDraft();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        if (recognitionBackend != null) writePersistentDraft(outState, captureDraft());
+        super.onSaveInstanceState(outState);
     }
 
     private View buildContent(AppSettings settings) {
         ScrollView scroll = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
+        scroll.setFillViewport(true);
+        LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
         scroll.addView(root);
 
-        TextView title = text("OpenTypeless Android", 26, true);
-        root.addView(title);
-        TextView intro = text(
-                "A BYOK-only system voice keyboard. Audio and text are sent directly to the endpoints you configure; there is no OpenTypeless account or paid cloud service.",
-                15,
-                false);
+        root.addView(text(getString(R.string.settings_title), 26, true));
+        TextView intro = text(getString(R.string.settings_intro), 15, false);
         intro.setTextColor(Color.DKGRAY);
-        intro.setPadding(0, dp(8), 0, dp(16));
+        intro.setPadding(0, dp(8), 0, dp(12));
         root.addView(intro);
 
-        root.addView(section("Speech to text"));
-        sttBaseUrl = field(root, "STT base URL", settings.sttBaseUrl(), false);
-        sttApiKey = field(root, "STT API key (Android Keystore)", settings.sttApiKey(), true);
-        sttModel = field(root, "STT model", settings.sttModel(), false);
-        language = field(root, "Language code (optional, e.g. zh or en)", settings.language(), false);
-
-        root.addView(section("AI polish (optional)"));
-        polishEnabled = new CheckBox(this);
-        polishEnabled.setText(R.string.polish_enabled);
-        polishEnabled.setChecked(settings.polishEnabled());
-        root.addView(polishEnabled);
-        llmBaseUrl = field(root, "LLM base URL", settings.llmBaseUrl(), false);
-        llmApiKey = field(root, "LLM API key (Android Keystore)", settings.llmApiKey(), true);
-        llmModel = field(root, "LLM model", settings.llmModel(), false);
-
-        TextView localHttp = text(
-                "Security note: HTTPS is strongly recommended. HTTP is allowed for explicit localhost/LAN self-hosted endpoints and can expose audio or text on an untrusted network.",
-                13,
+        root.addView(section(R.string.section_recognition));
+        recognitionBackend = enumSpinner(
+                root,
+                R.string.backend_label,
+                RecognitionBackend.values(),
+                settings.recognitionBackend().ordinal());
+        defaultMode = enumSpinner(
+                root,
+                R.string.default_mode_label,
+                ProcessingMode.values(),
+                settings.defaultMode().ordinal());
+        language = field(
+                root,
+                R.string.language_label,
+                settings.language(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
                 false);
-        localHttp.setTextColor(Color.rgb(145, 88, 0));
-        localHttp.setPadding(0, dp(8), 0, dp(12));
-        root.addView(localHttp);
+        maxRecordingSeconds = field(
+                root,
+                R.string.max_recording_label,
+                Integer.toString(settings.boundedMaxRecordingSeconds()),
+                InputType.TYPE_CLASS_NUMBER,
+                false);
 
-        Button save = button("Save configuration", ignored -> saveSettings());
-        root.addView(save);
+        networkSttFields = verticalLayout();
+        sttBaseUrl = field(
+                networkSttFields,
+                R.string.stt_base_url_label,
+                settings.sttBaseUrl(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
+                false);
+        sttApiKey = field(
+                networkSttFields,
+                R.string.stt_api_key_label,
+                settings.sttApiKey(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                false);
+        protectSecretField(sttApiKey);
+        sttModel = field(
+                networkSttFields,
+                R.string.stt_model_label,
+                settings.sttModel(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                false);
+        root.addView(networkSttFields);
+        systemBackendNote = note(R.string.system_backend_note, Color.rgb(68, 79, 76));
+        root.addView(systemBackendNote);
+        languageSupportStatus = note(
+                R.string.language_support_not_checked,
+                Color.rgb(68, 79, 76));
+        languageSupportStatus.setMinHeight(dp(48));
+        root.addView(languageSupportStatus);
+        checkLanguageSupport = button(
+                R.string.check_language_support,
+                ignored -> checkLanguageSupport());
+        root.addView(checkLanguageSupport);
+        downloadLanguageModel = button(
+                R.string.download_language_model,
+                ignored -> downloadLanguageModel());
+        downloadLanguageModel.setVisibility(View.GONE);
+        root.addView(downloadLanguageModel);
 
-        root.addView(section("Enable the keyboard"));
+        StandardRecognitionSettings.Snapshot standardSpeech = standardRecognitionSettings.load();
+        root.addView(section(R.string.section_standard_speech));
+        standardSpeechEnabled = checkbox(
+                R.string.standard_speech_enabled,
+                standardSpeech.enabled());
+        root.addView(standardSpeechEnabled);
+        standardSpeechCallers = field(
+                root,
+                R.string.standard_speech_callers_label,
+                standardSpeech.packagesAsText(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                        | InputType.TYPE_TEXT_FLAG_MULTI_LINE,
+                true);
+        standardSpeechCallers.setHint(R.string.standard_speech_callers_hint);
+        root.addView(note(R.string.standard_speech_security_note, Color.rgb(145, 88, 0)));
+
+        root.addView(section(R.string.section_processing));
+        polishEnabled = checkbox(R.string.polish_enabled, settings.polishEnabled());
+        root.addView(polishEnabled);
+        llmFields = verticalLayout();
+        llmBaseUrl = field(
+                llmFields,
+                R.string.llm_base_url_label,
+                settings.llmBaseUrl(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
+                false);
+        llmApiKey = field(
+                llmFields,
+                R.string.llm_api_key_label,
+                settings.llmApiKey(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                false);
+        protectSecretField(llmApiKey);
+        llmModel = field(
+                llmFields,
+                R.string.llm_model_label,
+                settings.llmModel(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                false);
+        translationFields = verticalLayout();
+        targetLanguage = field(
+                translationFields,
+                R.string.target_language_label,
+                settings.targetLanguage(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                false);
+        llmFields.addView(translationFields);
+        customInstructions = field(
+                llmFields,
+                R.string.custom_instructions_label,
+                settings.customInstructions(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                        | InputType.TYPE_TEXT_FLAG_MULTI_LINE,
+                true);
+        customInstructions.setHint(R.string.custom_instructions_hint);
+        root.addView(llmFields);
+
+        root.addView(section(R.string.section_privacy));
+        personalizationEnabled = checkbox(
+                R.string.personalization_enabled,
+                settings.personalizationEnabled());
+        historyEnabled = checkbox(R.string.history_enabled, settings.historyEnabled());
+        sendContext = checkbox(R.string.send_context_enabled, settings.sendContext());
+        root.addView(personalizationEnabled);
+        root.addView(historyEnabled);
+        root.addView(sendContext);
+        root.addView(note(R.string.privacy_note, Color.rgb(50, 70, 66)));
+        root.addView(note(R.string.local_http_note, Color.rgb(145, 88, 0)));
+
+        root.addView(button(R.string.save_configuration, ignored -> saveSettings()));
+
+        root.addView(section(R.string.section_manage));
+        root.addView(button(R.string.manage_dictionary, ignored ->
+                startActivity(new Intent(this, DictionaryActivity.class))));
+        root.addView(button(R.string.manage_history, ignored ->
+                startActivity(new Intent(this, HistoryActivity.class))));
+        root.addView(button(R.string.manage_app_profiles, ignored ->
+                startActivity(new Intent(this, AppProfileActivity.class))));
+        root.addView(button(R.string.legal_notices, ignored -> showLegalNotices()));
+
+        root.addView(section(R.string.section_enable_keyboard));
         permissionStatus = text("", 14, false);
+        permissionStatus.setMinHeight(dp(48));
         root.addView(permissionStatus);
-        root.addView(button("1. Grant microphone permission", ignored -> requestMicrophone()));
-        root.addView(button("2. Enable OpenTypeless keyboard", ignored ->
+        root.addView(button(R.string.grant_microphone, ignored -> requestMicrophone()));
+        root.addView(button(R.string.enable_keyboard, ignored ->
                 startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))));
-        root.addView(button("3. Choose OpenTypeless keyboard", ignored -> {
+        root.addView(button(R.string.choose_keyboard, ignored -> {
             InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             manager.showInputMethodPicker();
         }));
+
+        recognitionBackend.setOnItemSelectedListener(new SimpleSelectionListener(this::updateVisibility));
+        language.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable value) {
+                if (supportBackend != null) resetLanguageSupportState();
+            }
+        });
+        polishEnabled.setOnCheckedChangeListener((ignored, checked) -> updateVisibility());
+        updateVisibility();
         return scroll;
+    }
+
+    private void showLegalNotices() {
+        String notices;
+        try (InputStream input = getResources().openRawResource(R.raw.legal_notices)) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8_192];
+            int read;
+            while ((read = input.read(buffer)) != -1) bytes.write(buffer, 0, read);
+            notices = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        } catch (Exception error) {
+            notices = getString(R.string.operation_failed);
+        }
+        TextView content = text(notices, 13, false);
+        int padding = dp(20);
+        content.setPadding(padding, padding, padding, padding);
+        content.setTextIsSelectable(true);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.legal_notices)
+                .setView(scroll)
+                .setPositiveButton(R.string.close, null)
+                .show();
+    }
+
+    private void updateVisibility() {
+        RecognitionBackend backend = selectedBackend();
+        boolean network = backend == RecognitionBackend.OPENAI_COMPATIBLE;
+        if (supportBackend != backend) {
+            supportBackend = backend;
+            resetLanguageSupportState();
+        }
+        networkSttFields.setVisibility(network ? View.VISIBLE : View.GONE);
+        systemBackendNote.setVisibility(network ? View.GONE : View.VISIBLE);
+        languageSupportStatus.setVisibility(network ? View.GONE : View.VISIBLE);
+        checkLanguageSupport.setVisibility(network ? View.GONE : View.VISIBLE);
+        downloadLanguageModel.setVisibility(!network && languageDownloadAvailable
+                ? View.VISIBLE
+                : View.GONE);
+        if (!network) {
+            boolean available;
+            int statusResource;
+            if (selectedBackend() == RecognitionBackend.SYSTEM_ON_DEVICE) {
+                available = backendAvailable(RecognitionBackend.SYSTEM_ON_DEVICE);
+                statusResource = available
+                        ? R.string.on_device_available
+                        : R.string.on_device_unavailable;
+            } else {
+                available = backendAvailable(RecognitionBackend.SYSTEM_DEFAULT);
+                statusResource = available
+                        ? R.string.system_speech_available
+                        : R.string.system_speech_unavailable;
+            }
+            systemBackendNote.setText(getString(
+                    R.string.system_backend_status,
+                    getString(statusResource),
+                    getString(R.string.system_backend_note)));
+            systemBackendNote.setTextColor(available
+                    ? Color.rgb(0, 110, 82)
+                    : Color.rgb(170, 40, 40));
+            systemBackendNote.setContentDescription(systemBackendNote.getText());
+        }
+        llmFields.setVisibility(polishEnabled.isChecked() ? View.VISIBLE : View.GONE);
+        translationFields.setVisibility(View.VISIBLE);
+    }
+
+    private void checkLanguageSupport() {
+        if (selectedBackend() == RecognitionBackend.OPENAI_COMPATIBLE) return;
+        cancelLanguageOperations();
+        long request = supportGeneration;
+        languageDownloadAvailable = false;
+        checkLanguageSupport.setEnabled(false);
+        downloadLanguageModel.setVisibility(View.GONE);
+        languageSupportStatus.setText(R.string.language_support_checking);
+        languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+        supportOperation = SystemSpeechRecognizer.checkRecognitionSupport(
+                this,
+                languageSupportSettings(),
+                PersonalizationSnapshot.empty(),
+                result -> {
+                    if (request != supportGeneration || isFinishing() || isDestroyed()) return;
+                    supportOperation = null;
+                    showLanguageSupport(result);
+                });
+    }
+
+    private void downloadLanguageModel() {
+        if (selectedBackend() != RecognitionBackend.SYSTEM_ON_DEVICE) return;
+        cancelLanguageOperations();
+        long request = supportGeneration;
+        languageDownloadAvailable = false;
+        checkLanguageSupport.setEnabled(false);
+        downloadLanguageModel.setVisibility(View.GONE);
+        languageSupportStatus.setText(R.string.language_model_download_starting);
+        languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+        downloadOperation = SystemSpeechRecognizer.triggerModelDownload(
+                this,
+                languageSupportSettings(),
+                PersonalizationSnapshot.empty(),
+                new SystemRecognitionSupport.DownloadCallback() {
+                    @Override
+                    public void onProgress(int percent) {
+                        if (request == supportGeneration && !isFinishing() && !isDestroyed()) {
+                            languageSupportStatus.setText(getString(
+                                    R.string.language_model_download_progress,
+                                    percent));
+                        }
+                    }
+
+                    @Override
+                    public void onResult(SystemRecognitionSupport.DownloadResult result) {
+                        if (request != supportGeneration || isFinishing() || isDestroyed()) return;
+                        downloadOperation = null;
+                        checkLanguageSupport.setEnabled(true);
+                        languageSupportStatus.setText(downloadResultText(result));
+                        languageSupportStatus.setTextColor(
+                                result.status() == SystemRecognitionSupport.DownloadStatus.COMPLETED
+                                        ? Color.rgb(0, 110, 82)
+                                        : result.status() == SystemRecognitionSupport.DownloadStatus.FAILED
+                                                ? Color.rgb(170, 40, 40)
+                                                : Color.rgb(145, 88, 0));
+                    }
+                });
+    }
+
+    private void showLanguageSupport(SystemRecognitionSupport.Result result) {
+        checkLanguageSupport.setEnabled(true);
+        languageDownloadAvailable = result.canDownload()
+                && selectedBackend() == RecognitionBackend.SYSTEM_ON_DEVICE;
+        downloadLanguageModel.setVisibility(languageDownloadAvailable ? View.VISIBLE : View.GONE);
+        String text = supportResultText(result);
+        if (selectedBackend() == RecognitionBackend.SYSTEM_DEFAULT) {
+            text += "\n\n" + getString(R.string.system_default_offline_not_guaranteed);
+        }
+        languageSupportStatus.setText(text);
+        boolean success = result.status() == SystemRecognitionSupport.Status.INSTALLED
+                && selectedBackend() == RecognitionBackend.SYSTEM_ON_DEVICE;
+        boolean failure = result.status() == SystemRecognitionSupport.Status.UNSUPPORTED
+                || result.status() == SystemRecognitionSupport.Status.SERVICE_UNAVAILABLE
+                || result.status() == SystemRecognitionSupport.Status.ERROR;
+        languageSupportStatus.setTextColor(success
+                ? Color.rgb(0, 110, 82)
+                : failure ? Color.rgb(170, 40, 40) : Color.rgb(145, 88, 0));
+    }
+
+    private String supportResultText(SystemRecognitionSupport.Result result) {
+        String selectedLanguage = result.language().isBlank()
+                ? value(language)
+                : result.language();
+        return switch (result.status()) {
+            case INSTALLED -> getString(R.string.language_support_installed, selectedLanguage);
+            case DOWNLOAD_PENDING -> getString(
+                    R.string.language_support_download_pending,
+                    selectedLanguage);
+            case DOWNLOAD_AVAILABLE -> getString(
+                    R.string.language_support_download_available,
+                    selectedLanguage);
+            case ONLINE_ONLY -> getString(R.string.language_support_online_only, selectedLanguage);
+            case UNSUPPORTED -> getString(R.string.language_support_unsupported, selectedLanguage);
+            case LANGUAGE_UNSPECIFIED -> getString(R.string.language_support_unspecified);
+            case LEGACY_NOT_VERIFIABLE -> getString(R.string.language_support_legacy_unverified);
+            case SERVICE_UNAVAILABLE -> getString(R.string.language_support_service_unavailable);
+            case ERROR -> getString(R.string.language_support_check_failed, result.errorCode());
+        };
+    }
+
+    private String downloadResultText(SystemRecognitionSupport.DownloadResult result) {
+        return switch (result.status()) {
+            case REQUESTED -> getString(R.string.language_model_download_requested);
+            case SCHEDULED -> getString(R.string.language_model_download_scheduled);
+            case COMPLETED -> getString(R.string.language_model_download_completed);
+            case API_UNAVAILABLE -> getString(R.string.language_model_download_api_unavailable);
+            case FAILED -> getString(R.string.language_model_download_failed, result.errorCode());
+        };
+    }
+
+    private AppSettings languageSupportSettings() {
+        return new AppSettings(
+                selectedBackend(),
+                "",
+                "",
+                "",
+                value(language),
+                ProcessingMode.VERBATIM,
+                false,
+                "",
+                "",
+                "",
+                "",
+                "",
+                false,
+                false,
+                false,
+                180);
+    }
+
+    private void resetLanguageSupportState() {
+        cancelLanguageOperations();
+        languageDownloadAvailable = false;
+        if (languageSupportStatus != null) {
+            languageSupportStatus.setText(R.string.language_support_not_checked);
+            languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+        }
+        if (checkLanguageSupport != null) checkLanguageSupport.setEnabled(true);
+        if (downloadLanguageModel != null) downloadLanguageModel.setVisibility(View.GONE);
+    }
+
+    private void cancelLanguageOperations() {
+        supportGeneration++;
+        if (supportOperation != null) supportOperation.cancel();
+        if (downloadOperation != null) downloadOperation.cancel();
+        supportOperation = null;
+        downloadOperation = null;
     }
 
     private void saveSettings() {
         try {
-            EndpointNormalizer.endpoint(sttBaseUrl.getText().toString(), "audio/transcriptions");
-            if (sttModel.getText().toString().trim().isEmpty()) {
-                throw new IllegalArgumentException("STT model is required");
+            StandardRecognitionSettings.Snapshot standardSpeech =
+                    standardRecognitionSettings.validate(
+                            standardSpeechEnabled.isChecked(),
+                            value(standardSpeechCallers));
+            RecognitionBackend backend = selectedBackend();
+            if (backend == RecognitionBackend.OPENAI_COMPATIBLE) {
+                String endpoint = EndpointNormalizer.endpoint(
+                        sttBaseUrl.getText().toString(),
+                        "audio/transcriptions");
+                EndpointNormalizer.requireCredentialSafeTransport(endpoint, value(sttApiKey));
+                if (sttModel.getText().toString().trim().isEmpty()) {
+                    throw new IllegalArgumentException(getString(R.string.stt_model_required));
+                }
+            } else if (backend == RecognitionBackend.SYSTEM_ON_DEVICE
+                    && !backendAvailable(backend)) {
+                throw new IllegalArgumentException(getString(R.string.on_device_unavailable));
+            } else if (backend == RecognitionBackend.SYSTEM_DEFAULT
+                    && !backendAvailable(backend)) {
+                throw new IllegalArgumentException(getString(R.string.system_speech_unavailable));
             }
             if (polishEnabled.isChecked()) {
-                EndpointNormalizer.endpoint(llmBaseUrl.getText().toString(), "chat/completions");
+                String endpoint = EndpointNormalizer.endpoint(
+                        llmBaseUrl.getText().toString(),
+                        "chat/completions");
+                EndpointNormalizer.requireCredentialSafeTransport(endpoint, value(llmApiKey));
                 if (llmModel.getText().toString().trim().isEmpty()) {
-                    throw new IllegalArgumentException("LLM model is required when polish is enabled");
+                    throw new IllegalArgumentException(getString(R.string.llm_model_required));
                 }
             }
-            repository.save(new AppSettings(
-                    sttBaseUrl.getText().toString(),
-                    sttApiKey.getText().toString(),
-                    sttModel.getText().toString(),
-                    language.getText().toString(),
+            int maximumSeconds;
+            try {
+                maximumSeconds = Integer.parseInt(maxRecordingSeconds.getText().toString().trim());
+            } catch (NumberFormatException error) {
+                throw new IllegalArgumentException(getString(R.string.invalid_recording_length));
+            }
+            if (maximumSeconds < 5 || maximumSeconds > 540) {
+                throw new IllegalArgumentException(getString(R.string.invalid_recording_length));
+            }
+
+            AppSettings proposed = new AppSettings(
+                    backend,
+                    value(sttBaseUrl),
+                    value(sttApiKey),
+                    value(sttModel),
+                    value(language),
+                    selectedMode(),
                     polishEnabled.isChecked(),
-                    llmBaseUrl.getText().toString(),
-                    llmApiKey.getText().toString(),
-                    llmModel.getText().toString()));
-            Toast.makeText(this, "Configuration saved", Toast.LENGTH_SHORT).show();
+                    value(llmBaseUrl),
+                    value(llmApiKey),
+                    value(llmModel),
+                    value(targetLanguage),
+                    value(customInstructions),
+                    personalizationEnabled.isChecked(),
+                    historyEnabled.isChecked(),
+                    sendContext.isChecked(),
+                    maximumSeconds);
+            if (!StandardRecognitionSettings.isSupportedRoute(standardSpeech, proposed)) {
+                throw new IllegalArgumentException(
+                        getString(R.string.standard_speech_requires_byok));
+            }
+            try {
+                repository.save(proposed);
+                standardRecognitionSettings.save(standardSpeech);
+            } catch (RuntimeException storageFailure) {
+                // Never show storage/Keystore exception text: nested causes may contain endpoint or
+                // credential material supplied by a provider implementation.
+                Toast.makeText(this, R.string.operation_failed, Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(this, R.string.configuration_saved, Toast.LENGTH_SHORT).show();
         } catch (IllegalArgumentException error) {
-            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, safeMessage(error), Toast.LENGTH_LONG).show();
+        } catch (RuntimeException error) {
+            // Unexpected platform failures are reported without their possibly sensitive message.
+            Toast.makeText(this, R.string.operation_failed, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private SettingsFormDraft captureDraft() {
+        return new SettingsFormDraft(
+                recognitionBackend.getSelectedItemPosition(),
+                defaultMode.getSelectedItemPosition(),
+                raw(language),
+                raw(maxRecordingSeconds),
+                raw(sttBaseUrl),
+                raw(sttApiKey),
+                raw(sttModel),
+                standardSpeechEnabled.isChecked(),
+                raw(standardSpeechCallers),
+                polishEnabled.isChecked(),
+                raw(llmBaseUrl),
+                raw(llmApiKey),
+                raw(llmModel),
+                raw(targetLanguage),
+                raw(customInstructions),
+                personalizationEnabled.isChecked(),
+                historyEnabled.isChecked(),
+                sendContext.isChecked());
+    }
+
+    private void applyDraft(SettingsFormDraft draft) {
+        recognitionBackend.setSelection(clamp(
+                draft.recognitionBackendIndex(), RecognitionBackend.values().length));
+        defaultMode.setSelection(clamp(draft.defaultModeIndex(), ProcessingMode.values().length));
+        language.setText(draft.language());
+        maxRecordingSeconds.setText(draft.maxRecordingSeconds());
+        sttBaseUrl.setText(draft.sttBaseUrl());
+        sttApiKey.setText(draft.sttApiKey());
+        sttModel.setText(draft.sttModel());
+        standardSpeechEnabled.setChecked(draft.standardSpeechEnabled());
+        standardSpeechCallers.setText(draft.standardSpeechCallers());
+        polishEnabled.setChecked(draft.polishEnabled());
+        llmBaseUrl.setText(draft.llmBaseUrl());
+        llmApiKey.setText(draft.llmApiKey());
+        llmModel.setText(draft.llmModel());
+        targetLanguage.setText(draft.targetLanguage());
+        customInstructions.setText(draft.customInstructions());
+        personalizationEnabled.setChecked(draft.personalizationEnabled());
+        historyEnabled.setChecked(draft.historyEnabled());
+        sendContext.setChecked(draft.sendContext());
+        updateVisibility();
+    }
+
+    private static void writePersistentDraft(Bundle state, SettingsFormDraft draft) {
+        state.putBoolean(STATE_HAS_DRAFT, true);
+        state.putInt(key("backend"), draft.recognitionBackendIndex());
+        state.putInt(key("mode"), draft.defaultModeIndex());
+        state.putString(key("language"), draft.language());
+        state.putString(key("maximum"), draft.maxRecordingSeconds());
+        state.putString(key("stt_url"), draft.sttBaseUrl());
+        // API keys deliberately stay out of Bundle because Android may persist it to disk.
+        state.putString(key("stt_model"), draft.sttModel());
+        state.putBoolean(key("standard_enabled"), draft.standardSpeechEnabled());
+        state.putString(key("standard_callers"), draft.standardSpeechCallers());
+        state.putBoolean(key("polish"), draft.polishEnabled());
+        state.putString(key("llm_url"), draft.llmBaseUrl());
+        state.putString(key("llm_model"), draft.llmModel());
+        state.putString(key("target"), draft.targetLanguage());
+        state.putString(key("instructions"), draft.customInstructions());
+        state.putBoolean(key("personalization"), draft.personalizationEnabled());
+        state.putBoolean(key("history"), draft.historyEnabled());
+        state.putBoolean(key("context"), draft.sendContext());
+    }
+
+    private static SettingsFormDraft readPersistentDraft(Bundle state) {
+        return new SettingsFormDraft(
+                state.getInt(key("backend"), 0),
+                state.getInt(key("mode"), 0),
+                state.getString(key("language"), ""),
+                state.getString(key("maximum"), ""),
+                state.getString(key("stt_url"), ""),
+                "",
+                state.getString(key("stt_model"), ""),
+                state.getBoolean(key("standard_enabled"), false),
+                state.getString(key("standard_callers"), ""),
+                state.getBoolean(key("polish"), false),
+                state.getString(key("llm_url"), ""),
+                "",
+                state.getString(key("llm_model"), ""),
+                state.getString(key("target"), ""),
+                state.getString(key("instructions"), ""),
+                state.getBoolean(key("personalization"), false),
+                state.getBoolean(key("history"), false),
+                state.getBoolean(key("context"), false));
     }
 
     private void requestMicrophone() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(this, "Microphone permission is already granted", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.microphone_already_granted, Toast.LENGTH_SHORT).show();
             return;
         }
         requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MICROPHONE_PERMISSION_REQUEST);
@@ -147,35 +693,126 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (permissionStatus != null) refreshPermissionStatus();
+        if (recognitionBackend != null) updateVisibility();
+    }
+
+    @Override
+    protected void onStop() {
+        // A model download may temporarily launch system approval UI. Keep that operation alive
+        // while this Activity is merely stopped; explicit language/backend changes and onDestroy
+        // still cancel it. A support check has no user interaction and can be safely abandoned.
+        if (supportOperation != null) {
+            supportGeneration++;
+            supportOperation.cancel();
+            supportOperation = null;
+            languageDownloadAvailable = false;
+            languageSupportStatus.setText(R.string.language_support_not_checked);
+            languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+            checkLanguageSupport.setEnabled(true);
+            downloadLanguageModel.setVisibility(View.GONE);
+        }
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        cancelLanguageOperations();
+        super.onDestroy();
     }
 
     private void refreshPermissionStatus() {
         boolean granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED;
         permissionStatus.setText(granted
-                ? "✓ Microphone permission granted"
-                : "Microphone permission is required before recording from the keyboard");
+                ? R.string.microphone_granted
+                : R.string.microphone_required);
         permissionStatus.setTextColor(granted ? Color.rgb(0, 110, 82) : Color.rgb(170, 40, 40));
+        permissionStatus.setContentDescription(permissionStatus.getText());
     }
 
-    private EditText field(LinearLayout root, String hint, String value, boolean secret) {
+    private Spinner enumSpinner(
+            LinearLayout root,
+            int labelResource,
+            Object[] values,
+            int selectedIndex) {
+        String label = getString(labelResource);
+        TextView labelView = text(label, 14, true);
+        labelView.setPadding(0, dp(8), 0, 0);
+        root.addView(labelView);
+        String[] labels = new String[values.length];
+        for (int index = 0; index < values.length; index++) {
+            labels[index] = enumLabel(values[index]);
+        }
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Math.max(0, Math.min(selectedIndex, labels.length - 1)));
+        spinner.setMinimumHeight(dp(48));
+        spinner.setContentDescription(label);
+        root.addView(spinner, matchWrap());
+        return spinner;
+    }
+
+    private EditText field(
+            LinearLayout root,
+            int labelResource,
+            String value,
+            int inputType,
+            boolean multiline) {
+        String label = getString(labelResource);
+        TextView labelView = text(label, 14, true);
+        labelView.setPadding(0, dp(8), 0, 0);
+        root.addView(labelView);
         EditText field = new EditText(this);
-        field.setHint(hint);
         field.setText(value == null ? "" : value);
-        field.setSingleLine(true);
-        field.setInputType(secret
-                ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
-                : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        field.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(field);
+        field.setInputType(inputType);
+        field.setContentDescription(label);
+        field.setMinHeight(dp(multiline ? 96 : 48));
+        if (multiline) {
+            field.setSingleLine(false);
+            field.setMinLines(3);
+            field.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        } else {
+            field.setSingleLine(true);
+        }
+        root.addView(field, matchWrap());
         return field;
     }
 
-    private TextView section(String value) {
-        TextView view = text(value, 19, true);
+    private CheckBox checkbox(int labelResource, boolean checked) {
+        CheckBox checkbox = new CheckBox(this);
+        checkbox.setText(labelResource);
+        checkbox.setChecked(checked);
+        checkbox.setMinHeight(dp(48));
+        checkbox.setContentDescription(getString(labelResource));
+        return checkbox;
+    }
+
+    private Button button(int labelResource, View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setText(labelResource);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(48));
+        button.setContentDescription(getString(labelResource));
+        button.setOnClickListener(listener);
+        return button;
+    }
+
+    private TextView section(int stringResource) {
+        TextView view = text(getString(stringResource), 19, true);
         view.setPadding(0, dp(18), 0, dp(4));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) view.setAccessibilityHeading(true);
+        return view;
+    }
+
+    private TextView note(int stringResource, int color) {
+        TextView view = text(getString(stringResource), 13, false);
+        view.setTextColor(color);
+        view.setPadding(0, dp(8), 0, dp(12));
         return view;
     }
 
@@ -187,15 +824,103 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    private Button button(String label, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setAllCaps(false);
-        button.setOnClickListener(listener);
-        return button;
+    private LinearLayout verticalLayout() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
+    private LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private RecognitionBackend selectedBackend() {
+        return RecognitionBackend.values()[recognitionBackend.getSelectedItemPosition()];
+    }
+
+    private ProcessingMode selectedMode() {
+        return ProcessingMode.values()[defaultMode.getSelectedItemPosition()];
+    }
+
+    private boolean backendAvailable(RecognitionBackend backend) {
+        try {
+            return backend == RecognitionBackend.SYSTEM_ON_DEVICE
+                    ? SystemSpeechRecognizer.onDeviceAvailable(this)
+                    : SystemSpeechRecognizer.systemAvailable(this);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private String enumLabel(Object value) {
+        if (value instanceof RecognitionBackend backend) {
+            return getString(switch (backend) {
+                case OPENAI_COMPATIBLE -> R.string.backend_openai;
+                case SYSTEM_ON_DEVICE -> R.string.backend_on_device;
+                case SYSTEM_DEFAULT -> R.string.backend_system_default;
+            });
+        }
+        if (value instanceof ProcessingMode mode) {
+            return getString(switch (mode) {
+                case AUTO -> R.string.mode_auto;
+                case VERBATIM -> R.string.mode_verbatim;
+                case SMART -> R.string.mode_smart;
+                case TRANSLATE -> R.string.mode_translate;
+            });
+        }
+        return value.toString();
+    }
+
+    private static String value(EditText field) {
+        return field.getText().toString().trim();
+    }
+
+    private static String raw(EditText field) {
+        return field.getText().toString();
+    }
+
+    private static void protectSecretField(EditText field) {
+        // API keys use the in-memory retained draft; never let View state or Autofill persist them.
+        field.setSaveEnabled(false);
+        field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+    }
+
+    private static int clamp(int value, int size) {
+        return Math.max(0, Math.min(value, Math.max(0, size - 1)));
+    }
+
+    private static String key(String suffix) {
+        return STATE_PREFIX + suffix;
+    }
+
+    private String safeMessage(Exception error) {
+        String message = error.getMessage();
+        return message == null || message.trim().isEmpty()
+                ? getString(R.string.operation_failed)
+                : message;
     }
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static final class SimpleSelectionListener implements AdapterView.OnItemSelectedListener {
+        private final Runnable callback;
+
+        SimpleSelectionListener(Runnable callback) {
+            this.callback = callback;
+        }
+
+        @Override
+        public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+            callback.run();
+        }
+
+        @Override
+        public void onNothingSelected(AdapterView<?> parent) {
+            callback.run();
+        }
     }
 }

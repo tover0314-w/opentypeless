@@ -7,6 +7,55 @@ on:
     branches: [main]
 
 jobs:
+  check-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test, lint, and assemble Android
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentypeless-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  test-android-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Android Keystore and SQLite device tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: cd android && ./gradlew connectedDebugAndroidTest
+
   check-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -31,15 +80,19 @@ jobs:
           - platform: windows-latest
             platform_group: windows
             target: x86_64-pc-windows-msvc
+            python: python
           - platform: macos-latest
             platform_group: macos
             target: aarch64-apple-darwin
+            python: python3
           - platform: ubuntu-latest
             platform_group: linux
             target: x86_64-unknown-linux-gnu
+            python: python3
           - platform: ubuntu-22.04-arm
             platform_group: linux
             target: aarch64-unknown-linux-gnu
+            python: python3
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -60,6 +113,9 @@ jobs:
       - uses: swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
         with:
           workspaces: src-tauri -> target
+
+      - name: Verify dependency inventory on the release build host
+        run: ${{ matrix.python }} scripts/generate_third_party_inventory.py --check-inventory
 
       - name: Install Linux dependencies
         if: matrix.platform_group == 'linux'
@@ -92,6 +148,28 @@ jobs:
       - run: npm audit --audit-level=high
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+
+      - name: Install pinned cargo-about
+        run: cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Fetch locked Cargo sources for offline license extraction
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Verify third-party inventory and complete license material
+        run: |
+          test ! -e src/assets/app-icons/reference
+          node -e "const c=require('./src-tauri/tauri.conf.json'); if (c.bundle?.createUpdaterArtifacts !== false) process.exit(1)"
+          updater_key="$(printf '%s%s' TAURI_SIGNING_PRIVATE _KEY)"
+          updater_sign="$(printf '%s%s' 'tauri signer ' sign)"
+          updater_manifest="$(printf '%s%s' latest .json)"
+          if grep -R -n -E "${updater_key}|${updater_sign}|${updater_manifest}" \
+            .github/workflows .github/scripts/publish-signpath-windows-release.ps1; then
+            echo 'Updater-only release logic is forbidden while createUpdaterArtifacts is false.' >&2
+            exit 1
+          fi
+          python3 scripts/generate_third_party_inventory.py --check
 
       - name: Install cargo-audit
         run: cargo install cargo-audit

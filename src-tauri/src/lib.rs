@@ -1126,6 +1126,7 @@ pub fn run() {
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
             commands::misc::request_browser_access,
+            commands::misc::open_legal_document,
             commands::config::get_config,
             commands::config::update_config,
             commands::credentials::get_credential_status,

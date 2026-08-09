@@ -5,6 +5,13 @@ import { ExternalLink } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useAppStore } from '../../stores/appStore'
 import { APP_NAME, APP_VERSION, APP_REPO_URL, UI_LANGUAGES } from '../../lib/constants'
+import { toast } from '../toast-service'
+
+type LegalDocument =
+  | 'projectLicense'
+  | 'thirdPartyNotices'
+  | 'dependencyInventory'
+  | 'thirdPartyLicenses'
 
 export function AboutPane() {
   const { t } = useTranslation()
@@ -51,12 +58,50 @@ export function AboutPane() {
 
       {/* Open Source */}
       <SectionCard title={t('settings.openSource')}>
-        <InfoRow label={t('settings.license')} value={t('settings.mit')} />
+        <LegalDocumentRow
+          label={t('settings.license')}
+          document="projectLicense"
+          linkText={t('settings.mit')}
+        />
+        <LegalDocumentRow
+          label={t('settings.thirdPartyNotices')}
+          document="thirdPartyNotices"
+          linkText={t('settings.view')}
+        />
+        <LegalDocumentRow
+          label={t('settings.dependencyInventory')}
+          document="dependencyInventory"
+          linkText={t('settings.view')}
+        />
+        <LegalDocumentRow
+          label={t('settings.thirdPartyLicenses')}
+          document="thirdPartyLicenses"
+          linkText={t('settings.view')}
+        />
         <LinkRow label={t('settings.github')} url={APP_REPO_URL} linkText={t('settings.view')} />
         <InfoRow label={t('settings.framework')} value={t('settings.tauriReact')} />
       </SectionCard>
     </div>
   )
+}
+
+function LegalDocumentRow({
+  label,
+  document,
+  linkText,
+}: {
+  label: string
+  document: LegalDocument
+  linkText: string
+}) {
+  const { t } = useTranslation()
+  const handleOpen = () => {
+    invoke('open_legal_document', { document }).catch(() => {
+      toast(t('settings.openLegalDocumentFailed'), 'error')
+    })
+  }
+
+  return <ActionRow label={label} linkText={linkText} onClick={handleOpen} />
 }
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -80,9 +125,22 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 function LinkRow({ label, url, linkText }: { label: string; url: string; linkText: string }) {
+  return <ActionRow label={label} linkText={linkText} onClick={() => openUrl(url)} />
+}
+
+function ActionRow({
+  label,
+  linkText,
+  onClick,
+}: {
+  label: string
+  linkText: string
+  onClick: () => void
+}) {
   return (
     <button
-      onClick={() => openUrl(url)}
+      type="button"
+      onClick={onClick}
       className="flex justify-between items-center w-full px-3 py-2.5 border-b border-border last:border-b-0 bg-transparent border-x-0 border-t-0 cursor-pointer text-[13px]"
     >
       <span className="text-text-secondary">{label}</span>

@@ -1,13 +1,13 @@
-name: Staple macOS Release Assets
+name: Staple macOS Release DMG
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to replace, e.g. v1.1.46'
+        description: 'Release tag containing the notarized DMG, e.g. v1.2.0'
         required: true
       submission_id:
-        description: 'Accepted Apple notarization submission ID'
+        description: 'Accepted Apple notarization submission ID for that DMG'
         required: true
 
 permissions:
@@ -18,16 +18,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - run: npm ci
-
-      - name: Verify secrets and notarization status
+      - name: Verify secrets and DMG notarization status
         shell: bash
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -35,13 +26,8 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          for name in RELEASE_TOKEN SUBMISSION_ID APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+          for name in RELEASE_TOKEN SUBMISSION_ID APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!name}" ]; then
               echo "::error::$name is required."
               exit 1
@@ -54,120 +40,34 @@ jobs:
             --team-id "$APPLE_TEAM_ID" | tee notary-info.txt
 
           if ! grep -q "status: Accepted" notary-info.txt; then
-            echo "::error::Notarization submission is not Accepted yet."
+            echo "::error::DMG notarization submission is not Accepted yet."
             exit 1
           fi
 
-      - name: Import Apple Developer ID certificate
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/opentypeless-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          CERT_PATH="$RUNNER_TEMP/apple-certificate.p12"
-
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-
-      - name: Download, staple, sign, and upload macOS assets
+      - name: Download, staple, verify, and replace the macOS DMG
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ github.event.inputs.tag }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
 
           VERSION="${TAG#v}"
-          TARBALL_NAME="OpenTypeless_universal.app.tar.gz"
-          TARBALL_SIG_NAME="${TARBALL_NAME}.sig"
           DMG_NAME="OpenTypeless_${VERSION}_universal.dmg"
           WORK_DIR="$RUNNER_TEMP/staple-macos"
-          EXTRACT_DIR="$WORK_DIR/extract"
-          DMG_ROOT="$WORK_DIR/dmg-root"
+          mkdir -p "$WORK_DIR"
 
-          mkdir -p "$EXTRACT_DIR" "$DMG_ROOT"
           gh release download "$TAG" \
-            --repo tover0314-w/opentypeless \
-            --pattern "$TARBALL_NAME" \
+            --repo dengxuezhao/opentypeless \
             --pattern "$DMG_NAME" \
-            --pattern latest.json \
             --dir "$WORK_DIR"
 
-          tar -xzf "$WORK_DIR/$TARBALL_NAME" -C "$EXTRACT_DIR"
-          APP_PATH="$EXTRACT_DIR/OpenTypeless.app"
-
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-          xcrun stapler staple "$APP_PATH"
-          xcrun stapler validate "$APP_PATH"
-          spctl --assess --type execute --verbose=4 "$APP_PATH"
-
-          (
-            cd "$EXTRACT_DIR"
-            COPYFILE_DISABLE=1 tar -czf "$WORK_DIR/$TARBALL_NAME" OpenTypeless.app
-          )
-
-          SIGN_OUTPUT="$WORK_DIR/sign-output.txt"
-          npm run -s tauri -- signer sign "$WORK_DIR/$TARBALL_NAME" | tee "$SIGN_OUTPUT"
-          SIGNATURE="$(awk '/Public signature:/{getline; print; exit}' "$SIGN_OUTPUT")"
-          if [ -z "$SIGNATURE" ]; then
-            echo "::error::Failed to extract updater signature."
-            exit 1
-          fi
-          printf '%s' "$SIGNATURE" > "$WORK_DIR/$TARBALL_SIG_NAME"
-
-          ditto "$APP_PATH" "$DMG_ROOT/OpenTypeless.app"
-          ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create \
-            -volname OpenTypeless \
-            -srcfolder "$DMG_ROOT" \
-            -ov \
-            -format UDZO \
-            "$WORK_DIR/$DMG_NAME"
-          codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$WORK_DIR/$DMG_NAME"
-          codesign --verify --verbose=2 "$WORK_DIR/$DMG_NAME"
-          xcrun notarytool submit "$WORK_DIR/$DMG_NAME" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait | tee "$WORK_DIR/dmg-notary-info.txt"
-          if ! grep -q "status: Accepted" "$WORK_DIR/dmg-notary-info.txt"; then
-            echo "::error::DMG notarization did not finish Accepted."
-            exit 1
-          fi
+          test -f "$WORK_DIR/$DMG_NAME"
           xcrun stapler staple "$WORK_DIR/$DMG_NAME"
           xcrun stapler validate "$WORK_DIR/$DMG_NAME"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$WORK_DIR/$DMG_NAME"
+          spctl --assess --type open --context context:primary-signature --verbose=4 \
+            "$WORK_DIR/$DMG_NAME"
 
-          jq --arg sig "$SIGNATURE" '
-            .platforms |= with_entries(
-              if (.key | startswith("darwin-")) then
-                .value.signature = $sig
-              else
-                .
-              end
-            )
-          ' "$WORK_DIR/latest.json" > "$WORK_DIR/latest.new.json"
-          mv "$WORK_DIR/latest.new.json" "$WORK_DIR/latest.json"
-
-          gh release upload "$TAG" \
-            "$WORK_DIR/$DMG_NAME" \
-            "$WORK_DIR/$TARBALL_NAME" \
-            "$WORK_DIR/$TARBALL_SIG_NAME" \
-            "$WORK_DIR/latest.json" \
-            --repo tover0314-w/opentypeless \
+          gh release upload "$TAG" "$WORK_DIR/$DMG_NAME" \
+            --repo dengxuezhao/opentypeless \
             --clobber

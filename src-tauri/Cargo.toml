@@ -1,6 +1,6 @@
 [package]
 name = "opentypeless"
-version = "0.2.0"
+version = "1.2.0"
 description = "BYOK voice input and text polishing desktop app"
 authors = ["OpenTypeless Contributors"]
 license = "MIT"

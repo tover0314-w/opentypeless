@@ -13,8 +13,8 @@ Thanks for your interest in contributing! This guide covers everything you need 
 | Type | Process |
 |------|---------|
 | Bug fix / small improvement | Open a PR directly |
-| New feature / architecture change | Start a [Discussion](https://github.com/tover0314-w/opentypeless/discussions/categories/ideas) first |
-| Question / help | Post in [Q&A Discussions](https://github.com/tover0314-w/opentypeless/discussions/categories/q-a) |
+| New feature / architecture change | Start a [Discussion](https://github.com/dengxuezhao/opentypeless/discussions/categories/ideas) first |
+| Question / help | Post in [Q&A Discussions](https://github.com/dengxuezhao/opentypeless/discussions/categories/q-a) |
 
 ## Making Changes
 
@@ -40,6 +40,10 @@ npx vitest run
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml
+
+# Android
+cd android
+./gradlew testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
 ```
 
 ## Commit Message Format

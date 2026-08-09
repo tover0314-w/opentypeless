@@ -14,7 +14,6 @@ if (-not (Test-Path -LiteralPath $signedDir)) {
   throw "Signed artifact directory was not found: $signedDir"
 }
 
-$version = $tagName.TrimStart('v')
 $signedFiles = Get-ChildItem -Path $signedDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
 $msi = $signedFiles | Where-Object { $_.Name -like '*_x64_en-US.msi' } | Select-Object -First 1
 $nsis = $signedFiles | Where-Object { $_.Name -like '*_x64-setup.exe' } | Select-Object -First 1
@@ -28,27 +27,6 @@ if (-not $nsis) {
 if (-not $msi -or -not $nsis) {
   throw 'Both signed MSI and NSIS installers are required.'
 }
-
-function New-UpdaterSignature {
-  param([Parameter(Mandatory = $true)][System.IO.FileInfo]$File)
-
-  $signature = (& npx tauri signer sign "$($File.FullName)") -join "`n"
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to generate updater signature for $($File.Name)."
-  }
-
-  $signature = $signature.Trim()
-  if ([string]::IsNullOrWhiteSpace($signature)) {
-    throw "Updater signature for $($File.Name) is empty."
-  }
-
-  $signaturePath = "$($File.FullName).sig"
-  Set-Content -LiteralPath $signaturePath -Value $signature -NoNewline -Encoding ascii
-  return [System.IO.FileInfo]$signaturePath
-}
-
-$msiSig = New-UpdaterSignature -File $msi
-$nsisSig = New-UpdaterSignature -File $nsis
 
 $windowsChecksumPath = Join-Path (Get-Location) 'SHA256SUMS-windows-x86_64.txt'
 Remove-Item -LiteralPath $windowsChecksumPath -ErrorAction SilentlyContinue
@@ -69,53 +47,10 @@ if (-not $releaseExists) {
   }
 }
 
-$manifestUrl = "https://github.com/$releaseRepo/releases/download/$tagName/latest.json"
-try {
-  $existingManifest = (Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing).Content | ConvertFrom-Json
-} catch {
-  $existingManifest = $null
-}
-
-$platforms = [ordered]@{}
-if ($existingManifest -and $existingManifest.platforms) {
-  foreach ($property in $existingManifest.platforms.PSObject.Properties) {
-    if (-not $property.Name.StartsWith('windows-x86_64')) {
-      $platforms[$property.Name] = $property.Value
-    }
-  }
-}
-
-$baseUrl = "https://github.com/$releaseRepo/releases/download/$tagName"
-$msiEntry = [ordered]@{
-  signature = (Get-Content -LiteralPath $msiSig.FullName -Raw).Trim()
-  url = "$baseUrl/$($msi.Name)"
-}
-$nsisEntry = [ordered]@{
-  signature = (Get-Content -LiteralPath $nsisSig.FullName -Raw).Trim()
-  url = "$baseUrl/$($nsis.Name)"
-}
-
-$platforms['windows-x86_64'] = $msiEntry
-$platforms['windows-x86_64-msi'] = $msiEntry
-$platforms['windows-x86_64-nsis'] = $nsisEntry
-
-$manifest = [ordered]@{
-  version = $version
-  notes = if ($existingManifest -and $existingManifest.notes) { $existingManifest.notes } else { 'See the assets below to download and install.' }
-  pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-  platforms = $platforms
-}
-
-$latestJsonPath = Join-Path (Get-Location) 'latest.json'
-$manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $latestJsonPath -Encoding utf8
-
 gh release upload $tagName --repo $releaseRepo --clobber `
   $msi.FullName `
-  $msiSig.FullName `
   $nsis.FullName `
-  $nsisSig.FullName `
-  $windowsChecksumPath `
-  $latestJsonPath
+  $windowsChecksumPath
 
 if ($LASTEXITCODE -ne 0) {
   throw "Failed to upload signed Windows assets for $tagName."

@@ -26,6 +26,31 @@ public final class WavEncoderTest {
                 () -> WavEncoder.pcm16Mono(new byte[]{1}, 16_000));
     }
 
+    @Test
+    public void encodesSelectedPcmRangeWithoutIntermediateTrimArray() {
+        byte[] backing = new byte[]{99, 98, 1, 2, 3, 4, 97, 96};
+
+        byte[] wav = WavEncoder.pcm16Mono(backing, 2, 4, 16_000);
+
+        assertEquals(48, wav.length);
+        assertEquals(4, littleEndian32(wav, 40));
+        assertArrayEquals(new byte[]{1, 2, 3, 4}, slice(wav, 44, 48));
+        assertArrayEquals(new byte[]{99, 98, 1, 2, 3, 4, 97, 96}, backing);
+    }
+
+    @Test
+    public void rejectsInvalidPcmRangesAndSampleRates() {
+        byte[] pcm = new byte[8];
+        assertThrows(IllegalArgumentException.class,
+                () -> WavEncoder.pcm16Mono(pcm, -1, 2, 16_000));
+        assertThrows(IllegalArgumentException.class,
+                () -> WavEncoder.pcm16Mono(pcm, 7, 2, 16_000));
+        assertThrows(IllegalArgumentException.class,
+                () -> WavEncoder.pcm16Mono(pcm, 0, 3, 16_000));
+        assertThrows(IllegalArgumentException.class,
+                () -> WavEncoder.pcm16Mono(pcm, 0, 2, 0));
+    }
+
     private static byte[] slice(byte[] value, int from, int to) {
         byte[] result = new byte[to - from];
         System.arraycopy(value, from, result, 0, result.length);

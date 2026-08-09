@@ -32,4 +32,23 @@ public final class EndpointNormalizerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> EndpointNormalizer.endpoint("http://api.example.test/v1", "models"));
     }
+
+    @Test
+    public void bearerCredentialsRequireHttpsExceptOnLoopback() {
+        EndpointNormalizer.requireCredentialSafeTransport(
+                "https://192.168.1.20/v1/audio/transcriptions",
+                "secret");
+        EndpointNormalizer.requireCredentialSafeTransport(
+                "http://127.0.0.1:11434/v1/audio/transcriptions",
+                "secret");
+        EndpointNormalizer.requireCredentialSafeTransport(
+                "http://192.168.1.20:8000/v1/audio/transcriptions",
+                "");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> EndpointNormalizer.requireCredentialSafeTransport(
+                        "http://192.168.1.20:8000/v1/audio/transcriptions",
+                        "secret"));
+    }
 }

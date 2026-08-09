@@ -9,10 +9,56 @@ use crate::tray;
 use crate::AskHotkeyCache;
 use crate::HotkeyRegistrationError;
 use crate::HotkeyRoleCache;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri_plugin_opener::OpenerExt;
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LegalDocument {
+    ProjectLicense,
+    ThirdPartyNotices,
+    DependencyInventory,
+    ThirdPartyLicenses,
+}
+
+fn legal_document_filename(document: LegalDocument) -> &'static str {
+    match document {
+        LegalDocument::ProjectLicense => "LICENSE",
+        LegalDocument::ThirdPartyNotices => "THIRD_PARTY_NOTICES.md",
+        LegalDocument::DependencyInventory => "THIRD_PARTY_INVENTORY.md",
+        LegalDocument::ThirdPartyLicenses => "THIRD_PARTY_LICENSES.txt",
+    }
+}
+
+fn legal_document_path(resource_dir: &Path, document: LegalDocument) -> PathBuf {
+    resource_dir.join(legal_document_filename(document))
+}
+
+#[tauri::command]
+pub fn open_legal_document(app: tauri::AppHandle, document: LegalDocument) -> Result<(), String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
+    let path = legal_document_path(&resource_dir, document);
+    if !path.is_file() {
+        return Err(format!(
+            "bundled legal document is missing: {}",
+            legal_document_filename(document)
+        ));
+    }
+    let path = path
+        .into_os_string()
+        .into_string()
+        .map_err(|_| "bundled legal document path is not valid UTF-8".to_string())?;
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 pub fn request_browser_access(
@@ -1651,5 +1697,39 @@ mod tests {
 
         assert_eq!(row.status, DiagnosticStatus::Ok);
         assert!(row.message.contains("text-only"));
+    }
+
+    #[test]
+    fn legal_document_paths_are_fixed_basenames_under_the_resource_directory() {
+        let resource_dir = Path::new("/app/Contents/Resources");
+        let cases = [
+            (LegalDocument::ProjectLicense, "LICENSE"),
+            (LegalDocument::ThirdPartyNotices, "THIRD_PARTY_NOTICES.md"),
+            (
+                LegalDocument::DependencyInventory,
+                "THIRD_PARTY_INVENTORY.md",
+            ),
+            (
+                LegalDocument::ThirdPartyLicenses,
+                "THIRD_PARTY_LICENSES.txt",
+            ),
+        ];
+
+        for (document, filename) in cases {
+            assert_eq!(
+                legal_document_path(resource_dir, document),
+                resource_dir.join(filename)
+            );
+        }
+    }
+
+    #[test]
+    fn legal_document_deserialization_rejects_arbitrary_paths() {
+        assert_eq!(
+            serde_json::from_str::<LegalDocument>("\"thirdPartyNotices\"").unwrap(),
+            LegalDocument::ThirdPartyNotices
+        );
+        assert!(serde_json::from_str::<LegalDocument>("\"../../etc/passwd\"").is_err());
+        assert!(serde_json::from_str::<LegalDocument>("\"file:///etc/passwd\"").is_err());
     }
 }

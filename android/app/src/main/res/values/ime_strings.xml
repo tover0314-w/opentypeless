@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Voice keyboard keys and spoken accessibility labels. -->
+    <string name="ime_key_delete" translatable="false">⌫</string>
+    <string name="ime_key_space">Space</string>
+    <string name="ime_key_enter" translatable="false">↵</string>
+    <string name="ime_key_switch_keyboard" translatable="false">⌨</string>
+    <string name="ime_key_undo">Undo</string>
+    <string name="ime_key_raw">Raw</string>
+    <string name="ime_key_teach">Teach</string>
+    <string name="ime_key_cancel">Cancel</string>
+    <string name="ime_key_app_profile">App profile</string>
+    <string name="ime_key_settings">Settings</string>
+
+    <string name="ime_cd_start_voice_input">Start voice input</string>
+    <string name="ime_cd_stop_voice_recording">Stop voice recording</string>
+    <string name="ime_cd_delete">Delete</string>
+    <string name="ime_cd_insert_space">Insert space</string>
+    <string name="ime_cd_enter">Enter or perform the editor action</string>
+    <string name="ime_cd_switch_keyboard">Switch keyboard</string>
+    <string name="ime_cd_undo">Undo the last voice insertion</string>
+    <string name="ime_cd_restore_raw">Restore the raw transcript</string>
+    <string name="ime_cd_teach">Teach an explicit correction</string>
+    <string name="ime_cd_cancel">Cancel voice input</string>
+    <string name="ime_cd_app_profile">Configure voice behavior for this app</string>
+    <string name="ime_cd_settings">Open OpenTypeless settings</string>
+
+    <!-- TalkBack state descriptions for the microphone control. -->
+    <string name="ime_state_idle">Idle</string>
+    <string name="ime_state_recording">Recording</string>
+    <string name="ime_state_transcribing">Transcribing</string>
+    <string name="ime_state_polishing">Polishing</string>
+
+    <!-- Voice keyboard status and error messages. -->
+    <string name="ime_status_cancelled">Cancelled</string>
+    <string name="ime_status_sensitive_disabled">Voice input is disabled for sensitive fields</string>
+    <string name="ime_status_sensitive_field">Voice input disabled in this sensitive field</string>
+    <string name="ime_status_finishing_recording">Finishing recording…</string>
+    <string name="ime_status_processing_cancel_hint">Voice input is still processing; use Cancel to discard it</string>
+    <string name="ime_status_preparing_cancel_hint">Voice input is being prepared; use Cancel to discard it</string>
+    <string name="ime_status_microphone_permission">Grant microphone permission in OpenTypeless settings</string>
+    <string name="ime_status_preparing_local_data">Preparing local settings and vocabulary…</string>
+    <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
+    <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
+    <string name="ime_status_session_active">Another voice session is already active</string>
+    <string name="ime_status_live">Live: %1$s</string>
+    <string name="ime_status_field_unavailable">The current text field is no longer available</string>
+    <string name="ime_status_no_active_field">No active text field</string>
+    <string name="ime_status_selection_too_long">The selected text is too long; select at most 4,000 characters</string>
+    <string name="ime_status_target_changed_discarded">Input target changed; the result was discarded for safety</string>
+    <string name="ime_status_no_text">No text was produced</string>
+    <string name="ime_status_result_connection_failed">The text connection failed; verify whether the result was inserted</string>
+    <string name="ime_status_result_rejected">The app rejected the voice result</string>
+    <string name="ime_status_nothing_to_undo">Nothing safe to undo in this field</string>
+    <string name="ime_status_undo_target_changed">Text or cursor changed; undo was not applied</string>
+    <string name="ime_status_insertion_removed">Voice insertion removed</string>
+    <string name="ime_status_selection_restored">Original selection restored</string>
+    <string name="ime_status_raw_unavailable">Raw restore is not available for this result</string>
+    <string name="ime_status_raw_already_matches">The inserted text already matches the raw transcript</string>
+    <string name="ime_status_raw_target_changed">Text or cursor changed; raw restore was not applied</string>
+    <string name="ime_status_raw_restored">Raw transcript restored</string>
+    <string name="ime_status_teach_requires_insertion">Make a voice insertion before teaching a correction</string>
+    <string name="ime_status_learning_disallowed">This field does not allow personalized learning</string>
+    <string name="ime_operation_undo">undo</string>
+    <string name="ime_operation_raw_restore">raw restore</string>
+    <string name="ime_status_operation_rejected_unchanged">The app rejected %1$s; text was left unchanged</string>
+    <string name="ime_status_operation_rejected_restored">The app rejected %1$s; voice text was restored</string>
+    <string name="ime_status_operation_connection_failed">The text connection failed during %1$s; verify the field before continuing</string>
+    <string name="ime_status_delete_rejected">The app rejected delete</string>
+    <string name="ime_status_delete_connection_failed">The text connection failed during delete</string>
+    <string name="ime_status_key_rejected">The app rejected the key</string>
+    <string name="ime_status_typing_connection_failed">The text connection failed while typing</string>
+    <string name="ime_status_editor_action_failed">The text connection failed during the editor action</string>
+    <string name="ime_status_finish_before_mode_change">Finish or cancel the current recording before changing mode</string>
+    <string name="ime_status_mode_selected">%1$s mode selected</string>
+    <string name="ime_status_ready_mode">Ready · %1$s mode</string>
+    <string name="ime_status_cursor_moved_cancelled">Cursor moved; voice input was cancelled for safety</string>
+    <string name="ime_status_voice_input_failed">Voice input failed</string>
+</resources>

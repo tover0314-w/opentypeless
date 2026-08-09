@@ -12,7 +12,6 @@ import {
   Share2,
 } from 'lucide-react'
 
-import { APP_ICON_BY_KEY } from '../assets/app-icons/manifest'
 import type { ContextFamily } from '../stores/appStore'
 
 interface Props {
@@ -34,21 +33,7 @@ const FALLBACK_ICON_BY_FAMILY: Record<ContextFamily, LucideIcon> = {
   general: AppWindow,
 }
 
-export function AppLogo({ iconKey, family, className = '' }: Props) {
-  const source = APP_ICON_BY_KEY[iconKey]
-
-  if (source) {
-    return (
-      <img
-        src={source}
-        alt=""
-        width="16"
-        height="16"
-        className={`h-4 w-4 shrink-0 object-contain ${className}`}
-      />
-    )
-  }
-
+export function AppLogo({ family, className = '' }: Props) {
   const FallbackIcon = FALLBACK_ICON_BY_FAMILY[family] ?? AppWindow
   return (
     <FallbackIcon
