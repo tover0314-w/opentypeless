@@ -8,8 +8,11 @@ import android.inputmethodservice.InputMethodService;
 import android.os.Build;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -26,6 +29,7 @@ import com.opentypeless.android.context.InputContext;
 import com.opentypeless.android.context.InputContextClassifier;
 import com.opentypeless.android.data.HistoryEntry;
 import com.opentypeless.android.data.PersonalizationSnapshot;
+import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.data.PersonalizationStore;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.AppProfile;
@@ -69,6 +73,11 @@ public final class OpenTypelessImeService extends InputMethodService {
         final boolean learningAllowed;
         final int selectionStart;
         final int selectionEnd;
+        String liveComposition = "";
+        int compositionStart = -1;
+        int expectedCompositionEnd = -1;
+        int priorExpectedCompositionEnd = -1;
+        boolean compositionUpdatePending;
 
         CommitTarget(
                 long editorEpoch,
@@ -99,6 +108,10 @@ public final class OpenTypelessImeService extends InputMethodService {
 
         boolean replacedSelection() {
             return !selectedText.isEmpty();
+        }
+
+        boolean hasLiveComposition() {
+            return !liveComposition.isEmpty();
         }
     }
 
@@ -211,8 +224,13 @@ public final class OpenTypelessImeService extends InputMethodService {
         actions.addView(microphone);
         actions.addView(key(R.string.ime_key_delete, R.string.ime_cd_delete, 1f,
                 ignored -> backspace()));
-        actions.addView(key(R.string.ime_key_space, R.string.ime_cd_insert_space, 1.3f,
-                ignored -> commitText(" ")));
+        Button space = key(
+                R.string.ime_key_space,
+                R.string.ime_cd_space_hold_to_talk,
+                1.3f,
+                ignored -> commitText(" "));
+        configureHoldToTalk(space);
+        actions.addView(space);
         actions.addView(key(R.string.ime_key_enter, R.string.ime_cd_enter, 1f,
                 ignored -> sendEnter()));
         actions.addView(key(R.string.ime_key_switch_keyboard,
@@ -285,6 +303,70 @@ public final class OpenTypelessImeService extends InputMethodService {
         localIo.execute(() -> prepareAndStart(target, requestedMode));
     }
 
+    /** A tap inserts a space; holding starts voice input and releasing ends the utterance. */
+    private void configureHoldToTalk(Button space) {
+        final boolean[] pressed = {false};
+        final boolean[] holdActivated = {false};
+        Runnable beginHold = () -> {
+            if (!pressed[0]) return;
+            holdActivated[0] = true;
+            space.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            toggleRecording();
+        };
+        space.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN -> {
+                    pressed[0] = true;
+                    holdActivated[0] = false;
+                    view.setPressed(true);
+                    view.postDelayed(beginHold, ViewConfiguration.getLongPressTimeout());
+                    return true;
+                }
+                case MotionEvent.ACTION_UP -> {
+                    pressed[0] = false;
+                    view.removeCallbacks(beginHold);
+                    view.setPressed(false);
+                    if (holdActivated[0]) {
+                        finishHoldToTalk(false);
+                    } else {
+                        // Preserve Button accessibility/click semantics for an ordinary space tap.
+                        view.performClick();
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL -> {
+                    pressed[0] = false;
+                    view.removeCallbacks(beginHold);
+                    view.setPressed(false);
+                    if (holdActivated[0]) finishHoldToTalk(true);
+                    return true;
+                }
+                default -> {
+                    return true;
+                }
+            }
+        });
+    }
+
+    private void finishHoldToTalk(boolean cancelled) {
+        VoicePipeline.State currentState = pipeline.state();
+        if (currentState == VoicePipeline.State.RECORDING) {
+            pipeline.stopRecording();
+            setStatus(R.string.ime_status_finishing_recording, false);
+            return;
+        }
+        if (currentState != VoicePipeline.State.IDLE) return;
+        // Releasing while settings/model preparation is still running must not start a recording
+        // after the finger is already up.
+        if (activeTarget != null) {
+            cancelPipeline(
+                    getString(cancelled
+                            ? R.string.ime_status_cancelled
+                            : R.string.ime_status_hold_too_short),
+                    true);
+        }
+    }
+
     private void prepareAndStart(CommitTarget target, ProcessingMode requestedMode) {
         try {
             AppSettings settings = settingsRepository.load();
@@ -296,6 +378,18 @@ public final class OpenTypelessImeService extends InputMethodService {
                     if (activeTarget != target) return;
                     activeTarget = null;
                     setStatus(R.string.ime_status_configure_backend, true);
+                    openSettings();
+                });
+                return;
+            }
+            if (settings.recognitionBackend()
+                    == com.opentypeless.android.settings.RecognitionBackend.LOCAL_OFFLINE
+                    && (!LocalOfflineRecognizer.isSupportedDevice(this)
+                    || !LocalOfflineRecognizer.isInstalled(this))) {
+                postUi(() -> {
+                    if (activeTarget != target) return;
+                    activeTarget = null;
+                    setStatus(R.string.ime_status_offline_model_missing, true);
                     openSettings();
                 });
                 return;
@@ -353,6 +447,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     if (activeTarget == target && !text.isBlank()) {
                         setPartialStatus(getString(
                                 R.string.ime_status_live, compact(text, 100)));
+                        updateLiveComposition(target, text);
                     }
                 });
             }
@@ -366,9 +461,15 @@ public final class OpenTypelessImeService extends InputMethodService {
             public void onError(String message) {
                 postUi(() -> {
                     if (activeTarget != target) return;
+                    clearLiveComposition(target);
                     activeTarget = null;
                     updateMicrophone(VoicePipeline.State.IDLE);
-                    setStatus(safeMessage(message), true);
+                    if (com.opentypeless.android.recognition.SystemSpeechRecognizer
+                            .MICROPHONE_ACCESS_BLOCKED.equals(message)) {
+                        setStatus(R.string.ime_status_system_microphone_blocked, true);
+                    } else {
+                        setStatus(safeMessage(message), true);
+                    }
                 });
             }
         };
@@ -417,24 +518,28 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void commitResult(CommitTarget target, DictationResult result) {
         if (activeTarget != target) return;
+        boolean liveComposition = target.hasLiveComposition();
         activeTarget = null;
         updateMicrophone(VoicePipeline.State.IDLE);
-        if (!targetStillValid(target)) {
+        if (liveComposition
+                ? !liveCompositionStillValid(target)
+                : !targetStillValid(target)) {
+            if (liveComposition) clearLiveComposition(target);
             setStatus(R.string.ime_status_target_changed_discarded, true);
             return;
         }
 
         String finalText = result.finalText();
         if (finalText == null || finalText.isBlank()) {
+            if (liveComposition) clearLiveComposition(target);
             setStatus(R.string.ime_status_no_text, true);
             return;
         }
-        EditorMutationResult mutation = guardedReplace(
-                target.connection,
-                0,
-                finalText,
-                "");
+        EditorMutationResult mutation = liveComposition
+                ? guardedCommitComposition(target.connection, finalText)
+                : guardedReplace(target.connection, 0, finalText, "");
         if (mutation != EditorMutationResult.APPLIED) {
+            if (liveComposition) clearLiveComposition(target);
             setStatus(mutation == EditorMutationResult.CONNECTION_ERROR
                     ? getString(R.string.ime_status_result_connection_failed)
                     : getString(R.string.ime_status_result_rejected), true);
@@ -512,6 +617,85 @@ public final class OpenTypelessImeService extends InputMethodService {
                         currentConnection.getTextAfterCursor(CONTEXT_CHAR_LIMIT, 0),
                         FINGERPRINT_CODE_POINTS));
         return EditorTargetGuard.matches(captured, current, sensitiveField);
+    }
+
+    private void updateLiveComposition(CommitTarget target, String partial) {
+        if (target.replacedSelection()
+                || target.selectionStart < 0
+                || target.selectionStart != target.selectionEnd
+                || codePointCount(partial) > MAX_SELECTION_CODE_POINTS) {
+            return;
+        }
+        boolean hadComposition = target.hasLiveComposition();
+        if (hadComposition
+                ? !liveCompositionStillValid(target)
+                : !targetStillValid(target)) {
+            cancelPipeline(getString(R.string.ime_status_target_changed_cancelled), true);
+            return;
+        }
+
+        String previousText = target.liveComposition;
+        int previousStart = target.compositionStart;
+        int previousEnd = target.expectedCompositionEnd;
+        int previousPriorEnd = target.priorExpectedCompositionEnd;
+        boolean previousPending = target.compositionUpdatePending;
+        int start = hadComposition ? target.compositionStart : target.selectionStart;
+        target.liveComposition = partial;
+        target.compositionStart = start;
+        target.priorExpectedCompositionEnd = previousEnd;
+        target.expectedCompositionEnd = start + partial.length();
+        target.compositionUpdatePending = true;
+        if (!guardedSetComposingText(target.connection, partial)) {
+            target.liveComposition = previousText;
+            target.compositionStart = previousStart;
+            target.expectedCompositionEnd = previousEnd;
+            target.priorExpectedCompositionEnd = previousPriorEnd;
+            target.compositionUpdatePending = previousPending;
+        }
+    }
+
+    private boolean liveCompositionStillValid(CommitTarget target) {
+        try {
+            if (!target.hasLiveComposition()
+                    || currentEditor == null
+                    || editorEpoch != target.editorEpoch
+                    || getCurrentInputConnection() != target.connection
+                    || currentEditor.fieldId != target.fieldId
+                    || !safe(currentEditor.packageName).equals(target.packageName)
+                    || sensitiveField) {
+                return false;
+            }
+            CharSequence selected = target.connection.getSelectedText(0);
+            if (selected != null && selected.length() > 0) return false;
+            CharSequence beforeValue = target.connection.getTextBeforeCursor(
+                    CONTEXT_CHAR_LIMIT + target.liveComposition.length(),
+                    0);
+            if (beforeValue == null) return false;
+            String before = beforeValue.toString();
+            if (!before.endsWith(target.liveComposition)) return false;
+            String originalBefore = before.substring(
+                    0,
+                    before.length() - target.liveComposition.length());
+            if (!tailCodePoints(originalBefore, FINGERPRINT_CODE_POINTS)
+                    .equals(target.beforeFingerprint)) {
+                return false;
+            }
+            return headCodePoints(
+                    target.connection.getTextAfterCursor(CONTEXT_CHAR_LIMIT, 0),
+                    FINGERPRINT_CODE_POINTS).equals(target.afterFingerprint);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private void clearLiveComposition(CommitTarget target) {
+        if (target == null || !target.hasLiveComposition()) return;
+        guardedClearComposition(target.connection);
+        target.liveComposition = "";
+        target.compositionStart = -1;
+        target.expectedCompositionEnd = -1;
+        target.priorExpectedCompositionEnd = -1;
+        target.compositionUpdatePending = false;
     }
 
     private void undoLastVoiceCommit() {
@@ -646,6 +830,73 @@ public final class OpenTypelessImeService extends InputMethodService {
                     connection.endBatchEdit();
                 } catch (RuntimeException ignored) {
                     // The mutation result above is still authoritative; cleanup must not crash IME.
+                }
+            }
+        }
+    }
+
+    static boolean guardedSetComposingText(InputConnection connection, String text) {
+        if (connection == null || text == null || text.isBlank()) return false;
+        boolean batchEntered = false;
+        try {
+            connection.beginBatchEdit();
+            batchEntered = true;
+            return connection.setComposingText(text, 1);
+        } catch (RuntimeException ignored) {
+            return false;
+        } finally {
+            if (batchEntered) {
+                try {
+                    connection.endBatchEdit();
+                } catch (RuntimeException ignored) {
+                    // Composition is provisional; cleanup failure must not crash the IME.
+                }
+            }
+        }
+    }
+
+    static EditorMutationResult guardedCommitComposition(
+            InputConnection connection,
+            String finalText) {
+        if (connection == null || finalText == null || finalText.isBlank()) {
+            return EditorMutationResult.CONNECTION_ERROR;
+        }
+        boolean batchEntered = false;
+        try {
+            connection.beginBatchEdit();
+            batchEntered = true;
+            return connection.commitText(finalText, 1)
+                    ? EditorMutationResult.APPLIED
+                    : EditorMutationResult.COMMIT_REJECTED;
+        } catch (RuntimeException ignored) {
+            return EditorMutationResult.CONNECTION_ERROR;
+        } finally {
+            if (batchEntered) {
+                try {
+                    connection.endBatchEdit();
+                } catch (RuntimeException ignored) {
+                    // The mutation result remains authoritative.
+                }
+            }
+        }
+    }
+
+    private static void guardedClearComposition(InputConnection connection) {
+        if (connection == null) return;
+        boolean batchEntered = false;
+        try {
+            connection.beginBatchEdit();
+            batchEntered = true;
+            connection.setComposingText("", 1);
+            connection.finishComposingText();
+        } catch (RuntimeException ignored) {
+            // Clearing provisional text is best-effort when an editor is disappearing.
+        } finally {
+            if (batchEntered) {
+                try {
+                    connection.endBatchEdit();
+                } catch (RuntimeException ignored) {
+                    // Cleanup must not crash the IME.
                 }
             }
         }
@@ -817,6 +1068,7 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void cancelPipeline(String message, boolean announce) {
         pipeline.cancel();
+        clearLiveComposition(activeTarget);
         activeTarget = null;
         updateMicrophone(VoicePipeline.State.IDLE);
         if (announce) setStatus(message, false);
@@ -888,6 +1140,26 @@ public final class OpenTypelessImeService extends InputMethodService {
         CommitTarget target = activeTarget;
         currentSelectionStart = newSelStart;
         currentSelectionEnd = newSelEnd;
+        if (target != null && target.hasLiveComposition()) {
+            if (newSelStart == target.expectedCompositionEnd
+                    && newSelEnd == target.expectedCompositionEnd) {
+                target.compositionUpdatePending = false;
+                return;
+            }
+            // A few editors emit the unchanged cursor once before acknowledging composing text.
+            if (target.compositionUpdatePending
+                    && newSelStart == target.priorExpectedCompositionEnd
+                    && newSelEnd == target.priorExpectedCompositionEnd) {
+                return;
+            }
+            if (target.compositionUpdatePending
+                    && newSelStart == target.compositionStart
+                    && newSelEnd == target.compositionStart) {
+                return;
+            }
+            cancelPipeline(getString(R.string.ime_status_cursor_moved_cancelled), true);
+            return;
+        }
         if (target != null
                 && target.selectionStart >= 0
                 && target.selectionEnd >= 0

@@ -12,6 +12,7 @@
     <string name="section_recognition">Recognition</string>
     <string name="backend_label">Speech recognition backend</string>
     <string name="backend_openai">BYOK or self-hosted</string>
+    <string name="backend_local_offline">OpenTypeless offline · quality</string>
     <string name="backend_on_device">Android on-device</string>
     <string name="backend_system_default">Android system speech service</string>
     <string name="default_mode_label">Default processing mode</string>
@@ -24,6 +25,24 @@
     <string name="stt_base_url_label">STT base URL</string>
     <string name="stt_api_key_label">STT API key, protected by Android Keystore</string>
     <string name="stt_model_label">STT model</string>
+    <string name="offline_model_note">Runs fully offline with the quality-tier SenseVoice Small INT8 model. The 229 MiB download is optional, stored in private no-backup storage, and never receives text, audio, or API keys from another provider. Setting the spoken language to zh-CN enables the tested Mandarin accuracy lock; other languages stay on automatic detection. This final-only model uses more memory than Android system recognition.</string>
+    <string name="offline_model_missing">The OpenTypeless offline model is not installed.</string>
+    <string name="offline_model_unsupported_low_memory">This quality model requires a supported 64-bit ARM/x86 device that Android does not classify as low-RAM; its measured decode peak is about 457 MiB. Use Android on-device recognition or BYOK instead.</string>
+    <string name="offline_model_installed">✓ SenseVoice Small INT8 is installed and ready for offline recognition.</string>
+    <string name="offline_model_corrupt">The offline model is incomplete or from a different revision. Delete it and download the pinned version again.</string>
+    <string name="download_offline_model">Download offline model</string>
+    <string name="download_offline_model_title">Download the offline model?</string>
+    <string name="download_offline_model_confirmation">%1$s downloads about %2$d MiB over HTTPS from the pinned Hugging Face revision below and then verifies exact size and SHA-256 before installation. The model weights use the FunASR Model License; sherpa-onnx and its Android runtime are open source.\n\nRevision: %3$s\n\nContinue only if you accept the model license and storage use.</string>
+    <string name="offline_model_download_starting">Preparing the private offline-model download…</string>
+    <string name="offline_model_download_progress">Downloading and verifying offline model: %1$d%% (%2$d / %3$d MiB)</string>
+    <string name="offline_model_downloaded">Offline model downloaded and verified</string>
+    <string name="offline_model_download_failed">Offline model download failed: %1$s</string>
+    <string name="delete_offline_model">Delete offline model</string>
+    <string name="delete_offline_model_title">Delete the offline model?</string>
+    <string name="delete_offline_model_confirmation">The private model files will be removed. BYOK and Android speech routes are unaffected.</string>
+    <string name="offline_model_deleting">Releasing and deleting the offline model…</string>
+    <string name="offline_model_delete_failed">Offline model deletion failed: %1$s</string>
+    <string name="offline_model_required">This device must pass the memory gate and have a verified OpenTypeless offline model before selecting this backend</string>
     <string name="system_backend_note">System recognition does not use the STT URL or API key. Availability and network behavior depend on the speech service installed on this device.</string>
     <string name="system_backend_status">%1$s
 
@@ -71,7 +90,7 @@
     <string name="personalization_enabled">Use my confirmed personal terms and corrections</string>
     <string name="history_enabled">Save dictation history on this device</string>
     <string name="send_context_enabled">Send up to 500 characters before the cursor to the configured LLM</string>
-    <string name="privacy_note">Audio, text, optional context, and personal terms are sent only when required by the selected route. History is off by default. Password fields and fields that prohibit personalized learning are protected by the keyboard.</string>
+    <string name="privacy_note">The OpenTypeless offline route keeps recognition audio on this device. Other routes send audio, text, optional context, or personal terms only when required by the selected provider. History is off by default. Password fields and fields that prohibit personalized learning are protected by the keyboard.</string>
     <string name="local_http_note">HTTPS is strongly recommended. Plain HTTP is accepted only for explicit localhost or private-LAN self-hosted endpoints. API keys require HTTPS except on loopback; HTTP may expose audio or text on an untrusted network.</string>
     <string name="save_configuration">Save configuration</string>
     <string name="configuration_saved">Configuration saved</string>

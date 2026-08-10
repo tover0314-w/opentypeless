@@ -96,6 +96,35 @@ public final class EditorMutationGuardTest {
         assertEquals(1, fake.endCalls);
     }
 
+    @Test
+    public void provisionalCompositionCanBeRevisedThenCommittedAsFinalText() {
+        FakeInputConnection fake = new FakeInputConnection(true);
+
+        assertEquals(true, OpenTypelessImeService.guardedSetComposingText(
+                fake.connection(), "我现在在用百"));
+        assertEquals(true, OpenTypelessImeService.guardedSetComposingText(
+                fake.connection(), "我现在正在使用百度输入法"));
+        assertEquals(
+                OpenTypelessImeService.EditorMutationResult.APPLIED,
+                OpenTypelessImeService.guardedCommitComposition(
+                        fake.connection(), "我现在正在使用百度输入法。"));
+
+        assertEquals(List.of("我现在在用百", "我现在正在使用百度输入法"),
+                fake.composingTexts);
+        assertEquals(List.of("我现在正在使用百度输入法。"), fake.committedTexts);
+    }
+
+    @Test
+    public void rejectedCompositionDoesNotBecomeACommittedMutation() {
+        FakeInputConnection fake = new FakeInputConnection();
+        fake.composingAccepted = false;
+
+        assertEquals(false, OpenTypelessImeService.guardedSetComposingText(
+                fake.connection(), "draft"));
+        assertEquals(0, fake.commitCalls);
+        assertEquals(1, fake.endCalls);
+    }
+
     private static OpenTypelessImeService.EditorMutationResult replace(
             FakeInputConnection fake,
             int deleteBefore,
@@ -108,7 +137,9 @@ public final class EditorMutationGuardTest {
     private static final class FakeInputConnection implements InvocationHandler {
         final Deque<Boolean> commitResults = new ArrayDeque<>();
         final List<String> committedTexts = new ArrayList<>();
+        final List<String> composingTexts = new ArrayList<>();
         boolean deleteAccepted = true;
+        boolean composingAccepted = true;
         boolean throwOnDelete;
         boolean throwOnEnd;
         int throwOnCommitCall = -1;
@@ -149,6 +180,11 @@ public final class EditorMutationGuardTest {
                     committedTexts.add(String.valueOf(arguments[0]));
                     yield commitResults.isEmpty() || commitResults.removeFirst();
                 }
+                case "setComposingText" -> {
+                    composingTexts.add(String.valueOf(arguments[0]));
+                    yield composingAccepted;
+                }
+                case "finishComposingText" -> true;
                 case "toString" -> "FakeInputConnection";
                 case "hashCode" -> System.identityHashCode(proxy);
                 case "equals" -> proxy == arguments[0];

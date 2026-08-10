@@ -28,6 +28,10 @@ import android.widget.Toast;
 
 import com.opentypeless.android.net.EndpointNormalizer;
 import com.opentypeless.android.data.PersonalizationSnapshot;
+import com.opentypeless.android.offline.LocalOfflineRecognizer;
+import com.opentypeless.android.offline.OfflineModelDownloader;
+import com.opentypeless.android.offline.OfflineModelSpec;
+import com.opentypeless.android.offline.OfflineModelStore;
 import com.opentypeless.android.recognition.SystemSpeechRecognizer;
 import com.opentypeless.android.recognition.SystemRecognitionSupport;
 import com.opentypeless.android.recognition.StandardRecognitionSettings;
@@ -51,7 +55,11 @@ public final class MainActivity extends Activity {
     private Spinner recognitionBackend;
     private Spinner defaultMode;
     private LinearLayout networkSttFields;
+    private LinearLayout localOfflineFields;
     private TextView systemBackendNote;
+    private TextView localModelStatus;
+    private Button downloadOfflineModel;
+    private Button deleteOfflineModel;
     private TextView languageSupportStatus;
     private Button checkLanguageSupport;
     private Button downloadLanguageModel;
@@ -79,6 +87,8 @@ public final class MainActivity extends Activity {
     private RecognitionBackend supportBackend;
     private long supportGeneration;
     private boolean languageDownloadAvailable;
+    private OfflineModelDownloader.Operation offlineModelOperation;
+    private long offlineModelGeneration;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -171,6 +181,22 @@ public final class MainActivity extends Activity {
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
                 false);
         root.addView(networkSttFields);
+
+        localOfflineFields = verticalLayout();
+        localOfflineFields.addView(note(R.string.offline_model_note, Color.rgb(68, 79, 76)));
+        localModelStatus = note(R.string.offline_model_missing, Color.rgb(145, 88, 0));
+        localModelStatus.setMinHeight(dp(48));
+        localOfflineFields.addView(localModelStatus);
+        downloadOfflineModel = button(
+                R.string.download_offline_model,
+                ignored -> confirmOfflineModelDownload());
+        localOfflineFields.addView(downloadOfflineModel);
+        deleteOfflineModel = button(
+                R.string.delete_offline_model,
+                ignored -> confirmOfflineModelDelete());
+        localOfflineFields.addView(deleteOfflineModel);
+        root.addView(localOfflineFields);
+
         systemBackendNote = note(R.string.system_backend_note, Color.rgb(68, 79, 76));
         root.addView(systemBackendNote);
         languageSupportStatus = note(
@@ -295,12 +321,10 @@ public final class MainActivity extends Activity {
 
     private void showLegalNotices() {
         String notices;
-        try (InputStream input = getResources().openRawResource(R.raw.legal_notices)) {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8_192];
-            int read;
-            while ((read = input.read(buffer)) != -1) bytes.write(buffer, 0, read);
-            notices = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        try {
+            notices = readRawText(R.raw.legal_notices)
+                    + "\n\n"
+                    + readRawText(R.raw.offline_asr_runtime_licenses);
         } catch (Exception error) {
             notices = getString(R.string.operation_failed);
         }
@@ -317,21 +341,185 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
+    private String readRawText(int resource) throws Exception {
+        try (InputStream input = getResources().openRawResource(resource)) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8_192];
+            int read;
+            while ((read = input.read(buffer)) != -1) bytes.write(buffer, 0, read);
+            return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private void refreshOfflineModelStatus() {
+        OfflineModelStore.Status status = OfflineModelStore.status(this);
+        if (offlineModelOperation != null) return;
+        boolean supported = LocalOfflineRecognizer.isSupportedDevice(this);
+        int message = switch (status) {
+            case MISSING -> supported
+                    ? R.string.offline_model_missing
+                    : R.string.offline_model_unsupported_low_memory;
+            case INSTALLED -> R.string.offline_model_installed;
+            case CORRUPT -> R.string.offline_model_corrupt;
+        };
+        localModelStatus.setText(message);
+        localModelStatus.setTextColor(status == OfflineModelStore.Status.INSTALLED
+                ? Color.rgb(0, 110, 82)
+                : Color.rgb(170, 40, 40));
+        localModelStatus.setContentDescription(localModelStatus.getText());
+        downloadOfflineModel.setEnabled(supported
+                && status != OfflineModelStore.Status.INSTALLED);
+        deleteOfflineModel.setVisibility(status == OfflineModelStore.Status.MISSING
+                ? View.GONE
+                : View.VISIBLE);
+    }
+
+    private void confirmOfflineModelDownload() {
+        if (offlineModelOperation != null) return;
+        OfflineModelSpec spec = OfflineModelSpec.QUALITY;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.download_offline_model_title)
+                .setMessage(getString(
+                        R.string.download_offline_model_confirmation,
+                        spec.displayName(),
+                        spec.downloadBytes() / (1024L * 1024L),
+                        spec.revision()))
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.download_offline_model, (ignored, which) ->
+                        startOfflineModelDownload())
+                .show();
+    }
+
+    private void startOfflineModelDownload() {
+        cancelOfflineModelOperation();
+        long request = ++offlineModelGeneration;
+        downloadOfflineModel.setEnabled(false);
+        deleteOfflineModel.setVisibility(View.GONE);
+        localModelStatus.setText(R.string.offline_model_download_starting);
+        localModelStatus.setTextColor(Color.rgb(68, 79, 76));
+        offlineModelOperation = OfflineModelDownloader.download(this,
+                new OfflineModelDownloader.Callback() {
+                    @Override
+                    public void onProgress(int percent, long downloadedBytes, long totalBytes) {
+                        runOnUiThread(() -> {
+                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            localModelStatus.setText(getString(
+                                    R.string.offline_model_download_progress,
+                                    percent,
+                                    downloadedBytes / (1024L * 1024L),
+                                    totalBytes / (1024L * 1024L)));
+                        });
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        runOnUiThread(() -> {
+                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            offlineModelOperation = null;
+                            refreshOfflineModelStatus();
+                            Toast.makeText(MainActivity.this,
+                                    R.string.offline_model_downloaded,
+                                    Toast.LENGTH_SHORT).show();
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        runOnUiThread(() -> {
+                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            offlineModelOperation = null;
+                            localModelStatus.setText(getString(
+                                    R.string.offline_model_download_failed,
+                                    message));
+                            localModelStatus.setTextColor(Color.rgb(170, 40, 40));
+                            downloadOfflineModel.setEnabled(true);
+                        });
+                    }
+                });
+    }
+
+    private void confirmOfflineModelDelete() {
+        if (offlineModelOperation != null) return;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.delete_offline_model_title)
+                .setMessage(R.string.delete_offline_model_confirmation)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.delete, (ignored, which) -> startOfflineModelDelete())
+                .show();
+    }
+
+    private void startOfflineModelDelete() {
+        cancelOfflineModelOperation();
+        long request = ++offlineModelGeneration;
+        downloadOfflineModel.setEnabled(false);
+        deleteOfflineModel.setEnabled(false);
+        localModelStatus.setText(R.string.offline_model_deleting);
+        offlineModelOperation = OfflineModelDownloader.delete(this,
+                new OfflineModelDownloader.Callback() {
+                    @Override
+                    public void onProgress(int percent, long downloadedBytes, long totalBytes) {}
+
+                    @Override
+                    public void onComplete() {
+                        runOnUiThread(() -> {
+                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            offlineModelOperation = null;
+                            deleteOfflineModel.setEnabled(true);
+                            refreshOfflineModelStatus();
+                        });
+                    }
+
+                    @Override
+                    public void onError(String message) {
+                        runOnUiThread(() -> {
+                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            offlineModelOperation = null;
+                            localModelStatus.setText(getString(
+                                    R.string.offline_model_delete_failed,
+                                    message));
+                            localModelStatus.setTextColor(Color.rgb(170, 40, 40));
+                            deleteOfflineModel.setEnabled(true);
+                        });
+                    }
+                });
+    }
+
+    private void cancelOfflineModelOperation() {
+        offlineModelGeneration++;
+        if (offlineModelOperation != null) offlineModelOperation.cancel();
+        offlineModelOperation = null;
+    }
+
     private void updateVisibility() {
         RecognitionBackend backend = selectedBackend();
         boolean network = backend == RecognitionBackend.OPENAI_COMPATIBLE;
+        boolean local = backend == RecognitionBackend.LOCAL_OFFLINE;
+        boolean system = backend == RecognitionBackend.SYSTEM_ON_DEVICE
+                || backend == RecognitionBackend.SYSTEM_DEFAULT;
         if (supportBackend != backend) {
             supportBackend = backend;
             resetLanguageSupportState();
         }
         networkSttFields.setVisibility(network ? View.VISIBLE : View.GONE);
-        systemBackendNote.setVisibility(network ? View.GONE : View.VISIBLE);
-        languageSupportStatus.setVisibility(network ? View.GONE : View.VISIBLE);
-        checkLanguageSupport.setVisibility(network ? View.GONE : View.VISIBLE);
-        downloadLanguageModel.setVisibility(!network && languageDownloadAvailable
+        localOfflineFields.setVisibility(local ? View.VISIBLE : View.GONE);
+        systemBackendNote.setVisibility(system ? View.VISIBLE : View.GONE);
+        languageSupportStatus.setVisibility(system ? View.VISIBLE : View.GONE);
+        checkLanguageSupport.setVisibility(system ? View.VISIBLE : View.GONE);
+        downloadLanguageModel.setVisibility(system && languageDownloadAvailable
                 ? View.VISIBLE
                 : View.GONE);
-        if (!network) {
+        if (local) refreshOfflineModelStatus();
+        if (system) {
             boolean available;
             int statusResource;
             if (selectedBackend() == RecognitionBackend.SYSTEM_ON_DEVICE) {
@@ -359,7 +547,8 @@ public final class MainActivity extends Activity {
     }
 
     private void checkLanguageSupport() {
-        if (selectedBackend() == RecognitionBackend.OPENAI_COMPATIBLE) return;
+        if (selectedBackend() != RecognitionBackend.SYSTEM_ON_DEVICE
+                && selectedBackend() != RecognitionBackend.SYSTEM_DEFAULT) return;
         cancelLanguageOperations();
         long request = supportGeneration;
         languageDownloadAvailable = false;
@@ -522,6 +711,10 @@ public final class MainActivity extends Activity {
                 if (sttModel.getText().toString().trim().isEmpty()) {
                     throw new IllegalArgumentException(getString(R.string.stt_model_required));
                 }
+            } else if (backend == RecognitionBackend.LOCAL_OFFLINE
+                    && (!LocalOfflineRecognizer.isSupportedDevice(this)
+                    || !LocalOfflineRecognizer.isInstalled(this))) {
+                throw new IllegalArgumentException(getString(R.string.offline_model_required));
             } else if (backend == RecognitionBackend.SYSTEM_ON_DEVICE
                     && !backendAvailable(backend)) {
                 throw new IllegalArgumentException(getString(R.string.on_device_unavailable));
@@ -717,6 +910,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         cancelLanguageOperations();
+        cancelOfflineModelOperation();
         super.onDestroy();
     }
 
@@ -858,6 +1052,7 @@ public final class MainActivity extends Activity {
         if (value instanceof RecognitionBackend backend) {
             return getString(switch (backend) {
                 case OPENAI_COMPATIBLE -> R.string.backend_openai;
+                case LOCAL_OFFLINE -> R.string.backend_local_offline;
                 case SYSTEM_ON_DEVICE -> R.string.backend_on_device;
                 case SYSTEM_DEFAULT -> R.string.backend_system_default;
             });

@@ -1,6 +1,9 @@
 package com.opentypeless.android.ime;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.speech.SpeechRecognizer;
 
 import com.opentypeless.android.audio.AudioRecorder;
 import com.opentypeless.android.audio.RecordedAudio;
@@ -9,6 +12,9 @@ import com.opentypeless.android.context.InputContext;
 import com.opentypeless.android.context.InputPolicy;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.net.OpenAiCompatibleClient;
+import com.opentypeless.android.offline.LocalOfflineRecognizer;
+import com.opentypeless.android.offline.LocalRealtimePreview;
+import com.opentypeless.android.offline.SafePunctuationRestorer;
 import com.opentypeless.android.personalization.PersonalizedTextProcessor;
 import com.opentypeless.android.personalization.ProcessingResult;
 import com.opentypeless.android.personalization.PromptComposer;
@@ -45,7 +51,9 @@ public final class VoicePipeline {
         final long id;
         final DictationRequest request;
         final ProcessingMode mode;
-        final RecordingSession recordingSession;
+        volatile RecordingSession recordingSession;
+        volatile RecognitionBackend actualBackend;
+        volatile boolean systemFallbackAttempted;
         final Listener listener;
         final long startedAt;
         volatile boolean cancelled;
@@ -61,6 +69,7 @@ public final class VoicePipeline {
             this.request = request;
             this.mode = mode;
             this.recordingSession = recordingSession;
+            this.actualBackend = request.settings().recognitionBackend();
             this.listener = listener;
             this.startedAt = System.currentTimeMillis();
         }
@@ -73,8 +82,10 @@ public final class VoicePipeline {
     private final AudioRecorder recorder = new AudioRecorder();
     private final OpenAiCompatibleClient client = new OpenAiCompatibleClient();
     private final SystemSpeechRecognizer systemRecognizer;
+    private final Context applicationContext;
 
     public VoicePipeline(Context context) {
+        applicationContext = context.getApplicationContext();
         recorder.setAttributionContext(context);
         systemRecognizer = new SystemSpeechRecognizer(context);
     }
@@ -89,26 +100,42 @@ public final class VoicePipeline {
 
     public boolean start(DictationRequest request, Listener listener) {
         ProcessingMode mode = InputPolicy.resolve(request.requestedMode(), request.inputContext());
-        RecordingSession recordingSession = request.settings().recognitionBackend()
-                == RecognitionBackend.OPENAI_COMPATIBLE
+        RecognitionBackend backend = request.settings().recognitionBackend();
+        RecordingSession recordingSession = backend == RecognitionBackend.OPENAI_COMPATIBLE
+                || backend == RecognitionBackend.LOCAL_OFFLINE
                 ? new RecordingSession()
                 : null;
         ActiveRun run = new ActiveRun(
                 generation.incrementAndGet(), request, mode, recordingSession, listener);
         if (!active.compareAndSet(null, run)) return false;
         state.set(State.RECORDING);
-        listener.onState(State.RECORDING, routeLabel(request.settings()) + " · listening…");
+        listener.onState(State.RECORDING, routeLabel(run) + " · listening…");
 
-        if (request.settings().recognitionBackend() == RecognitionBackend.OPENAI_COMPATIBLE) {
-            run.task = executor.submit(() -> executeNetwork(run));
+        if (recordingSession != null) {
+            run.task = executor.submit(() -> executeCaptured(run));
         } else {
             startSystem(run);
         }
         return true;
     }
 
-    private void executeNetwork(ActiveRun run) {
+    private void executeCaptured(ActiveRun run) {
+        LocalOfflineRecognizer.Session offlineSession = null;
+        LocalRealtimePreview preview = null;
         try {
+            RecognitionBackend backend = run.actualBackend;
+            if (backend == RecognitionBackend.LOCAL_OFFLINE) {
+                offlineSession = LocalOfflineRecognizer.openSession(
+                        applicationContext,
+                        run.request.settings().language());
+                LocalOfflineRecognizer.Session sessionForPreview = offlineSession;
+                preview = new LocalRealtimePreview(
+                        sessionForPreview,
+                        text -> {
+                            if (isCurrent(run)) run.listener.onPartial(text);
+                        });
+            }
+            LocalRealtimePreview activePreview = preview;
             RecordedAudio audio = recorder.record(
                     run.recordingSession,
                     run.request.settings().boundedMaxRecordingSeconds(),
@@ -122,16 +149,33 @@ public final class VoicePipeline {
                         public void onBeginningOfSpeech() {
                             if (isCurrent(run)) run.listener.onBeginningOfSpeech();
                         }
+
+                        @Override
+                        public void onAudio(byte[] pcm16, int length) {
+                            if (activePreview != null && isCurrent(run)) {
+                                activePreview.accept(pcm16, length);
+                            }
+                        }
                     });
             if (!isCurrent(run)) return;
+            if (preview != null) preview.close();
             state.set(State.TRANSCRIBING);
-            run.listener.onState(State.TRANSCRIBING, routeLabel(run.request.settings()) + " · transcribing…");
-            ProviderCapabilities capabilities = ProviderCapabilities.forBackend(
-                    run.request.settings().recognitionBackend());
-            String prompt = capabilities.asrPrompt()
-                    ? PromptComposer.asrPrompt(run.request.personalization())
-                    : "";
-            String raw = client.transcribe(audio.wav(), run.request.settings(), prompt);
+            run.listener.onState(State.TRANSCRIBING, routeLabel(run) + " · transcribing…");
+            String raw;
+            if (backend == RecognitionBackend.LOCAL_OFFLINE) {
+                String punctuated = offlineSession.transcribeWithPunctuation(audio.wav());
+                String conservative = offlineSession.transcribe(audio.wav());
+                raw = SafePunctuationRestorer.choose(
+                        conservative,
+                        punctuated,
+                        run.request.inputContext().fieldKind());
+            } else {
+                ProviderCapabilities capabilities = ProviderCapabilities.forBackend(backend);
+                String prompt = capabilities.asrPrompt()
+                        ? PromptComposer.asrPrompt(run.request.personalization())
+                        : "";
+                raw = client.transcribe(audio.wav(), run.request.settings(), prompt);
+            }
             finishTranscription(
                     run,
                     raw,
@@ -142,6 +186,9 @@ public final class VoicePipeline {
             finishCancelled(run);
         } catch (Exception error) {
             finishError(run, error);
+        } finally {
+            if (preview != null) preview.close();
+            if (offlineSession != null) offlineSession.close();
         }
     }
 
@@ -154,7 +201,7 @@ public final class VoicePipeline {
                     public void onReady() {
                         if (isCurrent(run)) {
                             run.listener.onState(State.RECORDING,
-                                    routeLabel(run.request.settings()) + " · listening…");
+                                    routeLabel(run) + " · listening…");
                             run.listener.onReadyForSpeech();
                         }
                     }
@@ -183,10 +230,49 @@ public final class VoicePipeline {
                     }
 
                     @Override
-                    public void onError(String message) {
-                        if (isCurrent(run)) finishError(run, new IllegalStateException(message));
+                    public void onError(int errorCode, String message) {
+                        if (!isCurrent(run)) return;
+                        if (tryLocalFallback(run, errorCode)) return;
+                        finishError(run, new IllegalStateException(message));
                     }
                 });
+    }
+
+    private boolean tryLocalFallback(ActiveRun run, int errorCode) {
+        boolean permissionGranted = applicationContext.checkSelfPermission(
+                Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        boolean supported = LocalOfflineRecognizer.isSupportedDevice(applicationContext);
+        boolean installed = supported && LocalOfflineRecognizer.isInstalled(applicationContext);
+        if (!shouldFallbackToLocal(
+                errorCode,
+                permissionGranted,
+                supported,
+                installed,
+                run.systemFallbackAttempted)) {
+            return false;
+        }
+        run.systemFallbackAttempted = true;
+        run.actualBackend = RecognitionBackend.LOCAL_OFFLINE;
+        run.recordingSession = new RecordingSession();
+        state.set(State.RECORDING);
+        run.listener.onState(
+                State.RECORDING,
+                "Android speech service blocked microphone access · using OpenTypeless offline");
+        run.task = executor.submit(() -> executeCaptured(run));
+        return true;
+    }
+
+    static boolean shouldFallbackToLocal(
+            int errorCode,
+            boolean permissionGranted,
+            boolean supported,
+            boolean installed,
+            boolean alreadyAttempted) {
+        return errorCode == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                && permissionGranted
+                && supported
+                && installed
+                && !alreadyAttempted;
     }
 
     private void finishTranscription(
@@ -287,7 +373,7 @@ public final class VoicePipeline {
                 finalText,
                 message,
                 run.mode,
-                run.request.settings().recognitionBackend(),
+                run.actualBackend,
                 durationMs,
                 reachedLimit,
                 aiAccepted,
@@ -371,9 +457,10 @@ public final class VoicePipeline {
                 && !settings.llmModel().trim().isEmpty();
     }
 
-    private static String routeLabel(AppSettings settings) {
-        return switch (settings.recognitionBackend()) {
-            case OPENAI_COMPATIBLE -> "BYOK " + hostLabel(settings.sttBaseUrl());
+    private static String routeLabel(ActiveRun run) {
+        return switch (run.actualBackend) {
+            case OPENAI_COMPATIBLE -> "BYOK " + hostLabel(run.request.settings().sttBaseUrl());
+            case LOCAL_OFFLINE -> "OpenTypeless offline";
             case SYSTEM_ON_DEVICE -> "On-device";
             case SYSTEM_DEFAULT -> "Android speech service";
         };

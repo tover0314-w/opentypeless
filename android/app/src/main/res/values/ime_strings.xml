@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ime_status_offline_model_missing">Download the OpenTypeless offline model in Settings before recording</string>
     <!-- Voice keyboard keys and spoken accessibility labels. -->
     <string name="ime_key_delete" translatable="false">⌫</string>
     <string name="ime_key_space">Space</string>
@@ -16,6 +17,8 @@
     <string name="ime_cd_stop_voice_recording">Stop voice recording</string>
     <string name="ime_cd_delete">Delete</string>
     <string name="ime_cd_insert_space">Insert space</string>
+    <string name="ime_cd_space_hold_to_talk">Insert space; touch and hold for voice input</string>
+    <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
     <string name="ime_cd_enter">Enter or perform the editor action</string>
     <string name="ime_cd_switch_keyboard">Switch keyboard</string>
     <string name="ime_cd_undo">Undo the last voice insertion</string>
@@ -39,6 +42,7 @@
     <string name="ime_status_processing_cancel_hint">Voice input is still processing; use Cancel to discard it</string>
     <string name="ime_status_preparing_cancel_hint">Voice input is being prepared; use Cancel to discard it</string>
     <string name="ime_status_microphone_permission">Grant microphone permission in OpenTypeless settings</string>
+    <string name="ime_status_system_microphone_blocked">Android speech service could not use the microphone. In Settings, choose OpenTypeless offline and download the model.</string>
     <string name="ime_status_preparing_local_data">Preparing local settings and vocabulary…</string>
     <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
     <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>

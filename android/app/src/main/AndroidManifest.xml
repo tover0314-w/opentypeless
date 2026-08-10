@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <queries>
         <intent>
@@ -60,6 +62,7 @@
         <service
             android:name=".recognition.OpenTypelessRecognitionService"
             android:exported="true"
+            android:foregroundServiceType="microphone"
             tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="android.speech.RecognitionService" />
@@ -70,6 +73,7 @@
         <service
             android:name=".ime.OpenTypelessImeService"
             android:exported="true"
+            android:foregroundServiceType="microphone"
             android:label="@string/ime_name"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>

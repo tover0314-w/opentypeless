@@ -1,1 +1,2 @@
-# The Android client uses only platform APIs. Keep this file for release-specific rules.
+# sherpa-onnx exposes Kotlin/JNI entry points whose names must remain stable for native lookup.
+-keep class com.k2fsa.sherpa.onnx.** { *; }

@@ -2,6 +2,7 @@ package com.opentypeless.android.settings;
 
 public enum RecognitionBackend {
     OPENAI_COMPATIBLE("BYOK / self-hosted"),
+    LOCAL_OFFLINE("OpenTypeless offline model"),
     SYSTEM_ON_DEVICE("Android on-device"),
     SYSTEM_DEFAULT("Android system service");
 

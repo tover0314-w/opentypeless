@@ -1,0 +1,48 @@
+{"id":"zh_general_01","language":"zh","category":"general","text":"今天下午三点开产品评审会，请提前十分钟到会议室。","hotwords":[],"noise_probe":true}
+{"id":"zh_general_02","language":"zh","category":"general","text":"如果网络断开，语音输入仍然应该保存当前结果。","hotwords":[],"noise_probe":false}
+{"id":"zh_general_03","language":"zh","category":"general","text":"我刚刚修改了项目配置，但是还没有提交代码。","hotwords":[],"noise_probe":false}
+{"id":"zh_general_04","language":"zh","category":"general","text":"请把这段话整理得简洁一些，不要改变原来的数字。","hotwords":[],"noise_probe":true}
+{"id":"zh_general_05","language":"zh","category":"general","text":"周末可能有小雨，出门的时候记得带伞。","hotwords":[],"noise_probe":false}
+{"id":"zh_general_06","language":"zh","category":"general","text":"这个问题需要先复现，再分析日志，最后验证修复。","hotwords":[],"noise_probe":false}
+{"id":"zh_general_07","language":"zh","category":"general","text":"用户可以选择关闭历史记录和智能整理功能。","hotwords":[],"noise_probe":false}
+{"id":"zh_general_08","language":"zh","category":"general","text":"我想订明天早上七点半从上海到杭州的高铁票。","hotwords":[],"noise_probe":true}
+{"id":"en_general_01","language":"en","category":"general","text":"Please schedule the design review for three thirty tomorrow afternoon.","hotwords":[],"noise_probe":true}
+{"id":"en_general_02","language":"en","category":"general","text":"The offline recognizer should never upload audio to the network.","hotwords":[],"noise_probe":false}
+{"id":"en_general_03","language":"en","category":"general","text":"I changed the configuration but have not committed the code yet.","hotwords":[],"noise_probe":false}
+{"id":"en_general_04","language":"en","category":"general","text":"Please preserve every number, date, and email address in this message.","hotwords":[],"noise_probe":true}
+{"id":"en_general_05","language":"en","category":"general","text":"The quick brown fox jumps over the lazy dog.","hotwords":[],"noise_probe":false}
+{"id":"en_general_06","language":"en","category":"general","text":"We need to reproduce the bug, inspect the logs, and verify the fix.","hotwords":[],"noise_probe":false}
+{"id":"en_general_07","language":"en","category":"general","text":"Users can disable history and intelligent rewriting at any time.","hotwords":[],"noise_probe":false}
+{"id":"en_general_08","language":"en","category":"general","text":"Set a reminder for seven thirty on Friday morning.","hotwords":[],"noise_probe":true}
+{"id":"mixed_01","language":"mixed","category":"code_switch","text":"请把 OpenTypeless 的 Android build 上传到 GitHub Actions。","tts_text":"请把 Open Type Less 的 Android build 上传到 GitHub Actions。","hotwords":["OpenTypeless"],"bias_phrases":["OPEN TYPE LESS"],"correction_aliases":["OPEN TYPE LESS"],"noise_probe":true}
+{"id":"mixed_02","language":"mixed","category":"code_switch","text":"这个 API endpoint 必须使用 HTTPS，不能发送 bearer token。","hotwords":[],"noise_probe":false}
+{"id":"mixed_03","language":"mixed","category":"code_switch","text":"请检查 PostgreSQL migration 和 SQLite WAL 是否已经清理。","tts_text":"请检查 Postgres Q L migration 和 SQLite WAL 是否已经清理。","hotwords":["PostgreSQL"],"bias_phrases":["POSTGRES Q L"],"correction_aliases":["POSTGRES Q L"],"noise_probe":false}
+{"id":"mixed_04","language":"mixed","category":"code_switch","text":"明天 review VoicePipeline 的 cancel race condition。","tts_text":"明天 review Voice Pipeline 的 cancel race condition。","hotwords":["VoicePipeline"],"bias_phrases":["VOICE PIPELINE"],"correction_aliases":["VOICE PIPELINE"],"noise_probe":true}
+{"id":"mixed_05","language":"mixed","category":"code_switch","text":"把 model provider 切换到 system on device 模式。","hotwords":[],"noise_probe":false}
+{"id":"mixed_06","language":"mixed","category":"code_switch","text":"这个 pull request 有 twelve tests and zero failures。","hotwords":[],"noise_probe":false}
+{"id":"mixed_07","language":"mixed","category":"code_switch","text":"请用 Kotlin 编写 RecognitionService 的 integration test。","tts_text":"请用 Kotlin 编写 Recognition Service 的 integration test。","hotwords":["RecognitionService"],"bias_phrases":["RECOGNITION SERVICE"],"correction_aliases":["RECOGNITION SERVICE"],"noise_probe":false}
+{"id":"mixed_08","language":"mixed","category":"code_switch","text":"我们需要比较 Zipformer and Whisper on the same audio。","hotwords":["Zipformer"],"bias_phrases":["ZIP FORMER"],"correction_aliases":["ZIP FORMER"],"noise_probe":true}
+{"id":"zh_entity_01","language":"zh","category":"personal_entity","text":"请联系张雪昭确认验收时间。","hotwords":["张雪昭"],"noise_probe":true}
+{"id":"zh_entity_02","language":"zh","category":"personal_entity","text":"澜舟科技将在下周发布新的语音模型。","hotwords":["澜舟科技"],"noise_probe":false}
+{"id":"zh_entity_03","language":"zh","category":"personal_entity","text":"把飞桨框架升级到最新稳定版本。","hotwords":["飞桨"],"noise_probe":false}
+{"id":"zh_entity_04","language":"zh","category":"personal_entity","text":"文心一言需要保持原始数字不变。","hotwords":["文心一言"],"noise_probe":true}
+{"id":"zh_entity_05","language":"zh","category":"personal_entity","text":"量子位报道了这次模型更新。","hotwords":["量子位"],"noise_probe":false}
+{"id":"zh_entity_06","language":"zh","category":"personal_entity","text":"壁仞科技正在测试新的加速卡。","hotwords":["壁仞科技"],"noise_probe":false}
+{"id":"zh_entity_07","language":"zh","category":"personal_entity","text":"沐曦集成电路发布了软件工具链。","hotwords":["沐曦集成电路"],"noise_probe":false}
+{"id":"zh_entity_08","language":"zh","category":"personal_entity","text":"燧原科技完成了兼容性验证。","hotwords":["燧原科技"],"noise_probe":true}
+{"id":"en_entity_01","language":"en","category":"personal_entity","text":"Please open the OpenTypeless settings page.","tts_text":"Please open the Open Type Less settings page.","hotwords":["OpenTypeless"],"bias_phrases":["OPEN TYPE LESS"],"correction_aliases":["OPEN TYPE LESS"],"noise_probe":true}
+{"id":"en_entity_02","language":"en","category":"personal_entity","text":"Kubernetes restarted the deployment after the health check failed.","hotwords":["Kubernetes"],"noise_probe":false}
+{"id":"en_entity_03","language":"en","category":"personal_entity","text":"PostgreSQL completed the migration without losing any rows.","tts_text":"Postgres Q L completed the migration without losing any rows.","hotwords":["PostgreSQL"],"bias_phrases":["POSTGRES Q L"],"correction_aliases":["POSTGRES Q L"],"noise_probe":false}
+{"id":"en_entity_04","language":"en","category":"personal_entity","text":"Anthropic published an updated model card.","hotwords":["Anthropic"],"noise_probe":true}
+{"id":"en_entity_05","language":"en","category":"personal_entity","text":"Hugging Face stores the model weights in a separate repository.","hotwords":["Hugging Face"],"noise_probe":false}
+{"id":"en_entity_06","language":"en","category":"personal_entity","text":"PyTorch exported the encoder to the ONNX format.","tts_text":"Pie Torch exported the encoder to the O N N X format.","hotwords":["PyTorch"],"bias_phrases":["PIE TORCH"],"correction_aliases":["PIE TORCH"],"noise_probe":false}
+{"id":"en_entity_07","language":"en","category":"personal_entity","text":"The mobile application stores metadata in Supabase.","tts_text":"The mobile application stores metadata in Soup a Base.","hotwords":["Supabase"],"bias_phrases":["SOUP A BASE"],"correction_aliases":["SOUP A BASE"],"noise_probe":false}
+{"id":"en_entity_08","language":"en","category":"personal_entity","text":"Cloudflare rejected the unsafe redirect.","hotwords":["Cloudflare"],"noise_probe":true}
+{"id":"control_zh_01","language":"zh","category":"hotword_control","text":"请联系张先生确认验收时间。","hotwords":[],"noise_probe":false}
+{"id":"control_zh_02","language":"zh","category":"hotword_control","text":"请把文字飞快地传到屏幕上。","hotwords":[],"noise_probe":false}
+{"id":"control_zh_03","language":"zh","category":"hotword_control","text":"我们今天讨论温馨的一言一行。","hotwords":[],"noise_probe":false}
+{"id":"control_zh_04","language":"zh","category":"hotword_control","text":"这个项目需要沐浴阳光并保持清醒。","hotwords":[],"noise_probe":false}
+{"id":"control_en_01","language":"en","category":"hotword_control","text":"The open type uses fewer dependencies than the old design.","hotwords":[],"noise_probe":false}
+{"id":"control_en_02","language":"en","category":"hotword_control","text":"The post office stores data in a structured database.","hotwords":[],"noise_probe":false}
+{"id":"control_en_03","language":"en","category":"hotword_control","text":"The soup base is ready for dinner.","hotwords":[],"noise_probe":false}
+{"id":"control_en_04","language":"en","category":"hotword_control","text":"The cloud layer should handle traffic safely.","hotwords":[],"noise_probe":false}

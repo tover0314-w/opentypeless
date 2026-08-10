@@ -1,7 +1,9 @@
 package com.opentypeless.android.recognition;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -16,6 +18,8 @@ import com.opentypeless.android.settings.RecognitionBackend;
 import java.util.List;
 
 public final class SystemSpeechRecognizer {
+    public static final String MICROPHONE_ACCESS_BLOCKED =
+            "Android speech service was denied microphone access";
     private static final long STOP_GRACE_MILLIS = 8_000L;
     private static final long NATURAL_END_GRACE_MILLIS = 15_000L;
 
@@ -24,7 +28,7 @@ public final class SystemSpeechRecognizer {
         default void onBeginningOfSpeech() {}
         void onPartial(String text);
         void onFinal(String text);
-        void onError(String message);
+        void onError(int errorCode, String message);
     }
 
     private final Context context;
@@ -98,6 +102,7 @@ public final class SystemSpeechRecognizer {
                     failStart(
                             run,
                             callback,
+                            SpeechRecognizer.ERROR_CLIENT,
                             "On-device speech recognition is not available on this device");
                     return;
                 }
@@ -107,6 +112,7 @@ public final class SystemSpeechRecognizer {
                     failStart(
                             run,
                             callback,
+                            SpeechRecognizer.ERROR_CLIENT,
                             "No Android speech recognition service is installed");
                     return;
                 }
@@ -122,7 +128,7 @@ public final class SystemSpeechRecognizer {
                     () -> stopForTimeout(run, callback));
             recognizer.startListening(intent);
         } catch (RuntimeException error) {
-            failStart(run, callback, error.getMessage() == null
+            failStart(run, callback, SpeechRecognizer.ERROR_CLIENT, error.getMessage() == null
                     ? "Unable to start Android speech recognition"
                     : error.getMessage());
         }
@@ -183,7 +189,7 @@ public final class SystemSpeechRecognizer {
 
             @Override
             public void onError(int error) {
-                if (finishCurrent(run)) callback.onError(errorMessage(error));
+                if (finishCurrent(run)) callback.onError(error, errorMessage(error));
             }
 
             @Override
@@ -193,11 +199,17 @@ public final class SystemSpeechRecognizer {
                 try {
                     text = firstResult(results);
                 } catch (IllegalArgumentException error) {
-                    if (finishCurrent(run)) callback.onError(error.getMessage());
+                    if (finishCurrent(run)) {
+                        callback.onError(SpeechRecognizer.ERROR_CLIENT, error.getMessage());
+                    }
                     return;
                 }
                 if (!finishCurrent(run)) return;
-                if (text.isBlank()) callback.onError("Android speech recognition returned no text");
+                if (text.isBlank()) {
+                    callback.onError(
+                            SpeechRecognizer.ERROR_NO_MATCH,
+                            "Android speech recognition returned no text");
+                }
                 else callback.onFinal(text);
             }
 
@@ -208,7 +220,9 @@ public final class SystemSpeechRecognizer {
                     try {
                         text = firstResult(partialResults);
                     } catch (IllegalArgumentException error) {
-                        if (finishCurrent(run)) callback.onError(error.getMessage());
+                        if (finishCurrent(run)) {
+                            callback.onError(SpeechRecognizer.ERROR_CLIENT, error.getMessage());
+                        }
                         return;
                     }
                     if (!text.isBlank()) callback.onPartial(text);
@@ -229,10 +243,10 @@ public final class SystemSpeechRecognizer {
         return true;
     }
 
-    private void failStart(long run, Callback callback, String message) {
+    private void failStart(long run, Callback callback, int errorCode, String message) {
         if (!generation.finish(run)) return;
         destroyRecognizer();
-        callback.onError(message);
+        callback.onError(errorCode, message);
     }
 
     private void destroyRecognizer() {
@@ -272,7 +286,11 @@ public final class SystemSpeechRecognizer {
         try {
             recognizer.stopListening();
         } catch (RuntimeException error) {
-            if (finishCurrent(run)) callback.onError("Unable to stop Android speech recognition");
+            if (finishCurrent(run)) {
+                callback.onError(
+                        SpeechRecognizer.ERROR_CLIENT,
+                        "Unable to stop Android speech recognition");
+            }
             return;
         }
         if (!current(run) || recognizer == null) return;
@@ -289,7 +307,9 @@ public final class SystemSpeechRecognizer {
         } catch (RuntimeException ignored) {
             // destroyRecognizer() below is the final cleanup path.
         }
-        if (finishCurrent(run)) callback.onError(terminalError);
+        if (finishCurrent(run)) {
+            callback.onError(SpeechRecognizer.ERROR_SPEECH_TIMEOUT, terminalError);
+        }
     }
 
     private static String firstResult(Bundle bundle) {
@@ -300,11 +320,15 @@ public final class SystemSpeechRecognizer {
                 : RecognitionTextLimit.apply(values.get(0).trim());
     }
 
-    private static String errorMessage(int error) {
+    private String errorMessage(int error) {
         return switch (error) {
             case SpeechRecognizer.ERROR_AUDIO -> "Android speech recognition audio error";
             case SpeechRecognizer.ERROR_CLIENT -> "Android speech recognition was cancelled";
-            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required";
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                    context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                            == PackageManager.PERMISSION_GRANTED
+                            ? MICROPHONE_ACCESS_BLOCKED
+                            : "Microphone permission is required";
             case SpeechRecognizer.ERROR_NETWORK -> "Android speech recognition network error";
             case SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Android speech recognition timed out";
             case SpeechRecognizer.ERROR_NO_MATCH -> "No speech could be recognized";

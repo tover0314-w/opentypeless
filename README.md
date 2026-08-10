@@ -19,6 +19,10 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   genuinely available, otherwise the installed system service, otherwise an explicit BYOK or
   self-hosted OpenAI-compatible endpoint. “System service” is labelled separately because its
   network behavior belongs to that provider and is not guaranteed offline.
+- **Tested optional offline model:** non-low-RAM devices may explicitly download the pinned
+  228.45 MiB SenseVoice Small INT8 quality model into private no-backup storage. Exact size and
+  SHA-256 are checked before atomic installation and again before first decode; the model can be
+  deleted in Settings and is never bundled into the APK.
 - **AI is optional:** Exact mode and structured fields do not require an LLM. Smart editing,
   selected-text editing, and translation run only after the user enables an OpenAI-compatible LLM.
 - **Personal names that actually reach ASR:** confirmed canonical spellings, pronunciations,
@@ -42,10 +46,25 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   is capped locally, and is never included in dictionary export.
 - **Per-app behavior:** an explicit app profile can choose Auto, Exact, Smart, or Translate mode,
   a target language, a writing preference, and whether limited preceding context may be sent.
-- **Voice UX:** partial results for Android recognizers; silence auto-stop, leading-silence trim,
-  cancellation tokens, and an upper recording limit for upload-based recognition.
+- **Voice UX:** tap Space for a space, or hold it to talk and release to stop. Android recognizers
+  use native partials; local SenseVoice re-decodes a bounded prefix every 750 ms and revises
+  composing text in place. The authoritative final pass then applies personal rules and accepts
+  ITN punctuation only when no word or number changed. Upload capture retains silence auto-stop,
+  leading-silence trim, cancellation tokens, and an upper recording limit.
 
 No model weights are bundled. See [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
+The first 189.85 MiB Zipformer was rejected. The next round tested SenseVoice and Paraformer on all
+1,315 pinned ASCEND test utterances; SenseVoice reached 11.4% Mandarin CER, 25.9% English WER, and
+13.3% mixed MER and passed a real API 36 arm64 download/native-decode smoke gate. The app now uses
+a verified ASR-only two-ABI runtime: the clean universal debug APK is 52.54 MiB instead of the
+upstream all-feature 120 MiB build. Its measured 457 MiB transient peak still prevents a general
+default claim. Same-size Paraformer Large and Whisper Small Q5_1 were also screened and rejected as
+bilingual defaults. When the user explicitly configures `zh-*` or `cmn-*`, the offline route now
+uses SenseVoice's Mandarin lock; the fixed A/B reduced public Mandarin CER from 10.59% to 10.01%
+and mixed MER from 20.37% to 18.31%. English remains auto-detected because forcing `en` regressed.
+See
+the [round-2 evaluation](docs/2026-08-09-offline-asr-candidate-round-2.md) and
+[reproducible harness](benchmarks/offline_asr/README.md).
 
 ## Processing policy
 
@@ -67,6 +86,8 @@ Existing confirmed dictionary entries may still help recognition; they are not m
   installed language model.
 - Android system recognition may be local or cloud-backed. OpenTypeless reports it as a distinct
   route and does not claim it is offline.
+- The optional OpenTypeless offline route keeps recognition audio on the device. Only its model
+  download uses the network; the fixed download carries no provider credentials.
 - BYOK audio goes directly to the configured `/audio/transcriptions` endpoint. Optional Smart,
   Translate, or selected-text content goes directly to `/chat/completions`.
 - HTTP redirects are rejected, provider error bodies are not shown, response sizes are bounded,
@@ -82,21 +103,24 @@ Existing confirmed dictionary entries may still help recognition; they are not m
 1. Install `android/app/build/outputs/apk/debug/app-debug.apk` or a properly signed release APK.
 2. Open **OpenTypeless Voice Studio**, grant microphone access, and confirm the selected speech
    route. Android on-device is preferred only when the platform reports it available.
-3. Optionally configure BYOK STT and an LLM. AI, history, and preceding-context sharing start off.
+3. Optionally download the quality offline model, or configure BYOK STT and an LLM. AI, history,
+   and preceding-context sharing start off.
 4. Enable the OpenTypeless IME. To use either Android standard speech entry, first configure a
    ready BYOK STT endpoint, explicitly enable **Standard Android speech entry**, and add the exact
    caller package name to its allowlist. Then select OpenTypeless as the speech-recognition service
    or launch its `RecognizerIntent` activity from that allowed app. Some proprietary keyboards
    hard-code their own speech provider; use the independent IME or system keyboard switcher in that
    case.
-5. Choose Auto, Exact, Smart, or Translate, then speak. For selected-text editing, select text before
-   starting voice input; the same selection must still exist when the result returns.
+5. Select Auto, Exact, Smart, or Translate, then tap **Speak** or hold Space and release to stop.
+   Local live text is provisional composing text and may be revised in place by the final pass. For
+   selected-text editing, select text before starting voice input; the same selection must still
+   exist when the result returns.
 
 Both exported standard speech entries intentionally use the BYOK STT route only and are disabled
 by default. Their package allowlist and request limiter prevent an arbitrary microphone-enabled app
 from spending the user's provider quota. Calling the Android system recognizer from inside a
 registered recognition service could resolve back to itself. The independent IME supports all
-three recognition backends.
+four recognition backends.
 
 ## Build and verify Android
 
@@ -106,15 +130,21 @@ Requirements: JDK 17, Android SDK Platform 35, and Build Tools 35.x.
 cd android
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/android-sdk
+python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-asr-1.13.4.aar
 ./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
 ./gradlew connectedDebugAndroidTest  # with an API 35+ emulator/device online
 ```
 
+The checked-in native runtime supports 64-bit ARM devices and x86_64 emulators. Rebuilding that
+AAR from its pinned sources additionally requires Android NDK r27d; use
+`scripts/build_sherpa_asr_runtime.py --help` for the audited build command and provenance inputs.
+
 The automated suite covers deterministic personalization, NFKC span mapping, prompt boundaries,
 fact integrity, VAD, cancellation state, editor-target identity, HTTP redirects/errors/headers,
 RecognitionService contracts, real SQLite import transactions, and Android Keystore history
-encryption/migration. CI runs JVM, lint, APK assembly, and API 35 emulator tests without real API
-keys.
+encryption/migration. The opt-in large-model gate additionally covers a real revision-pinned model
+download, exact hashes, native arm64 load/decode, and measured memory. CI runs JVM, lint, APK
+assembly, and API 35 emulator tests without real API keys or a 229 MiB model download.
 
 The exact accepted matrix, artifacts, and known limits are recorded in the
 [2026-08-09 acceptance report](docs/2026-08-09-byok-android-acceptance.md).
@@ -139,10 +169,11 @@ npm run tauri build
 
 Android 0.2 is a voice layer, not a newly invented full QWERTY/swipe keyboard. Its standard Android
 entry points are the compatibility strategy. Android on-device recognition is not available on
-every device or for every language, and the project does not yet publish a cross-device CER/WER,
-latency, battery, or blind Typeless benchmark. The repository therefore claims verifiable product
-advantages—offline-capable routing, provider freedom, explicit term learning, target-bound commits,
-fact guards, and reversible AI—not universal recognition accuracy superiority.
+every device or for every language. The repository now publishes a reproducible desktop screening
+benchmark that rejected one offline candidate, but it does not yet publish a cross-device latency,
+battery, unseen mobile blind-set, or Typeless head-to-head result. It therefore claims verifiable
+product advantages—offline-capable routing, provider freedom, explicit term learning, target-bound
+commits, fact guards, and reversible AI—not universal recognition accuracy superiority.
 
 ## License
 

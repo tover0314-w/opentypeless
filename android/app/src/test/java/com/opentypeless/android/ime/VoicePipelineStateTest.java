@@ -4,6 +4,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import android.speech.SpeechRecognizer;
+
 import org.junit.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,5 +47,39 @@ public final class VoicePipelineStateTest {
         assertSame(
                 VoicePipeline.AiCandidateDisposition.ACCEPT,
                 VoicePipeline.aiCandidateDisposition(true, true));
+    }
+
+    @Test
+    public void fallsBackOnlyForGrantedVendorPermissionFailureWithInstalledModel() {
+        assertTrue(VoicePipeline.shouldFallbackToLocal(
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                true,
+                true,
+                true,
+                false));
+        assertFalse(VoicePipeline.shouldFallbackToLocal(
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                false,
+                true,
+                true,
+                false));
+        assertFalse(VoicePipeline.shouldFallbackToLocal(
+                SpeechRecognizer.ERROR_AUDIO,
+                true,
+                true,
+                true,
+                false));
+        assertFalse(VoicePipeline.shouldFallbackToLocal(
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                true,
+                true,
+                false,
+                false));
+        assertFalse(VoicePipeline.shouldFallbackToLocal(
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
+                true,
+                true,
+                true,
+                true));
     }
 }

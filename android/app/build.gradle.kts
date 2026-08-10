@@ -1,5 +1,21 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
+}
+
+val sherpaAsrRuntime = layout.projectDirectory.file("libs/sherpa-onnx-asr-1.13.4.aar").asFile
+val expectedSherpaAsrRuntimeSha256 =
+    "35af2790bfcb39a1bfe6d0d495193b7fadc367c5c6f07e5e95996ba210cb9196"
+require(sherpaAsrRuntime.isFile) {
+    "Missing pinned ASR-only runtime: ${sherpaAsrRuntime.path}"
+}
+val actualSherpaAsrRuntimeSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(sherpaAsrRuntime.readBytes())
+    .joinToString("") { "%02x".format(it) }
+require(actualSherpaAsrRuntimeSha256 == expectedSherpaAsrRuntimeSha256) {
+    "ASR-only runtime checksum mismatch: expected $expectedSherpaAsrRuntimeSha256, " +
+        "got $actualSherpaAsrRuntimeSha256"
 }
 
 val releaseStorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
@@ -71,6 +87,8 @@ android {
 }
 
 dependencies {
+    implementation(files(sherpaAsrRuntime))
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.7.20")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

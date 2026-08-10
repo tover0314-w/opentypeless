@@ -16,6 +16,8 @@ public final class AudioRecorder {
     public interface CaptureListener {
         default void onReady() {}
         default void onBeginningOfSpeech() {}
+        /** Called synchronously on the capture thread; implementations must copy retained data. */
+        default void onAudio(byte[] pcm16, int length) {}
     }
 
     private static final CaptureListener NO_CAPTURE_LISTENER = new CaptureListener() {};
@@ -101,6 +103,7 @@ public final class AudioRecorder {
                 if (read > 0) {
                     consecutiveEmptyReads = 0;
                     pcm.append(buffer, 0, read);
+                    listener.onAudio(buffer, read);
                     AdaptiveVad.Decision decision = vad.accept(buffer, read, pcm.size());
                     captureEvents.speechDetected(vad.heardSpeech());
                     if (decision == AdaptiveVad.Decision.END_OF_SPEECH) {

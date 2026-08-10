@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="ime_status_offline_model_missing">请先在设置中下载 OpenTypeless 离线模型，再开始录音</string>
     <!-- 语音键盘按键与无障碍朗读文本。 -->
     <string name="ime_key_space">空格</string>
     <string name="ime_key_undo">撤销</string>
@@ -13,6 +14,8 @@
     <string name="ime_cd_stop_voice_recording">停止录音</string>
     <string name="ime_cd_delete">删除</string>
     <string name="ime_cd_insert_space">插入空格</string>
+    <string name="ime_cd_space_hold_to_talk">插入空格；按住可进行语音输入</string>
+    <string name="ime_status_hold_too_short">请按住空格，等开始聆听后再松手</string>
     <string name="ime_cd_enter">换行或执行编辑器操作</string>
     <string name="ime_cd_switch_keyboard">切换键盘</string>
     <string name="ime_cd_undo">撤销上一次语音插入</string>
@@ -36,6 +39,7 @@
     <string name="ime_status_processing_cancel_hint">语音仍在处理；如需放弃，请点按“取消”</string>
     <string name="ime_status_preparing_cancel_hint">正在准备语音输入；如需放弃，请点按“取消”</string>
     <string name="ime_status_microphone_permission">请在 OpenTypeless 设置中授予麦克风权限</string>
+    <string name="ime_status_system_microphone_blocked">小米系统语音服务无法使用麦克风。请在设置中选择 OpenTypeless 离线模型并下载模型。</string>
     <string name="ime_status_preparing_local_data">正在准备本地设置和词汇…</string>
     <string name="ime_status_configure_backend">请先配置已选语音识别后端</string>
     <string name="ime_status_target_changed_cancelled">输入目标已更改；为保证安全，已取消语音输入</string>

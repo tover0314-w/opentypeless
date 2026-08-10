@@ -1,0 +1,6 @@
+audio/
+models/
+results/
+__pycache__/
+*.aiff
+*.wav

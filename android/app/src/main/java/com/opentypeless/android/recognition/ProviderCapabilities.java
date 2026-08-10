@@ -13,6 +13,7 @@ public record ProviderCapabilities(
     public static ProviderCapabilities forBackend(RecognitionBackend backend) {
         return switch (backend) {
             case OPENAI_COMPATIBLE -> new ProviderCapabilities(false, false, true, false, true);
+            case LOCAL_OFFLINE -> new ProviderCapabilities(true, false, false, false, false);
             case SYSTEM_ON_DEVICE -> new ProviderCapabilities(true, true, false, true, true);
             case SYSTEM_DEFAULT -> new ProviderCapabilities(false, true, false, true, true);
         };

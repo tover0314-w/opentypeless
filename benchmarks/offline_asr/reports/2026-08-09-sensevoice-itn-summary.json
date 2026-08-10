@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "experiment": "sensevoice_inverse_text_normalization",
+  "only_changed_parameter": {
+    "use_itn": {
+      "baseline": false,
+      "candidate": true
+    }
+  },
+  "runner_sha256": "df0ad9ddf97cd14c89f2d3866e3cacec26395c119d975e87147612b7810df140",
+  "experiment_script_sha256": "a3b11673c60a971e6d688c41a06610325ebf95ae9f9a5b0f422e8cb9f87d4c01",
+  "model": {
+    "model_bytes": 239233841,
+    "model_sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+    "tokens_bytes": 315894,
+    "tokens_sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc"
+  },
+  "public_200": {
+    "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+    "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c",
+    "baseline_results_sha256": "9a279a40e6dabca4841228bed10d5f01f75c04049a24ec95de9203ffc43cfd6a",
+    "baseline": {
+      "overall_error_rate": 0.11141084434852981,
+      "zh_cer": 0.10589941972920697,
+      "en_wer": 0.08735440931780367,
+      "mixed_mer": 0.2036613272311213
+    },
+    "itn": {
+      "overall_error_rate": 0.09981116806042623,
+      "zh_cer": 0.08558994197292069,
+      "en_wer": 0.09068219633943428,
+      "mixed_mer": 0.19221967963386727
+    },
+    "paired_counts": {
+      "changed": 200,
+      "improved": 26,
+      "worsened": 28,
+      "tied": 146
+    }
+  },
+  "synthetic_142": {
+    "manifest_sha256": "28f3d9e6ef199c8fd3b6cdfa86c172da1ed0f6af5110dd0459ae9d80fc35efed",
+    "audio_set_sha256": "47c748c21e47feeed5e73ec395dcf028e369259b1ca4dbf4aa48ff3ca526ae5a",
+    "baseline_results_sha256": "64434ac8df2e2248d9a2f328756a501235b64d7f4e0b9fcf2eb39295786ca0f7",
+    "baseline": {
+      "overall_error_rate": 0.12278630460448642,
+      "zh_cer": 0.04157782515991471,
+      "en_wer": 0.1,
+      "mixed_mer": 0.4796747967479675,
+      "entity_hits": 16,
+      "entity_total": 60
+    },
+    "itn": {
+      "overall_error_rate": 0.1269185360094451,
+      "zh_cer": 0.05970149253731343,
+      "en_wer": 0.11568627450980393,
+      "mixed_mer": 0.4065040650406504,
+      "entity_hits": 16,
+      "entity_total": 60
+    },
+    "paired_counts": {
+      "changed": 142,
+      "improved": 13,
+      "worsened": 26,
+      "tied": 103
+    }
+  },
+  "decision": "keep_itn_off_by_default_until_locale_aware_number_formatting_is_available"
+}
