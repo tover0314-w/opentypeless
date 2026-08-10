@@ -10,7 +10,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -18,6 +20,7 @@ import android.speech.SpeechRecognizer;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.annotation.RequiresApi;
 
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.RecognitionBackend;
@@ -28,6 +31,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -188,16 +193,43 @@ public final class RecognitionServiceBinderInstrumentedTest {
 
     private void grantMicrophone(String packageName) {
         try {
-            instrumentation.getUiAutomation().grantRuntimePermission(
-                    packageName,
-                    Manifest.permission.RECORD_AUDIO);
-        } catch (RuntimeException ignored) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Api28.grantRuntimePermission(instrumentation, packageName);
+            } else {
+                grantRuntimePermissionWithShell(packageName);
+            }
+        } catch (IOException | RuntimeException ignored) {
             // The instrumentation APK does not request RECORD_AUDIO; the target app does.
         }
         if (packageName.equals(context.getPackageName())) {
             assertEquals(
                     PackageManager.PERMISSION_GRANTED,
                     context.checkSelfPermission(Manifest.permission.RECORD_AUDIO));
+        }
+    }
+
+    private void grantRuntimePermissionWithShell(String packageName) throws IOException {
+        if (!packageName.matches("[A-Za-z0-9_.]+")) {
+            throw new IllegalArgumentException("Unsafe package name");
+        }
+        ParcelFileDescriptor descriptor = instrumentation.getUiAutomation().executeShellCommand(
+                "pm grant " + packageName + " " + Manifest.permission.RECORD_AUDIO);
+        try (InputStream output = new ParcelFileDescriptor.AutoCloseInputStream(descriptor)) {
+            byte[] buffer = new byte[256];
+            while (output.read(buffer) != -1) {
+                // Drain the command so the permission change is complete before the assertion.
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    private static final class Api28 {
+        private Api28() {}
+
+        static void grantRuntimePermission(Instrumentation instrumentation, String packageName) {
+            instrumentation.getUiAutomation().grantRuntimePermission(
+                    packageName,
+                    Manifest.permission.RECORD_AUDIO);
         }
     }
 }

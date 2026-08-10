@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -90,9 +91,13 @@ public final class AndroidRecognitionContractsInstrumentedTest {
         assertEquals(3, intent.getIntExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 0));
         assertTrue(intent.getBooleanExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false));
         assertEquals("zh-CN", intent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE));
-        assertEquals(
-                RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY,
-                intent.getStringExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            assertEquals(
+                    RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY,
+                    intent.getStringExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING));
+        } else {
+            assertFalse(intent.hasExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING));
+        }
     }
 
     @Test
