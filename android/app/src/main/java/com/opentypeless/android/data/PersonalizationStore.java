@@ -351,7 +351,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 null,
                 null,
                 "app_scope_key, canonical_key",
-                safeLimit + " OFFSET " + safeOffset)) {
+                paginationLimit(safeLimit, safeOffset))) {
             List<PersonalTerm> result = new ArrayList<>();
             while (cursor.moveToNext()) result.add(readTerm(cursor));
             return result;
@@ -373,7 +373,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 null,
                 null,
                 "app_scope, pattern COLLATE NOCASE",
-                safeLimit + " OFFSET " + safeOffset)) {
+                paginationLimit(safeLimit, safeOffset))) {
             List<CorrectionRule> result = new ArrayList<>();
             while (cursor.moveToNext()) result.add(readCorrection(cursor));
             return result;
@@ -448,7 +448,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 null,
                 null,
                 "created_at DESC, id DESC",
-                safeLimit + " OFFSET " + safeOffset)) {
+                paginationLimit(safeLimit, safeOffset))) {
             List<HistoryEntry> result = new ArrayList<>();
             while (cursor.moveToNext()) result.add(readHistory(cursor));
             return result;
@@ -1020,6 +1020,12 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String paginationLimit(int limit, int offset) {
+        // Android 8.0's SQLiteQueryBuilder rejects the newer "LIMIT n OFFSET m" spelling.
+        // SQLite's equivalent "LIMIT offset,count" form passes every supported API validator.
+        return offset + "," + limit;
     }
 
     private static String limit(String value, int maximum) {

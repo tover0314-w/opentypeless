@@ -149,6 +149,10 @@ public final class PersonalizationStoreInstrumentedTest {
         assertEquals("Beta", store.listTerms(2, 1).get(0).canonical());
         assertEquals("Gamma", store.listTerms(2, 1).get(1).canonical());
 
+        store.addCorrection("alpha wrong", "alpha right", "");
+        store.addCorrection("beta wrong", "beta right", "");
+        assertEquals("beta wrong", store.listCorrections(1, 1).get(0).pattern());
+
         store.addHistory(new HistoryEntry(
                 0, 100, "app", "GENERAL", "VERBATIM", "SYSTEM_DEFAULT", "one", "one", 1));
         store.addHistory(new HistoryEntry(
