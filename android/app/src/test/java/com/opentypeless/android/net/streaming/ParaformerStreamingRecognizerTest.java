@@ -190,6 +190,13 @@ public final class ParaformerStreamingRecognizerTest {
             public void onMessage(WebSocket socket, ByteString bytes) {
                 if (bytes.size() > 0) audioReceived.countDown();
             }
+
+            @Override
+            public void onClosing(WebSocket socket, int code, String reason) {
+                // MockWebServer does not automatically acknowledge a peer close. Complete the
+                // WebSocket close handshake so its request queue can terminate deterministically.
+                socket.close(code, reason);
+            }
         };
     }
 
