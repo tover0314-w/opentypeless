@@ -4,13 +4,13 @@
 
 This independent MIT fork removes the account, subscription, checkout, quota, donation, and
 managed-cloud product paths from OpenTypeless. It keeps the desktop BYOK application and adds
-OpenTypeless Android 0.2: a local-first voice-input layer designed to be safer and more adaptable
+OpenTypeless Android 0.3: a local-first voice-input layer designed to be safer and more adaptable
 than a mandatory-cloud “ASR + LLM” keyboard.
 
 - Fork: [dengxuezhao/opentypeless](https://github.com/dengxuezhao/opentypeless)
 - Upstream project: [tover0314-w/opentypeless](https://github.com/tover0314-w/opentypeless)
 
-## Android 0.2 highlights
+## Android 0.3 highlights
 
 - **Three Android entry points:** an independent voice IME, a standard `RecognitionService`, and a
   `RecognizerIntent` activity. The service lets compatible full keyboards keep their letters,
@@ -23,6 +23,14 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   228.45 MiB SenseVoice Small INT8 quality model into private no-backup storage. Exact size and
   SHA-256 are checked before atomic installation and again before first decode; the model can be
   deleted in Settings and is never bundled into the APK.
+- **Live text in the editor:** Android partial hypotheses use replaceable IME composing text. Word
+  and punctuation revisions replace the previous draft instead of being appended or shown only in
+  a status label. Cursor movement created by OpenTypeless is distinguished from a user target
+  change, and cancellation removes only the owned composition.
+- **True realtime streaming:** the optional DashScope Paraformer route sends bounded 40 ms,
+  16 kHz PCM frames over an allowlisted WSS endpoint, consumes incremental punctuated results, and
+  caps the outgoing queue. The existing OpenAI-compatible completed-WAV upload remains clearly
+  labelled as batch recognition; OpenTypeless never silently switches providers.
 - **AI is optional:** Exact mode and structured fields do not require an LLM. Smart editing,
   selected-text editing, and translation run only after the user enables an OpenAI-compatible LLM.
 - **Personal names that actually reach ASR:** confirmed canonical spellings, pronunciations,
@@ -50,7 +58,10 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   use native partials; local SenseVoice re-decodes a bounded prefix every 750 ms and revises
   composing text in place. The authoritative final pass then applies personal rules and accepts
   ITN punctuation only when no word or number changed. Upload capture retains silence auto-stop,
-  leading-silence trim, cancellation tokens, and an upper recording limit.
+  leading-silence trim, cancellation tokens, bounded streaming capture, and an upper recording
+  limit. Paraformer supplies incremental results; Android recognizers are asked for partials but
+  may return only a final result. Settings show the configured Android speech service identity and
+  on-device API availability where Android exposes them.
 
 No model weights are bundled. See [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
 The first 189.85 MiB Zipformer was rejected. The next round tested SenseVoice and Paraformer on all
@@ -90,6 +101,8 @@ Existing confirmed dictionary entries may still help recognition; they are not m
   download uses the network; the fixed download carries no provider credentials.
 - BYOK audio goes directly to the configured `/audio/transcriptions` endpoint. Optional Smart,
   Translate, or selected-text content goes directly to `/chat/completions`.
+- Paraformer audio goes only to the validated official DashScope WSS inference host selected by
+  the user. Its API key is independently encrypted by Android Keystore.
 - HTTP redirects are rejected, provider error bodies are not shown, response sizes are bounded,
   and credentials/control characters are validated before request headers are written.
 - HTTPS is required for public hosts. Plain HTTP is accepted only for an explicitly configured
@@ -103,10 +116,11 @@ Existing confirmed dictionary entries may still help recognition; they are not m
 1. Install `android/app/build/outputs/apk/debug/app-debug.apk` or a properly signed release APK.
 2. Open **OpenTypeless Voice Studio**, grant microphone access, and confirm the selected speech
    route. Android on-device is preferred only when the platform reports it available.
-3. Optionally download the quality offline model, or configure BYOK STT and an LLM. AI, history,
+3. Optionally download the quality offline model, or configure batch BYOK STT, DashScope
+   Paraformer realtime, and an LLM. AI, history,
    and preceding-context sharing start off.
 4. Enable the OpenTypeless IME. To use either Android standard speech entry, first configure a
-   ready BYOK STT endpoint, explicitly enable **Standard Android speech entry**, and add the exact
+   ready BYOK or streaming STT endpoint, explicitly enable **Standard Android speech entry**, and add the exact
    caller package name to its allowlist. Then select OpenTypeless as the speech-recognition service
    or launch its `RecognizerIntent` activity from that allowed app. Some proprietary keyboards
    hard-code their own speech provider; use the independent IME or system keyboard switcher in that
@@ -116,11 +130,12 @@ Existing confirmed dictionary entries may still help recognition; they are not m
    selected-text editing, select text before starting voice input; the same selection must still
    exist when the result returns.
 
-Both exported standard speech entries intentionally use the BYOK STT route only and are disabled
+Both exported standard speech entries intentionally use an explicitly configured BYOK/streaming
+STT route only and are disabled
 by default. Their package allowlist and request limiter prevent an arbitrary microphone-enabled app
 from spending the user's provider quota. Calling the Android system recognizer from inside a
 registered recognition service could resolve back to itself. The independent IME supports all
-four recognition backends.
+five recognition backends.
 
 ## Build and verify Android
 
@@ -139,15 +154,19 @@ The checked-in native runtime supports 64-bit ARM devices and x86_64 emulators. 
 AAR from its pinned sources additionally requires Android NDK r27d; use
 `scripts/build_sherpa_asr_runtime.py --help` for the audited build command and provenance inputs.
 
-The automated suite covers deterministic personalization, NFKC span mapping, prompt boundaries,
+The automated suite covers transcript revisions, editor composition/cancellation races,
+Paraformer protocol and transport events, deterministic personalization, NFKC span mapping,
+prompt boundaries,
 fact integrity, VAD, cancellation state, editor-target identity, HTTP redirects/errors/headers,
 RecognitionService contracts, real SQLite import transactions, and Android Keystore history
 encryption/migration. The opt-in large-model gate additionally covers a real revision-pinned model
 download, exact hashes, native arm64 load/decode, and measured memory. CI runs JVM, lint, APK
-assembly, and API 35 emulator tests without real API keys or a 229 MiB model download.
+assembly, and API 26/33/35/36 emulator tests without real API keys or a 229 MiB model download.
 
-The exact accepted matrix, artifacts, and known limits are recorded in the
-[2026-08-09 acceptance report](docs/2026-08-09-byok-android-acceptance.md).
+The 0.3 review, automated evidence, physical-device procedure, and open gates are documented in
+[the Android 0.3 review and acceptance report](docs/2026-08-09-android-0.3-review-acceptance.md).
+The [0.2 acceptance report](docs/2026-08-09-byok-android-acceptance.md) remains the historical
+baseline.
 
 The release build produced by a local checkout is unsigned unless a signing configuration is
 provided. Never distribute it as a trusted release without signing and publishing checksums.
@@ -167,13 +186,14 @@ npm run tauri build
 
 ## Honest scope
 
-Android 0.2 is a voice layer, not a newly invented full QWERTY/swipe keyboard. Its standard Android
-entry points are the compatibility strategy. Android on-device recognition is not available on
-every device or for every language. The repository now publishes a reproducible desktop screening
-benchmark that rejected one offline candidate, but it does not yet publish a cross-device latency,
-battery, unseen mobile blind-set, or Typeless head-to-head result. It therefore claims verifiable
-product advantages—offline-capable routing, provider freedom, explicit term learning, target-bound
-commits, fact guards, and reversible AI—not universal recognition accuracy superiority.
+Android 0.3 is the installable Voice Core milestone, not yet the promised full Rime keyboard. The
+[Android IME 1.0 upgrade specification](docs/2026-08-09-android-ime-v1-upgrade-spec.md) defines the
+Fcitx5 Android + Rime integration and Xiaomi 15 release gate; this repository does not describe
+that milestone as complete before its physical-device evidence exists. Android on-device recognition is not available on
+every device or for every language, and the project does not yet publish a cross-device CER/WER,
+latency, battery, or blind Typeless benchmark. The repository therefore claims verifiable product
+advantages—offline-capable routing, provider freedom, explicit term learning, target-bound commits,
+fact guards, and reversible AI—not universal recognition accuracy superiority.
 
 ## License
 

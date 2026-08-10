@@ -90,6 +90,11 @@ public final class OpenAiCompatibleClientTest {
                 .transcribe(new byte[]{1, 2}, unsafe, ""));
         assertTrue(error.getMessage().contains("control characters"));
         assertEquals(0, server.getRequestCount());
+
+        AppSettings legacyControl = settings(baseUrl(), "token\u0007value");
+        assertThrows(Exception.class, () -> new OpenAiCompatibleClient()
+                .transcribe(new byte[]{1, 2}, legacyControl, ""));
+        assertEquals(0, server.getRequestCount());
     }
 
     @Test
@@ -144,6 +149,10 @@ public final class OpenAiCompatibleClientTest {
                 baseUrl,
                 key,
                 "whisper-test",
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                "streaming-key",
+                "paraformer-realtime-v2",
+                "",
                 "zh-CN",
                 ProcessingMode.AUTO,
                 true,

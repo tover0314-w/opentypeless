@@ -2,7 +2,6 @@ package com.opentypeless.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -81,6 +80,7 @@ public final class AppProfileActivity extends Activity {
 
     private View buildView() {
         ScrollView scroll = new ScrollView(this);
+        SystemBarInsets.apply(scroll);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(20), dp(20), dp(32));
@@ -252,7 +252,7 @@ public final class AppProfileActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextSize(size);
-        view.setTextColor(Color.rgb(25, 55, 50));
+        view.setTextColor(getColor(R.color.ime_on_surface));
         view.setPadding(0, dp(10), 0, dp(6));
         return view;
     }
@@ -261,7 +261,7 @@ public final class AppProfileActivity extends Activity {
         TextView view = new TextView(this);
         view.setText(text);
         view.setTextSize(14);
-        view.setTextColor(Color.rgb(45, 65, 61));
+        view.setTextColor(getColor(R.color.ime_on_surface_variant));
         view.setPadding(0, dp(4), 0, dp(8));
         return view;
     }

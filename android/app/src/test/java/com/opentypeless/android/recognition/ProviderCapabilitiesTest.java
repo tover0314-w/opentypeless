@@ -9,13 +9,17 @@ import org.junit.Test;
 
 public final class ProviderCapabilitiesTest {
     @Test
-    public void onlyExplicitOnDeviceRouteClaimsOfflineGuarantee() {
+    public void onlyExplicitLocalRoutesClaimOfflineGuarantee() {
+        assertTrue(ProviderCapabilities.forBackend(
+                RecognitionBackend.LOCAL_OFFLINE).guaranteedOnDevice());
         assertTrue(ProviderCapabilities.forBackend(
                 RecognitionBackend.SYSTEM_ON_DEVICE).guaranteedOnDevice());
         assertFalse(ProviderCapabilities.forBackend(
                 RecognitionBackend.SYSTEM_DEFAULT).guaranteedOnDevice());
         assertFalse(ProviderCapabilities.forBackend(
                 RecognitionBackend.OPENAI_COMPATIBLE).guaranteedOnDevice());
+        assertFalse(ProviderCapabilities.forBackend(
+                RecognitionBackend.DASHSCOPE_STREAMING).guaranteedOnDevice());
     }
 
     @Test
@@ -26,5 +30,9 @@ public final class ProviderCapabilitiesTest {
                 RecognitionBackend.OPENAI_COMPATIBLE).biasingStrings());
         assertTrue(ProviderCapabilities.forBackend(
                 RecognitionBackend.SYSTEM_ON_DEVICE).biasingStrings());
+        assertTrue(ProviderCapabilities.forBackend(
+                RecognitionBackend.DASHSCOPE_STREAMING).partialResults());
+        assertTrue(ProviderCapabilities.forBackend(
+                RecognitionBackend.LOCAL_OFFLINE).partialResults());
     }
 }

@@ -22,4 +22,16 @@ public final class CallerPackageAllowlistTest {
                 IllegalArgumentException.class,
                 () -> CallerPackageAllowlist.parse("com.example.valid\nnot a package"));
     }
+
+    @Test
+    public void rejectsUnboundedCallerLists() {
+        StringBuilder packages = new StringBuilder();
+        for (int index = 0; index <= 100; index++) {
+            packages.append("com.example.app").append(index).append('\n');
+        }
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> CallerPackageAllowlist.parse(packages.toString()));
+    }
 }

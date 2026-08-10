@@ -16,7 +16,7 @@ public final class StandardRecognitionSettingsRouteTest {
             new StandardRecognitionSettings.Snapshot(true, Set.of("com.example.caller"));
 
     @Test
-    public void enabledEntryRequiresReadyOpenAiCompatibleRoute() {
+    public void enabledEntryRequiresReadyExternalRecognitionRoute() {
         assertTrue(StandardRecognitionSettings.isSupportedRoute(
                 ENABLED,
                 settings(RecognitionBackend.OPENAI_COMPATIBLE, "https://speech.example/v1", "model")));
@@ -28,10 +28,16 @@ public final class StandardRecognitionSettingsRouteTest {
                 settings(RecognitionBackend.SYSTEM_DEFAULT, "", "")));
         assertFalse(StandardRecognitionSettings.isSupportedRoute(
                 ENABLED,
+                settings(RecognitionBackend.LOCAL_OFFLINE, "", "")));
+        assertFalse(StandardRecognitionSettings.isSupportedRoute(
+                ENABLED,
                 settings(RecognitionBackend.OPENAI_COMPATIBLE, "", "model")));
         assertFalse(StandardRecognitionSettings.isSupportedRoute(
                 ENABLED,
                 settings(RecognitionBackend.OPENAI_COMPATIBLE, "https://speech.example/v1", "")));
+        assertTrue(StandardRecognitionSettings.isSupportedRoute(
+                ENABLED,
+                settings(RecognitionBackend.DASHSCOPE_STREAMING, "", "")));
     }
 
     @Test
@@ -52,6 +58,10 @@ public final class StandardRecognitionSettingsRouteTest {
                 baseUrl,
                 "",
                 model,
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                backend == RecognitionBackend.DASHSCOPE_STREAMING ? "streaming-key" : "",
+                "paraformer-realtime-v2",
+                "",
                 "",
                 ProcessingMode.VERBATIM,
                 false,

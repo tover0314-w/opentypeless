@@ -9,11 +9,12 @@
     <string name="ime_key_cancel">取消</string>
     <string name="ime_key_app_profile">应用配置</string>
     <string name="ime_key_settings">设置</string>
+    <string name="ime_transcript_hint">实时转写</string>
+    <string name="ime_transcript_listening">正在聆听…</string>
 
     <string name="ime_cd_start_voice_input">开始语音输入</string>
     <string name="ime_cd_stop_voice_recording">停止录音</string>
     <string name="ime_cd_delete">删除</string>
-    <string name="ime_cd_insert_space">插入空格</string>
     <string name="ime_cd_space_hold_to_talk">插入空格；按住可进行语音输入</string>
     <string name="ime_status_hold_too_short">请按住空格，等开始聆听后再松手</string>
     <string name="ime_cd_enter">换行或执行编辑器操作</string>
@@ -44,10 +45,12 @@
     <string name="ime_status_configure_backend">请先配置已选语音识别后端</string>
     <string name="ime_status_target_changed_cancelled">输入目标已更改；为保证安全，已取消语音输入</string>
     <string name="ime_status_session_active">已有另一个语音会话正在进行</string>
-    <string name="ime_status_live">实时：%1$s</string>
+    <string name="ime_status_live_composition_rejected">当前应用无法在此字段显示实时转写；已取消语音输入</string>
+    <string name="ime_status_composition_cleanup_failed">语音输入已停止，但无法确认实时草稿已移除；继续前请检查当前字段</string>
     <string name="ime_status_field_unavailable">当前文本字段已不可用</string>
     <string name="ime_status_no_active_field">没有活动的文本字段</string>
     <string name="ime_status_selection_too_long">所选文本过长；请最多选择 4,000 个字符</string>
+    <string name="ime_status_selection_unavailable">当前应用未提供选中文本，未启动语音编辑</string>
     <string name="ime_status_target_changed_discarded">输入目标已更改；为保证安全，已丢弃识别结果</string>
     <string name="ime_status_no_text">未生成文本</string>
     <string name="ime_status_result_connection_failed">文本连接失败；请确认结果是否已插入</string>
@@ -77,4 +80,17 @@
     <string name="ime_status_ready_mode">就绪 · %1$s模式</string>
     <string name="ime_status_cursor_moved_cancelled">光标已移动；为保证安全，已取消语音输入</string>
     <string name="ime_status_voice_input_failed">语音输入失败</string>
+    <string name="ime_status_listening">正在聆听…</string>
+    <string name="ime_status_transcribing">正在转写并应用个人词汇…</string>
+    <string name="ime_status_polishing">正在核对并整理，不改变事实…</string>
+    <string name="ime_status_inserted">已插入</string>
+    <string name="ime_status_inserted_recording_limit">已插入 · 已达到录音时长上限</string>
+    <string name="ime_status_inserted_after_silence">已插入 · 检测到静音后自动停止</string>
+    <string name="ime_status_voice_command_inserted">已执行语音命令</string>
+    <string name="ime_status_exact_ai_not_configured">已插入精确转写 · 尚未配置 AI 整理</string>
+    <string name="ime_status_selection_updated">已更新选中文本 · 可撤销</string>
+    <string name="ime_status_translated">已翻译 · 可撤销</string>
+    <string name="ime_status_smart_edited">已插入智能整理结果 · 可撤销</string>
+    <string name="ime_status_ai_blocked_exact">AI 结果可能改变事实，已改为插入精确转写</string>
+    <string name="ime_status_exact_ai_failed">AI 整理失败，已插入精确转写</string>
 </resources>

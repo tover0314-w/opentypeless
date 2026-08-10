@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -29,10 +28,12 @@ import android.widget.Toast;
 import com.opentypeless.android.net.EndpointNormalizer;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
-import com.opentypeless.android.offline.OfflineModelDownloader;
+import com.opentypeless.android.offline.OfflineModelOperationCoordinator;
 import com.opentypeless.android.offline.OfflineModelSpec;
 import com.opentypeless.android.offline.OfflineModelStore;
 import com.opentypeless.android.recognition.SystemSpeechRecognizer;
+import com.opentypeless.android.recognition.SystemRecognitionDiagnostics;
+import com.opentypeless.android.recognition.SystemModelDownloadCoordinator;
 import com.opentypeless.android.recognition.SystemRecognitionSupport;
 import com.opentypeless.android.recognition.StandardRecognitionSettings;
 import com.opentypeless.android.settings.AppSettings;
@@ -55,8 +56,11 @@ public final class MainActivity extends Activity {
     private Spinner recognitionBackend;
     private Spinner defaultMode;
     private LinearLayout networkSttFields;
+    private LinearLayout batchSttFields;
+    private LinearLayout streamingSttFields;
     private LinearLayout localOfflineFields;
     private TextView systemBackendNote;
+    private TextView systemRouteDiagnostics;
     private TextView localModelStatus;
     private Button downloadOfflineModel;
     private Button deleteOfflineModel;
@@ -68,6 +72,10 @@ public final class MainActivity extends Activity {
     private EditText sttBaseUrl;
     private EditText sttApiKey;
     private EditText sttModel;
+    private EditText streamingBaseUrl;
+    private EditText streamingApiKey;
+    private EditText streamingModel;
+    private EditText streamingVocabularyId;
     private EditText language;
     private EditText maxRecordingSeconds;
     private CheckBox polishEnabled;
@@ -83,12 +91,14 @@ public final class MainActivity extends Activity {
     private CheckBox sendContext;
     private TextView permissionStatus;
     private SystemRecognitionSupport.Operation supportOperation;
-    private SystemRecognitionSupport.Operation downloadOperation;
     private RecognitionBackend supportBackend;
     private long supportGeneration;
     private boolean languageDownloadAvailable;
-    private OfflineModelDownloader.Operation offlineModelOperation;
-    private long offlineModelGeneration;
+    private final OfflineModelOperationCoordinator.Listener offlineModelListener =
+            this::renderOfflineModelOperation;
+    private final SystemModelDownloadCoordinator.Listener systemModelListener =
+            this::renderSystemModelDownload;
+    private boolean applyingDraft;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -99,13 +109,19 @@ public final class MainActivity extends Activity {
         AppSettings persisted = repository.load();
         setContentView(buildContent(persisted));
         Object retained = getLastNonConfigurationInstance();
-        if (retained instanceof SettingsFormDraft draft) {
-            applyDraft(draft);
-        } else if (savedInstanceState != null
-                && savedInstanceState.getBoolean(STATE_HAS_DRAFT, false)) {
-            applyDraft(readPersistentDraft(savedInstanceState).withSecrets(
-                    persisted.sttApiKey(),
-                    persisted.llmApiKey()));
+        applyingDraft = true;
+        try {
+            if (retained instanceof SettingsFormDraft draft) {
+                applyDraft(draft);
+            } else if (savedInstanceState != null
+                    && savedInstanceState.getBoolean(STATE_HAS_DRAFT, false)) {
+                applyDraft(readPersistentDraft(savedInstanceState).withSecrets(
+                        persisted.sttApiKey(),
+                        persisted.streamingApiKey(),
+                        persisted.llmApiKey()));
+            }
+        } finally {
+            applyingDraft = false;
         }
         refreshPermissionStatus();
     }
@@ -125,14 +141,16 @@ public final class MainActivity extends Activity {
     private View buildContent(AppSettings settings) {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        SystemBarInsets.apply(scroll);
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
+        root.setBackgroundColor(getColor(R.color.ime_surface));
         scroll.addView(root);
 
         root.addView(text(getString(R.string.settings_title), 26, true));
         TextView intro = text(getString(R.string.settings_intro), 15, false);
-        intro.setTextColor(Color.DKGRAY);
+        intro.setTextColor(getColor(R.color.ime_on_surface_variant));
         intro.setPadding(0, dp(8), 0, dp(12));
         root.addView(intro);
 
@@ -161,30 +179,65 @@ public final class MainActivity extends Activity {
                 false);
 
         networkSttFields = verticalLayout();
+        batchSttFields = verticalLayout();
         sttBaseUrl = field(
-                networkSttFields,
+                batchSttFields,
                 R.string.stt_base_url_label,
                 settings.sttBaseUrl(),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
                 false);
         sttApiKey = field(
-                networkSttFields,
+                batchSttFields,
                 R.string.stt_api_key_label,
                 settings.sttApiKey(),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 false);
         protectSecretField(sttApiKey);
         sttModel = field(
-                networkSttFields,
+                batchSttFields,
                 R.string.stt_model_label,
                 settings.sttModel(),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
                 false);
+        networkSttFields.addView(batchSttFields);
+
+        streamingSttFields = verticalLayout();
+        streamingSttFields.addView(note(
+                R.string.streaming_provider_note,
+                getColor(R.color.ime_on_surface_variant)));
+        streamingBaseUrl = field(
+                streamingSttFields,
+                R.string.streaming_base_url_label,
+                settings.streamingBaseUrl(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI,
+                false);
+        streamingApiKey = field(
+                streamingSttFields,
+                R.string.streaming_api_key_label,
+                settings.streamingApiKey(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                false);
+        protectSecretField(streamingApiKey);
+        streamingModel = field(
+                streamingSttFields,
+                R.string.streaming_model_label,
+                settings.streamingModel(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                false);
+        streamingVocabularyId = field(
+                streamingSttFields,
+                R.string.streaming_vocabulary_id_label,
+                settings.streamingVocabularyId(),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+                false);
+        networkSttFields.addView(streamingSttFields);
         root.addView(networkSttFields);
 
         localOfflineFields = verticalLayout();
-        localOfflineFields.addView(note(R.string.offline_model_note, Color.rgb(68, 79, 76)));
-        localModelStatus = note(R.string.offline_model_missing, Color.rgb(145, 88, 0));
+        localOfflineFields.addView(note(
+                R.string.offline_model_note,
+                getColor(R.color.ime_on_surface_variant)));
+        localModelStatus = note(R.string.offline_model_missing, getColor(R.color.ime_warning));
         localModelStatus.setMinHeight(dp(48));
         localOfflineFields.addView(localModelStatus);
         downloadOfflineModel = button(
@@ -197,11 +250,18 @@ public final class MainActivity extends Activity {
         localOfflineFields.addView(deleteOfflineModel);
         root.addView(localOfflineFields);
 
-        systemBackendNote = note(R.string.system_backend_note, Color.rgb(68, 79, 76));
+        systemBackendNote = note(
+                R.string.system_backend_note,
+                getColor(R.color.ime_on_surface_variant));
         root.addView(systemBackendNote);
+        systemRouteDiagnostics = note(
+                R.string.system_route_inspecting,
+                getColor(R.color.ime_on_surface_variant));
+        systemRouteDiagnostics.setTextIsSelectable(true);
+        root.addView(systemRouteDiagnostics);
         languageSupportStatus = note(
                 R.string.language_support_not_checked,
-                Color.rgb(68, 79, 76));
+                getColor(R.color.ime_on_surface_variant));
         languageSupportStatus.setMinHeight(dp(48));
         root.addView(languageSupportStatus);
         checkLanguageSupport = button(
@@ -228,7 +288,9 @@ public final class MainActivity extends Activity {
                         | InputType.TYPE_TEXT_FLAG_MULTI_LINE,
                 true);
         standardSpeechCallers.setHint(R.string.standard_speech_callers_hint);
-        root.addView(note(R.string.standard_speech_security_note, Color.rgb(145, 88, 0)));
+        root.addView(note(
+                R.string.standard_speech_security_note,
+                getColor(R.color.ime_warning)));
 
         root.addView(section(R.string.section_processing));
         polishEnabled = checkbox(R.string.polish_enabled, settings.polishEnabled());
@@ -280,10 +342,13 @@ public final class MainActivity extends Activity {
         root.addView(personalizationEnabled);
         root.addView(historyEnabled);
         root.addView(sendContext);
-        root.addView(note(R.string.privacy_note, Color.rgb(50, 70, 66)));
-        root.addView(note(R.string.local_http_note, Color.rgb(145, 88, 0)));
+        root.addView(note(R.string.privacy_note, getColor(R.color.ime_on_surface_variant)));
+        root.addView(note(R.string.local_http_note, getColor(R.color.ime_warning)));
 
-        root.addView(button(R.string.save_configuration, ignored -> saveSettings()));
+        Button save = button(R.string.save_configuration, ignored -> saveSettings());
+        save.setBackgroundResource(R.drawable.ime_primary_key_background);
+        save.setTextColor(getColorStateList(R.color.ime_primary_key_text));
+        root.addView(save);
 
         root.addView(section(R.string.section_manage));
         root.addView(button(R.string.manage_dictionary, ignored ->
@@ -311,7 +376,7 @@ public final class MainActivity extends Activity {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence value, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable value) {
-                if (supportBackend != null) resetLanguageSupportState();
+                if (!applyingDraft && supportBackend != null) resetLanguageSupportState();
             }
         });
         polishEnabled.setOnCheckedChangeListener((ignored, checked) -> updateVisibility());
@@ -352,8 +417,14 @@ public final class MainActivity extends Activity {
     }
 
     private void refreshOfflineModelStatus() {
+        OfflineModelOperationCoordinator.State operation =
+                OfflineModelOperationCoordinator.snapshot();
+        if (operation.running()
+                || operation.phase() == OfflineModelOperationCoordinator.Phase.FAILED) {
+            renderOfflineModelOperation(operation);
+            return;
+        }
         OfflineModelStore.Status status = OfflineModelStore.status(this);
-        if (offlineModelOperation != null) return;
         boolean supported = LocalOfflineRecognizer.isSupportedDevice(this);
         int message = switch (status) {
             case MISSING -> supported
@@ -364,8 +435,8 @@ public final class MainActivity extends Activity {
         };
         localModelStatus.setText(message);
         localModelStatus.setTextColor(status == OfflineModelStore.Status.INSTALLED
-                ? Color.rgb(0, 110, 82)
-                : Color.rgb(170, 40, 40));
+                ? getColor(R.color.ime_primary)
+                : getColor(R.color.ime_error));
         localModelStatus.setContentDescription(localModelStatus.getText());
         downloadOfflineModel.setEnabled(supported
                 && status != OfflineModelStore.Status.INSTALLED);
@@ -375,7 +446,7 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmOfflineModelDownload() {
-        if (offlineModelOperation != null) return;
+        if (OfflineModelOperationCoordinator.snapshot().running()) return;
         OfflineModelSpec spec = OfflineModelSpec.QUALITY;
         new AlertDialog.Builder(this)
                 .setTitle(R.string.download_offline_model_title)
@@ -391,61 +462,11 @@ public final class MainActivity extends Activity {
     }
 
     private void startOfflineModelDownload() {
-        cancelOfflineModelOperation();
-        long request = ++offlineModelGeneration;
-        downloadOfflineModel.setEnabled(false);
-        deleteOfflineModel.setVisibility(View.GONE);
-        localModelStatus.setText(R.string.offline_model_download_starting);
-        localModelStatus.setTextColor(Color.rgb(68, 79, 76));
-        offlineModelOperation = OfflineModelDownloader.download(this,
-                new OfflineModelDownloader.Callback() {
-                    @Override
-                    public void onProgress(int percent, long downloadedBytes, long totalBytes) {
-                        runOnUiThread(() -> {
-                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            localModelStatus.setText(getString(
-                                    R.string.offline_model_download_progress,
-                                    percent,
-                                    downloadedBytes / (1024L * 1024L),
-                                    totalBytes / (1024L * 1024L)));
-                        });
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        runOnUiThread(() -> {
-                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            offlineModelOperation = null;
-                            refreshOfflineModelStatus();
-                            Toast.makeText(MainActivity.this,
-                                    R.string.offline_model_downloaded,
-                                    Toast.LENGTH_SHORT).show();
-                        });
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        runOnUiThread(() -> {
-                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            offlineModelOperation = null;
-                            localModelStatus.setText(getString(
-                                    R.string.offline_model_download_failed,
-                                    message));
-                            localModelStatus.setTextColor(Color.rgb(170, 40, 40));
-                            downloadOfflineModel.setEnabled(true);
-                        });
-                    }
-                });
+        OfflineModelOperationCoordinator.startDownload(this);
     }
 
     private void confirmOfflineModelDelete() {
-        if (offlineModelOperation != null) return;
+        if (OfflineModelOperationCoordinator.snapshot().running()) return;
         new AlertDialog.Builder(this)
                 .setTitle(R.string.delete_offline_model_title)
                 .setMessage(R.string.delete_offline_model_confirmation)
@@ -455,64 +476,63 @@ public final class MainActivity extends Activity {
     }
 
     private void startOfflineModelDelete() {
-        cancelOfflineModelOperation();
-        long request = ++offlineModelGeneration;
-        downloadOfflineModel.setEnabled(false);
-        deleteOfflineModel.setEnabled(false);
-        localModelStatus.setText(R.string.offline_model_deleting);
-        offlineModelOperation = OfflineModelDownloader.delete(this,
-                new OfflineModelDownloader.Callback() {
-                    @Override
-                    public void onProgress(int percent, long downloadedBytes, long totalBytes) {}
-
-                    @Override
-                    public void onComplete() {
-                        runOnUiThread(() -> {
-                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            offlineModelOperation = null;
-                            deleteOfflineModel.setEnabled(true);
-                            refreshOfflineModelStatus();
-                        });
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        runOnUiThread(() -> {
-                            if (request != offlineModelGeneration || isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            offlineModelOperation = null;
-                            localModelStatus.setText(getString(
-                                    R.string.offline_model_delete_failed,
-                                    message));
-                            localModelStatus.setTextColor(Color.rgb(170, 40, 40));
-                            deleteOfflineModel.setEnabled(true);
-                        });
-                    }
-                });
+        OfflineModelOperationCoordinator.startDelete(this);
     }
 
-    private void cancelOfflineModelOperation() {
-        offlineModelGeneration++;
-        if (offlineModelOperation != null) offlineModelOperation.cancel();
-        offlineModelOperation = null;
+    private void renderOfflineModelOperation(OfflineModelOperationCoordinator.State operation) {
+        if (localModelStatus == null || isFinishing() || isDestroyed()) return;
+        boolean running = operation.running();
+        downloadOfflineModel.setEnabled(!running);
+        deleteOfflineModel.setEnabled(!running);
+        if (running && operation.kind() == OfflineModelOperationCoordinator.Kind.DOWNLOAD) {
+            deleteOfflineModel.setVisibility(View.GONE);
+            if (operation.totalBytes() > 0) {
+                localModelStatus.setText(getString(
+                        R.string.offline_model_download_progress,
+                        operation.percent(),
+                        operation.completedBytes() / (1024L * 1024L),
+                        operation.totalBytes() / (1024L * 1024L)));
+            } else {
+                localModelStatus.setText(R.string.offline_model_download_starting);
+            }
+            localModelStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
+            return;
+        }
+        if (running) {
+            localModelStatus.setText(R.string.offline_model_deleting);
+            localModelStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
+            return;
+        }
+        if (operation.phase() == OfflineModelOperationCoordinator.Phase.FAILED) {
+            int message = operation.kind() == OfflineModelOperationCoordinator.Kind.DOWNLOAD
+                    ? R.string.offline_model_download_failed
+                    : R.string.offline_model_delete_failed;
+            localModelStatus.setText(getString(message, operation.errorMessage()));
+            localModelStatus.setTextColor(getColor(R.color.ime_error));
+            return;
+        }
+        refreshOfflineModelStatus();
     }
 
     private void updateVisibility() {
         RecognitionBackend backend = selectedBackend();
-        boolean network = backend == RecognitionBackend.OPENAI_COMPATIBLE;
+        boolean batch = backend == RecognitionBackend.OPENAI_COMPATIBLE;
+        boolean streaming = backend == RecognitionBackend.DASHSCOPE_STREAMING;
+        boolean network = batch || streaming;
         boolean local = backend == RecognitionBackend.LOCAL_OFFLINE;
         boolean system = backend == RecognitionBackend.SYSTEM_ON_DEVICE
                 || backend == RecognitionBackend.SYSTEM_DEFAULT;
         if (supportBackend != backend) {
+            boolean changedByUser = supportBackend != null && !applyingDraft;
             supportBackend = backend;
-            resetLanguageSupportState();
+            if (changedByUser) resetLanguageSupportState();
         }
         networkSttFields.setVisibility(network ? View.VISIBLE : View.GONE);
+        batchSttFields.setVisibility(batch ? View.VISIBLE : View.GONE);
+        streamingSttFields.setVisibility(streaming ? View.VISIBLE : View.GONE);
         localOfflineFields.setVisibility(local ? View.VISIBLE : View.GONE);
         systemBackendNote.setVisibility(system ? View.VISIBLE : View.GONE);
+        systemRouteDiagnostics.setVisibility(system ? View.VISIBLE : View.GONE);
         languageSupportStatus.setVisibility(system ? View.VISIBLE : View.GONE);
         checkLanguageSupport.setVisibility(system ? View.VISIBLE : View.GONE);
         downloadLanguageModel.setVisibility(system && languageDownloadAvailable
@@ -520,6 +540,7 @@ public final class MainActivity extends Activity {
                 : View.GONE);
         if (local) refreshOfflineModelStatus();
         if (system) {
+            refreshSystemRouteDiagnostics(backend);
             boolean available;
             int statusResource;
             if (selectedBackend() == RecognitionBackend.SYSTEM_ON_DEVICE) {
@@ -537,13 +558,47 @@ public final class MainActivity extends Activity {
                     R.string.system_backend_status,
                     getString(statusResource),
                     getString(R.string.system_backend_note)));
-            systemBackendNote.setTextColor(available
-                    ? Color.rgb(0, 110, 82)
-                    : Color.rgb(170, 40, 40));
+            systemBackendNote.setTextColor(getColor(available
+                    ? R.color.ime_primary
+                    : R.color.ime_error));
             systemBackendNote.setContentDescription(systemBackendNote.getText());
         }
         llmFields.setVisibility(polishEnabled.isChecked() ? View.VISIBLE : View.GONE);
         translationFields.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshSystemRouteDiagnostics(RecognitionBackend backend) {
+        SystemRecognitionDiagnostics.Snapshot diagnostics =
+                SystemRecognitionDiagnostics.inspect(this);
+        String service = diagnostics.serviceIdentified()
+                ? getString(
+                        R.string.system_route_service,
+                        diagnostics.serviceLabel().isBlank()
+                                ? diagnostics.packageName()
+                                : diagnostics.serviceLabel(),
+                        diagnostics.packageName(),
+                        diagnostics.versionName().isBlank()
+                                ? getString(R.string.system_route_version_unknown)
+                                : diagnostics.versionName())
+                : getString(R.string.system_route_service_unknown);
+        String capability;
+        if (backend == RecognitionBackend.SYSTEM_ON_DEVICE) {
+            capability = diagnostics.onDeviceAvailable()
+                    ? getString(R.string.system_route_on_device_available)
+                    : getString(R.string.system_route_on_device_unavailable);
+        } else {
+            capability = diagnostics.systemAvailable()
+                    ? getString(R.string.system_route_default_available)
+                    : getString(R.string.system_route_default_unavailable);
+        }
+        systemRouteDiagnostics.setText(getString(
+                R.string.system_route_diagnostics_summary,
+                service,
+                capability));
+        systemRouteDiagnostics.setTextColor(getColor(
+                backendAvailable(backend)
+                        ? R.color.ime_on_surface_variant
+                        : R.color.ime_error));
     }
 
     private void checkLanguageSupport() {
@@ -555,7 +610,7 @@ public final class MainActivity extends Activity {
         checkLanguageSupport.setEnabled(false);
         downloadLanguageModel.setVisibility(View.GONE);
         languageSupportStatus.setText(R.string.language_support_checking);
-        languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+        languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
         supportOperation = SystemSpeechRecognizer.checkRecognitionSupport(
                 this,
                 languageSupportSettings(),
@@ -570,40 +625,39 @@ public final class MainActivity extends Activity {
     private void downloadLanguageModel() {
         if (selectedBackend() != RecognitionBackend.SYSTEM_ON_DEVICE) return;
         cancelLanguageOperations();
-        long request = supportGeneration;
         languageDownloadAvailable = false;
         checkLanguageSupport.setEnabled(false);
         downloadLanguageModel.setVisibility(View.GONE);
         languageSupportStatus.setText(R.string.language_model_download_starting);
-        languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
-        downloadOperation = SystemSpeechRecognizer.triggerModelDownload(
+        languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
+        SystemModelDownloadCoordinator.start(
                 this,
                 languageSupportSettings(),
-                PersonalizationSnapshot.empty(),
-                new SystemRecognitionSupport.DownloadCallback() {
-                    @Override
-                    public void onProgress(int percent) {
-                        if (request == supportGeneration && !isFinishing() && !isDestroyed()) {
-                            languageSupportStatus.setText(getString(
-                                    R.string.language_model_download_progress,
-                                    percent));
-                        }
-                    }
+                PersonalizationSnapshot.empty());
+    }
 
-                    @Override
-                    public void onResult(SystemRecognitionSupport.DownloadResult result) {
-                        if (request != supportGeneration || isFinishing() || isDestroyed()) return;
-                        downloadOperation = null;
-                        checkLanguageSupport.setEnabled(true);
-                        languageSupportStatus.setText(downloadResultText(result));
-                        languageSupportStatus.setTextColor(
-                                result.status() == SystemRecognitionSupport.DownloadStatus.COMPLETED
-                                        ? Color.rgb(0, 110, 82)
-                                        : result.status() == SystemRecognitionSupport.DownloadStatus.FAILED
-                                                ? Color.rgb(170, 40, 40)
-                                                : Color.rgb(145, 88, 0));
-                    }
-                });
+    private void renderSystemModelDownload(SystemModelDownloadCoordinator.State operation) {
+        if (languageSupportStatus == null || isFinishing() || isDestroyed()) return;
+        if (operation.running()) {
+            languageDownloadAvailable = false;
+            checkLanguageSupport.setEnabled(false);
+            downloadLanguageModel.setVisibility(View.GONE);
+            languageSupportStatus.setText(operation.progress() > 0
+                    ? getString(R.string.language_model_download_progress, operation.progress())
+                    : getString(R.string.language_model_download_starting));
+            languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
+            return;
+        }
+        SystemRecognitionSupport.DownloadResult result = operation.result();
+        if (result == null) return;
+        checkLanguageSupport.setEnabled(true);
+        languageSupportStatus.setText(downloadResultText(result));
+        languageSupportStatus.setTextColor(getColor(
+                result.status() == SystemRecognitionSupport.DownloadStatus.COMPLETED
+                        ? R.color.ime_primary
+                        : result.status() == SystemRecognitionSupport.DownloadStatus.FAILED
+                                ? R.color.ime_error
+                                : R.color.ime_warning));
     }
 
     private void showLanguageSupport(SystemRecognitionSupport.Result result) {
@@ -621,9 +675,9 @@ public final class MainActivity extends Activity {
         boolean failure = result.status() == SystemRecognitionSupport.Status.UNSUPPORTED
                 || result.status() == SystemRecognitionSupport.Status.SERVICE_UNAVAILABLE
                 || result.status() == SystemRecognitionSupport.Status.ERROR;
-        languageSupportStatus.setTextColor(success
-                ? Color.rgb(0, 110, 82)
-                : failure ? Color.rgb(170, 40, 40) : Color.rgb(145, 88, 0));
+        languageSupportStatus.setTextColor(getColor(success
+                ? R.color.ime_primary
+                : failure ? R.color.ime_error : R.color.ime_warning));
     }
 
     private String supportResultText(SystemRecognitionSupport.Result result) {
@@ -663,6 +717,10 @@ public final class MainActivity extends Activity {
                 "",
                 "",
                 "",
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                "",
+                "paraformer-realtime-v2",
+                "",
                 value(language),
                 ProcessingMode.VERBATIM,
                 false,
@@ -682,7 +740,7 @@ public final class MainActivity extends Activity {
         languageDownloadAvailable = false;
         if (languageSupportStatus != null) {
             languageSupportStatus.setText(R.string.language_support_not_checked);
-            languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+            languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
         }
         if (checkLanguageSupport != null) checkLanguageSupport.setEnabled(true);
         if (downloadLanguageModel != null) downloadLanguageModel.setVisibility(View.GONE);
@@ -691,9 +749,8 @@ public final class MainActivity extends Activity {
     private void cancelLanguageOperations() {
         supportGeneration++;
         if (supportOperation != null) supportOperation.cancel();
-        if (downloadOperation != null) downloadOperation.cancel();
         supportOperation = null;
-        downloadOperation = null;
+        SystemModelDownloadCoordinator.cancel();
     }
 
     private void saveSettings() {
@@ -715,6 +772,16 @@ public final class MainActivity extends Activity {
                     && (!LocalOfflineRecognizer.isSupportedDevice(this)
                     || !LocalOfflineRecognizer.isInstalled(this))) {
                 throw new IllegalArgumentException(getString(R.string.offline_model_required));
+            } else if (backend == RecognitionBackend.DASHSCOPE_STREAMING) {
+                EndpointNormalizer.dashScopeWebSocket(value(streamingBaseUrl));
+                if (value(streamingApiKey).isEmpty()) {
+                    throw new IllegalArgumentException(
+                            getString(R.string.streaming_api_key_required));
+                }
+                if (value(streamingModel).isEmpty()) {
+                    throw new IllegalArgumentException(
+                            getString(R.string.streaming_model_required));
+                }
             } else if (backend == RecognitionBackend.SYSTEM_ON_DEVICE
                     && !backendAvailable(backend)) {
                 throw new IllegalArgumentException(getString(R.string.on_device_unavailable));
@@ -746,6 +813,10 @@ public final class MainActivity extends Activity {
                     value(sttBaseUrl),
                     value(sttApiKey),
                     value(sttModel),
+                    value(streamingBaseUrl),
+                    value(streamingApiKey),
+                    value(streamingModel),
+                    value(streamingVocabularyId),
                     value(language),
                     selectedMode(),
                     polishEnabled.isChecked(),
@@ -789,6 +860,10 @@ public final class MainActivity extends Activity {
                 raw(sttBaseUrl),
                 raw(sttApiKey),
                 raw(sttModel),
+                raw(streamingBaseUrl),
+                raw(streamingApiKey),
+                raw(streamingModel),
+                raw(streamingVocabularyId),
                 standardSpeechEnabled.isChecked(),
                 raw(standardSpeechCallers),
                 polishEnabled.isChecked(),
@@ -811,6 +886,10 @@ public final class MainActivity extends Activity {
         sttBaseUrl.setText(draft.sttBaseUrl());
         sttApiKey.setText(draft.sttApiKey());
         sttModel.setText(draft.sttModel());
+        streamingBaseUrl.setText(draft.streamingBaseUrl());
+        streamingApiKey.setText(draft.streamingApiKey());
+        streamingModel.setText(draft.streamingModel());
+        streamingVocabularyId.setText(draft.streamingVocabularyId());
         standardSpeechEnabled.setChecked(draft.standardSpeechEnabled());
         standardSpeechCallers.setText(draft.standardSpeechCallers());
         polishEnabled.setChecked(draft.polishEnabled());
@@ -834,6 +913,9 @@ public final class MainActivity extends Activity {
         state.putString(key("stt_url"), draft.sttBaseUrl());
         // API keys deliberately stay out of Bundle because Android may persist it to disk.
         state.putString(key("stt_model"), draft.sttModel());
+        state.putString(key("streaming_url"), draft.streamingBaseUrl());
+        state.putString(key("streaming_model"), draft.streamingModel());
+        state.putString(key("streaming_vocabulary"), draft.streamingVocabularyId());
         state.putBoolean(key("standard_enabled"), draft.standardSpeechEnabled());
         state.putString(key("standard_callers"), draft.standardSpeechCallers());
         state.putBoolean(key("polish"), draft.polishEnabled());
@@ -855,6 +937,12 @@ public final class MainActivity extends Activity {
                 state.getString(key("stt_url"), ""),
                 "",
                 state.getString(key("stt_model"), ""),
+                state.getString(
+                        key("streaming_url"),
+                        "wss://dashscope.aliyuncs.com/api-ws/v1/inference"),
+                "",
+                state.getString(key("streaming_model"), "paraformer-realtime-v2"),
+                state.getString(key("streaming_vocabulary"), ""),
                 state.getBoolean(key("standard_enabled"), false),
                 state.getString(key("standard_callers"), ""),
                 state.getBoolean(key("polish"), false),
@@ -890,17 +978,26 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        OfflineModelOperationCoordinator.addListener(offlineModelListener);
+        SystemModelDownloadCoordinator.addListener(systemModelListener);
+    }
+
+    @Override
     protected void onStop() {
-        // A model download may temporarily launch system approval UI. Keep that operation alive
-        // while this Activity is merely stopped; explicit language/backend changes and onDestroy
-        // still cancel it. A support check has no user interaction and can be safely abandoned.
+        OfflineModelOperationCoordinator.removeListener(offlineModelListener);
+        SystemModelDownloadCoordinator.removeListener(systemModelListener);
+        // A platform language-model download may temporarily launch system approval UI. Keep it
+        // alive while this Activity is merely stopped. A support check has no user interaction and
+        // can be safely abandoned. OpenTypeless model transfers are application-scoped separately.
         if (supportOperation != null) {
             supportGeneration++;
             supportOperation.cancel();
             supportOperation = null;
             languageDownloadAvailable = false;
             languageSupportStatus.setText(R.string.language_support_not_checked);
-            languageSupportStatus.setTextColor(Color.rgb(68, 79, 76));
+            languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
             checkLanguageSupport.setEnabled(true);
             downloadLanguageModel.setVisibility(View.GONE);
         }
@@ -909,8 +1006,9 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        cancelLanguageOperations();
-        cancelOfflineModelOperation();
+        supportGeneration++;
+        if (supportOperation != null) supportOperation.cancel();
+        supportOperation = null;
         super.onDestroy();
     }
 
@@ -920,7 +1018,8 @@ public final class MainActivity extends Activity {
         permissionStatus.setText(granted
                 ? R.string.microphone_granted
                 : R.string.microphone_required);
-        permissionStatus.setTextColor(granted ? Color.rgb(0, 110, 82) : Color.rgb(170, 40, 40));
+        permissionStatus.setTextColor(getColor(
+                granted ? R.color.ime_primary : R.color.ime_error));
         permissionStatus.setContentDescription(permissionStatus.getText());
     }
 
@@ -991,6 +1090,14 @@ public final class MainActivity extends Activity {
         button.setText(labelResource);
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
+        button.setBackgroundResource(R.drawable.ime_key_background);
+        button.setTextColor(getColorStateList(R.color.ime_key_text));
+        button.setElevation(0f);
+        button.setStateListAnimator(null);
+        LinearLayout.LayoutParams parameters = matchWrap();
+        parameters.topMargin = dp(3);
+        parameters.bottomMargin = dp(3);
+        button.setLayoutParams(parameters);
         button.setContentDescription(getString(labelResource));
         button.setOnClickListener(listener);
         return button;
@@ -998,6 +1105,7 @@ public final class MainActivity extends Activity {
 
     private TextView section(int stringResource) {
         TextView view = text(getString(stringResource), 19, true);
+        view.setTextColor(getColor(R.color.ime_primary));
         view.setPadding(0, dp(18), 0, dp(4));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) view.setAccessibilityHeading(true);
         return view;
@@ -1053,6 +1161,7 @@ public final class MainActivity extends Activity {
             return getString(switch (backend) {
                 case OPENAI_COMPATIBLE -> R.string.backend_openai;
                 case LOCAL_OFFLINE -> R.string.backend_local_offline;
+                case DASHSCOPE_STREAMING -> R.string.backend_dashscope_streaming;
                 case SYSTEM_ON_DEVICE -> R.string.backend_on_device;
                 case SYSTEM_DEFAULT -> R.string.backend_system_default;
             });

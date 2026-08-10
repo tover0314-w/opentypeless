@@ -90,7 +90,9 @@ public final class AndroidRecognitionContractsInstrumentedTest {
         assertEquals(3, intent.getIntExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 0));
         assertTrue(intent.getBooleanExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false));
         assertEquals("zh-CN", intent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE));
-        assertTrue(intent.hasExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING));
+        assertEquals(
+                RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY,
+                intent.getStringExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING));
     }
 
     @Test
@@ -134,6 +136,10 @@ public final class AndroidRecognitionContractsInstrumentedTest {
                 RecognitionBackend.SYSTEM_ON_DEVICE,
                 "",
                 "",
+                "",
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                "",
+                "paraformer-realtime-v2",
                 "",
                 language,
                 ProcessingMode.VERBATIM,

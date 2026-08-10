@@ -29,6 +29,46 @@ public final class RecognitionLanguageSupportEvaluatorTest {
                 evaluate(" ").outcome());
     }
 
+    @Test
+    public void acceptsAndroidChineseAliasesWithoutMixingWritingSystems() {
+        assertEquals(
+                RecognitionLanguageSupportEvaluator.Outcome.INSTALLED,
+                RecognitionLanguageSupportEvaluator.evaluate(
+                        "cmn-Hans-CN",
+                        List.of("zh-CN"),
+                        List.of(),
+                        List.of(),
+                        List.of()).outcome());
+        assertEquals(
+                RecognitionLanguageSupportEvaluator.Outcome.INSTALLED,
+                RecognitionLanguageSupportEvaluator.evaluate(
+                        "zh-Hans",
+                        List.of("cmn_CN"),
+                        List.of(),
+                        List.of(),
+                        List.of()).outcome());
+        assertEquals(
+                RecognitionLanguageSupportEvaluator.Outcome.UNSUPPORTED,
+                RecognitionLanguageSupportEvaluator.evaluate(
+                        "zh-TW",
+                        List.of("zh-CN"),
+                        List.of(),
+                        List.of(),
+                        List.of()).outcome());
+    }
+
+    @Test
+    public void languageOnlyRequestAcceptsARegionalModel() {
+        assertEquals(
+                RecognitionLanguageSupportEvaluator.Outcome.INSTALLED,
+                RecognitionLanguageSupportEvaluator.evaluate(
+                        "en",
+                        List.of("en-US"),
+                        List.of(),
+                        List.of(),
+                        List.of()).outcome());
+    }
+
     private static RecognitionLanguageSupportEvaluator.Evaluation evaluate(String language) {
         return RecognitionLanguageSupportEvaluator.evaluate(
                 language,

@@ -9,6 +9,7 @@ import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.data.PersonalizationStore;
 import com.opentypeless.android.ime.DictationRequest;
 import com.opentypeless.android.ime.DictationResult;
+import com.opentypeless.android.ime.TranscriptUpdate;
 import com.opentypeless.android.ime.VoicePipeline;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.ProcessingMode;
@@ -123,7 +124,8 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
 
     private Prepared prepare(RecognitionRequest request) throws RecognitionStartException {
         AppSettings stored = settingsRepository.load();
-        if (stored.recognitionBackend() != RecognitionBackend.OPENAI_COMPATIBLE) {
+        if (stored.recognitionBackend() != RecognitionBackend.OPENAI_COMPATIBLE
+                && stored.recognitionBackend() != RecognitionBackend.DASHSCOPE_STREAMING) {
             throw new RecognitionStartException(
                     RecognitionErrors.unsupportedBackend(stored.recognitionBackend()));
         }
@@ -174,8 +176,8 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
             }
 
             @Override
-            public void onPartial(String text) {
-                deliverActive(token, () -> callback.onPartial(text));
+            public void onTranscript(TranscriptUpdate update) {
+                deliverActive(token, () -> callback.onPartial(update.text()));
             }
 
             @Override
@@ -301,6 +303,10 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
                 settings.sttBaseUrl(),
                 settings.sttApiKey(),
                 settings.sttModel(),
+                settings.streamingBaseUrl(),
+                settings.streamingApiKey(),
+                settings.streamingModel(),
+                settings.streamingVocabularyId(),
                 language,
                 settings.defaultMode(),
                 settings.polishEnabled(),

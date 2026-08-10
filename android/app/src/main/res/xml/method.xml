@@ -5,6 +5,6 @@
     <subtype
         android:imeSubtypeLocale=""
         android:imeSubtypeMode="keyboard"
-        android:isAsciiCapable="true"
+        android:isAsciiCapable="false"
         android:label="@string/ime_subtype_en" />
 </input-method>

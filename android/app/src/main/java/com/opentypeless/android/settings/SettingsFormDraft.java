@@ -9,6 +9,10 @@ public record SettingsFormDraft(
         String sttBaseUrl,
         String sttApiKey,
         String sttModel,
+        String streamingBaseUrl,
+        String streamingApiKey,
+        String streamingModel,
+        String streamingVocabularyId,
         boolean standardSpeechEnabled,
         String standardSpeechCallers,
         boolean polishEnabled,
@@ -27,6 +31,10 @@ public record SettingsFormDraft(
         sttBaseUrl = safe(sttBaseUrl);
         sttApiKey = safe(sttApiKey);
         sttModel = safe(sttModel);
+        streamingBaseUrl = safe(streamingBaseUrl);
+        streamingApiKey = safe(streamingApiKey);
+        streamingModel = safe(streamingModel);
+        streamingVocabularyId = safe(streamingVocabularyId);
         standardSpeechCallers = safe(standardSpeechCallers);
         llmBaseUrl = safe(llmBaseUrl);
         llmApiKey = safe(llmApiKey);
@@ -36,7 +44,10 @@ public record SettingsFormDraft(
     }
 
     /** Uses persisted keys when restoring a process-death Bundle that intentionally excludes them. */
-    public SettingsFormDraft withSecrets(String persistedSttApiKey, String persistedLlmApiKey) {
+    public SettingsFormDraft withSecrets(
+            String persistedSttApiKey,
+            String persistedStreamingApiKey,
+            String persistedLlmApiKey) {
         return new SettingsFormDraft(
                 recognitionBackendIndex,
                 defaultModeIndex,
@@ -45,6 +56,10 @@ public record SettingsFormDraft(
                 sttBaseUrl,
                 persistedSttApiKey,
                 sttModel,
+                streamingBaseUrl,
+                persistedStreamingApiKey,
+                streamingModel,
+                streamingVocabularyId,
                 standardSpeechEnabled,
                 standardSpeechCallers,
                 polishEnabled,
@@ -62,7 +77,7 @@ public record SettingsFormDraft(
     public String toString() {
         return "SettingsFormDraft{backend=" + recognitionBackendIndex
                 + ", mode=" + defaultModeIndex
-                + ", sttApiKey=<redacted>, llmApiKey=<redacted>}";
+                + ", sttApiKey=<redacted>, streamingApiKey=<redacted>, llmApiKey=<redacted>}";
     }
 
     private static String safe(String value) {

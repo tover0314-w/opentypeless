@@ -38,8 +38,13 @@ final class RecognitionLanguageSupportEvaluator {
 
     private static boolean contains(List<String> values, String requested) {
         if (values == null) return false;
+        LanguageTag requestedTag = LanguageTag.parse(requested);
         for (String value : values) {
-            if (normalize(value).equals(requested)) return true;
+            String normalized = normalize(value);
+            if (normalized.equals(requested)
+                    || requestedTag.compatibleWith(LanguageTag.parse(normalized))) {
+                return true;
+            }
         }
         return false;
     }
@@ -48,5 +53,29 @@ final class RecognitionLanguageSupportEvaluator {
         return value == null
                 ? ""
                 : value.trim().replace('_', '-').toLowerCase(Locale.ROOT);
+    }
+
+    private record LanguageTag(String language, String script) {
+        static LanguageTag parse(String value) {
+            Locale locale = Locale.forLanguageTag(normalize(value));
+            String language = locale.getLanguage().toLowerCase(Locale.ROOT);
+            if (language.equals("cmn")) language = "zh";
+            String script = locale.getScript();
+            if (language.equals("zh") && script.isEmpty()) {
+                script = switch (locale.getCountry().toUpperCase(Locale.ROOT)) {
+                    case "CN", "SG", "MY" -> "Hans";
+                    case "TW", "HK", "MO" -> "Hant";
+                    default -> "";
+                };
+            }
+            return new LanguageTag(language, script.toLowerCase(Locale.ROOT));
+        }
+
+        boolean compatibleWith(LanguageTag candidate) {
+            if (language.isEmpty() || !language.equals(candidate.language)) return false;
+            return script.isEmpty()
+                    || candidate.script.isEmpty()
+                    || script.equals(candidate.script);
+        }
     }
 }

@@ -54,7 +54,8 @@ public final class StandardRecognitionSettings {
     public static boolean isSupportedRoute(Snapshot snapshot, AppSettings settings) {
         if (snapshot == null || !snapshot.enabled()) return true;
         return settings != null
-                && settings.recognitionBackend() == RecognitionBackend.OPENAI_COMPATIBLE
+                && (settings.recognitionBackend() == RecognitionBackend.OPENAI_COMPATIBLE
+                        || settings.recognitionBackend() == RecognitionBackend.DASHSCOPE_STREAMING)
                 && settings.isReady();
     }
 

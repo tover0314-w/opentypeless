@@ -51,4 +51,23 @@ public final class EndpointNormalizerTest {
                         "http://192.168.1.20:8000/v1/audio/transcriptions",
                         "secret"));
     }
+
+    @Test
+    public void acceptsOnlyOfficialDashScopeWssEndpoints() {
+        assertEquals(
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+                EndpointNormalizer.dashScopeWebSocket(
+                        " wss://dashscope.aliyuncs.com/api-ws/v1/inference "));
+        assertEquals(
+                "wss://workspace-123.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference",
+                EndpointNormalizer.dashScopeWebSocket(
+                        "wss://workspace-123.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference"));
+
+        assertThrows(IllegalArgumentException.class, () -> EndpointNormalizer.dashScopeWebSocket(
+                "ws://dashscope.aliyuncs.com/api-ws/v1/inference"));
+        assertThrows(IllegalArgumentException.class, () -> EndpointNormalizer.dashScopeWebSocket(
+                "wss://dashscope.aliyuncs.com.attacker.test/api-ws/v1/inference"));
+        assertThrows(IllegalArgumentException.class, () -> EndpointNormalizer.dashScopeWebSocket(
+                "wss://dashscope.aliyuncs.com/api-ws/v1/inference?key=secret"));
+    }
 }

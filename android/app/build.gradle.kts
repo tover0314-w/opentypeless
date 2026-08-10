@@ -41,8 +41,8 @@ android {
         applicationId = "com.opentypeless.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -88,7 +88,9 @@ android {
 
 dependencies {
     implementation(files(sherpaAsrRuntime))
+    //noinspection GradleDependency -- matches the pinned sherpa runtime's Kotlin ABI.
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.7.20")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

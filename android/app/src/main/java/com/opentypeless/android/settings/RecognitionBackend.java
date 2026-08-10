@@ -3,6 +3,7 @@ package com.opentypeless.android.settings;
 public enum RecognitionBackend {
     OPENAI_COMPATIBLE("BYOK / self-hosted"),
     LOCAL_OFFLINE("OpenTypeless offline model"),
+    DASHSCOPE_STREAMING("DashScope Paraformer realtime"),
     SYSTEM_ON_DEVICE("Android on-device"),
     SYSTEM_DEFAULT("Android system service");
 

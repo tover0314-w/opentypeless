@@ -1,12 +1,10 @@
 package com.opentypeless.android.recognition;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
@@ -19,8 +17,10 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.opentypeless.android.R;
+import com.opentypeless.android.SystemBarInsets;
+
 /** Activity implementation for {@link RecognizerIntent#ACTION_RECOGNIZE_SPEECH}. */
-@SuppressLint("SetTextI18n") // Kept self-contained so the recognition entry adds no shared resources.
 public final class OpenTypelessRecognizerActivity extends Activity {
     private static final int MICROPHONE_PERMISSION_REQUEST = 4201;
     private static final String STATE_SESSION_CANCELLED =
@@ -51,7 +51,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
                 || !RecognizerIntent.ACTION_RECOGNIZE_SPEECH.equals(source.getAction())) {
             finishError(new RecognitionFailure(
                     android.speech.SpeechRecognizer.ERROR_CLIENT,
-                    "Unsupported speech recognition action"));
+                    getString(R.string.recognition_error_unsupported_action)));
             return;
         }
         String callingPackage = getCallingPackage();
@@ -64,8 +64,8 @@ public final class OpenTypelessRecognizerActivity extends Activity {
                             ? RecognitionErrors.rateLimitedCode()
                             : android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
                     access == RecognitionAccessController.Decision.RATE_LIMITED
-                            ? "Too many speech recognition requests; try again later"
-                            : "Allow this caller in OpenTypeless standard speech settings"));
+                            ? getString(R.string.recognition_error_rate_limited)
+                            : getString(R.string.recognition_error_caller_not_allowed)));
             return;
         }
         controller = new RecognitionSessionController(new VoicePipelineRecognitionEngine(this));
@@ -73,7 +73,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
                 == PackageManager.PERMISSION_GRANTED) {
             startRecognition();
         } else {
-            status.setText("Microphone access is required");
+            status.setText(R.string.recognition_status_microphone_required);
             requestPermissions(
                     new String[]{Manifest.permission.RECORD_AUDIO},
                     MICROPHONE_PERMISSION_REQUEST);
@@ -92,7 +92,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
         } else {
             finishError(new RecognitionFailure(
                     android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
-                    "Microphone permission is required for speech recognition"));
+                    getString(R.string.recognition_error_microphone_permission)));
         }
     }
 
@@ -138,7 +138,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
             @Override
             public void onReady() {
                 postUi(() -> {
-                    status.setText("Listening…");
+                    status.setText(R.string.recognition_status_listening);
                     stop.setEnabled(true);
                 });
             }
@@ -148,7 +148,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
             @Override
             public void onEndOfSpeech() {
                 postUi(() -> {
-                    status.setText("Transcribing…");
+                    status.setText(R.string.recognition_status_transcribing);
                     stop.setEnabled(false);
                 });
             }
@@ -220,7 +220,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
     private void stopRecognition() {
         if (controller == null || completed) return;
         controller.stop();
-        status.setText("Transcribing…");
+        status.setText(R.string.recognition_status_transcribing);
         stop.setEnabled(false);
     }
 
@@ -229,18 +229,18 @@ public final class OpenTypelessRecognizerActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(24), dp(24), dp(24), dp(20));
-        root.setBackgroundColor(Color.rgb(245, 247, 246));
+        root.setBackgroundColor(getColor(R.color.ime_surface));
 
         status = new TextView(this);
-        status.setText("Preparing speech recognition…");
+        status.setText(R.string.recognition_status_preparing);
         status.setTextSize(18);
-        status.setTextColor(Color.rgb(35, 70, 63));
+        status.setTextColor(getColor(R.color.ime_on_surface_variant));
         status.setGravity(Gravity.CENTER);
         root.addView(status, matchWidthWrap());
 
         partial = new TextView(this);
         partial.setTextSize(16);
-        partial.setTextColor(Color.rgb(35, 50, 47));
+        partial.setTextColor(getColor(R.color.ime_on_surface));
         partial.setGravity(Gravity.CENTER);
         partial.setPadding(0, dp(20), 0, dp(20));
         root.addView(partial, matchWidthWrap());
@@ -248,22 +248,23 @@ public final class OpenTypelessRecognizerActivity extends Activity {
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.CENTER);
-        stop = button("Stop", ignored -> stopRecognition());
+        stop = button(R.string.recognition_action_stop, ignored -> stopRecognition());
         stop.setEnabled(false);
         buttons.addView(stop, buttonLayoutParams());
         buttons.addView(
-                button("Cancel", ignored -> cancelAndFinish()),
+                button(R.string.cancel, ignored -> cancelAndFinish()),
                 buttonLayoutParams());
         root.addView(buttons, matchWidthWrap());
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        SystemBarInsets.apply(scroll);
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    private Button button(String text, View.OnClickListener listener) {
+    private Button button(int textResource, View.OnClickListener listener) {
         Button button = new Button(this);
-        button.setText(text);
+        button.setText(textResource);
         button.setAllCaps(false);
         button.setMinimumHeight(dp(48));
         button.setOnClickListener(listener);

@@ -41,7 +41,7 @@ final class SystemRecognitionIntentFactory {
             }
             intent.putExtra(
                     RecognizerIntent.EXTRA_ENABLE_FORMATTING,
-                    RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY);
+                    RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY);
         }
         return intent;
     }

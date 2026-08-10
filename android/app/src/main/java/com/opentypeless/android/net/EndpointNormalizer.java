@@ -46,6 +46,38 @@ public final class EndpointNormalizer {
         }
     }
 
+    /**
+     * Validates the official DashScope realtime endpoint before attaching a bearer credential.
+     * This deliberately rejects look-alike hosts so a pasted URL cannot exfiltrate the API key.
+     */
+    public static String dashScopeWebSocket(String value) {
+        String endpoint = value == null ? "" : value.trim();
+        if (endpoint.isEmpty()) {
+            throw new IllegalArgumentException("DashScope WebSocket URL is required");
+        }
+        try {
+            URI uri = new URI(endpoint);
+            String host = uri.getHost();
+            boolean officialHost = host != null
+                    && (host.equalsIgnoreCase("dashscope.aliyuncs.com")
+                            || host.toLowerCase(Locale.ROOT)
+                                    .matches("[a-z0-9-]+\\.cn-beijing\\.maas\\.aliyuncs\\.com"));
+            if (!"wss".equalsIgnoreCase(uri.getScheme())
+                    || !officialHost
+                    || uri.getPort() != -1
+                    || uri.getUserInfo() != null
+                    || uri.getQuery() != null
+                    || uri.getFragment() != null
+                    || !"/api-ws/v1/inference".equals(uri.getPath())) {
+                throw new IllegalArgumentException(
+                        "Use the official DashScope WSS inference URL without credentials, query, or fragment");
+            }
+            return uri.toASCIIString();
+        } catch (URISyntaxException error) {
+            throw new IllegalArgumentException("DashScope WebSocket URL is invalid", error);
+        }
+    }
+
     private static boolean isLocalHost(String host) {
         String value = host.toLowerCase(Locale.ROOT);
         if (value.startsWith("[") && value.endsWith("]")) {

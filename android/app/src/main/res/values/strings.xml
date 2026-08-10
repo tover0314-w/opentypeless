@@ -6,6 +6,15 @@
     <string name="status_ready">Ready</string>
     <string name="action_speak">🎙 Speak</string>
     <string name="action_stop">■ Stop</string>
+    <string name="recognition_status_preparing">Preparing speech recognition…</string>
+    <string name="recognition_status_microphone_required">Microphone access is required</string>
+    <string name="recognition_status_listening">Listening…</string>
+    <string name="recognition_status_transcribing">Transcribing…</string>
+    <string name="recognition_action_stop">Stop</string>
+    <string name="recognition_error_unsupported_action">Unsupported speech recognition action</string>
+    <string name="recognition_error_rate_limited">Too many speech recognition requests; try again later</string>
+    <string name="recognition_error_caller_not_allowed">Allow this caller in OpenTypeless standard speech settings</string>
+    <string name="recognition_error_microphone_permission">Microphone permission is required for speech recognition</string>
 
     <string name="settings_title">OpenTypeless Voice Studio</string>
     <string name="settings_intro">Private-by-design voice input with on-device or BYOK recognition. OpenTypeless has no account and sends data only to the provider you choose.</string>
@@ -13,6 +22,7 @@
     <string name="backend_label">Speech recognition backend</string>
     <string name="backend_openai">BYOK or self-hosted</string>
     <string name="backend_local_offline">OpenTypeless offline · quality</string>
+    <string name="backend_dashscope_streaming">DashScope Paraformer realtime</string>
     <string name="backend_on_device">Android on-device</string>
     <string name="backend_system_default">Android system speech service</string>
     <string name="default_mode_label">Default processing mode</string>
@@ -35,7 +45,6 @@
     <string name="download_offline_model_confirmation">%1$s downloads about %2$d MiB over HTTPS from the pinned Hugging Face revision below and then verifies exact size and SHA-256 before installation. The model weights use the FunASR Model License; sherpa-onnx and its Android runtime are open source.\n\nRevision: %3$s\n\nContinue only if you accept the model license and storage use.</string>
     <string name="offline_model_download_starting">Preparing the private offline-model download…</string>
     <string name="offline_model_download_progress">Downloading and verifying offline model: %1$d%% (%2$d / %3$d MiB)</string>
-    <string name="offline_model_downloaded">Offline model downloaded and verified</string>
     <string name="offline_model_download_failed">Offline model download failed: %1$s</string>
     <string name="delete_offline_model">Delete offline model</string>
     <string name="delete_offline_model_title">Delete the offline model?</string>
@@ -43,7 +52,21 @@
     <string name="offline_model_deleting">Releasing and deleting the offline model…</string>
     <string name="offline_model_delete_failed">Offline model deletion failed: %1$s</string>
     <string name="offline_model_required">This device must pass the memory gate and have a verified OpenTypeless offline model before selecting this backend</string>
+    <string name="streaming_provider_note">True realtime mode sends bounded 16 kHz PCM frames over WSS and replaces partial text in the active editor. It never falls back to another provider silently.</string>
+    <string name="streaming_base_url_label">DashScope WebSocket URL</string>
+    <string name="streaming_api_key_label">DashScope API key, protected by Android Keystore</string>
+    <string name="streaming_model_label">Streaming model</string>
+    <string name="streaming_vocabulary_id_label">Optional DashScope vocabulary ID</string>
     <string name="system_backend_note">System recognition does not use the STT URL or API key. Availability and network behavior depend on the speech service installed on this device.</string>
+    <string name="system_route_inspecting">Inspecting Android speech route…</string>
+    <string name="system_route_service">Android default service: %1$s\n%2$s · %3$s</string>
+    <string name="system_route_service_unknown">Android does not expose the configured recognition-service identity.</string>
+    <string name="system_route_diagnostics_summary">%1$s\n%2$s</string>
+    <string name="system_route_version_unknown">version unknown</string>
+    <string name="system_route_on_device_available">On-device recognizer API: available. Android does not expose its exact component; no network fallback is assumed.</string>
+    <string name="system_route_on_device_unavailable">On-device recognizer API: unavailable. OpenTypeless fails closed and does not silently send audio to the default online service.</string>
+    <string name="system_route_default_available">Default recognizer API: available. Its provider decides whether recognition uses the network.</string>
+    <string name="system_route_default_unavailable">Default recognizer API: unavailable.</string>
     <string name="system_backend_status">%1$s
 
 %2$s</string>
@@ -77,7 +100,7 @@
     <string name="standard_speech_callers_label">Allowed caller package names (one per line)</string>
     <string name="standard_speech_callers_hint">Example: com.example.keyboard</string>
     <string name="standard_speech_security_note">Off by default. Only listed packages may invoke the standard RecognitionService or RecognizerIntent entry, and each caller is rate-limited. Requests use your configured BYOK endpoint and may incur provider charges.</string>
-    <string name="standard_speech_requires_byok">Android standard speech entry requires the BYOK or self-hosted recognition backend</string>
+    <string name="standard_speech_requires_byok">Android standard speech entry requires a configured BYOK or streaming recognition backend</string>
     <string name="section_processing">Processing</string>
     <string name="polish_enabled">Enable AI smart editing and translation</string>
     <string name="llm_base_url_label">LLM base URL</string>
@@ -97,6 +120,8 @@
     <string name="operation_failed">The operation could not be completed</string>
     <string name="invalid_recording_length">Recording length must be a whole number from 5 to 540 seconds</string>
     <string name="stt_model_required">STT model is required for the BYOK backend</string>
+    <string name="streaming_api_key_required">DashScope API key is required for realtime streaming</string>
+    <string name="streaming_model_required">Streaming model is required for realtime streaming</string>
     <string name="llm_model_required">LLM model is required when AI processing is enabled</string>
     <string name="section_manage">Personal data</string>
     <string name="manage_dictionary">Manage personal dictionary and corrections</string>

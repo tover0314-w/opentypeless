@@ -172,7 +172,7 @@ public final class OpenAiCompatibleClient {
     private static String headerSafe(String value, int maximumCodePoints, String label) {
         String clean = value == null ? "" : value.trim();
         if (clean.isEmpty()) throw new IllegalArgumentException(label + " is required");
-        if (clean.indexOf('\r') >= 0 || clean.indexOf('\n') >= 0 || clean.indexOf('\u0000') >= 0) {
+        if (clean.codePoints().anyMatch(Character::isISOControl)) {
             throw new IllegalArgumentException(label + " contains unsupported control characters");
         }
         if (clean.codePointCount(0, clean.length()) > maximumCodePoints) {

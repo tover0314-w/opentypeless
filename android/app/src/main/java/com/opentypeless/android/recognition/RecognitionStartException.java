@@ -1,6 +1,8 @@
 package com.opentypeless.android.recognition;
 
 public final class RecognitionStartException extends Exception {
+    private static final long serialVersionUID = 1L;
+
     private final RecognitionFailure failure;
 
     public RecognitionStartException(RecognitionFailure failure) {

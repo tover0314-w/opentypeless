@@ -15,6 +15,8 @@ import com.opentypeless.android.net.OpenAiCompatibleClient;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.offline.LocalRealtimePreview;
 import com.opentypeless.android.offline.SafePunctuationRestorer;
+import com.opentypeless.android.net.streaming.ParaformerStreamingRecognizer;
+import com.opentypeless.android.net.streaming.StreamingRecognitionEngine;
 import com.opentypeless.android.personalization.PersonalizedTextProcessor;
 import com.opentypeless.android.personalization.ProcessingResult;
 import com.opentypeless.android.personalization.PromptComposer;
@@ -42,7 +44,12 @@ public final class VoicePipeline {
         void onState(State state, String message);
         default void onReadyForSpeech() {}
         default void onBeginningOfSpeech() {}
-        void onPartial(String text);
+        default void onTranscript(TranscriptUpdate update) {
+            onPartial(update.text());
+        }
+        /** @deprecated Implement {@link #onTranscript(TranscriptUpdate)} for revision metadata. */
+        @Deprecated
+        default void onPartial(String text) {}
         void onResult(DictationResult result);
         void onError(String message);
     }
@@ -56,6 +63,7 @@ public final class VoicePipeline {
         volatile boolean systemFallbackAttempted;
         final Listener listener;
         final long startedAt;
+        final AtomicLong transcriptSequence = new AtomicLong();
         volatile boolean cancelled;
         volatile Future<?> task;
 
@@ -81,6 +89,8 @@ public final class VoicePipeline {
     private final AtomicLong generation = new AtomicLong();
     private final AudioRecorder recorder = new AudioRecorder();
     private final OpenAiCompatibleClient client = new OpenAiCompatibleClient();
+    private final ParaformerStreamingRecognizer streamingRecognizer =
+            new ParaformerStreamingRecognizer();
     private final SystemSpeechRecognizer systemRecognizer;
     private final Context applicationContext;
 
@@ -103,6 +113,7 @@ public final class VoicePipeline {
         RecognitionBackend backend = request.settings().recognitionBackend();
         RecordingSession recordingSession = backend == RecognitionBackend.OPENAI_COMPATIBLE
                 || backend == RecognitionBackend.LOCAL_OFFLINE
+                || backend == RecognitionBackend.DASHSCOPE_STREAMING
                 ? new RecordingSession()
                 : null;
         ActiveRun run = new ActiveRun(
@@ -111,8 +122,11 @@ public final class VoicePipeline {
         state.set(State.RECORDING);
         listener.onState(State.RECORDING, routeLabel(run) + " · listening…");
 
-        if (recordingSession != null) {
+        if (backend == RecognitionBackend.OPENAI_COMPATIBLE
+                || backend == RecognitionBackend.LOCAL_OFFLINE) {
             run.task = executor.submit(() -> executeCaptured(run));
+        } else if (backend == RecognitionBackend.DASHSCOPE_STREAMING) {
+            run.task = executor.submit(() -> executeStreaming(run));
         } else {
             startSystem(run);
         }
@@ -132,7 +146,12 @@ public final class VoicePipeline {
                 preview = new LocalRealtimePreview(
                         sessionForPreview,
                         text -> {
-                            if (isCurrent(run)) run.listener.onPartial(text);
+                            if (isCurrent(run)) {
+                                run.listener.onTranscript(TranscriptUpdate.unstable(
+                                        run.transcriptSequence.incrementAndGet(),
+                                        text,
+                                        TranscriptUpdate.Source.LOCAL_OFFLINE));
+                            }
                         });
             }
             LocalRealtimePreview activePreview = preview;
@@ -192,6 +211,57 @@ public final class VoicePipeline {
         }
     }
 
+    private void executeStreaming(ActiveRun run) {
+        try {
+            StreamingRecognitionEngine.Result streaming = streamingRecognizer.recognize(
+                    run.request.settings(),
+                    recorder,
+                    run.recordingSession,
+                    new AudioRecorder.CaptureListener() {
+                        @Override
+                        public void onReady() {
+                            if (isCurrent(run)) run.listener.onReadyForSpeech();
+                        }
+
+                        @Override
+                        public void onBeginningOfSpeech() {
+                            if (isCurrent(run)) run.listener.onBeginningOfSpeech();
+                        }
+                    },
+                    new StreamingRecognitionEngine.Listener() {
+                        @Override
+                        public void onFinishing() {
+                            if (!isCurrent(run)) return;
+                            state.set(State.TRANSCRIBING);
+                            run.listener.onState(
+                                    State.TRANSCRIBING,
+                                    "Paraformer realtime · finalizing punctuation…");
+                        }
+
+                        @Override
+                        public void onTranscript(String stableText, String unstableText) {
+                            if (!isCurrent(run)) return;
+                            run.listener.onTranscript(new TranscriptUpdate(
+                                    run.transcriptSequence.incrementAndGet(),
+                                    stableText,
+                                    unstableText,
+                                    false,
+                                    TranscriptUpdate.Source.DASHSCOPE_PARAFORMER));
+                        }
+                    });
+            finishTranscription(
+                    run,
+                    streaming.text(),
+                    streaming.durationMs(),
+                    streaming.reachedLimit(),
+                    streaming.autoStopped());
+        } catch (CancellationException ignored) {
+            finishCancelled(run);
+        } catch (Exception error) {
+            finishError(run, error);
+        }
+    }
+
     private void startSystem(ActiveRun run) {
         systemRecognizer.start(
                 run.request.settings(),
@@ -213,7 +283,12 @@ public final class VoicePipeline {
 
                     @Override
                     public void onPartial(String text) {
-                        if (isCurrent(run)) run.listener.onPartial(text);
+                        if (isCurrent(run)) {
+                            run.listener.onTranscript(TranscriptUpdate.unstable(
+                                    run.transcriptSequence.incrementAndGet(),
+                                    text,
+                                    TranscriptUpdate.Source.ANDROID_SYSTEM));
+                        }
                     }
 
                     @Override
@@ -293,9 +368,11 @@ public final class VoicePipeline {
             return;
         }
         String finalText = personalized.text();
-        String message = reachedLimit
-                ? "Inserted · recording time limit reached"
-                : autoStopped ? "Inserted · stopped after silence" : "Inserted";
+        DictationResult.Outcome outcome = reachedLimit
+                ? DictationResult.Outcome.INSERTED_RECORDING_LIMIT
+                : autoStopped
+                ? DictationResult.Outcome.INSERTED_AFTER_SILENCE
+                : DictationResult.Outcome.INSERTED;
         boolean aiAccepted = false;
 
         String command = run.request.inputContext().hasSelection()
@@ -303,7 +380,7 @@ public final class VoicePipeline {
                 : VoiceCommandProcessor.exactReplacement(finalText);
         if (command != null) {
             finalText = command;
-            message = "Voice command inserted";
+            outcome = DictationResult.Outcome.VOICE_COMMAND_INSERTED;
         } else if (requiresLlm(run.mode, run.request.inputContext())) {
             if (!llmReady(run.request.settings())) {
                 if (run.request.inputContext().hasSelection()) {
@@ -311,7 +388,7 @@ public final class VoicePipeline {
                             "Selected-text editing requires a configured AI polish endpoint"));
                     return;
                 }
-                message = "Inserted exact transcript · AI polish is not configured";
+                outcome = DictationResult.Outcome.EXACT_AI_NOT_CONFIGURED;
             } else {
                 state.set(State.POLISHING);
                 run.listener.onState(State.POLISHING, "Checking and polishing without changing facts…");
@@ -342,17 +419,17 @@ public final class VoicePipeline {
                     if (disposition == AiCandidateDisposition.ACCEPT) {
                         finalText = protectedCandidate.text();
                         aiAccepted = true;
-                        message = run.request.inputContext().hasSelection()
-                                ? "Selected text updated · Undo available"
+                        outcome = run.request.inputContext().hasSelection()
+                                ? DictationResult.Outcome.SELECTION_UPDATED
                                 : run.mode == ProcessingMode.TRANSLATE
-                                ? "Translated · Undo available"
-                                : "Smart edit inserted · Undo available";
+                                ? DictationResult.Outcome.TRANSLATED
+                                : DictationResult.Outcome.SMART_EDITED;
                     } else if (disposition == AiCandidateDisposition.PRESERVE_SELECTION) {
                         finishError(run, new IllegalStateException(
                                 "AI edit blocked to protect facts; original selection was preserved"));
                         return;
                     } else {
-                        message = "AI edit blocked to protect facts · exact transcript inserted";
+                        outcome = DictationResult.Outcome.AI_BLOCKED_EXACT;
                     }
                 } catch (Exception error) {
                     if (!isCurrent(run)) return;
@@ -361,7 +438,7 @@ public final class VoicePipeline {
                                 "Selected-text edit failed; original selection was preserved"));
                         return;
                     }
-                    message = "Inserted exact transcript because AI polish failed";
+                    outcome = DictationResult.Outcome.EXACT_AI_FAILED;
                 }
             }
         }
@@ -371,7 +448,7 @@ public final class VoicePipeline {
                 rawText.trim(),
                 personalized.text(),
                 finalText,
-                message,
+                outcome,
                 run.mode,
                 run.actualBackend,
                 durationMs,
@@ -400,6 +477,7 @@ public final class VoicePipeline {
             if (run.recordingSession != null) recorder.cancel(run.recordingSession);
             systemRecognizer.cancel();
             client.cancelActiveRequest();
+            streamingRecognizer.cancelActiveSession();
             Future<?> task = run.task;
             if (task != null) task.cancel(true);
         }
@@ -413,6 +491,7 @@ public final class VoicePipeline {
     public void shutdown() {
         cancel();
         systemRecognizer.destroy();
+        streamingRecognizer.shutdown();
         executor.shutdownNow();
     }
 
@@ -461,6 +540,7 @@ public final class VoicePipeline {
         return switch (run.actualBackend) {
             case OPENAI_COMPATIBLE -> "BYOK " + hostLabel(run.request.settings().sttBaseUrl());
             case LOCAL_OFFLINE -> "OpenTypeless offline";
+            case DASHSCOPE_STREAMING -> "Paraformer realtime";
             case SYSTEM_ON_DEVICE -> "On-device";
             case SYSTEM_DEFAULT -> "Android speech service";
         };

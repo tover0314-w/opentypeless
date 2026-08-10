@@ -8,17 +8,20 @@ import android.speech.SpeechRecognizer;
 
 import com.opentypeless.android.security.SecurePreferences;
 
+import java.util.Locale;
 import java.util.Map;
 
 public final class SettingsRepository {
     private static final String STORE = "opentypeless_settings";
     private static final String TRANSACTION_STORE = "opentypeless_settings_transaction";
     private static final String STT_KEY = "stt_api_key";
+    private static final String STREAMING_KEY = "streaming_api_key";
     private static final String LLM_KEY = "llm_api_key";
     private static final String REVISION = "settings_revision";
     private static final String TX_PENDING = "pending";
     private static final String TX_PREFIX = "old_";
     private static final String TX_STT_SECRET = "old_stt_secret";
+    private static final String TX_STREAMING_SECRET = "old_streaming_secret";
     private static final String TX_LLM_SECRET = "old_llm_secret";
     private static final Object TRANSACTION_LOCK = new Object();
 
@@ -44,7 +47,11 @@ public final class SettingsRepository {
             long revision = preferences.getLong(REVISION, 0L);
             AppSettings existing = cached;
             if (existing != null && cachedRevision == revision) return existing;
-            AppSettings loaded = readSettings(preferences, secrets.get(STT_KEY), secrets.get(LLM_KEY));
+            AppSettings loaded = readSettings(
+                    preferences,
+                    secrets.get(STT_KEY),
+                    secrets.get(STREAMING_KEY),
+                    secrets.get(LLM_KEY));
             cached = loaded;
             cachedRevision = revision;
             return loaded;
@@ -80,6 +87,7 @@ public final class SettingsRepository {
         AppSettings normalized = normalize(settings);
         // Encryption is prepared before the journal or either durable value store is changed.
         String preparedSttKey = secrets.prepare(normalized.sttApiKey());
+        String preparedStreamingKey = secrets.prepare(normalized.streamingApiKey());
         String preparedLlmKey = secrets.prepare(normalized.llmApiKey());
 
         synchronized (TRANSACTION_LOCK) {
@@ -97,6 +105,7 @@ public final class SettingsRepository {
                 public void writeSecrets() {
                     secrets.commitPrepared(Map.of(
                             STT_KEY, preparedSttKey,
+                            STREAMING_KEY, preparedStreamingKey,
                             LLM_KEY, preparedLlmKey));
                 }
 
@@ -141,7 +150,15 @@ public final class SettingsRepository {
                 .putString(key("stt_base_url"), preferences.getString(
                         "stt_base_url", "https://api.openai.com/v1"))
                 .putString(key("stt_model"), preferences.getString("stt_model", "whisper-1"))
-                .putString(key("language"), preferences.getString("language", ""))
+                .putString(key("streaming_base_url"), preferences.getString(
+                        "streaming_base_url",
+                        "wss://dashscope.aliyuncs.com/api-ws/v1/inference"))
+                .putString(key("streaming_model"), preferences.getString(
+                        "streaming_model", "paraformer-realtime-v2"))
+                .putString(key("streaming_vocabulary_id"), preferences.getString(
+                        "streaming_vocabulary_id", ""))
+                .putString(key("language"), preferences.getString(
+                        "language", defaultLanguage()))
                 .putString(key("default_mode"), preferences.getString(
                         "default_mode", ProcessingMode.AUTO.name()))
                 .putBoolean(key("polish_enabled"), preferences.getBoolean(
@@ -162,6 +179,7 @@ public final class SettingsRepository {
                         "max_recording_seconds", 180))
                 .putLong(key(REVISION), preferences.getLong(REVISION, 0L))
                 .putString(TX_STT_SECRET, secrets.storedValue(STT_KEY))
+                .putString(TX_STREAMING_SECRET, secrets.storedValue(STREAMING_KEY))
                 .putString(TX_LLM_SECRET, secrets.storedValue(LLM_KEY));
         if (!editor.commit()) {
             throw new IllegalStateException("Unable to start settings transaction");
@@ -172,8 +190,9 @@ public final class SettingsRepository {
         if (!transactionPreferences.getBoolean(TX_PENDING, false)) return;
         secrets.commitPrepared(Map.of(
                 STT_KEY, transactionPreferences.getString(TX_STT_SECRET, ""),
+                STREAMING_KEY, transactionPreferences.getString(TX_STREAMING_SECRET, ""),
                 LLM_KEY, transactionPreferences.getString(TX_LLM_SECRET, "")));
-        AppSettings previous = readSettings(transactionPreferences, "", "");
+        AppSettings previous = readSettings(transactionPreferences, "", "", "");
         commitSettings(previous, transactionPreferences.getLong(key(REVISION), 0L));
     }
 
@@ -187,6 +206,7 @@ public final class SettingsRepository {
     private AppSettings readSettings(
             SharedPreferences source,
             String sttApiKey,
+            String streamingApiKey,
             String llmApiKey) {
         String prefix = source == transactionPreferences ? TX_PREFIX : "";
         return new AppSettings(
@@ -195,7 +215,13 @@ public final class SettingsRepository {
                 source.getString(prefix + "stt_base_url", "https://api.openai.com/v1"),
                 sttApiKey,
                 source.getString(prefix + "stt_model", "whisper-1"),
-                source.getString(prefix + "language", ""),
+                source.getString(
+                        prefix + "streaming_base_url",
+                        "wss://dashscope.aliyuncs.com/api-ws/v1/inference"),
+                streamingApiKey,
+                source.getString(prefix + "streaming_model", "paraformer-realtime-v2"),
+                source.getString(prefix + "streaming_vocabulary_id", ""),
+                source.getString(prefix + "language", defaultLanguage()),
                 ProcessingMode.fromStored(source.getString(
                         prefix + "default_mode", ProcessingMode.AUTO.name())),
                 source.getBoolean(prefix + "polish_enabled", false),
@@ -216,6 +242,9 @@ public final class SettingsRepository {
                 .putString("recognition_backend", settings.recognitionBackend().name())
                 .putString("stt_base_url", settings.sttBaseUrl())
                 .putString("stt_model", settings.sttModel())
+                .putString("streaming_base_url", settings.streamingBaseUrl())
+                .putString("streaming_model", settings.streamingModel())
+                .putString("streaming_vocabulary_id", settings.streamingVocabularyId())
                 .putString("language", settings.language())
                 .putString("default_mode", settings.defaultMode().name())
                 .putBoolean("polish_enabled", settings.polishEnabled())
@@ -253,6 +282,10 @@ public final class SettingsRepository {
                 safe(settings.sttBaseUrl()).trim(),
                 safe(settings.sttApiKey()).trim(),
                 safe(settings.sttModel()).trim(),
+                safe(settings.streamingBaseUrl()).trim(),
+                safe(settings.streamingApiKey()).trim(),
+                safe(settings.streamingModel()).trim(),
+                safe(settings.streamingVocabularyId()).trim(),
                 safe(settings.language()).trim(),
                 settings.defaultMode(),
                 settings.polishEnabled(),
@@ -276,13 +309,17 @@ public final class SettingsRepository {
             throw new IllegalArgumentException("Default mode is required");
         }
         bounded(settings.sttBaseUrl(), 2_048, "STT base URL", false);
+        bounded(settings.streamingBaseUrl(), 2_048, "Streaming WebSocket URL", false);
         bounded(settings.llmBaseUrl(), 2_048, "LLM base URL", false);
         bounded(settings.sttModel(), 200, "STT model", true);
+        bounded(settings.streamingModel(), 200, "Streaming model", true);
+        bounded(settings.streamingVocabularyId(), 200, "Streaming vocabulary ID", true);
         bounded(settings.llmModel(), 200, "LLM model", true);
         bounded(settings.language(), 80, "Language", true);
         bounded(settings.targetLanguage(), 80, "Target language", true);
         bounded(settings.customInstructions(), 1_000, "Writing preference", false);
         bounded(settings.sttApiKey(), 4_096, "STT API key", true);
+        bounded(settings.streamingApiKey(), 4_096, "Streaming API key", true);
         bounded(settings.llmApiKey(), 4_096, "LLM API key", true);
     }
 
@@ -296,13 +333,19 @@ public final class SettingsRepository {
             throw new IllegalArgumentException(label + " is too long");
         }
         if (safe.indexOf('\u0000') >= 0
-                || (singleLine && (safe.indexOf('\r') >= 0 || safe.indexOf('\n') >= 0))) {
+                || (singleLine && safe.codePoints().anyMatch(Character::isISOControl))) {
             throw new IllegalArgumentException(label + " contains unsupported control characters");
         }
     }
 
     private static String key(String name) {
         return TX_PREFIX + name;
+    }
+
+    /** Chinese devices default to their concrete locale; other devices keep auto detection. */
+    static String defaultLanguage() {
+        Locale locale = Locale.getDefault();
+        return locale.getLanguage().equalsIgnoreCase("zh") ? locale.toLanguageTag() : "";
     }
 
     private static String safe(String value) {

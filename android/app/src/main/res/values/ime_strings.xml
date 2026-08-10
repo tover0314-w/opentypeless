@@ -12,11 +12,12 @@
     <string name="ime_key_cancel">Cancel</string>
     <string name="ime_key_app_profile">App profile</string>
     <string name="ime_key_settings">Settings</string>
+    <string name="ime_transcript_hint">Live transcript</string>
+    <string name="ime_transcript_listening">Listening…</string>
 
     <string name="ime_cd_start_voice_input">Start voice input</string>
     <string name="ime_cd_stop_voice_recording">Stop voice recording</string>
     <string name="ime_cd_delete">Delete</string>
-    <string name="ime_cd_insert_space">Insert space</string>
     <string name="ime_cd_space_hold_to_talk">Insert space; touch and hold for voice input</string>
     <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
     <string name="ime_cd_enter">Enter or perform the editor action</string>
@@ -47,10 +48,12 @@
     <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
     <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
     <string name="ime_status_session_active">Another voice session is already active</string>
-    <string name="ime_status_live">Live: %1$s</string>
+    <string name="ime_status_live_composition_rejected">The app cannot display a live transcript in this field; voice input was cancelled</string>
+    <string name="ime_status_composition_cleanup_failed">The app stopped voice input but could not confirm removal of the live draft; check the field before continuing</string>
     <string name="ime_status_field_unavailable">The current text field is no longer available</string>
     <string name="ime_status_no_active_field">No active text field</string>
     <string name="ime_status_selection_too_long">The selected text is too long; select at most 4,000 characters</string>
+    <string name="ime_status_selection_unavailable">The app did not expose the selected text; voice editing was not started</string>
     <string name="ime_status_target_changed_discarded">Input target changed; the result was discarded for safety</string>
     <string name="ime_status_no_text">No text was produced</string>
     <string name="ime_status_result_connection_failed">The text connection failed; verify whether the result was inserted</string>
@@ -80,4 +83,17 @@
     <string name="ime_status_ready_mode">Ready · %1$s mode</string>
     <string name="ime_status_cursor_moved_cancelled">Cursor moved; voice input was cancelled for safety</string>
     <string name="ime_status_voice_input_failed">Voice input failed</string>
+    <string name="ime_status_listening">Listening…</string>
+    <string name="ime_status_transcribing">Transcribing and applying personal vocabulary…</string>
+    <string name="ime_status_polishing">Checking and polishing without changing facts…</string>
+    <string name="ime_status_inserted">Inserted</string>
+    <string name="ime_status_inserted_recording_limit">Inserted · recording time limit reached</string>
+    <string name="ime_status_inserted_after_silence">Inserted · stopped after silence</string>
+    <string name="ime_status_voice_command_inserted">Voice command inserted</string>
+    <string name="ime_status_exact_ai_not_configured">Inserted exact transcript · AI polish is not configured</string>
+    <string name="ime_status_selection_updated">Selected text updated · Undo available</string>
+    <string name="ime_status_translated">Translated · Undo available</string>
+    <string name="ime_status_smart_edited">Smart edit inserted · Undo available</string>
+    <string name="ime_status_ai_blocked_exact">AI edit blocked to protect facts · exact transcript inserted</string>
+    <string name="ime_status_exact_ai_failed">Inserted exact transcript because AI polish failed</string>
 </resources>

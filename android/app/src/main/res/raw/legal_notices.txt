@@ -1,4 +1,4 @@
-OpenTypeless Android 0.2
+OpenTypeless Android 0.3
 
 MIT License
 

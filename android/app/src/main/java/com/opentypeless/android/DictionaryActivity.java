@@ -3,7 +3,6 @@ package com.opentypeless.android;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -77,6 +76,7 @@ public final class DictionaryActivity extends Activity {
     private View buildContent() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        SystemBarInsets.apply(scroll);
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
@@ -206,7 +206,7 @@ public final class DictionaryActivity extends Activity {
             termOffset = requestedOffset + terms.size();
             if (terms.size() == PAGE_SIZE) {
                 Button more = button(R.string.load_more, ignored -> {
-                    termList.removeView((View) ignored);
+                    termList.removeView(ignored);
                     appendTermPage(generation, false);
                 });
                 termList.addView(more);
@@ -252,7 +252,7 @@ public final class DictionaryActivity extends Activity {
             correctionOffset = requestedOffset + corrections.size();
             if (corrections.size() == PAGE_SIZE) {
                 Button more = button(R.string.load_more, ignored -> {
-                    correctionList.removeView((View) ignored);
+                    correctionList.removeView(ignored);
                     appendCorrectionPage(generation, false);
                 });
                 correctionList.addView(more);
@@ -584,7 +584,7 @@ public final class DictionaryActivity extends Activity {
     private LinearLayout card() {
         LinearLayout card = verticalLayout();
         card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackgroundColor(Color.rgb(244, 247, 246));
+        card.setBackgroundColor(getColor(R.color.ime_surface_container));
         LinearLayout.LayoutParams parameters = matchWrap();
         parameters.setMargins(0, dp(4), 0, dp(8));
         card.setLayoutParams(parameters);
@@ -624,14 +624,14 @@ public final class DictionaryActivity extends Activity {
 
     private TextView note(int resource) {
         TextView note = text(getString(resource), 14, false);
-        note.setTextColor(Color.DKGRAY);
+        note.setTextColor(getColor(R.color.ime_on_surface_variant));
         note.setPadding(0, dp(8), 0, dp(12));
         return note;
     }
 
     private TextView empty(int resource) {
         TextView empty = text(getString(resource), 14, false);
-        empty.setTextColor(Color.DKGRAY);
+        empty.setTextColor(getColor(R.color.ime_on_surface_variant));
         empty.setMinHeight(dp(48));
         empty.setGravity(Gravity.CENTER_VERTICAL);
         return empty;
@@ -639,7 +639,7 @@ public final class DictionaryActivity extends Activity {
 
     private TextView detail(String value) {
         TextView detail = text(value, 13, false);
-        detail.setTextColor(Color.DKGRAY);
+        detail.setTextColor(getColor(R.color.ime_on_surface_variant));
         detail.setPadding(0, dp(4), 0, dp(4));
         return detail;
     }

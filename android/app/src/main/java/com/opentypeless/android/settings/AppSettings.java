@@ -5,6 +5,10 @@ public record AppSettings(
         String sttBaseUrl,
         String sttApiKey,
         String sttModel,
+        String streamingBaseUrl,
+        String streamingApiKey,
+        String streamingModel,
+        String streamingVocabularyId,
         String language,
         ProcessingMode defaultMode,
         boolean polishEnabled,
@@ -19,11 +23,24 @@ public record AppSettings(
         int maxRecordingSeconds) {
 
     public boolean isReady() {
-        if (recognitionBackend != RecognitionBackend.OPENAI_COMPATIBLE) return true;
-        return !sttBaseUrl.trim().isEmpty() && !sttModel.trim().isEmpty();
+        return switch (recognitionBackend) {
+            case OPENAI_COMPATIBLE ->
+                    !sttBaseUrl.trim().isEmpty() && !sttModel.trim().isEmpty();
+            case DASHSCOPE_STREAMING -> !streamingBaseUrl.trim().isEmpty()
+                    && !streamingApiKey.trim().isEmpty()
+                    && !streamingModel.trim().isEmpty();
+            case LOCAL_OFFLINE, SYSTEM_ON_DEVICE, SYSTEM_DEFAULT -> true;
+        };
     }
 
     public int boundedMaxRecordingSeconds() {
         return Math.max(5, Math.min(maxRecordingSeconds, 540));
+    }
+
+    @Override
+    public String toString() {
+        return "AppSettings{backend=" + recognitionBackend
+                + ", defaultMode=" + defaultMode
+                + ", sttApiKey=<redacted>, streamingApiKey=<redacted>, llmApiKey=<redacted>}";
     }
 }
