@@ -54,3 +54,12 @@ The optional offline live-text package is independently downloaded from the Apac
 The model card attributes the converted source to ModelScope
 `damo/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8404-online`. It is used only as the
 replaceable first pass; SenseVoice remains the quality final pass.
+
+The optional semantic-punctuation package is the 75,519,198-byte INT8 CT-Transformer model from
+the official sherpa-onnx punctuation-models release. Its source is ModelScope
+`iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch`, which declares Apache License 2.0.
+OpenTypeless uses the revision-pinned Hugging Face transport mirror
+`fc2be466e3c11927b306a31cdee23c9c38da44cc` only after verifying the model against the official
+release digest `65a3fb9f…24b1`. The model runs in a private text-only process; its candidate is
+discarded if a case-sensitive lexical, paragraph, number, URL, email, or code-literal gate detects
+anything beyond punctuation changes.

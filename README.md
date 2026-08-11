@@ -21,10 +21,11 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   network behavior belongs to that provider and is not guaranteed offline.
 - **Tested optional offline two-pass models:** non-low-RAM devices may explicitly download the
   pinned 228.45 MiB SenseVoice Small INT8 quality model and a separate 226.21 MiB Streaming
-  Paraformer zh/en INT8 live-text model into private no-backup storage. Every artifact is
-  size/SHA-256 checked before atomic installation and again before first use; neither model is
-  bundled into the APK. Speech Core v2 requires both artifacts and never silently drops an
-  upgraded install back to the older final-only implementation.
+  Paraformer zh/en INT8 live-text model, plus a 72.02 MiB CT-Transformer zh/en INT8 punctuation
+  model, into private no-backup storage. Every artifact is size/SHA-256 checked before atomic
+  installation and again before first use; no weights are bundled into the APK. Speech Core v2
+  requires both ASR artifacts, reports punctuation as an independently repairable capability, and
+  never silently drops an upgraded install back to the older final-only implementation.
 - **Live text in the editor:** Android partial hypotheses use replaceable IME composing text. Word
   and punctuation revisions replace the previous draft instead of being appended or shown only in
   a status label. Cursor movement created by OpenTypeless is distinguished from a user target
@@ -66,8 +67,10 @@ than a mandatory-cloud “ASR + LLM” keyboard.
 - **Speech Core v2 is the local production route:** continuous capture, soft/hard segmentation,
   immutable `VoiceDraft` revisions, encrypted multi-segment recovery and target-bound
   `EditorProjection` now drive ordinary local-offline keyboard sessions. Streaming Paraformer stays
-  warm in `:local_stream`; SenseVoice is loaded on demand in `:local_quality`. Voice Lab reports the
-  actual route and revisions. V1 is retained only behind an explicit emergency rollback switch.
+  warm in `:local_stream`; SenseVoice is loaded on demand in `:local_quality`; semantic punctuation
+  runs in the text-only `:local_punctuation` worker. Voice Lab reports the actual route, revisions,
+  and aggregate PSS of all three workers. V1 is retained only behind an explicit emergency rollback
+  switch.
 
 No model weights are bundled. See [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
 The first 189.85 MiB Zipformer was rejected. The next round tested SenseVoice and Paraformer on all
@@ -89,7 +92,10 @@ coverage, and first-partial audio position p50/p95 0.64/3.04 s. Across 1,682 cha
 did not revise earlier visible text once. It therefore does not by itself provide Baidu-style
 earlier-word correction. Speech Core v2 uses it as the low-latency first pass, then permits
 provisional punctuation and per-segment SenseVoice revision without stopping continuous capture.
-The models run in separate private processes; memory/thermal policy may choose concurrent,
+The independent CT-Transformer produces the punctuation candidate at pauses and after the quality
+pass; a case-sensitive lexical/protected-literal gate rejects any candidate that changes words,
+numbers, URLs, email, code-shaped text, or paragraphs. The models run in separate private processes;
+memory/thermal policy may choose concurrent,
 sequential or streaming-only execution. See the
 [v2 architecture](docs/2026-08-11-speech-core-v2-architecture.md) and
 [pinned streaming result](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json).

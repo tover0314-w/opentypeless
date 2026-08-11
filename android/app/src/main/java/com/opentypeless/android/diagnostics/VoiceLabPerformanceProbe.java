@@ -33,6 +33,7 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
     private final ActivityManager activityManager;
     private final String streamingProcessName;
     private final String qualityProcessName;
+    private final String punctuationProcessName;
     private ScheduledFuture<?> samplingTask;
     private boolean running;
     private long startPssKb;
@@ -52,6 +53,7 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
                 Context.ACTIVITY_SERVICE);
         streamingProcessName = applicationContext.getPackageName() + ":local_stream";
         qualityProcessName = applicationContext.getPackageName() + ":local_quality";
+        punctuationProcessName = applicationContext.getPackageName() + ":local_punctuation";
     }
 
     public synchronized void start() {
@@ -119,11 +121,12 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
             java.util.List<ActivityManager.RunningAppProcessInfo> processes =
                     activityManager.getRunningAppProcesses();
             if (processes == null) return -1L;
-            java.util.ArrayList<Integer> pids = new java.util.ArrayList<>(2);
+            java.util.ArrayList<Integer> pids = new java.util.ArrayList<>(3);
             for (ActivityManager.RunningAppProcessInfo process : processes) {
                 if (process.pid > 0
                         && (streamingProcessName.equals(process.processName)
-                                || qualityProcessName.equals(process.processName))) {
+                                || qualityProcessName.equals(process.processName)
+                                || punctuationProcessName.equals(process.processName))) {
                     pids.add(process.pid);
                 }
             }

@@ -127,6 +127,8 @@ Exit gate:
 - Keep sequential and streaming-only policies as explicit local strategies, not silent provider
   fallbacks.
 - Integrate punctuation and deterministic personalization with provenance.
+- Keep punctuation in a private text-only process, include its conservative PSS in scheduling, and
+  terminate that process at the end of every dictation lease.
 
 Exit gate:
 
@@ -210,9 +212,9 @@ APK. Store-release and Xiaomi 15 physical acceptance remain separate gates.
 | 1 — immutable document core | Complete | Android-free `VoiceDraft`, segment/revision model, orthogonal states, bounded reducer, 100-seed duplicate/out-of-order property test. |
 | 2 — capability / replay | Complete | Fail-closed engine capability contract, bounded deterministic JSON, system/batch/Paraformer fixtures and replay reports. |
 | 3 — segmentation / journal | Production-integrated | One continuous microphone capture feeds soft/hard boundaries and an AES-GCM multi-segment no-backup journal with generation handles, repair, tombstones, quotas and acknowledgement. Completed segment audio and visible revisions are recoverable; process death before the first durable revision/boundary remains a documented limit. |
-| 4 — transforms / scheduling | Production-integrated | Streaming Paraformer is retained in private `:local_stream`; SenseVoice runs on demand in private `:local_quality`. A memory/thermal policy selects concurrent, sequential or streaming-only behavior. Provisional punctuation and deterministic personalization are revision-producing transforms. |
+| 4 — transforms / scheduling | Production-integrated | Streaming Paraformer is retained in private `:local_stream`; SenseVoice runs on demand in private `:local_quality`; pinned Chinese/English CT-Transformer punctuation runs in session-scoped private `:local_punctuation`. The punctuation candidate passes a lexical-integrity gate and its worker PSS participates in the memory/thermal policy; the process is terminated after every dictation. Provisional punctuation and deterministic personalization are revision-producing transforms. |
 | 5 — EditorProjection / IME | Production-integrated | Ordinary local dictation projects into the host editor with target validation and readback, short whole-composition or long sealed-prefix/tail delivery, lifecycle freeze, recoverable failure and whole-session Unicode-safe undo. Voice Lab reports the actual route without becoming another writer. |
-| 6 — evaluation / switch | Automated cutover gate complete; Xiaomi manual pending | 410 JVM tests, Debug/Release lint and three APK builds pass. API 36 reports 41 tests / 37 pass / 4 designed skips; after provisioned, hash-verified weights, the 3 native streaming/quality Binder tests pass. The exact streaming model still has no inherent earlier-word rewrite, so v2 obtains earlier revisions from segment quality rather than claiming otherwise. Xiaomi 15 is not connected for this APK and remains a manual acceptance item. |
+| 6 — evaluation / switch | Automated cutover gate complete; Xiaomi manual pending | 415 JVM tests, Debug/Release lint and three APK builds pass. With all three hash-verified model sets provisioned, the ordinary API 36 arm64 suite reports 41 pass plus the designed opt-in download skip; the download/hash/native E2E passes separately. Real streaming, quality and punctuation Binder processes plus deterministic punctuation-worker reclamation are covered. The exact streaming model still has no inherent earlier-word rewrite, so v2 obtains earlier revisions from bounded punctuation and segment quality rather than claiming otherwise. Xiaomi 15 remains a manual acceptance item for the final APK hash. |
 
 The resulting deliverable is a real v2 local pipeline with an explicit rollback boundary, not a
 renamed v1 path and not an unsupported claim that it already outperforms every mature keyboard. See

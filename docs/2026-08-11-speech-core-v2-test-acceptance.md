@@ -126,7 +126,7 @@ Run at least API 26, 33, 35 and 36 builds; execute device tests on available API
 targets where CI capacity permits.
 
 - Binder/service same-UID and non-exported contract;
-- stream/quality process isolation and kill/rebind;
+- stream/quality/punctuation process isolation and kill/rebind;
 - encrypted journal with real Android Keystore;
 - InputMethodService lifecycle and view recreation;
 - light/dark, gesture/three-button, portrait/landscape;
@@ -171,7 +171,7 @@ for Xiaomi 15 and must be revised only from recorded evidence, never to hide a r
 
 Resources are process-bounded:
 
-- app/IME, stream worker and quality worker PSS separately;
+- app/IME, stream worker, quality worker and punctuation worker PSS separately;
 - cold peak, warm peak, steady listening and 30 seconds after release;
 - CPU time, thermal state, battery delta and network bytes;
 - 1/5/15-minute sustained sessions and ten cancel/retry cycles;
@@ -221,20 +221,20 @@ tested rollback switch; it does not by itself authorize a stable release claim.
 
 | Gate | Result | Notes |
 | --- | --- | --- |
-| Pure Android JVM | PASS — 410/410 | Zero failure/error/skip; includes reducer/audio/transform/runtime/journal/projection plus production routing and final-projection regressions. |
+| Pure Android JVM | PASS — 415/415 | Zero failure/error/skip; includes reducer/audio/transform/runtime/journal/projection, punctuation integrity, model specification, production routing and final-projection regressions. |
 | Offline benchmark tooling | PASS — 60/60 | Python 3.11 with pinned `numpy==2.4.6`, `sherpa-onnx==1.13.4`; includes exact streaming-Paraformer runner tests. |
 | Debug / Release lint | PASS with one intentional warning | Zero errors. `ChromeOsAbiSupport` warns about the optional arm64-only delivery property; universal builds still include x86_64. |
 | APK assembly | PASS | Debug, unsigned minified Release, AndroidTest and arm64 delivery APK built. |
-| API 36 arm64 full device suite | PASS — 37 pass / 4 designed skips | Keystore journal, Android `InputConnection`, visual navigation/runtime, migration, service contracts and lifecycle. Four native/download cases skip before weights are provisioned. |
-| Provisioned exact native models | PASS — 3/3 | The app downloaded and hash-verified both pinned model sets; private `:local_stream` and `:local_quality` Binder processes produced non-empty partial/final text from a deterministic 16 kHz Mandarin smoke WAV. |
+| API 36 arm64 ordinary device suite | PASS — 41 pass / 1 designed skip | Keystore journal, Android `InputConnection`, visual navigation/runtime, migration, service contracts, lifecycle and provisioned native worker tests passed. The only skip is the separately invoked large-download E2E. |
+| Provisioned exact native models | PASS — separate opt-in E2E 1/1 | The app downloaded and hash-verified Streaming Paraformer, SenseVoice and CT-Transformer punctuation. Private `:local_stream`/`:local_quality` produced non-empty partial/final text from a deterministic 16 kHz Mandarin smoke WAV. Private `:local_punctuation` produced `我们都是木头人，不会说话，不会动。`, survived rebind/reload, and exited after its session lease. |
 | Public real-speech screening | PASS as evidence; model capability gate FAIL | 200 pinned ASCEND/FLEURS cases. Current stream model: zh CER 12.5%, en WER 40.2%, mixed MER 22.9%, partial coverage 95.5%, 0 earlier-text rewrites across 1,682 changed hypotheses. |
 | Physical Xiaomi 15 for this exact APK | NOT RUN | No physical device is currently visible to ADB; older user measurements are diagnostic context, not acceptance for this hash. |
 
 ### Default-switch verdict
 
 **YES for the engineering APK; NO stable-release claim yet.** Real v2 capture, continuous
-segmentation, a retained streaming worker, an isolated on-demand quality worker, provisional pause
-punctuation, encrypted recovery and target-bound editor projection now form the ordinary local
+segmentation, a retained streaming worker, an isolated on-demand quality worker, independently
+modelled and lexically guarded provisional/final punctuation, encrypted recovery and target-bound editor projection now form the ordinary local
 keyboard route. A missing streaming model fails visibly; v1 can be selected only by the explicit
 emergency preference.
 

@@ -12,8 +12,8 @@ public record RuntimePolicy(
 
     public static final RuntimePolicy DEFAULT = new RuntimePolicy(
             384L,
-            768L,
-            640L,
+            1_024L,
+            896L,
             ThermalLevel.SEVERE,
             1,
             4,

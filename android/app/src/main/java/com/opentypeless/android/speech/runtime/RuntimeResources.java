@@ -9,6 +9,7 @@ public record RuntimeResources(
         long appPssMiB,
         long streamingWorkerPssMiB,
         long expectedQualityWorkerPssMiB,
+        long expectedPunctuationWorkerPssMiB,
         ThermalLevel thermalLevel,
         boolean lowMemorySignal) {
     public RuntimeResources {
@@ -17,7 +18,8 @@ public record RuntimeResources(
                 || availableMemoryMiB > totalMemoryMiB
                 || appPssMiB < 0L
                 || streamingWorkerPssMiB < 0L
-                || expectedQualityWorkerPssMiB < 0L) {
+                || expectedQualityWorkerPssMiB < 0L
+                || expectedPunctuationWorkerPssMiB < 0L) {
             throw new IllegalArgumentException("invalid runtime resource snapshot");
         }
         Objects.requireNonNull(thermalLevel, "thermalLevel");
@@ -25,7 +27,9 @@ public record RuntimeResources(
 
     public long expectedConcurrentPssMiB() {
         return Math.addExact(
-                Math.addExact(appPssMiB, streamingWorkerPssMiB),
-                expectedQualityWorkerPssMiB);
+                Math.addExact(
+                        Math.addExact(appPssMiB, streamingWorkerPssMiB),
+                        expectedQualityWorkerPssMiB),
+                expectedPunctuationWorkerPssMiB);
     }
 }

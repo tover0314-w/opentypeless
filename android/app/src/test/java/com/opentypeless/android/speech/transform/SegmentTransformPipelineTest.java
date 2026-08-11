@@ -85,6 +85,25 @@ public final class SegmentTransformPipelineTest {
     }
 
     @Test
+    public void punctuationCandidateCannotRecaseEnglishNames() {
+        SegmentRevision source = refined("OpenTypeless works");
+
+        SegmentTransformResult result = SegmentTransformPipeline.apply(request(
+                source,
+                2L,
+                TransformPhase.REFINED,
+                "opentypeless, works.",
+                null,
+                PersonalizationSnapshot.empty(),
+                SegmentTransformPolicy.DEFAULT));
+
+        assertEquals("OpenTypeless works.", result.finalRevision().fullText());
+        assertEquals(
+                TransformDisposition.REJECTED_UNSAFE,
+                audit(result, TransformKind.PUNCTUATION));
+    }
+
+    @Test
     public void confirmedPersonalizationRunsAfterPunctuationAsSeparateRevision() {
         PersonalizationSnapshot snapshot = new PersonalizationSnapshot(
                 List.of(new PersonalTerm(

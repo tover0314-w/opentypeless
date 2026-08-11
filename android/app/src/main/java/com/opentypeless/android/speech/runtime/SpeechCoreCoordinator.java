@@ -8,6 +8,7 @@ import com.opentypeless.android.speech.core.RevisionOrigin;
 import com.opentypeless.android.speech.core.RevisionStage;
 import com.opentypeless.android.speech.core.SegmentJoin;
 import com.opentypeless.android.speech.core.SegmentRevision;
+import com.opentypeless.android.speech.core.SegmentStage;
 import com.opentypeless.android.speech.core.TerminalReason;
 import com.opentypeless.android.speech.core.TokenEvidence;
 import com.opentypeless.android.speech.core.VoiceDraft;
@@ -15,6 +16,7 @@ import com.opentypeless.android.speech.core.VoiceDraftEvent;
 import com.opentypeless.android.speech.core.VoiceDraftLimits;
 import com.opentypeless.android.speech.core.VoiceDraftReducer;
 import com.opentypeless.android.speech.core.VoiceDraftReduction;
+import com.opentypeless.android.speech.core.VoiceSegment;
 import com.opentypeless.android.speech.engine.EngineCapability;
 import com.opentypeless.android.speech.engine.EngineDescriptor;
 import com.opentypeless.android.speech.transform.SegmentTransformPipeline;
@@ -246,6 +248,40 @@ public final class SpeechCoreCoordinator {
         return reduce(
                 callbackToken,
                 new VoiceDraftEvent.ReopenSegment(token.sessionId(), segmentId));
+    }
+
+    /**
+     * Applies a text-model punctuation candidate only while the exact streaming source is still at
+     * the same soft boundary. A resumed segment or newer hypothesis makes the callback stale.
+     */
+    public synchronized CoordinatorUpdate provisionalPunctuation(
+            SpeechSessionToken callbackToken,
+            long segmentId,
+            String expectedSourceText,
+            String punctuationCandidate) {
+        if (!owned(callbackToken)) return rejectedSession();
+        Optional<VoiceSegment> segment = draft.segment(segmentId);
+        if (segment.isEmpty() || segment.get().stage() != SegmentStage.SOFT_BOUNDARY) {
+            return update(
+                    CoordinatorDisposition.IGNORED_STALE,
+                    "punctuation boundary is no longer active");
+        }
+        Optional<SegmentRevision> source = latestStreamingRevision(segmentId);
+        if (source.isEmpty()
+                || expectedSourceText == null
+                || !source.get().fullText().equals(expectedSourceText)) {
+            return update(
+                    CoordinatorDisposition.IGNORED_STALE,
+                    "punctuation source was replaced by a newer hypothesis");
+        }
+        Batch batch = new Batch();
+        applyTransforms(
+                batch,
+                source.get(),
+                TransformPhase.SOFT_BOUNDARY,
+                punctuationCandidate,
+                null);
+        return batch.finish();
     }
 
     public synchronized CoordinatorUpdate hardBoundary(

@@ -68,4 +68,20 @@ public final class SafePunctuationRestorerTest {
                         "I ordered icecream.",
                         FieldKind.GENERAL));
     }
+
+    @Test
+    public void rejectsRecasingDecimalMutationAndParagraphFlattening() {
+        assertEquals(
+                "OpenTypeless costs 3.14 dollars.",
+                SafePunctuationRestorer.choose(
+                        "OpenTypeless costs 3.14 dollars",
+                        "opentypeless costs 314 dollars.",
+                        FieldKind.GENERAL));
+        assertEquals(
+                "first paragraph\nsecond paragraph.",
+                SafePunctuationRestorer.choose(
+                        "first paragraph\nsecond paragraph",
+                        "first paragraph. second paragraph.",
+                        FieldKind.LONG_TEXT));
+    }
 }

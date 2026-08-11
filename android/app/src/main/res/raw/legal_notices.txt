@@ -72,6 +72,21 @@ The encoder, decoder, and token files are independently size- and SHA-256-pinned
 Model source: https://www.modelscope.cn/models/damo/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8404-online/summary
 Conversion repository: https://huggingface.co/csukuangfj/streaming-paraformer-zh
 
+If the user adds semantic punctuation, the app separately retrieves the exact
+75,519,198-byte CT-Transformer zh/en INT8 model published in the official
+sherpa-onnx punctuation-models release. The transport mirror is revision-pinned;
+the installed model must match SHA-256
+65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1.
+Official converted model and instructions:
+https://k2-fsa.github.io/sherpa/onnx/punctuation/pretrained_models.html
+Source model:
+https://modelscope.cn/models/iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch/summary
+Pinned transport revision:
+https://huggingface.co/lorneluo/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/tree/fc2be466e3c11927b306a31cdee23c9c38da44cc
+The source model declares Apache License 2.0. OpenTypeless runs punctuation in
+a private text-only process and accepts its output only when lexical content,
+paragraphs, and protected literals remain unchanged.
+
 Android speech selected as on-device or system service is provided by software
 installed on the device and has its own terms and privacy behavior.
 

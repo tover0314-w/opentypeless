@@ -101,6 +101,12 @@
             android:stopWithTask="false" />
 
         <service
+            android:name=".offline.LocalPunctuationRecognitionService"
+            android:exported="false"
+            android:process=":local_punctuation"
+            android:stopWithTask="false" />
+
+        <service
             android:name=".ime.OpenTypelessImeService"
             android:exported="true"
             android:foregroundServiceType="microphone"

@@ -1,6 +1,7 @@
 package com.opentypeless.android.offline;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -42,8 +43,16 @@ public final class OfflineModelEndToEndInstrumentedTest {
 
         if ("true".equals(arguments.getString("offlineModelFresh"))) {
             LocalOfflineRecognizer.deleteModel(context);
+            OfflineStreamingRecognizer.releaseShared();
+            OfflineStreamingModelStore.delete(context);
+            LocalPunctuationRecognizer.releaseShared();
+            OfflinePunctuationModelStore.delete(context);
         }
-        if (OfflineModelStore.status(context) != OfflineModelStore.Status.INSTALLED) {
+        if (OfflineModelStore.status(context) != OfflineModelStore.Status.INSTALLED
+                || OfflineStreamingModelStore.status(context)
+                        != OfflineStreamingModelStore.Status.INSTALLED
+                || OfflinePunctuationModelStore.status(context)
+                        != OfflinePunctuationModelStore.Status.INSTALLED) {
             CountDownLatch complete = new CountDownLatch(1);
             AtomicReference<String> error = new AtomicReference<>();
             AtomicInteger lastProgress = new AtomicInteger(-1);
@@ -77,6 +86,33 @@ public final class OfflineModelEndToEndInstrumentedTest {
             assertNull(error.get(), error.get());
         }
         assertEquals(OfflineModelStore.Status.INSTALLED, OfflineModelStore.status(context));
+        assertEquals(
+                OfflineStreamingModelStore.Status.INSTALLED,
+                OfflineStreamingModelStore.status(context));
+        assertEquals(
+                OfflinePunctuationModelStore.Status.INSTALLED,
+                OfflinePunctuationModelStore.status(context));
+
+        String punctuationInput = "我们都是木头人不会说话不会动";
+        try (LocalPunctuationRecognitionClient client =
+                     new LocalPunctuationRecognitionClient(context)) {
+            client.prewarm();
+            assertNotEquals(
+                    "Punctuation must run outside the app process",
+                    android.os.Process.myPid(),
+                    client.servicePidForDiagnostics());
+            String punctuationOutput = client.punctuate(punctuationInput);
+            assertEquals(
+                    SafePunctuationRestorer.contentKey(punctuationInput),
+                    SafePunctuationRestorer.contentKey(punctuationOutput));
+            assertTrue(
+                    "Punctuation model did not produce an internal sentence break: "
+                            + punctuationOutput,
+                    punctuationOutput.indexOf('，') >= 0 || punctuationOutput.indexOf(',') >= 0);
+            Log.i(TAG, "punctuation_input=" + punctuationInput
+                    + " punctuation_output=" + punctuationOutput
+                    + " punctuation_pid=" + client.servicePidForDiagnostics());
+        }
 
         byte[] wavBytes = Files.readAllBytes(wav.toPath());
         assertTrue("Prepared smoke WAV must have a PCM data chunk", wavBytes.length > 44

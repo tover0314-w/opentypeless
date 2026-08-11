@@ -11,7 +11,7 @@
 
 - **三个原生入口：**独立语音 IME、标准 `RecognitionService`、`RecognizerIntent` Activity。兼容的完整键盘可以继续提供字母、滑行输入、Emoji 和剪贴板，只把语音识别交给 OpenTypeless。
 - **本地优先：**首次安装时，只有系统确认设备端识别真正可用，才默认选择 Android 设备端；否则依次选择系统语音服务或用户明确配置的 BYOK/自建 OpenAI 兼容端点。系统语音服务是否联网由其提供方决定，界面不会把它冒充为离线。
-- **经过实测的可选离线双通道模型：**非低内存设备可主动下载固定版本的 228.45 MiB SenseVoice Small INT8 质量模型，以及独立的 226.21 MiB Streaming Paraformer 中英 INT8 实时模型，均保存在不备份的 App 私有目录。每个文件会在原子安装前及首次使用前核对大小与 SHA-256，APK 不内置权重。Speech Core v2 要求两组模型齐全；旧安装缺少流式模型时会明确要求补下载，不会静默掉回旧的仅终稿实现。
+- **经过实测的可选离线双遍模型：**非低内存设备可主动下载固定版本的 228.45 MiB SenseVoice Small INT8 质量模型、226.21 MiB Streaming Paraformer 中英 INT8 实时模型，以及独立的 72.02 MiB CT-Transformer 中英 INT8 标点模型，均保存在不备份的 App 私有目录。每个文件会在原子安装前及首次使用前核对大小与 SHA-256，APK 不内置权重。Speech Core v2 要求两组 ASR 模型齐全；标点能力可以单独补装或修复，旧安装不会静默掉回仅终稿实现。
 - **在输入框内实时出字：**Android partial 会作为可替换的 IME composing text 写入当前编辑框。词语和标点修订会原位替换，不会重复追加，也不再只显示在状态栏；输入法自身造成的光标变化与用户换目标会被分别处理，取消只移除本次语音草稿。
 - **真流式识别：**离线 Streaming Paraformer 通过匿名管道在私有 ASR 进程消费有界的 40 ms PCM 帧；可选百炼路径通过白名单 WSS 发送同样有界的帧。两者都返回可替换 partial。OpenAI 兼容 WAV 上传仍明确标为批处理，绝不静默切换服务商。
 - **AI 可选：**精确模式和结构化字段不需要 LLM。智能整理、翻译和选中文字编辑，只有用户开启 OpenAI 兼容 LLM 后才运行。
@@ -23,13 +23,13 @@
 - **本地隐私：**API Key 与可选历史正文分别使用 Android Keystore 不可导出的 AES-GCM 密钥；历史默认关闭，支持逐条删除/全部清空，有本地数量上限，也不会进入词典导出文件。
 - **按 App 配置：**可显式设置每个 App 的 Auto/Exact/Smart/Translate 模式、翻译目标、写作偏好，以及是否允许发送有限的光标前上下文。
 - **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手上屏；独立的“长文”操作用于持续听写。Speech Core v2 会把流式首遍作为可替换 composition 直接写入宿主输入框，在软停顿处加入可撤回标点，并允许隔离的 SenseVoice 质量遍在句段关闭后原位修订。OpenAI 兼容 WAV 仍明确标为“仅终稿”。最终结果会再走个人规则和事实安全门。
-- **Speech Core v2 已成为本地主管线：**连续录音、软/硬分段、不可变 `VoiceDraft` 修订、加密多段恢复和严格绑定目标的 `EditorProjection` 已接入普通离线键盘会话。Streaming Paraformer 常驻于 `:local_stream`，SenseVoice 按需运行在 `:local_quality`；语音实验室显示实际路径与修订。v1 只保留为显式紧急回滚，不再按模型状态静默启用。
+- **Speech Core v2 已成为本地主管线：**连续录音、软/硬分段、不可变 `VoiceDraft` 修订、加密多段恢复和严格绑定目标的 `EditorProjection` 已接入普通离线键盘会话。Streaming Paraformer 常驻于 `:local_stream`，SenseVoice 按需运行在 `:local_quality`，语义标点运行在只接收文本的 `:local_punctuation`；语音实验室显示实际路径、修订和三个工作进程的合计 PSS。v1 只保留为显式紧急回滚，不再按模型状态静默启用。
 
 APK 不内置任何语音或语言模型。许可证说明见 [Android 第三方声明](android/THIRD_PARTY_NOTICES.md)。首个 189.85 MiB Zipformer 已被否决；第二轮在完整 1,315 条 ASCEND test 上测试了 SenseVoice 与 Paraformer。SenseVoice 达到普通话 CER 11.4%、英文 WER 25.9%、中英混说 MER 13.3%，并通过 API 36 arm64 的真实下载与原生识别烟测。现在使用经校验的 ASR-only 双 ABI 运行时，干净构建的通用 debug APK 已从上游全功能包的约 120 MiB 降到 52.54 MiB；但约 457 MiB 瞬时峰值仍使它不适合直接称为全设备默认。同体积档的 Paraformer Large 与 Whisper Small Q5_1 也已实测并被否决为中英默认。用户明确设置 `zh-*` 或 `cmn-*` 时，现在会启用 SenseVoice 普通话锁定；固定 A/B 将公开集普通话 CER 从 10.59% 降至 10.01%、混说 MER 从 20.37% 降至 18.31%。英文保持自动检测，因为强制 `en` 反而退化。详见
 [第二轮离线模型评测](docs/2026-08-09-offline-asr-candidate-round-2.md)和
 [可复现测试工具](benchmarks/offline_asr/README.md)。
 
-Android 当前实际使用的 226.21 MiB 流式模型也已单独跑过固定 200 条 ASCEND/FLEURS 公开集：普通话 CER 12.5%、英文 WER 40.2%、中英混说 MER 22.9%，95.5% 样本能看到 partial，首个 partial 的音频位置 p50/p95 为 0.64/3.04 秒。但 1,682 次变化的 hypothesis 中，改写前面已显示文字的次数为 0。因此它单独使用时不能冒充百度式“边说边回头纠词”。Speech Core v2 现在把它作为低延迟首遍，再通过软停顿临时标点和 SenseVoice 分段质量复核实现前文修订；两组模型位于独立私有进程，内存/热策略可选择并发、顺序或仅流式。详见 [v2 架构](docs/2026-08-11-speech-core-v2-architecture.md)和[固定流式模型结果](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json)。
+Android 当前实际使用的 226.21 MiB 流式模型也已单独跑过固定 200 条 ASCEND/FLEURS 公开集：普通话 CER 12.5%、英文 WER 40.2%、中英混说 MER 22.9%，95.5% 样本能看到 partial，首个 partial 的音频位置 p50/p95 为 0.64/3.04 秒。但 1,682 次变化的 hypothesis 中，改写前面已显示文字的次数为 0。因此它单独使用时不能冒充百度式“边说边回头纠词”。Speech Core v2 现在把它作为低延迟首遍，再通过软停顿临时标点和 SenseVoice 分段质量复核实现前文修订。独立 CT-Transformer 会在停顿及质量终稿后给出标点候选；只有候选未改变大小写敏感的正文、段落、数字、网址、邮箱和代码形态文本时才会被接受。三组模型位于独立私有进程，内存/热策略可选择并发、顺序或仅流式。详见 [v2 架构](docs/2026-08-11-speech-core-v2-architecture.md)和[固定流式模型结果](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json)。
 
 ## 场景策略
 

@@ -9,6 +9,8 @@ import com.opentypeless.android.context.InputPolicy;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.offline.LocalOfflineRecognitionClient;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
+import com.opentypeless.android.offline.LocalPunctuationRecognitionClient;
+import com.opentypeless.android.offline.LocalPunctuationRecognizer;
 import com.opentypeless.android.offline.LocalRealtimeRecognitionClient;
 import com.opentypeless.android.offline.OfflineModelSpec;
 import com.opentypeless.android.offline.OfflineStreamingModelSpec;
@@ -120,7 +122,9 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
     private final AudioRecorder recorder;
     private final LocalRealtimeRecognitionClient streamingClient;
     private final LocalOfflineRecognitionClient qualityClient;
+    private final LocalPunctuationRecognitionClient punctuationClient;
     private final ExecutorService qualityExecutor;
+    private final ExecutorService punctuationExecutor;
     private final Observer observer;
     private final ContinuousSegmentAssembler assembler =
             new ContinuousSegmentAssembler(AudioRecorder.SAMPLE_RATE, EndpointPolicy.DEFAULT);
@@ -129,11 +133,13 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
     private final SpeechSessionToken token;
     private final SpeechCoreCoordinator coordinator;
     private final RuntimeStrategyDecision runtimeStrategy;
+    private final boolean punctuationExecutionAllowed;
     private final ProjectionMode projectionMode;
     private final Map<Long, String> rawBySegment = new LinkedHashMap<>();
     private final Map<Long, SegmentPayload> payloadBySegment = new HashMap<>();
     private final Map<QualityJobToken, Future<?>> qualityFutures = new LinkedHashMap<>();
     private final List<QualityJobToken> deferredQuality = new ArrayList<>();
+    private final List<Future<?>> punctuationFutures = new ArrayList<>();
     private final Set<QualityJobToken> terminalQuality = new java.util.HashSet<>();
     private final JournalQueue journal;
     private final AtomicBoolean cancelled = new AtomicBoolean();
@@ -154,7 +160,9 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
             AudioRecorder recorder,
             LocalRealtimeRecognitionClient streamingClient,
             LocalOfflineRecognitionClient qualityClient,
+            LocalPunctuationRecognitionClient punctuationClient,
             ExecutorService qualityExecutor,
+            ExecutorService punctuationExecutor,
             VoiceDraftJournal journal,
             Observer observer) {
         this.context = context.getApplicationContext();
@@ -164,7 +172,11 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         this.recorder = Objects.requireNonNull(recorder, "recorder");
         this.streamingClient = Objects.requireNonNull(streamingClient, "streamingClient");
         this.qualityClient = Objects.requireNonNull(qualityClient, "qualityClient");
+        this.punctuationClient = Objects.requireNonNull(
+                punctuationClient, "punctuationClient");
         this.qualityExecutor = Objects.requireNonNull(qualityExecutor, "qualityExecutor");
+        this.punctuationExecutor = Objects.requireNonNull(
+                punctuationExecutor, "punctuationExecutor");
         this.observer = Objects.requireNonNull(observer, "observer");
         projectionMode = chooseProjectionMode(request);
 
@@ -173,10 +185,21 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         token = new SpeechSessionToken(sessionId, generation);
         boolean streamingInstalled = OfflineStreamingRecognizer.isInstalled(this.context);
         boolean qualityInstalled = LocalOfflineRecognizer.isInstalled(this.context);
+        boolean punctuationInstalled = LocalPunctuationRecognizer.isInstalled(this.context);
+        com.opentypeless.android.speech.runtime.RuntimeResources runtimeResources =
+                AndroidRuntimeResources.snapshot(this.context, punctuationInstalled);
         runtimeStrategy = LocalRuntimeSelector.select(
                 new RuntimeCapabilities(streamingInstalled, qualityInstalled, true),
-                AndroidRuntimeResources.snapshot(this.context),
+                runtimeResources,
                 RuntimePolicy.DEFAULT);
+        punctuationExecutionAllowed = punctuationInstalled
+                && !runtimeResources.lowMemorySignal()
+                && runtimeResources.availableMemoryMiB()
+                        >= RuntimePolicy.DEFAULT.minimumSequentialAvailableMiB()
+                && (runtimeResources.thermalLevel()
+                                == com.opentypeless.android.speech.runtime.ThermalLevel.UNKNOWN
+                        || !runtimeResources.thermalLevel().atLeast(
+                                RuntimePolicy.DEFAULT.disableQualityAtThermal()));
         EngineDescriptor streaming = new EngineDescriptor(
                 OfflineStreamingModelSpec.REALTIME.id(),
                 OfflineStreamingModelSpec.REALTIME.displayName(),
@@ -191,10 +214,14 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
                         OfflineModelSpec.QUALITY.displayName(),
                         OfflineModelSpec.QUALITY.revision(),
                         ProcessingLocation.ON_DEVICE,
-                        EngineCapabilities.of(
-                                EngineCapability.SEGMENT_FINALS,
-                                EngineCapability.AUTOMATIC_PUNCTUATION,
-                                EngineCapability.ON_DEVICE))
+                        punctuationExecutionAllowed
+                                ? EngineCapabilities.of(
+                                        EngineCapability.SEGMENT_FINALS,
+                                        EngineCapability.AUTOMATIC_PUNCTUATION,
+                                        EngineCapability.ON_DEVICE)
+                                : EngineCapabilities.of(
+                                        EngineCapability.SEGMENT_FINALS,
+                                        EngineCapability.ON_DEVICE))
                 : null;
         PersonalizationSnapshot personalization = request.settings().personalizationEnabled()
                 ? request.personalization()
@@ -205,7 +232,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
                 quality,
                 runtimeStrategy,
                 personalization,
-                SegmentTransformPolicy.DEFAULT);
+                punctuationPolicy(request));
         qualityExecutionAllowed = runtimeStrategy.strategy()
                 == RuntimeStrategy.CONCURRENT_TWO_PASS;
         this.journal = new JournalQueue(
@@ -223,6 +250,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
     Result execute() {
         CoordinatorUpdate prepared = coordinator.prepare(token);
         acceptCoordinatorUpdate(prepared, false);
+        schedulePunctuationPrewarm();
         try {
             requireCurrent();
             streamingSession = streamingClient.start(this::onStreamingHypothesis);
@@ -316,8 +344,11 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         LocalRealtimeRecognitionClient.Session stream = streamingSession;
         if (stream != null) stream.cancel();
         qualityClient.cancelActive();
+        punctuationClient.cancelActive();
         synchronized (lock) {
             for (Future<?> future : qualityFutures.values()) future.cancel(true);
+            for (Future<?> future : punctuationFutures) future.cancel(true);
+            punctuationFutures.clear();
             for (SegmentPayload payload : payloadBySegment.values()) payload.zeroize();
             payloadBySegment.clear();
             if (!assembler.terminal()) {
@@ -432,11 +463,14 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         }
         if (signal instanceof BoundarySignal.SoftBoundary soft) {
             CoordinatorUpdate update;
+            String source;
             synchronized (lock) {
-                ensureOpenSegment(soft.segmentId(), slicer.activeSegmentText());
+                source = slicer.activeSegmentText().trim();
+                ensureOpenSegment(soft.segmentId(), source);
                 update = coordinator.softBoundary(token, soft.segmentId(), null);
             }
             acceptCoordinatorUpdate(update, false);
+            scheduleProvisionalPunctuation(soft.segmentId(), source);
             return;
         }
         if (signal instanceof BoundarySignal.SegmentReopened reopened) {
@@ -575,13 +609,14 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
             LocalOfflineRecognitionClient.Result result = qualityClient.recognize(
                     payload.wav(), request.settings().language(), formatted);
             if (cancelled.get()) return;
-            String qualityText = result.punctuatedText();
+            String qualityText = result.exactText();
+            String punctuationCandidate = punctuationCandidate(qualityText);
             synchronized (lock) {
                 rawBySegment.put(job.segmentId(), qualityText);
                 terminalQuality.add(job);
             }
             CoordinatorUpdate accepted = coordinator.qualitySucceeded(
-                    job, qualityText, qualityText, null);
+                    job, qualityText, punctuationCandidate, null);
             acceptCoordinatorUpdate(accepted, false);
         } catch (CancellationException error) {
             if (!cancelled.get()) failQuality(job, true);
@@ -604,6 +639,76 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
                 ? coordinator.qualityTimedOut(job)
                 : coordinator.qualityFailed(job);
         acceptCoordinatorUpdate(fallback, false);
+    }
+
+    private void scheduleProvisionalPunctuation(long segmentId, String sourceText) {
+        if (sourceText == null
+                || sourceText.isBlank()
+                || !punctuationEnabled()
+                || cancelled.get()) {
+            return;
+        }
+        try {
+            Future<?> future = punctuationExecutor.submit(() -> {
+                try {
+                    String candidate = punctuationClient.punctuate(sourceText);
+                    if (cancelled.get() || !observer.isCurrent()) return;
+                    CoordinatorUpdate punctuation = coordinator.provisionalPunctuation(
+                            token, segmentId, sourceText, candidate);
+                    acceptCoordinatorUpdate(punctuation, false);
+                } catch (CancellationException ignored) {
+                    // Cancellation never removes the last accepted transcript revision.
+                } catch (RuntimeException ignored) {
+                    // The immediate terminal punctuation revision remains the safe fallback.
+                }
+            });
+            synchronized (lock) {
+                punctuationFutures.add(future);
+            }
+        } catch (RejectedExecutionException ignored) {
+            // The immediate terminal punctuation revision remains the safe fallback.
+        }
+    }
+
+    private void schedulePunctuationPrewarm() {
+        if (!punctuationEnabled() || cancelled.get()) return;
+        try {
+            Future<?> future = punctuationExecutor.submit(() -> {
+                try {
+                    punctuationClient.prewarm();
+                } catch (RuntimeException ignored) {
+                    // The first real punctuation request retries loading; prewarm is not a gate.
+                }
+            });
+            synchronized (lock) {
+                punctuationFutures.add(future);
+            }
+        } catch (RejectedExecutionException ignored) {
+            // The first real punctuation request can still load synchronously.
+        }
+    }
+
+    private String punctuationCandidate(String sourceText) {
+        if (!punctuationEnabled()) return null;
+        try {
+            return punctuationClient.punctuate(sourceText);
+        } catch (CancellationException error) {
+            throw error;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private boolean punctuationEnabled() {
+        return punctuationExecutionAllowed
+                && com.opentypeless.android.offline.SafePunctuationRestorer.prefersPunctuation(
+                        request.inputContext().fieldKind());
+    }
+
+    private static SegmentTransformPolicy punctuationPolicy(DictationRequest request) {
+        boolean enabled = com.opentypeless.android.offline.SafePunctuationRestorer.prefersPunctuation(
+                request.inputContext().fieldKind());
+        return new SegmentTransformPolicy(enabled, enabled, false, true);
     }
 
     private void awaitQualityDeadline() {
@@ -692,9 +797,12 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         LocalRealtimeRecognitionClient.Session stream = streamingSession;
         if (stream != null) stream.close();
         synchronized (lock) {
+            for (Future<?> future : punctuationFutures) future.cancel(true);
+            punctuationFutures.clear();
             for (SegmentPayload payload : payloadBySegment.values()) payload.zeroize();
             payloadBySegment.clear();
         }
+        punctuationClient.releaseSessionWorker();
         assembler.close();
         journal.close();
     }

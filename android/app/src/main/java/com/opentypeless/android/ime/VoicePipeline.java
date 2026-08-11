@@ -22,6 +22,8 @@ import com.opentypeless.android.net.OpenAiCompatibleClient;
 import com.opentypeless.android.offline.LocalOfflineRecognitionClient;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.offline.LocalOfflineRecognitionService;
+import com.opentypeless.android.offline.LocalPunctuationRecognitionClient;
+import com.opentypeless.android.offline.LocalPunctuationRecognizer;
 import com.opentypeless.android.offline.LocalRealtimeRecognitionClient;
 import com.opentypeless.android.offline.OfflineStreamingRecognizer;
 import com.opentypeless.android.offline.SafePunctuationRestorer;
@@ -140,6 +142,7 @@ public final class VoicePipeline {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService localQualityExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService localPunctuationExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService modelWarmExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean modelWarmScheduled = new AtomicBoolean();
     private final AtomicReference<State> state = new AtomicReference<>(State.IDLE);
@@ -151,6 +154,7 @@ public final class VoicePipeline {
     private final AudioRecorder recorder = new AudioRecorder();
     private final OpenAiCompatibleClient client = new OpenAiCompatibleClient();
     private final LocalOfflineRecognitionClient localOfflineClient;
+    private final LocalPunctuationRecognitionClient localPunctuationClient;
     private final LocalRealtimeRecognitionClient localRealtimeClient;
     private final ParaformerStreamingRecognizer streamingRecognizer =
             new ParaformerStreamingRecognizer();
@@ -165,6 +169,7 @@ public final class VoicePipeline {
         recorder.setAttributionContext(context);
         systemRecognizer = new SystemSpeechRecognizer(context);
         localOfflineClient = new LocalOfflineRecognitionClient(context);
+        localPunctuationClient = new LocalPunctuationRecognitionClient(context);
         localRealtimeClient = new LocalRealtimeRecognitionClient(context);
         diagnosticsStore = new RecognitionDiagnosticsStore(context);
         recoveryJournal = new VoiceRecoveryJournal(context);
@@ -258,7 +263,9 @@ public final class VoicePipeline {
         try {
             modelWarmExecutor.submit(() -> {
                 try {
-                    if (active.get() == null) localRealtimeClient.prewarm();
+                    if (active.get() == null) {
+                        localRealtimeClient.prewarm();
+                    }
                 } catch (RuntimeException ignored) {
                     // Dictation can still load on demand; prewarm is an optimization, not a gate.
                 } finally {
@@ -278,7 +285,9 @@ public final class VoicePipeline {
                 recorder,
                 localRealtimeClient,
                 localOfflineClient,
+                localPunctuationClient,
                 localQualityExecutor,
+                localPunctuationExecutor,
                 speechCoreJournal,
                 new LocalSpeechCoreV2Session.Observer() {
                     @Override
@@ -461,7 +470,7 @@ public final class VoicePipeline {
             if (backend == RecognitionBackend.LOCAL_OFFLINE) {
                 boolean formatted = SafePunctuationRestorer.prefersPunctuation(
                         run.request.inputContext().fieldKind());
-                LocalOfflineRecognitionClient.Result local = localOfflineClient.recognize(
+                LocalOfflineRecognitionClient.Result local = recognizeLocal(
                         audio.wav(),
                         run.request.settings().language(),
                         formatted);
@@ -1403,7 +1412,7 @@ public final class VoicePipeline {
             byte[] wav = WavEncoder.pcm16Mono(pcm, recovery.metadata().sampleRate());
             Arrays.fill(pcm, (byte) 0);
             try {
-                LocalOfflineRecognitionClient.Result recognized = localOfflineClient.recognize(
+                LocalOfflineRecognitionClient.Result recognized = recognizeLocal(
                         wav, recovery.metadata().languageTag(), true);
                 String segmentText = recognized.punctuatedText();
                 if (segmentText.isBlank()) continue;
@@ -1462,7 +1471,7 @@ public final class VoicePipeline {
                 if (run.actualBackend == RecognitionBackend.LOCAL_OFFLINE) {
                     boolean formatted = SafePunctuationRestorer.prefersPunctuation(
                             run.request.inputContext().fieldKind());
-                    LocalOfflineRecognitionClient.Result local = localOfflineClient.recognize(
+                    LocalOfflineRecognitionClient.Result local = recognizeLocal(
                             wav,
                             run.request.settings().language(),
                             formatted);
@@ -1533,14 +1542,39 @@ public final class VoicePipeline {
         return state.get();
     }
 
+    private LocalOfflineRecognitionClient.Result recognizeLocal(
+            byte[] wav, String language, boolean formatted) {
+        LocalOfflineRecognitionClient.Result recognized = localOfflineClient.recognize(
+                wav, language, formatted);
+        if (!formatted || !LocalPunctuationRecognizer.isInstalled(applicationContext)) {
+            return recognized;
+        }
+        try {
+            String punctuated = localPunctuationClient.punctuate(recognized.exactText());
+            return new LocalOfflineRecognitionClient.Result(recognized.exactText(), punctuated);
+        } catch (CancellationException error) {
+            throw error;
+        } catch (RuntimeException ignored) {
+            // The ASR result remains authoritative; the field-safe gate can still add a terminal
+            // mark without risking any lexical rewrite.
+            return recognized;
+        } finally {
+            // Legacy/recovery requests have no v2 session lease. Do not retain a 72 MiB model
+            // worker after this one text transform.
+            localPunctuationClient.releaseSessionWorker();
+        }
+    }
+
     public void shutdown() {
         cancel();
         systemRecognizer.destroy();
         localOfflineClient.close();
+        localPunctuationClient.close();
         localRealtimeClient.close();
         streamingRecognizer.shutdown();
         executor.shutdownNow();
         localQualityExecutor.shutdownNow();
+        localPunctuationExecutor.shutdownNow();
         modelWarmExecutor.shutdownNow();
     }
 

@@ -10,7 +10,8 @@ Delivery class: debug-signed engineering build; Xiaomi 15 physical acceptance st
 The local-offline keyboard route now uses Speech Core v2 by default. V1 is retained only behind an
 explicit emergency rollback preference. When v2 is enabled, both the pinned Streaming Paraformer
 and SenseVoice model sets are required; a missing model is reported as an incomplete installation
-and never causes a silent route downgrade.
+and never causes a silent route downgrade. The independently downloadable pinned CT-Transformer
+punctuation model upgrades pause and final revisions without changing the selected privacy route.
 
 This is a real production-path cutover inside the engineering APK, not a Voice Lab shadow and not a
 renamed v1 callback path. It does **not** authorize a stable-store release or a claim that the current
@@ -21,12 +22,16 @@ models outperform Baidu, Typeless, Gboard, or another mature keyboard.
 - One continuous microphone capture feeds a warm first-pass Streaming Paraformer worker in the
   private `:local_stream` process.
 - Soft/hard boundaries create ordered segments without treating an ordinary pause as cancellation.
-- Safe provisional punctuation appears as a revision; a resumed segment can revise punctuation
-  without blindly appending duplicate text.
+- A pinned Chinese/English CT-Transformer in private `:local_punctuation` produces provisional and
+  final punctuation candidates. A shared lexical-integrity gate rejects any candidate that changes
+  words, letter case, numbers, URLs, email, code or paragraph structure; resumed speech can remove
+  a provisional revision without duplicate text.
 - SenseVoice quality jobs run on demand in the separate `:local_quality` process. Results are
   generation-bound and may refine an earlier segment while the next segment remains live.
-- A memory/thermal policy selects concurrent, sequential, or streaming-only execution explicitly;
-  it never silently changes provider/privacy routing.
+- A memory/thermal policy selects concurrent, sequential, or streaming-only execution explicitly
+  and includes a conservative 192 MiB punctuation-worker allowance. The text-only worker is
+  prewarmed during capture and killed after each dictation lease; it never changes provider/privacy
+  routing.
 - `EditorProjection` owns the host composing span, validates connection/editor/field/selection and
   context before every mutation, reads back editor results, freezes on lifecycle loss, and commits
   at most once.
@@ -62,7 +67,7 @@ ANDROID_HOME=/Users/dengxuezhao/Library/Android/sdk \
 
 Result:
 
-- Android JVM: **410/410**, 83 suites, zero failure/error/skip.
+- Android JVM: **415/415**, 84 suites, zero failure/error/skip.
 - Offline-ASR tools: **60/60** with Python 3.11, `numpy==2.4.6`, and
   `sherpa-onnx==1.13.4`.
 - Debug and Release lint: zero errors and one intentional `ChromeOsAbiSupport` warning for the
@@ -71,12 +76,13 @@ Result:
 
 ### API 36 arm64 emulator
 
-The complete connected suite ran after both exact model sets had been downloaded and SHA-verified:
+The complete connected suite ran after all three exact model sets had been downloaded and
+SHA-verified:
 
-- **41 total: 40 pass, 1 designed skip, 0 failures/errors**.
-- The sole skip is the opt-in external model-download test because ordinary connected runs are not
-  allowed to fetch hundreds of MiB from the internet.
-- Native Streaming Paraformer/SenseVoice Binder tests ran rather than skipping.
+- **42 discovered: 41 pass, 1 designed opt-in download skip, 0 failures/errors** in the ordinary
+  provisioned suite. The skipped large-download/native E2E was then invoked explicitly and passed
+  **1/1**.
+- Native Streaming Paraformer, SenseVoice and CT-Transformer Binder tests ran rather than skipping.
 - Real AndroidKeyStore journal, Android `InputConnection`, manifest/service isolation, visual
   navigation, settings migration, recovery, recognition contracts, and lifecycle tests passed.
 
@@ -88,6 +94,11 @@ first/second-pass finals. The most recent emulator diagnostic reported:
 - stream process PSS: 30,121 KiB;
 - quality final: 1,408 ms;
 - quality process PSS: 76,991 KiB.
+
+The current punctuation-worker gate reported exact output
+`我们都是木头人，不会说话，不会动。`, cold load plus first inference 522 ms, warm inference 2 ms,
+and 168,207 KiB PSS. The process was absent after its session release and then successfully
+rebound/reloaded. These figures are API 36 arm64 emulator evidence, not Xiaomi 15 claims.
 
 `streaming client start` is Binder/session setup, not a claim that native model loading completed at
 that point. Emulator timings/PSS are engineering evidence only and are not Xiaomi 15 measurements.
@@ -120,11 +131,11 @@ Debug-only Xiaomi 15 / arm64-v8a APK:
 
 ```text
 android/app/build/outputs/apk/delivery/
-OpenTypeless-0.3.0-SpeechCore-v2-Default-arm64-debug.apk
+OpenTypeless-0.3.0-SpeechCore-v2-Punctuation-arm64-debug.apk
 ```
 
-- bytes: 27,300,132 (26.04 MiB);
-- SHA-256: `93333b47dcc17a120228aff4eeb05ee217634b837d3a02800712ce0110149d4b`;
+- bytes: 27,317,908 (26.05 MiB);
+- SHA-256: `9831c0486ed6db09f5e545ae0e7b43ed65e1b8df292870e855646084a3dc5541`;
 - native ABI: `arm64-v8a` only;
 - signature: Android Debug certificate, APK Signature Scheme v2.
 

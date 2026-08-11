@@ -38,6 +38,8 @@ import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.offline.OfflineModelOperationCoordinator;
 import com.opentypeless.android.offline.OfflineModelSpec;
 import com.opentypeless.android.offline.OfflineModelStore;
+import com.opentypeless.android.offline.OfflinePunctuationModelSpec;
+import com.opentypeless.android.offline.OfflinePunctuationModelStore;
 import com.opentypeless.android.offline.OfflineStreamingModelSpec;
 import com.opentypeless.android.offline.OfflineStreamingModelStore;
 import com.opentypeless.android.ime.OpenTypelessImeService;
@@ -599,10 +601,14 @@ public final class MainActivity extends Activity {
         OfflineModelStore.Status status = OfflineModelStore.status(this);
         OfflineStreamingModelStore.Status streamingStatus =
                 OfflineStreamingModelStore.status(this);
+        OfflinePunctuationModelStore.Status punctuationStatus =
+                OfflinePunctuationModelStore.status(this);
         boolean supported = LocalOfflineRecognizer.isSupportedDevice(this);
         boolean qualityInstalled = status == OfflineModelStore.Status.INSTALLED;
         boolean streamingInstalled = streamingStatus
                 == OfflineStreamingModelStore.Status.INSTALLED;
+        boolean punctuationInstalled = punctuationStatus
+                == OfflinePunctuationModelStore.Status.INSTALLED;
         int message;
         if (!supported) {
             message = R.string.offline_model_unsupported_low_memory;
@@ -612,25 +618,34 @@ public final class MainActivity extends Activity {
             message = R.string.offline_model_corrupt;
         } else if (streamingStatus == OfflineStreamingModelStore.Status.CORRUPT) {
             message = R.string.offline_preview_model_corrupt;
+        } else if (punctuationStatus == OfflinePunctuationModelStore.Status.CORRUPT) {
+            message = R.string.offline_punctuation_model_corrupt;
         } else if (!streamingInstalled) {
             message = R.string.offline_model_quality_only;
+        } else if (!punctuationInstalled) {
+            message = R.string.offline_model_punctuation_missing;
         } else {
             message = R.string.offline_model_installed;
         }
         localModelStatus.setText(message);
-        localModelStatus.setTextColor(supported && qualityInstalled && streamingInstalled
+        localModelStatus.setTextColor(
+                supported && qualityInstalled && streamingInstalled && punctuationInstalled
                 ? getColor(R.color.ime_primary)
                 : supported && qualityInstalled
                 ? getColor(R.color.ime_warning)
                 : getColor(R.color.ime_error));
         localModelStatus.setContentDescription(localModelStatus.getText());
-        downloadOfflineModel.setText(qualityInstalled && !streamingInstalled
-                ? R.string.download_offline_live_preview
-                : R.string.download_offline_model);
+        downloadOfflineModel.setText(
+                qualityInstalled && streamingInstalled && !punctuationInstalled
+                        ? R.string.download_offline_punctuation
+                        : qualityInstalled && !streamingInstalled
+                                ? R.string.download_offline_live_preview
+                                : R.string.download_offline_model);
         downloadOfflineModel.setEnabled(supported
-                && (!qualityInstalled || !streamingInstalled));
+                && (!qualityInstalled || !streamingInstalled || !punctuationInstalled));
         deleteOfflineModel.setVisibility(status == OfflineModelStore.Status.MISSING
                 && streamingStatus == OfflineStreamingModelStore.Status.MISSING
+                && punctuationStatus == OfflinePunctuationModelStore.Status.MISSING
                 ? View.GONE
                 : View.VISIBLE);
     }
@@ -639,18 +654,32 @@ public final class MainActivity extends Activity {
         if (OfflineModelOperationCoordinator.snapshot().running()) return;
         OfflineModelSpec quality = OfflineModelSpec.QUALITY;
         OfflineStreamingModelSpec streaming = OfflineStreamingModelSpec.REALTIME;
+        OfflinePunctuationModelSpec punctuation = OfflinePunctuationModelSpec.ZH_EN;
         boolean needsQuality = OfflineModelStore.status(this)
                 != OfflineModelStore.Status.INSTALLED;
         boolean needsStreaming = OfflineStreamingModelStore.status(this)
                 != OfflineStreamingModelStore.Status.INSTALLED;
+        boolean needsPunctuation = OfflinePunctuationModelStore.status(this)
+                != OfflinePunctuationModelStore.Status.INSTALLED;
         long missingBytes = (needsQuality ? quality.downloadBytes() : 0L)
-                + (needsStreaming ? streaming.downloadBytes() : 0L);
-        String models = needsQuality && needsStreaming
-                ? quality.displayName() + " + " + streaming.displayName()
-                : needsQuality ? quality.displayName() : streaming.displayName();
-        String revisions = needsQuality && needsStreaming
-                ? quality.revision() + " / " + streaming.revision()
-                : needsQuality ? quality.revision() : streaming.revision();
+                + (needsStreaming ? streaming.downloadBytes() : 0L)
+                + (needsPunctuation ? punctuation.downloadBytes() : 0L);
+        java.util.ArrayList<String> modelNames = new java.util.ArrayList<>();
+        java.util.ArrayList<String> revisionsList = new java.util.ArrayList<>();
+        if (needsQuality) {
+            modelNames.add(quality.displayName());
+            revisionsList.add(quality.revision());
+        }
+        if (needsStreaming) {
+            modelNames.add(streaming.displayName());
+            revisionsList.add(streaming.revision());
+        }
+        if (needsPunctuation) {
+            modelNames.add(punctuation.displayName());
+            revisionsList.add(punctuation.revision());
+        }
+        String models = String.join(" + ", modelNames);
+        String revisions = String.join(" / ", revisionsList);
         new AlertDialog.Builder(this)
                 .setTitle(R.string.download_offline_model_title)
                 .setMessage(getString(

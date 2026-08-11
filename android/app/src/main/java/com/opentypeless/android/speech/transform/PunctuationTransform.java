@@ -8,7 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Punctuation-only candidate gate that preserves lexical content and protected literal spelling. */
-final class PunctuationTransform {
+public final class PunctuationTransform {
     private static final int MAX_CODE_POINTS = 20_000;
     private static final Pattern PROTECTED = Pattern.compile(
             "(?iu)(?:https?://|www\\.)[^\\s<>\\[\\](){}\\\"']+"
@@ -18,6 +18,23 @@ final class PunctuationTransform {
                     + "(?:[.,:/-]\\d+)*(?:%|％|元|美元|欧元)?(?![\\p{L}\\p{N}_])");
 
     private PunctuationTransform() {}
+
+    /** Shared fail-closed gate used by both Speech Core v2 and legacy recovery paths. */
+    public static boolean preservesLexicalContent(String source, String candidate) {
+        String safeSource = source == null ? "" : source;
+        String safeCandidate = candidate == null ? "" : candidate;
+        return !safeSource.isBlank()
+                && !safeCandidate.isBlank()
+                && safeCandidate.codePointCount(0, safeCandidate.length()) <= MAX_CODE_POINTS
+                && newlineCount(safeSource) == newlineCount(safeCandidate)
+                && lexicalKey(safeSource).equals(lexicalKey(safeCandidate))
+                && protectedLiterals(safeSource).equals(protectedLiterals(safeCandidate));
+    }
+
+    /** Punctuation-insensitive, case-sensitive key for diagnostics and native smoke tests. */
+    public static String contentKey(String value) {
+        return lexicalKey(value == null ? "" : value);
+    }
 
     static Decision apply(String source, String candidate) {
         String safeSource = source == null ? "" : source;
@@ -55,8 +72,10 @@ final class PunctuationTransform {
     }
 
     private static String lexicalKey(String value) {
-        String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC)
-                .toLowerCase(Locale.ROOT);
+        // Punctuation restoration is not allowed to silently recase English names or acronyms.
+        // NFKC still makes compatibility punctuation/spaces comparable, but lexical code points
+        // remain case-sensitive and must survive byte-for-byte after normalization.
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC);
         StringBuilder result = new StringBuilder(normalized.length());
         boolean pendingSpace = false;
         for (int offset = 0; offset < normalized.length();) {

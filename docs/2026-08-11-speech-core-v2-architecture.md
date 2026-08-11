@@ -206,6 +206,9 @@ applied to a refined segment. Automatic fuzzy replacement and unreviewed learnin
 ## Punctuation, ITN and LLM
 
 - Punctuation is a text transformation with its own provenance, not proof of ASR confidence.
+- The production local route uses a pinned Chinese/English CT-Transformer punctuation model. Its
+  candidate is accepted only when a lexical-content guard proves that words, letter case, numbers,
+  URLs, email, code and paragraph structure are unchanged.
 - Soft-boundary punctuation is provisional and may be removed when speech resumes.
 - Refined punctuation/ITN is sealed with the segment and evaluated separately from lexical error.
 - Locale-sensitive ITN remains opt-in until its date/number formatting passes dedicated tests.
@@ -235,6 +238,8 @@ One logical local speech service fronts a capability-aware scheduler. Execution 
 
 - a warm streaming worker/process while the keyboard is visible;
 - an on-demand quality worker/process for closed segments;
+- a text-only, session-scoped punctuation worker prewarmed in parallel with capture and terminated
+  after the dictation lease;
 - a single-process sequential strategy on constrained devices;
 - a fast single-pass strategy when memory/thermal pressure prevents quality refinement.
 
@@ -242,8 +247,12 @@ The user-visible integrity contract does not change when quality timing degrades
 delay refinement or retain a safe streaming result, but it cannot discard the draft or silently
 switch to a network provider.
 
-Two simultaneously resident native models are permitted only after device-specific PSS, thermal,
-battery and cancellation gates pass. Model workers remain non-exported and same-UID guarded.
+The default cap remains two simultaneously resident ASR models. A third, text-only punctuation
+worker is permitted only while one high-headroom dictation session owns it, and its measured PSS is
+included in the concurrent resource decision. Sequential mode unloads streaming before quality;
+low-memory or severe-thermal profiles omit the native punctuation pass and retain the safe ASR
+revision. The punctuation worker is killed after each session because native allocators may retain
+arenas even after model close. All model workers remain non-exported and same-UID guarded.
 
 ## Durable recovery
 

@@ -43,8 +43,8 @@ public final class SpeechCoreCoordinatorTest {
         assertTrue(first.projectionChanged());
 
         CoordinatorUpdate soft = coordinator.softBoundary(
-                TOKEN, 1L, "Use open type less.");
-        assertEquals("Use OpenTypeless.", soft.draft().renderedText());
+                TOKEN, 1L, "use open type less.");
+        assertEquals("use OpenTypeless.", soft.draft().renderedText());
         assertEquals(SegmentStage.SOFT_BOUNDARY, soft.draft().segment(1L).orElseThrow().stage());
 
         CoordinatorUpdate reopened = coordinator.reopenSegment(TOKEN, 1L);
@@ -60,16 +60,63 @@ public final class SpeechCoreCoordinatorTest {
         CoordinatorUpdate finalUpdate = coordinator.qualitySucceeded(
                 quality,
                 "use open type less daily",
-                "Use open type less daily.",
+                "use open type less daily.",
                 null);
 
-        assertEquals("Use OpenTypeless daily.", finalUpdate.draft().renderedText());
+        assertEquals("use OpenTypeless daily.", finalUpdate.draft().renderedText());
         assertEquals(SegmentStage.SEALED,
                 finalUpdate.draft().segment(1L).orElseThrow().stage());
         assertEquals(
                 RevisionOrigin.PERSONALIZATION,
                 finalUpdate.draft().segment(1L).orElseThrow()
                         .visibleRevision().orElseThrow().origin());
+    }
+
+    @Test
+    public void asynchronousPunctuationAppliesOnlyToExactActiveSoftBoundary() {
+        SpeechCoreCoordinator coordinator = coordinator(concurrent(1, 4), null);
+        start(coordinator);
+        coordinator.openSegment(TOKEN, 1L, SegmentJoin.NONE);
+        coordinator.liveRevision(
+                StreamingRevisionInput.text(TOKEN, 1L, 1L, "我们都是木头人不会说话不会动"));
+        coordinator.softBoundary(TOKEN, 1L, null);
+
+        CoordinatorUpdate punctuated = coordinator.provisionalPunctuation(
+                TOKEN,
+                1L,
+                "我们都是木头人不会说话不会动",
+                "我们都是木头人，不会说话，不会动。 ".trim());
+
+        assertEquals(CoordinatorDisposition.APPLIED, punctuated.disposition());
+        assertEquals("我们都是木头人，不会说话，不会动。", punctuated.draft().renderedText());
+        assertEquals(
+                RevisionOrigin.PUNCTUATION,
+                punctuated.draft().segment(1L).orElseThrow()
+                        .visibleRevision().orElseThrow().origin());
+    }
+
+    @Test
+    public void asynchronousPunctuationCannotOverwriteReopenedOrNewerStreamingText() {
+        SpeechCoreCoordinator coordinator = coordinator(concurrent(1, 4), null);
+        start(coordinator);
+        coordinator.openSegment(TOKEN, 1L, SegmentJoin.NONE);
+        coordinator.liveRevision(
+                StreamingRevisionInput.text(TOKEN, 1L, 1L, "第一句话没有标点"));
+        coordinator.softBoundary(TOKEN, 1L, null);
+        coordinator.reopenSegment(TOKEN, 1L);
+
+        CoordinatorUpdate reopenedStale = coordinator.provisionalPunctuation(
+                TOKEN, 1L, "第一句话没有标点", "第一句话，没有标点。 ".trim());
+        assertEquals(CoordinatorDisposition.IGNORED_STALE, reopenedStale.disposition());
+        assertEquals("第一句话没有标点", coordinator.draft().renderedText());
+
+        coordinator.liveRevision(
+                StreamingRevisionInput.text(TOKEN, 1L, 2L, "第一句话后面还有新内容"));
+        coordinator.softBoundary(TOKEN, 1L, null);
+        CoordinatorUpdate sourceStale = coordinator.provisionalPunctuation(
+                TOKEN, 1L, "第一句话没有标点", "第一句话，没有标点。 ".trim());
+        assertEquals(CoordinatorDisposition.IGNORED_STALE, sourceStale.disposition());
+        assertEquals("第一句话后面还有新内容。", coordinator.draft().renderedText());
     }
 
     @Test

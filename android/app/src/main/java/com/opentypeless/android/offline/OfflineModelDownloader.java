@@ -59,6 +59,8 @@ public final class OfflineModelDownloader {
                 LocalOfflineRecognizer.deleteModel(context.getApplicationContext());
                 OfflineStreamingRecognizer.releaseShared();
                 OfflineStreamingModelStore.delete(context.getApplicationContext());
+                LocalPunctuationRecognizer.releaseShared();
+                OfflinePunctuationModelStore.delete(context.getApplicationContext());
                 if (!cancelled.get()) callback.onComplete();
             } catch (RuntimeException error) {
                 if (!cancelled.get()) callback.onError(safeMessage(error));
@@ -87,6 +89,7 @@ public final class OfflineModelDownloader {
         private volatile HttpURLConnection activeConnection;
         private File qualityStaging;
         private File streamingStaging;
+        private File punctuationStaging;
 
         DownloadTask(Context context, Callback callback) {
             this.context = context;
@@ -98,12 +101,16 @@ public final class OfflineModelDownloader {
             try {
                 OfflineModelSpec quality = OfflineModelSpec.QUALITY;
                 OfflineStreamingModelSpec streaming = OfflineStreamingModelSpec.REALTIME;
+                OfflinePunctuationModelSpec punctuation = OfflinePunctuationModelSpec.ZH_EN;
                 boolean needsQuality = OfflineModelStore.status(context)
                         != OfflineModelStore.Status.INSTALLED;
                 boolean needsStreaming = OfflineStreamingModelStore.status(context)
                         != OfflineStreamingModelStore.Status.INSTALLED;
+                boolean needsPunctuation = OfflinePunctuationModelStore.status(context)
+                        != OfflinePunctuationModelStore.Status.INSTALLED;
                 long total = (needsQuality ? quality.downloadBytes() : 0L)
-                        + (needsStreaming ? streaming.downloadBytes() : 0L);
+                        + (needsStreaming ? streaming.downloadBytes() : 0L)
+                        + (needsPunctuation ? punctuation.downloadBytes() : 0L);
                 if (total == 0L) {
                     callback.onProgress(100, 0L, 0L);
                     callback.onComplete();
@@ -133,6 +140,15 @@ public final class OfflineModelDownloader {
                     OfflineStreamingModelStore.commitVerifiedStaging(context, streamingStaging);
                     streamingStaging = null;
                 }
+                if (needsPunctuation) {
+                    punctuationStaging = OfflinePunctuationModelStore.newStagingDirectory(context);
+                    downloaded += downloadArtifact(
+                            punctuation.model(), punctuationStaging, downloaded, total);
+                    checkCancelled();
+                    OfflinePunctuationModelStore.commitVerifiedStaging(
+                            context, punctuationStaging);
+                    punctuationStaging = null;
+                }
                 callback.onProgress(100, downloaded, total);
                 callback.onComplete();
             } catch (Cancelled ignored) {
@@ -152,6 +168,13 @@ public final class OfflineModelDownloader {
                 if (streamingStaging != null) {
                     try {
                         OfflineStreamingModelStore.discardStaging(context, streamingStaging);
+                    } catch (RuntimeException ignored) {
+                        // The verified fixed-path cleanup is best effort after the original error.
+                    }
+                }
+                if (punctuationStaging != null) {
+                    try {
+                        OfflinePunctuationModelStore.discardStaging(context, punctuationStaging);
                     } catch (RuntimeException ignored) {
                         // The verified fixed-path cleanup is best effort after the original error.
                     }

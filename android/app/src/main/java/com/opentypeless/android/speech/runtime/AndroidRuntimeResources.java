@@ -10,10 +10,13 @@ import android.os.PowerManager;
 public final class AndroidRuntimeResources {
     private static final long EXPECTED_STREAMING_WORKER_MIB = 128L;
     private static final long EXPECTED_QUALITY_WORKER_MIB = 320L;
+    // API 36 arm64 emulator runs observed roughly 154--170 MiB. Keep headroom for allocator
+    // variation; the worker is session-scoped and is killed after the dictation lease.
+    private static final long EXPECTED_PUNCTUATION_WORKER_MIB = 192L;
 
     private AndroidRuntimeResources() {}
 
-    public static RuntimeResources snapshot(Context context) {
+    public static RuntimeResources snapshot(Context context, boolean punctuationEnabled) {
         Context app = context.getApplicationContext();
         ActivityManager manager = app.getSystemService(ActivityManager.class);
         ActivityManager.MemoryInfo memory = new ActivityManager.MemoryInfo();
@@ -27,6 +30,7 @@ public final class AndroidRuntimeResources {
                 appPss,
                 EXPECTED_STREAMING_WORKER_MIB,
                 EXPECTED_QUALITY_WORKER_MIB,
+                punctuationEnabled ? EXPECTED_PUNCTUATION_WORKER_MIB : 0L,
                 thermal(app),
                 memory.lowMemory);
     }
