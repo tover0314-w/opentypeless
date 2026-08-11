@@ -16,12 +16,14 @@ const MIN_CHUNK_MS: u32 = 50;
 const TARGET_CHUNK_MS: u32 = 100;
 const MAX_CHUNK_MS: u32 = 1000;
 const BYTES_PER_SAMPLE: u32 = 2; // PCM s16le mono
+const SPEECH_MODEL: &str = "universal-3-5-pro";
 const TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct AssemblyAiProvider {
     ws: Option<WsStream>,
     pending: Vec<u8>,
     sample_rate: u32,
+    url_override: Option<String>,
 }
 
 impl Default for AssemblyAiProvider {
@@ -36,16 +38,41 @@ impl AssemblyAiProvider {
             ws: None,
             pending: Vec::new(),
             sample_rate: 16000,
+            url_override: None,
         }
     }
 
-    fn build_url(config: &SttConfig) -> String {
+    #[cfg(test)]
+    fn with_url(url: String) -> Self {
+        Self {
+            url_override: Some(url),
+            ..Self::new()
+        }
+    }
+
+    fn resolved_sample_rate(config: &SttConfig) -> u32 {
+        if config.sample_rate == 0 {
+            16000
+        } else {
+            config.sample_rate
+        }
+    }
+
+    fn build_url(sample_rate: u32) -> String {
         format!(
             "wss://streaming.assemblyai.com/v3/ws?\
              sample_rate={}&\
+             encoding=pcm_s16le&\
+             speech_model={}&\
              format_turns=true",
-            config.sample_rate
+            sample_rate, SPEECH_MODEL
         )
+    }
+
+    fn connection_url(&self, sample_rate: u32) -> String {
+        self.url_override
+            .clone()
+            .unwrap_or_else(|| Self::build_url(sample_rate))
     }
 
     fn bytes_for_ms(&self, ms: u32) -> usize {
@@ -71,19 +98,20 @@ impl AssemblyAiProvider {
 
             // Never send a final undersized frame if we can avoid it; pad only on force
             // when residual audio is shorter than the minimum (end of utterance).
+            let mut frame = self.pending[..take].to_vec();
             if take < min_bytes {
                 if !force {
                     break;
                 }
                 // Pad short residual with silence so AssemblyAI accepts the last frame.
-                let mut frame = self.pending.drain(..).collect::<Vec<u8>>();
                 frame.resize(min_bytes, 0);
                 self.send_frame(&frame).await?;
+                self.pending.drain(..take);
                 break;
             }
 
-            let frame: Vec<u8> = self.pending.drain(..take).collect();
             self.send_frame(&frame).await?;
+            self.pending.drain(..take);
         }
 
         Ok(())
@@ -122,7 +150,7 @@ fn parse_transcript_message(text: &str) -> Result<Option<TranscriptEvent>, AppEr
             let turn_is_formatted = v
                 .get("turn_is_formatted")
                 .and_then(|value| value.as_bool())
-                .unwrap_or(end_of_turn);
+                .unwrap_or(false);
 
             if end_of_turn && turn_is_formatted {
                 Ok(Some(TranscriptEvent::Final {
@@ -160,15 +188,17 @@ fn append_final_text(final_text: &mut String, text: &str) {
     final_text.push_str(trimmed);
 }
 
-async fn read_until_termination(ws: &mut WsStream) -> Result<Option<String>, AppError> {
-    let deadline = tokio::time::Instant::now() + TERMINATION_TIMEOUT;
+async fn read_until_termination_with_timeout(
+    ws: &mut WsStream,
+    timeout: Duration,
+) -> Result<Option<String>, AppError> {
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut final_text = String::new();
 
     loop {
         let now = tokio::time::Instant::now();
         if now >= deadline {
-            tracing::warn!("Timed out waiting for AssemblyAI Termination message");
-            break;
+            return Err(AppError::Timeout(timeout));
         }
 
         let next = tokio::time::timeout(deadline - now, ws.next()).await;
@@ -183,28 +213,29 @@ async fn read_until_termination(ws: &mut WsStream) -> Result<Option<String>, App
                 }
                 _ => {}
             },
-            Ok(Some(Ok(Message::Close(_)))) | Ok(None) => break,
+            Ok(Some(Ok(Message::Close(_))) | None) => {
+                return Err(AppError::Network(
+                    "AssemblyAI WebSocket closed before Termination".to_string(),
+                ));
+            }
             Ok(Some(Err(e))) => return Err(AppError::Network(e.to_string())),
             Ok(Some(Ok(_))) => {}
-            Err(_) => {
-                tracing::warn!("Timed out waiting for AssemblyAI Termination message");
-                break;
-            }
+            Err(_) => return Err(AppError::Timeout(timeout)),
         }
     }
 
     Ok((!final_text.is_empty()).then_some(final_text))
 }
 
+async fn read_until_termination(ws: &mut WsStream) -> Result<Option<String>, AppError> {
+    read_until_termination_with_timeout(ws, TERMINATION_TIMEOUT).await
+}
+
 #[async_trait]
 impl SttProvider for AssemblyAiProvider {
     async fn connect(&mut self, config: &SttConfig) -> Result<(), AppError> {
-        let url = Self::build_url(config);
-        self.sample_rate = if config.sample_rate == 0 {
-            16000
-        } else {
-            config.sample_rate
-        };
+        self.sample_rate = Self::resolved_sample_rate(config);
+        let url = self.connection_url(self.sample_rate);
         self.pending.clear();
 
         let mut attempt = 0u32;
@@ -282,11 +313,13 @@ impl SttProvider for AssemblyAiProvider {
 
     async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
         // Flush residual audio before Terminate so the last words are not dropped.
-        let _ = self.flush_ready(true).await;
+        self.flush_ready(true).await?;
 
         if let Some(mut ws) = self.ws.take() {
             let terminate = serde_json::json!({"type": "Terminate"});
-            let _ = ws.send(Message::Text(terminate.to_string())).await;
+            ws.send(Message::Text(terminate.to_string()))
+                .await
+                .map_err(|e| AppError::Network(e.to_string()))?;
             let final_text = read_until_termination(&mut ws).await?;
             let _ = ws.close(None).await;
             self.pending.clear();
@@ -307,6 +340,21 @@ impl SttProvider for AssemblyAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+
+    fn test_config() -> SttConfig {
+        SttConfig {
+            api_key: "test-key".to_string(),
+            language: None,
+            smart_format: true,
+            sample_rate: 16_000,
+            resource_id: None,
+            operation_id: None,
+            managed_audio: None,
+            provider_region: None,
+        }
+    }
 
     #[test]
     fn chunk_size_matches_assemblyai_pcm16_duration_bounds() {
@@ -315,6 +363,15 @@ mod tests {
         assert_eq!(provider.bytes_for_ms(MIN_CHUNK_MS), 1600);
         assert_eq!(provider.bytes_for_ms(TARGET_CHUNK_MS), 3200);
         assert_eq!(provider.bytes_for_ms(MAX_CHUNK_MS), 32000);
+    }
+
+    #[test]
+    fn build_url_pins_current_streaming_model_and_pcm_encoding() {
+        let url = AssemblyAiProvider::build_url(16_000);
+
+        assert!(url.contains("sample_rate=16000"));
+        assert!(url.contains("encoding=pcm_s16le"));
+        assert!(url.contains("speech_model=universal-3-5-pro"));
     }
 
     #[test]
@@ -349,6 +406,23 @@ mod tests {
 
         match event {
             Some(TranscriptEvent::Partial { text }) => assert_eq!(text, "hello world"),
+            other => panic!("expected partial transcript, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_turn_is_formatted_does_not_finalize_turn() {
+        let message = serde_json::json!({
+            "type": "Turn",
+            "end_of_turn": true,
+            "transcript": "hello"
+        })
+        .to_string();
+
+        let event = parse_transcript_message(&message).unwrap();
+
+        match event {
+            Some(TranscriptEvent::Partial { text }) => assert_eq!(text, "hello"),
             other => panic!("expected partial transcript, got {other:?}"),
         }
     }
@@ -390,5 +464,223 @@ mod tests {
         append_final_text(&mut final_text, "world ");
 
         assert_eq!(final_text, "hello world");
+    }
+
+    #[tokio::test]
+    async fn streams_buffered_frames_and_drains_final_turns_until_termination() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            ws.send(Message::Text(
+                serde_json::json!({"type": "Begin"}).to_string(),
+            ))
+            .await
+            .unwrap();
+
+            let audio = ws.next().await.unwrap().unwrap();
+            match audio {
+                Message::Binary(bytes) => assert_eq!(bytes.len(), 3200),
+                other => panic!("expected binary audio frame, got {other:?}"),
+            }
+
+            let terminate = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&terminate).unwrap()["type"],
+                "Terminate"
+            );
+
+            ws.send(Message::Text(
+                serde_json::json!({
+                    "type": "Turn",
+                    "end_of_turn": true,
+                    "turn_is_formatted": true,
+                    "transcript": "hello"
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+            ws.send(Message::Text(
+                serde_json::json!({
+                    "type": "Turn",
+                    "end_of_turn": true,
+                    "turn_is_formatted": true,
+                    "transcript": "world"
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+            ws.send(Message::Text(
+                serde_json::json!({"type": "Termination"}).to_string(),
+            ))
+            .await
+            .unwrap();
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+        for _ in 0..5 {
+            provider.send_audio(&vec![1; 640]).await.unwrap();
+        }
+
+        assert_eq!(
+            provider.disconnect().await.unwrap().as_deref(),
+            Some("hello world")
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn disconnect_pads_short_residual_before_terminate() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            let audio = ws.next().await.unwrap().unwrap();
+            match audio {
+                Message::Binary(bytes) => {
+                    assert_eq!(bytes.len(), 1600);
+                    assert_eq!(&bytes[..640], vec![1; 640].as_slice());
+                    assert!(bytes[640..].iter().all(|byte| *byte == 0));
+                }
+                other => panic!("expected padded binary audio frame, got {other:?}"),
+            }
+
+            let terminate = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&terminate).unwrap()["type"],
+                "Terminate"
+            );
+            ws.send(Message::Text(
+                serde_json::json!({"type": "Termination"}).to_string(),
+            ))
+            .await
+            .unwrap();
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+        provider.send_audio(&vec![1; 640]).await.unwrap();
+
+        assert_eq!(provider.disconnect().await.unwrap(), None);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_audio_is_split_into_provider_sized_frames() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+
+            for _ in 0..11 {
+                let audio = ws.next().await.unwrap().unwrap();
+                match audio {
+                    Message::Binary(bytes) => assert_eq!(bytes.len(), 3200),
+                    other => panic!("expected binary audio frame, got {other:?}"),
+                }
+            }
+
+            let terminate = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&terminate).unwrap()["type"],
+                "Terminate"
+            );
+            ws.send(Message::Text(
+                serde_json::json!({"type": "Termination"}).to_string(),
+            ))
+            .await
+            .unwrap();
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+        provider.send_audio(&vec![1; 35_200]).await.unwrap();
+
+        assert_eq!(provider.disconnect().await.unwrap(), None);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_error_during_termination_is_returned() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await.unwrap().unwrap();
+
+            ws.send(Message::Text(
+                serde_json::json!({
+                    "type": "Error",
+                    "error": "Input duration violation: 20 ms. Expected between 50 and 1000 ms"
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+
+        let error = provider.disconnect().await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Input duration violation: 20 ms"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn close_before_termination_is_incomplete_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await.unwrap().unwrap();
+            ws.close(None).await.unwrap();
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+
+        let error = provider.disconnect().await.unwrap_err();
+        assert!(error.to_string().contains("closed before Termination"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn timeout_before_termination_is_incomplete_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(stream).await.unwrap();
+            let _ = ws.next().await.unwrap().unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        });
+
+        let mut provider = AssemblyAiProvider::with_url(format!("ws://{address}"));
+        provider.connect(&test_config()).await.unwrap();
+        let ws = provider.ws.as_mut().unwrap();
+        ws.send(Message::Text(
+            serde_json::json!({"type": "Terminate"}).to_string(),
+        ))
+        .await
+        .unwrap();
+
+        let error = read_until_termination_with_timeout(ws, Duration::from_millis(20))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AppError::Timeout(_)));
+        server.await.unwrap();
     }
 }
