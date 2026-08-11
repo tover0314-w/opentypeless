@@ -83,6 +83,7 @@ python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-as
 
 0.3 的代码审查、自动化证据、真机步骤和未完成门槛见
 [Android 0.3 审查与验收报告](docs/2026-08-09-android-0.3-review-acceptance.md)；
+[小米 15 Voice Core P0 真机矩阵](docs/2026-08-11-xiaomi15-p0-acceptance.md)是当前物理验收依据；
 [0.2 验收报告](docs/2026-08-09-byok-android-acceptance.md)保留为历史基线。
 
 本地生成的 release APK 默认未签名；没有完成签名和校验和发布前，不应把它当成可信正式包分发。

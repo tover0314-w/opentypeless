@@ -1,22 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
+export LANG=C
 
 PACKAGE="com.opentypeless.android"
+ADB_BIN="${ADB:-adb}"
+SERIAL=""
 APK_PATH=""
 RUN_SMOKE=false
 OUTPUT_DIR="xiaomi15-acceptance-$(date +%Y%m%d-%H%M%S)"
 
 usage() {
   printf '%s\n' \
-    "Usage: $0 [--apk path/to/app-debug.apk] [--smoke] [--output directory]" \
+    "Usage: $0 --serial exact-adb-serial [--adb path/to/adb] [--apk app.apk]" \
+    "          [--smoke] [--output directory]" \
     "" \
     "The default run is read-only. --apk installs or updates OpenTypeless; --smoke launches" \
-    "its settings Activity. Set ANDROID_SERIAL when more than one device is attached." \
+    "its settings Activity. An exact serial is always required; devices are never auto-selected." \
     "No logcat, screenshot, transcript, clipboard, account, or other app data is collected."
 }
 
 while (($#)); do
   case "$1" in
+    --adb)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      ADB_BIN="$2"
+      shift 2
+      ;;
+    --serial)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      SERIAL="$2"
+      shift 2
+      ;;
     --apk)
       [[ $# -ge 2 ]] || { usage >&2; exit 2; }
       APK_PATH="$2"
@@ -43,7 +58,12 @@ while (($#)); do
   esac
 done
 
-command -v adb >/dev/null || { printf 'adb is required.\n' >&2; exit 1; }
+[[ -n "$SERIAL" ]] || { printf 'An exact --serial is required.\n' >&2; usage >&2; exit 2; }
+if [[ "$ADB_BIN" == */* ]]; then
+  [[ -x "$ADB_BIN" ]] || { printf 'adb is not executable: %s\n' "$ADB_BIN" >&2; exit 1; }
+else
+  command -v "$ADB_BIN" >/dev/null || { printf 'adb is required.\n' >&2; exit 1; }
+fi
 if command -v sha256sum >/dev/null; then
   SHA256=(sha256sum)
 elif command -v shasum >/dev/null; then
@@ -61,32 +81,20 @@ fi
   exit 1
 }
 
-if [[ -n "${ANDROID_SERIAL:-}" ]]; then
-  SERIAL="$ANDROID_SERIAL"
-  [[ "$(adb -s "$SERIAL" get-state 2>/dev/null)" == "device" ]] || {
-    printf 'ANDROID_SERIAL does not identify an authorized online device.\n' >&2
-    exit 1
-  }
-else
-  DEVICES=()
-  while IFS= read -r device; do
-    DEVICES+=("$device")
-  done < <(adb devices | awk '$2 == "device" {print $1}')
-  [[ ${#DEVICES[@]} -eq 1 ]] || {
-    printf 'Attach exactly one authorized device, or set ANDROID_SERIAL. Found: %d\n' \
-      "${#DEVICES[@]}" >&2
-    exit 1
-  }
-  SERIAL="${DEVICES[0]}"
-fi
-ADB=(adb -s "$SERIAL")
+[[ "$("$ADB_BIN" -s "$SERIAL" get-state 2>/dev/null)" == "device" ]] || {
+  printf '%s\n' \
+    "--serial does not identify an authorized online device." \
+    "No fallback device was selected."
+  exit 1
+}
+ADB_CMD=("$ADB_BIN" -s "$SERIAL")
 mkdir -p "$OUTPUT_DIR"
 
 device_prop() {
   local label="$1"
   local property="$2"
   local value
-  value="$("${ADB[@]}" shell getprop "$property" | tr -d '\r')"
+  value="$("${ADB_CMD[@]}" shell getprop "$property" | tr -d '\r')"
   printf '%s=%s\n' "$label" "$value" >> "$OUTPUT_DIR/device.properties"
 }
 
@@ -124,25 +132,25 @@ if [[ -n "$APK_PATH" ]]; then
   [[ -f "$APK_PATH" ]] || { printf 'APK not found: %s\n' "$APK_PATH" >&2; exit 1; }
   APK_SHA256="$("${SHA256[@]}" "$APK_PATH" | awk '{print $1}')"
   printf '%s  %s\n' "$APK_SHA256" "$(basename "$APK_PATH")" > "$OUTPUT_DIR/apk.sha256"
-  "${ADB[@]}" install -r "$APK_PATH" > "$OUTPUT_DIR/install.txt"
+  "${ADB_CMD[@]}" install -r "$APK_PATH" > "$OUTPUT_DIR/install.txt"
 fi
 
-"${ADB[@]}" shell pm path "$PACKAGE" | tr -d '\r' > "$OUTPUT_DIR/package-path.txt"
+"${ADB_CMD[@]}" shell pm path "$PACKAGE" | tr -d '\r' > "$OUTPUT_DIR/package-path.txt"
 grep -q '^package:' "$OUTPUT_DIR/package-path.txt" || {
   printf '%s is not installed on the attached phone.\n' "$PACKAGE" >&2
   exit 1
 }
 
-"${ADB[@]}" shell dumpsys package "$PACKAGE" \
+"${ADB_CMD[@]}" shell dumpsys package "$PACKAGE" \
   | tr -d '\r' \
   | grep -E 'versionCode=|versionName=|targetSdk=|firstInstallTime=|lastUpdateTime=|android.permission.RECORD_AUDIO' \
   > "$OUTPUT_DIR/package.txt" || true
-"${ADB[@]}" shell cmd appops get "$PACKAGE" RECORD_AUDIO \
+"${ADB_CMD[@]}" shell cmd appops get "$PACKAGE" RECORD_AUDIO \
   | tr -d '\r' > "$OUTPUT_DIR/microphone-appop.txt" || true
 
-DEFAULT_IME="$("${ADB[@]}" shell settings get secure default_input_method | tr -d '\r')"
-ENABLED_IMES="$("${ADB[@]}" shell settings get secure enabled_input_methods | tr -d '\r')"
-AVAILABLE_IMES="$("${ADB[@]}" shell ime list -s | tr -d '\r')"
+DEFAULT_IME="$("${ADB_CMD[@]}" shell settings get secure default_input_method | tr -d '\r')"
+ENABLED_IMES="$("${ADB_CMD[@]}" shell settings get secure enabled_input_methods | tr -d '\r')"
+AVAILABLE_IMES="$("${ADB_CMD[@]}" shell ime list -s | tr -d '\r')"
 {
   [[ "$DEFAULT_IME" == "$PACKAGE/"* ]] \
     && printf 'opentypeless_is_default=true\n' \
@@ -155,11 +163,11 @@ AVAILABLE_IMES="$("${ADB[@]}" shell ime list -s | tr -d '\r')"
     || printf 'opentypeless_is_registered=false\n'
 } > "$OUTPUT_DIR/ime.txt"
 
-VOICE_COMPONENT="$("${ADB[@]}" shell settings get secure voice_recognition_service | tr -d '\r')"
+VOICE_COMPONENT="$("${ADB_CMD[@]}" shell settings get secure voice_recognition_service | tr -d '\r')"
 printf 'voice_recognition_service=%s\n' "$VOICE_COMPONENT" > "$OUTPUT_DIR/speech-route.txt"
 VOICE_PACKAGE="${VOICE_COMPONENT%%/*}"
 if [[ -n "$VOICE_PACKAGE" && "$VOICE_PACKAGE" != "null" ]]; then
-  "${ADB[@]}" shell dumpsys package "$VOICE_PACKAGE" \
+  "${ADB_CMD[@]}" shell dumpsys package "$VOICE_PACKAGE" \
     | tr -d '\r' \
     | grep -E 'versionCode=|versionName=|targetSdk=' \
     >> "$OUTPUT_DIR/speech-route.txt" || true
@@ -167,22 +175,25 @@ fi
 
 {
   printf 'low_power='
-  "${ADB[@]}" shell settings get global low_power | tr -d '\r'
+  "${ADB_CMD[@]}" shell settings get global low_power | tr -d '\r'
   printf 'process_id='
-  "${ADB[@]}" shell pidof "$PACKAGE" | tr -d '\r' || true
+  "${ADB_CMD[@]}" shell pidof "$PACKAGE" | tr -d '\r' || true
 } > "$OUTPUT_DIR/runtime.txt"
-"${ADB[@]}" shell dumpsys meminfo "$PACKAGE" \
+"${ADB_CMD[@]}" shell dumpsys meminfo "$PACKAGE" \
   | tr -d '\r' \
   | grep -E 'TOTAL PSS:|TOTAL RSS:|App Summary|Java Heap:|Native Heap:|Code:|Stack:|Graphics:|Private Other:|System:' \
   > "$OUTPUT_DIR/memory.txt" || true
 
 if [[ "$RUN_SMOKE" == true ]]; then
-  "${ADB[@]}" shell am start -W -n "$PACKAGE/.MainActivity" \
+  "${ADB_CMD[@]}" shell am start -W -n "$PACKAGE/.MainActivity" \
     | tr -d '\r' > "$OUTPUT_DIR/activity-smoke.txt"
 fi
 
 printf 'id\tstatus\tevidence\tnotes\n' > "$OUTPUT_DIR/manual-results.tsv"
-for id in XM-01 XM-02 XM-03 XM-04 XM-05 XM-06 XM-07 XM-08 XM-09 XM-10 XM-11 XM-12 XM-13 XM-14; do
+for id in \
+  XM-P0-01 XM-P0-02 XM-P0-03 XM-P0-04 XM-P0-05 XM-P0-06 XM-P0-07 \
+  XM-P0-08 XM-P0-09 XM-P0-10 XM-P0-11 XM-P0-12 XM-P0-13 XM-P0-14 \
+  XM-P0-15 XM-P0-16 XM-P0-17 XM-P0-18 XM-P0-19; do
   printf '%s\tPENDING\t\t\n' "$id" >> "$OUTPUT_DIR/manual-results.tsv"
 done
 
@@ -192,9 +203,10 @@ done
     "" \
     "This bundle intentionally excludes logcat, screenshots, transcripts, clipboard contents," \
     "accounts, and data from other apps. Complete manual-results.tsv using the scenarios in" \
-    "docs/2026-08-09-android-ime-v1-upgrade-spec.md. Use only dedicated test text." \
-    "Record 20 utterances per speech route in a copy of android/tools/latency-template.csv," \
-    "then run android/tools/summarize-latency.py on that copy."
+    "docs/2026-08-11-xiaomi15-p0-acceptance.md. Use only dedicated test text." \
+    "Run the checked-in benchmarks/mobile_voice corpus and Voice Lab. Record 20 short" \
+    "utterances per shipping route in a copy of android/tools/latency-template.csv, then run" \
+    "android/tools/summarize-latency.py on that copy."
 } > "$OUTPUT_DIR/README.txt"
 
 (

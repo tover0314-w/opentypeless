@@ -188,7 +188,8 @@ npm run tauri build
 
 Android 0.3 is the installable Voice Core milestone, not yet the promised full Rime keyboard. The
 [Android IME 1.0 upgrade specification](docs/2026-08-09-android-ime-v1-upgrade-spec.md) defines the
-Fcitx5 Android + Rime integration and Xiaomi 15 release gate; this repository does not describe
+Fcitx5 Android + Rime integration. The current Voice Core physical gate is the
+[Xiaomi 15 P0 acceptance matrix](docs/2026-08-11-xiaomi15-p0-acceptance.md); this repository does not describe
 that milestone as complete before its physical-device evidence exists. Android on-device recognition is not available on
 every device or for every language, and the project does not yet publish a cross-device CER/WER,
 latency, battery, or blind Typeless benchmark. The repository therefore claims verifiable product

@@ -26,6 +26,9 @@ integration and Xiaomi 15 physical acceptance.
 
 Run the checks documented in `README.md` and
 [`docs/2026-08-09-android-0.3-review-acceptance.md`](docs/2026-08-09-android-0.3-review-acceptance.md).
+Use
+[`docs/2026-08-11-xiaomi15-p0-acceptance.md`](docs/2026-08-11-xiaomi15-p0-acceptance.md)
+as the current physical Voice Core release authority.
 Do not distribute the unsigned Android release APK. A public binary release additionally requires:
 
 - a maintainer-controlled Android release keystore and reproducible signing configuration;

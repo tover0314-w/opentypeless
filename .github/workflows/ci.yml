@@ -29,6 +29,18 @@ jobs:
         working-directory: android
         run: |
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
+          python3 -m unittest discover -s ../benchmarks/mobile_voice -p 'test_*.py' -v
+          python3 -m py_compile ../benchmarks/mobile_voice/*.py
+          bash -n tools/collect-xiaomi15-acceptance.sh
+          set +e
+          tools/collect-xiaomi15-acceptance.sh \
+            --output /tmp/opentypeless-collector-must-not-run \
+            >/tmp/opentypeless-collector-policy.txt 2>&1
+          collector_status=$?
+          set -e
+          test "$collector_status" -eq 2
+          test ! -e /tmp/opentypeless-collector-must-not-run
+          grep -q 'exact --serial is required' /tmp/opentypeless-collector-policy.txt
           python3 scripts/build_sherpa_asr_runtime.py \
             --verify-aar app/libs/sherpa-onnx-asr-1.13.4.aar
           ./gradlew testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
