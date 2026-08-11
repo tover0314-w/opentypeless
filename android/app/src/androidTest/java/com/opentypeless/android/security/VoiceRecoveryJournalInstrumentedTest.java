@@ -18,6 +18,7 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @RunWith(AndroidJUnit4.class)
 public final class VoiceRecoveryJournalInstrumentedTest {
@@ -69,5 +70,20 @@ public final class VoiceRecoveryJournalInstrumentedTest {
         assertFalse(recreated.discard("another_session_0001"));
         assertTrue(recreated.discard(ID));
         assertFalse(recreated.hasPending());
+    }
+
+    @Test
+    public void androidKeystoreCheckpointIsRemovedWhenDiscardWinsTheWriteRace() {
+        AtomicInteger acceptanceChecks = new AtomicInteger();
+        VoiceRecoveryJournal journal = new VoiceRecoveryJournal(context);
+
+        boolean saved = journal.saveAudioIfAccepted(
+                ID, "LOCAL_OFFLINE", "zh", "", "sensevoice-small-int8",
+                100L, 450L, false, false, new byte[] {1, 2, 3, 4},
+                () -> acceptanceChecks.incrementAndGet() == 1);
+
+        assertFalse(saved);
+        assertEquals(2, acceptanceChecks.get());
+        assertFalse(journal.hasPending());
     }
 }

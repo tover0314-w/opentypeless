@@ -83,6 +83,7 @@ public final class VoicePipeline {
         final AtomicLong transcriptSequence = new AtomicLong();
         final String recoveryId;
         volatile boolean cancelled;
+        volatile boolean discardRecoveryRequested;
         volatile boolean recoveryJournalWritten;
         volatile Future<?> task;
 
@@ -217,7 +218,7 @@ public final class VoicePipeline {
             // local engines. Protect it before any network/model work so process death cannot
             // silently erase an utterance that the user already finished.
             try {
-                recoveryJournal.saveAudio(
+                run.recoveryJournalWritten = recoveryJournal.saveAudioIfAccepted(
                         run.recoveryId,
                         backend.name(),
                         run.request.settings().language(),
@@ -231,8 +232,8 @@ public final class VoicePipeline {
                         audio.durationMs(),
                         audio.reachedLimit(),
                         audio.autoStopped(),
-                        audio.wav());
-                run.recoveryJournalWritten = true;
+                        audio.wav(),
+                        () -> !run.discardRecoveryRequested);
             } catch (RuntimeException ignored) {
                 // Disk-full/Keystore failure must not throw away audio that is still available in
                 // this process. Continue the current transcription; only crash recovery is lost.
@@ -830,7 +831,10 @@ public final class VoicePipeline {
         synchronized (lifecycleLock) {
             run = active.getAndSet(null);
             generation.incrementAndGet();
-            if (run != null) run.cancelled = true;
+            if (run != null) {
+                run.cancelled = true;
+                if (discardRecovery) run.discardRecoveryRequested = true;
+            }
             state.set(State.IDLE);
         }
         if (run != null) {

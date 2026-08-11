@@ -302,7 +302,7 @@ public final class VoiceLabActivity extends Activity {
             return;
         }
         if (!microphoneReady) {
-            pipeline.cancel();
+            pipeline.discard();
             recognitionActive = false;
             activeAttempt = ++attemptGeneration;
             statusView.setText(R.string.voice_lab_released_before_ready);
@@ -563,7 +563,10 @@ public final class VoiceLabActivity extends Activity {
 
     @Override
     protected void onStop() {
-        if (recognitionActive) pipeline.cancel();
+        // Voice Lab takes are disposable diagnostics, not user drafts. Leaving the screen is an
+        // explicit end to the test and must not leave a captured checkpoint that blocks the IME or
+        // a later quick check. Ordinary IME lifecycle stops continue to preserve user speech.
+        if (recognitionActive) pipeline.discard();
         performanceProbe.finish();
         recognitionActive = false;
         holding = false;

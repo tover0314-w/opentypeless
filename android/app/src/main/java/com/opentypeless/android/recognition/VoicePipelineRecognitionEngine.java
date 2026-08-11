@@ -267,7 +267,10 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
             toCancel = preparation;
             preparation = null;
             activeCallback = null;
-            pipeline.cancel();
+            // RecognitionService/RecognizerIntent cancellation is an explicit caller discard,
+            // unlike lifecycle shutdown or a backend failure. It must not strand this take in the
+            // global recovery journal and block the next standard recognition request.
+            pipeline.discard();
             pipeline.setRecordingContext(baseContext);
         }
         if (toCancel != null) toCancel.cancel(true);

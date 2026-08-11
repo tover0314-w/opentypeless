@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.KeyStore;
 import java.util.Arrays;
+import java.util.function.BooleanSupplier;
 
 import javax.crypto.Cipher;
 import javax.crypto.CipherInputStream;
@@ -124,7 +125,7 @@ public final class VoiceRecoveryJournal {
         }
     }
 
-    public void saveAudio(
+    public boolean saveAudio(
             String id,
             String backend,
             String language,
@@ -135,6 +136,29 @@ public final class VoiceRecoveryJournal {
             boolean reachedLimit,
             boolean autoStopped,
             byte[] wav) {
+        return saveAudioIfAccepted(
+                id, backend, language, endpoint, model, createdAtMillis, durationMs,
+                reachedLimit, autoStopped, wav, () -> true);
+    }
+
+    /**
+     * Atomically refuses or removes a checkpoint when an explicit discard races the disk write.
+     * The predicate is checked both before and after the authenticated atomic replacement while
+     * holding the same process lock used by {@link #discard(String)}.
+     */
+    public boolean saveAudioIfAccepted(
+            String id,
+            String backend,
+            String language,
+            String endpoint,
+            String model,
+            long createdAtMillis,
+            long durationMs,
+            boolean reachedLimit,
+            boolean autoStopped,
+            byte[] wav,
+            BooleanSupplier accepted) {
+        if (accepted == null) throw new IllegalArgumentException("Recovery acceptance is required");
         byte[] safeAudio = wav == null ? new byte[0] : wav;
         if (safeAudio.length == 0 || safeAudio.length > MAX_AUDIO_BYTES) {
             throw new IllegalArgumentException("Recoverable audio has an invalid size");
@@ -144,10 +168,19 @@ public final class VoiceRecoveryJournal {
                 createdAtMillis, durationMs,
                 reachedLimit, autoStopped, safeAudio, "");
         synchronized (PROCESS_LOCK) {
+            if (!accepted.getAsBoolean()) return false;
             if (pending.exists()) {
                 throw new IllegalStateException("A recoverable recording is already waiting");
             }
             writeAtomically(entry);
+            if (!accepted.getAsBoolean()) {
+                if (!deletePending()) {
+                    throw new IllegalStateException(
+                            "Unable to remove a discarded voice recovery checkpoint");
+                }
+                return false;
+            }
+            return true;
         }
     }
 

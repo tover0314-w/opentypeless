@@ -13,6 +13,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.crypto.spec.SecretKeySpec;
 
@@ -86,6 +87,21 @@ public final class VoiceRecoveryJournalTest {
 
         assertThrows(IllegalStateException.class, journal::read);
         assertTrue(journal.discard(FIRST_ID));
+        assertFalse(journal.hasPending());
+    }
+
+    @Test
+    public void explicitDiscardThatRacesTheWriteCannotLeaveALateCheckpoint() {
+        VoiceRecoveryJournal journal = journal();
+        AtomicInteger acceptanceChecks = new AtomicInteger();
+
+        boolean saved = journal.saveAudioIfAccepted(
+                FIRST_ID, "LOCAL_OFFLINE", "zh", "", "sensevoice-small-int8",
+                1L, 500L, false, false, new byte[] {1, 2, 3, 4},
+                () -> acceptanceChecks.incrementAndGet() == 1);
+
+        assertFalse(saved);
+        assertEquals(2, acceptanceChecks.get());
         assertFalse(journal.hasPending());
     }
 

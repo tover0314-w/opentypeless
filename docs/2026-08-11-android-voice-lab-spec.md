@@ -178,6 +178,10 @@ stages rather than being simulated by this screen.
 - finished OpenAI-compatible and local-offline captures are written to a bounded, AES-GCM,
   no-backup recovery journal before network/model processing; the journal atomically becomes final
   text before result delivery and is deleted only after an editor commit or encrypted draft save;
+- explicit user/caller cancellation is linearized against that journal write: if discard wins while
+  capture is returning, the same critical section removes the just-written checkpoint. Voice Lab
+  test takes and standard Android recognition cancels therefore cannot strand private audio or
+  block the next recognition session;
 - recovery never writes into a stale editor. It opens as a regular recoverable draft and keeps the
   original encrypted backend/language/model routing metadata; a mismatched network endpoint is
   rejected rather than silently uploading elsewhere;
