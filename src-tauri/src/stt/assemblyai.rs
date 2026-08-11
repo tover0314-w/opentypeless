@@ -286,7 +286,7 @@ impl SttProvider for AssemblyAiProvider {
 
         if let Some(mut ws) = self.ws.take() {
             let terminate = serde_json::json!({"type": "Terminate"});
-            let _ = ws.send(Message::Text(terminate.to_string().into())).await;
+            let _ = ws.send(Message::Text(terminate.to_string())).await;
             let final_text = read_until_termination(&mut ws).await?;
             let _ = ws.close(None).await;
             self.pending.clear();
