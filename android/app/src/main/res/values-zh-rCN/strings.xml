@@ -207,6 +207,7 @@
     <string name="voice_lab_engine_dashscope">已配置的百炼流式模型</string>
     <string name="voice_lab_engine_sensevoice">SenseVoice Small INT8 · 仅最终结果的质量档</string>
     <string name="voice_lab_engine_system_on_device">Android 管理的设备端识别器 · Android 不公开确切组件</string>
+    <string name="voice_lab_engine_system_checking">Android 系统语音服务 · 正在后台识别…</string>
     <string name="voice_lab_engine_system_unknown">Android 系统语音服务 · 无法识别具体服务</string>
     <string name="voice_lab_status_active">进行中</string>
     <string name="voice_lab_status_succeeded">成功</string>

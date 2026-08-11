@@ -56,6 +56,7 @@ public final class VoiceLabActivity extends Activity {
     private VoiceLabPerformanceProbe performanceProbe;
     private AppSettings settings;
     private RecognitionRoute route;
+    private SystemRecognitionDiagnostics.Snapshot systemDiagnostics;
     private TextView statusView;
     private TextView routeView;
     private TextView promptView;
@@ -207,6 +208,16 @@ public final class VoiceLabActivity extends Activity {
                     route = RecognitionRoute.direct(loaded.recognitionBackend());
                     renderIdle();
                 });
+                if (loaded.recognitionBackend() == RecognitionBackend.SYSTEM_DEFAULT) {
+                    SystemRecognitionDiagnostics.Snapshot inspected =
+                            SystemRecognitionDiagnostics.inspect(getApplicationContext());
+                    if (destroyed) return;
+                    runOnUiThread(() -> {
+                        if (destroyed || settings != loaded) return;
+                        systemDiagnostics = inspected;
+                        renderRoute();
+                    });
+                }
             } catch (RuntimeException error) {
                 if (destroyed) return;
                 runOnUiThread(() -> {
@@ -600,8 +611,10 @@ public final class VoiceLabActivity extends Activity {
             case LOCAL_OFFLINE -> getString(R.string.voice_lab_engine_sensevoice);
             case SYSTEM_ON_DEVICE -> getString(R.string.voice_lab_engine_system_on_device);
             case SYSTEM_DEFAULT -> {
-                SystemRecognitionDiagnostics.Snapshot system =
-                        SystemRecognitionDiagnostics.inspect(this);
+                SystemRecognitionDiagnostics.Snapshot system = systemDiagnostics;
+                if (system == null) {
+                    yield getString(R.string.voice_lab_engine_system_checking);
+                }
                 String identified = (system.serviceLabel() + " " + system.versionName()).trim();
                 yield safeIdentity(
                         identified,

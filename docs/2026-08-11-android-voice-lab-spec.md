@@ -105,7 +105,9 @@ On Android 12+ devices, a fresh installation selects the privacy-preserving plat
 route without synchronously probing an OEM speech service on the IME/UI startup path. The settings
 screen then diagnoses real availability in the background and requires the user to choose another
 route if the device does not provide it. Older devices default to the platform speech route. The
-processing-mode label `Automatic` does not identify either route.
+processing-mode label `Automatic` does not identify either route. Voice Lab also resolves the OEM
+system-service identity in the background; its route card never performs provider discovery on the
+recording/UI hot path or folds that work into microphone-latency measurements.
 
 The OpenTypeless offline quality tier is SenseVoice Small INT8, downloaded on demand rather than
 bundled. The current fixed model is 228.45 MiB. The API 36 arm64 emulator gate observed about

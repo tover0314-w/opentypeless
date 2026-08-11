@@ -234,6 +234,7 @@
     <string name="voice_lab_engine_dashscope">configured DashScope streaming model</string>
     <string name="voice_lab_engine_sensevoice">SenseVoice Small INT8 · final-only quality tier</string>
     <string name="voice_lab_engine_system_on_device">Android-managed on-device recognizer · exact component hidden by Android</string>
+    <string name="voice_lab_engine_system_checking">Android system recognition service · identifying in background…</string>
     <string name="voice_lab_engine_system_unknown">Android system recognition service · identity unavailable</string>
     <string name="voice_lab_status_active">active</string>
     <string name="voice_lab_status_succeeded">succeeded</string>
