@@ -18,8 +18,8 @@ public final class EditorProjectionTest {
 
         assertEquals(
                 ProjectionOutcome.APPLIED,
-                projection.project(ProjectionDocument.shortDraft("hel")).outcome());
-        assertEquals("note:hel!", connection.text());
+                projection.project(ProjectionDocument.shortDraft("hell")).outcome());
+        assertEquals("note:hell!", connection.text());
         assertEquals(
                 ProjectionOutcome.APPLIED,
                 projection.project(ProjectionDocument.shortDraft("hello")).outcome());
