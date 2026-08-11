@@ -37,6 +37,10 @@ android {
     namespace = "com.opentypeless.android"
     compileSdk = 35
 
+    buildFeatures {
+        aidl = true
+    }
+
     defaultConfig {
         applicationId = "com.opentypeless.android"
         minSdk = 26

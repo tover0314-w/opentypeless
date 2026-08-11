@@ -31,6 +31,19 @@ public final class VoiceCompositionSessionTest {
     }
 
     @Test
+    public void blankRevisionNeverErasesTheLastVisiblePartial() {
+        FakeConnection fake = new FakeConnection();
+        VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 4, 4);
+
+        assertEquals(VoiceCompositionSession.ApplyResult.APPLIED, session.apply(partial(1, "你好")));
+        assertEquals(VoiceCompositionSession.ApplyResult.UNCHANGED, session.apply(partial(2, "   ")));
+        assertEquals("你好", session.composingText());
+        assertEquals(List.of("你好"), fake.composingTexts);
+        assertEquals(VoiceCompositionSession.ApplyResult.APPLIED,
+                session.apply(partial(3, "你好，世界")));
+    }
+
+    @Test
     public void acceptsOwnedSelectionCallbacksButRejectsUserCursorMovement() {
         FakeConnection fake = new FakeConnection();
         VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 10, 10);
@@ -58,6 +71,18 @@ public final class VoiceCompositionSessionTest {
         assertTrue(second.cancel());
         assertEquals(List.of("partial", ""), cancelled.composingTexts);
         assertEquals(1, cancelled.finishCalls);
+    }
+
+    @Test
+    public void lifecycleStopFinalizesCompositionInsteadOfDeletingIt() {
+        FakeConnection fake = new FakeConnection();
+        VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 0, 0);
+        session.apply(partial(1, "保留这段文字"));
+
+        assertTrue(session.preserve());
+        assertEquals(List.of("保留这段文字"), fake.composingTexts);
+        assertEquals(1, fake.finishCalls);
+        assertFalse(session.ownsComposition());
     }
 
     @Test

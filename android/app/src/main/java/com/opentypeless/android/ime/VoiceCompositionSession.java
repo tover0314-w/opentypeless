@@ -25,6 +25,7 @@ final class VoiceCompositionSession {
 
     private long latestSequence;
     private String composingText = "";
+    private boolean liveUpdatesEnabled = true;
 
     VoiceCompositionSession(
             InputConnection connection,
@@ -36,7 +37,8 @@ final class VoiceCompositionSession {
     }
 
     boolean enabled() {
-        return connection != null
+        return liveUpdatesEnabled
+                && connection != null
                 && originalSelectionStart >= 0
                 && originalSelectionStart == originalSelectionEnd;
     }
@@ -53,6 +55,10 @@ final class VoiceCompositionSession {
         if (!enabled() || update.finalResult()) return ApplyResult.DISABLED;
         if (update.sequence() <= latestSequence) return ApplyResult.STALE;
         String replacement = update.text();
+        if (replacement.isBlank()) {
+            latestSequence = update.sequence();
+            return ApplyResult.UNCHANGED;
+        }
         if (replacement.equals(composingText)) {
             latestSequence = update.sequence();
             return ApplyResult.UNCHANGED;
@@ -107,6 +113,29 @@ final class VoiceCompositionSession {
         return true;
     }
 
+    /**
+     * Stops treating the current composing range as provisional without deleting it. This is used
+     * when an editor/window goes away for reasons other than an explicit user discard.
+     */
+    boolean preserve() {
+        if (!ownsComposition()) {
+            discardState();
+            return true;
+        }
+        boolean preserved;
+        try {
+            preserved = connection.finishComposingText();
+        } catch (RuntimeException ignored) {
+            preserved = false;
+        }
+        discardState();
+        return preserved;
+    }
+
+    void disableLiveUpdates() {
+        liveUpdatesEnabled = false;
+    }
+
     /** Removes only this session's composing range. It never deletes surrounding committed text. */
     boolean cancel() {
         if (!ownsComposition()) {
@@ -133,6 +162,7 @@ final class VoiceCompositionSession {
     void discardState() {
         composingText = "";
         expectedSelectionEnds.clear();
+        liveUpdatesEnabled = false;
     }
 
     private void rememberExpectedSelection(int selectionEnd) {

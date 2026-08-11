@@ -10,6 +10,7 @@ public final class AdaptiveVad {
     private static final long MIN_THRESHOLD = 550L;
     private final long bytesPerSecond;
     private final long speechConfirmationBytes;
+    private final long manualEndpointConfirmationBytes;
     private final long onsetGapToleranceBytes;
     private final long endSilenceBytes;
     private final long noSpeechTimeoutBytes;
@@ -18,6 +19,9 @@ public final class AdaptiveVad {
     private long candidateGapBytes;
     private long candidateSpeechStart = -1L;
     private long candidateLastVoiceEnd = -1L;
+    private long endpointVoiceBytes;
+    private long endpointSpeechStart = -1L;
+    private long endpointLastVoiceEnd = -1L;
     private long speechStartByte = -1L;
     private long lastVoiceEndByte = -1L;
     private long silenceBytes;
@@ -26,6 +30,7 @@ public final class AdaptiveVad {
         if (sampleRate <= 0) throw new IllegalArgumentException("Sample rate must be positive");
         bytesPerSecond = sampleRate * 2L;
         speechConfirmationBytes = bytesForMs(300);
+        manualEndpointConfirmationBytes = bytesForMs(120);
         onsetGapToleranceBytes = bytesForMs(180);
         endSilenceBytes = bytesForMs(2_000);
         noSpeechTimeoutBytes = bytesForMs(15_000);
@@ -39,6 +44,11 @@ public final class AdaptiveVad {
 
         if (speechStartByte < 0) {
             if (voice) {
+                if (endpointSpeechStart < 0L) {
+                    endpointSpeechStart = Math.max(0L, capturedBytes - length);
+                }
+                endpointVoiceBytes += length;
+                endpointLastVoiceEnd = capturedBytes;
                 if (candidateSpeechStart < 0L) {
                     candidateSpeechStart = Math.max(0L, capturedBytes - length);
                 }
@@ -85,6 +95,23 @@ public final class AdaptiveVad {
 
     public boolean heardSpeech() {
         return speechStartByte >= 0L;
+    }
+
+    /**
+     * Accepts weaker speech evidence only when the user explicitly ends a hold-to-talk style
+     * capture. Automatic endpointing still requires the full 300 ms confirmation above, so a
+     * short cough or click cannot open ordinary single-utterance recording.
+     */
+    boolean confirmAtManualEndpoint() {
+        if (heardSpeech()) return true;
+        if (endpointSpeechStart < 0L
+                || endpointLastVoiceEnd < 0L
+                || endpointVoiceBytes < manualEndpointConfirmationBytes) {
+            return false;
+        }
+        speechStartByte = endpointSpeechStart;
+        lastVoiceEndByte = endpointLastVoiceEnd;
+        return true;
     }
 
     public int recommendedStart(int totalBytes) {

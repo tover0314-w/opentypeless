@@ -1,6 +1,7 @@
 package com.opentypeless.android;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -16,6 +17,7 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.opentypeless.android.ime.OpenTypelessImeService;
+import com.opentypeless.android.offline.LocalOfflineRecognitionService;
 import com.opentypeless.android.recognition.OpenTypelessRecognitionService;
 import com.opentypeless.android.recognition.OpenTypelessRecognizerActivity;
 
@@ -43,6 +45,17 @@ public final class ManifestContractTest {
                 manager,
                 new ComponentName(context, OpenTypelessRecognizerActivity.class));
         assertNotNull(recognizer);
+
+        ActivityInfo voiceLab = getActivityInfo(
+                manager,
+                new ComponentName(context, VoiceLabActivity.class));
+        assertFalse(voiceLab.exported);
+
+        ServiceInfo localOffline = getServiceInfo(
+                manager,
+                new ComponentName(context, LocalOfflineRecognitionService.class));
+        assertFalse(localOffline.exported);
+        assertEquals(context.getPackageName() + ":local_asr", localOffline.processName);
     }
 
     @SuppressWarnings("deprecation")

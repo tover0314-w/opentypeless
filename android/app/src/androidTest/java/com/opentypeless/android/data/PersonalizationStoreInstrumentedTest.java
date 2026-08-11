@@ -56,21 +56,24 @@ public final class PersonalizationStoreInstrumentedTest {
     public void historyIsEncryptedAtRestAndDecryptsForTheUser() {
         String raw = "private raw transcript 123";
         String result = "Private raw transcript 123.";
+        String applied = "open type less → OpenTypeless";
         store.addHistory(new HistoryEntry(
                 0, System.currentTimeMillis(), "com.example", "LONG_TEXT", "SMART",
-                "OPENAI_COMPATIBLE", raw, result, 1_250));
+                "OPENAI_COMPATIBLE", raw, result, 1_250, applied));
 
         try (Cursor cursor = store.getReadableDatabase().query(
                 "dictation_history",
-                new String[]{"raw_text", "final_text"},
+                new String[]{"raw_text", "final_text", "applied_rules"},
                 null, null, null, null, null)) {
             assertTrue(cursor.moveToFirst());
             assertFalse(cursor.getString(0).contains(raw));
             assertFalse(cursor.getString(1).contains(result));
+            assertFalse(cursor.getString(2).contains(applied));
         }
         HistoryEntry decoded = store.listHistory(1).get(0);
         assertEquals(raw, decoded.rawText());
         assertEquals(result, decoded.finalText());
+        assertEquals(applied, decoded.appliedRules());
     }
 
     @Test
@@ -112,6 +115,62 @@ public final class PersonalizationStoreInstrumentedTest {
             assertTrue(cursor.getString(0).startsWith("opentypeless-encrypted-history:v1:"));
         }
         assertStorageDoesNotContain("legacy raw", "legacy final");
+    }
+
+    @Test
+    public void legacyPlaintextPersonalizationMigratesAndSanitizesWal() throws Exception {
+        long termId = store.addTerm("Secret Project", "see kret", "秘密项目", "com.secret.app");
+        long correctionId = store.addCorrection("old secret", "new secret", "com.secret.app");
+
+        ContentValues term = new ContentValues();
+        term.put("canonical", "Secret Project");
+        term.put("canonical_key", PersonalizationStore.identity("Secret Project"));
+        term.put("pronunciation", "see kret");
+        term.put("aliases", "秘密项目");
+        term.put("app_scope", "com.secret.app");
+        term.put("app_scope_key", PersonalizationStore.identity("com.secret.app"));
+        store.getWritableDatabase().update(
+                "personal_terms", term, "id = ?", new String[]{Long.toString(termId)});
+
+        ContentValues correction = new ContentValues();
+        correction.put("pattern", "old secret");
+        correction.put("replacement", "new secret");
+        correction.put("app_scope", "com.secret.app");
+        correction.put("app_scope_key", "com.secret.app");
+        correction.put("identity_key", PersonalizationStore.correctionIdentity(
+                "old secret", "new secret", "com.secret.app"));
+        store.getWritableDatabase().update(
+                "correction_rules",
+                correction,
+                "id = ?",
+                new String[]{Long.toString(correctionId)});
+        assertTrue(context.getSharedPreferences(
+                        PersonalizationStore.PRIVACY_MIGRATIONS,
+                        Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PersonalizationStore.PERSONALIZATION_STORAGE_SANITIZED, false)
+                .commit());
+        store.close();
+        assertTrue(storageContains("Secret Project"));
+
+        store = new PersonalizationStore(context);
+        assertEquals("Secret Project", store.listTerms().get(0).canonical());
+        assertEquals("old secret", store.listCorrections().get(0).pattern());
+        try (Cursor cursor = store.getReadableDatabase().query(
+                "personal_terms",
+                new String[]{"canonical", "canonical_key", "app_scope_key"},
+                "id = ?",
+                new String[]{Long.toString(termId)},
+                null, null, null)) {
+            assertTrue(cursor.moveToFirst());
+            assertTrue(cursor.getString(0).startsWith(
+                    "opentypeless-encrypted-personalization:v1:"));
+            assertTrue(cursor.getString(1).startsWith("h1:"));
+            assertTrue(cursor.getString(2).startsWith("h1:"));
+        }
+        assertStorageDoesNotContain(
+                "Secret Project", "see kret", "秘密项目", "com.secret.app",
+                "old secret", "new secret");
     }
 
     @Test
@@ -162,6 +221,39 @@ public final class PersonalizationStoreInstrumentedTest {
         assertEquals("two", store.listHistory(1, 1).get(0).rawText());
     }
 
+    @Test
+    public void searchFindsUnicodeTermsAliasesCorrectionsAndScopesWithoutWildcardInjection() {
+        long termId = store.addTerm(
+                "ＯｐｅｎＴｙｐｅｌｅｓｓ", "open type less", "开放无类型", "com.chat.app");
+        store.addTerm("Literal%_percent", "", "", "com.notes.app");
+        long correctionId = store.addCorrection("雪昭", "学昭", "com.chat.app");
+
+        assertEquals("ＯｐｅｎＴｙｐｅｌｅｓｓ", store.searchTerms("opentypeless", 10, 0).get(0).canonical());
+        assertEquals("ＯｐｅｎＴｙｐｅｌｅｓｓ", store.searchTerms("开放", 10, 0).get(0).canonical());
+        assertEquals("ＯｐｅｎＴｙｐｅｌｅｓｓ", store.searchTerms("chat.app", 10, 0).get(0).canonical());
+        assertEquals("雪昭", store.searchCorrections("学昭", 10, 0).get(0).pattern());
+        assertEquals(1, store.searchTerms("%", 10, 0).size());
+        assertEquals("Literal%_percent", store.searchTerms("_", 10, 0).get(0).canonical());
+        assertEquals(
+                java.util.List.of("ＯｐｅｎＴｙｐｅｌｅｓｓ", "雪昭 → 学昭"),
+                store.describeMatches(
+                        java.util.List.of(termId, termId, -1L),
+                        java.util.List.of(correctionId)));
+        try (Cursor cursor = store.getReadableDatabase().query(
+                "personal_terms",
+                new String[]{"canonical", "pronunciation", "aliases", "app_scope",
+                        "canonical_key", "app_scope_key"},
+                "id = ?", new String[]{Long.toString(termId)}, null, null, null)) {
+            assertTrue(cursor.moveToFirst());
+            for (int index = 0; index < 4; index++) {
+                assertTrue(cursor.getString(index).startsWith(
+                        "opentypeless-encrypted-personalization:v1:"));
+            }
+            assertTrue(cursor.getString(4).startsWith("h1:"));
+            assertTrue(cursor.getString(5).startsWith("h1:"));
+        }
+    }
+
     private void assertStorageDoesNotContain(String... plaintexts) throws IOException {
         File database = context.getDatabasePath(DATABASE);
         File wal = new File(database.getPath() + "-wal");
@@ -174,6 +266,16 @@ public final class PersonalizationStoreInstrumentedTest {
                         contains(bytes, plaintext.getBytes(StandardCharsets.UTF_8)));
             }
         }
+    }
+
+    private boolean storageContains(String plaintext) throws IOException {
+        File database = context.getDatabasePath(DATABASE);
+        File wal = new File(database.getPath() + "-wal");
+        byte[] needle = plaintext.getBytes(StandardCharsets.UTF_8);
+        for (File file : new File[]{database, wal}) {
+            if (file.exists() && contains(Files.readAllBytes(file.toPath()), needle)) return true;
+        }
+        return false;
     }
 
     private static boolean contains(byte[] haystack, byte[] needle) {

@@ -88,13 +88,16 @@ public final class HistoryActivity extends Activity {
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
+        AppVisualSystem.stylePage(this, root);
         scroll.addView(root);
 
         root.addView(title(R.string.history_title));
         root.addView(note(R.string.history_intro));
+        LinearLayout managementCard = card();
         historyDisabledNote = warning(R.string.history_disabled_note);
-        root.addView(historyDisabledNote);
-        root.addView(button(R.string.clear_history, ignored -> confirmClearHistory()));
+        managementCard.addView(historyDisabledNote);
+        managementCard.addView(button(R.string.clear_history, ignored -> confirmClearHistory()));
+        root.addView(managementCard);
         historyList = verticalLayout();
         historyList.setPadding(0, dp(12), 0, 0);
         root.addView(historyList, matchWrap());
@@ -199,21 +202,26 @@ public final class HistoryActivity extends Activity {
 
         card.addView(transcriptBlock(R.string.raw_transcript_label, limited(entry.rawText(), 800)));
         card.addView(transcriptBlock(R.string.final_transcript_label, limited(entry.finalText(), 800)));
-        LinearLayout actions = horizontalLayout();
+        if (!entry.appliedRules().isBlank()) {
+            card.addView(transcriptBlock(
+                    R.string.applied_personal_rules_label,
+                    limited(entry.appliedRules(), 800)));
+        }
+        LinearLayout actions = AppVisualSystem.actionGroup(this);
         Button view = button(R.string.view_full_history_entry, ignored -> showFullEntry(entry));
         view.setContentDescription(
                 getString(R.string.view_full_history_entry) + ": " + limited(entry.rawText(), 60));
-        actions.addView(view, weighted());
+        actions.addView(view, AppVisualSystem.actionParams(this));
         Button save = button(R.string.save_correction, ignored -> showCorrectionDialog(entry));
         save.setContentDescription(
                 getString(R.string.save_correction) + ": " + limited(entry.rawText(), 60));
-        actions.addView(save, weighted());
+        actions.addView(save, AppVisualSystem.actionParams(this));
         Button delete = button(
                 R.string.delete_history_entry,
                 ignored -> confirmDeleteHistory(entry));
         delete.setContentDescription(
                 getString(R.string.delete_history_entry) + ": " + limited(entry.rawText(), 60));
-        actions.addView(delete, weighted());
+        actions.addView(delete, AppVisualSystem.actionParams(this));
         card.addView(actions, matchWrap());
         return card;
     }
@@ -224,6 +232,11 @@ public final class HistoryActivity extends Activity {
         content.setPadding(padding, padding, padding, padding);
         content.addView(transcriptBlock(R.string.raw_transcript_label, entry.rawText()));
         content.addView(transcriptBlock(R.string.final_transcript_label, entry.finalText()));
+        if (!entry.appliedRules().isBlank()) {
+            content.addView(transcriptBlock(
+                    R.string.applied_personal_rules_label,
+                    entry.appliedRules()));
+        }
         ScrollView scroll = new ScrollView(this);
         scroll.addView(content);
         new AlertDialog.Builder(this)
@@ -399,36 +412,21 @@ public final class HistoryActivity extends Activity {
     }
 
     private LinearLayout card() {
-        LinearLayout card = verticalLayout();
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackgroundColor(getColor(R.color.ime_surface_container));
-        LinearLayout.LayoutParams parameters = matchWrap();
-        parameters.setMargins(0, dp(4), 0, dp(8));
-        card.setLayoutParams(parameters);
+        LinearLayout card = AppVisualSystem.card(this);
+        card.setLayoutParams(AppVisualSystem.cardParams(this));
         return card;
     }
 
     private Button button(int labelResource, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(labelResource);
-        button.setAllCaps(false);
-        button.setMinHeight(dp(48));
-        button.setContentDescription(getString(labelResource));
-        button.setOnClickListener(listener);
-        return button;
+        return AppVisualSystem.secondaryButton(this, labelResource, listener);
     }
 
     private TextView title(int resource) {
-        TextView title = text(getString(resource), 26, true);
-        heading(title);
-        return title;
+        return AppVisualSystem.title(this, getString(resource));
     }
 
     private TextView note(int resource) {
-        TextView note = text(getString(resource), 14, false);
-        note.setTextColor(getColor(R.color.ime_on_surface_variant));
-        note.setPadding(0, dp(8), 0, dp(12));
-        return note;
+        return AppVisualSystem.note(this, getString(resource));
     }
 
     private TextView warning(int resource) {

@@ -84,15 +84,30 @@ public final class SystemSpeechRecognizer {
             AppSettings settings,
             PersonalizationSnapshot snapshot,
             Callback callback) {
+        start(
+                settings,
+                snapshot,
+                callback,
+                RecognitionTimeoutPolicy.milliseconds(settings.maxRecordingSeconds()));
+    }
+
+    public void start(
+            AppSettings settings,
+            PersonalizationSnapshot snapshot,
+            Callback callback,
+            long timeoutMillis) {
         long run = generation.next();
-        mainHandler.post(() -> startOnMain(run, settings, snapshot, callback));
+        long boundedTimeoutMillis = Math.max(1L, timeoutMillis);
+        mainHandler.post(() -> startOnMain(
+                run, settings, snapshot, callback, boundedTimeoutMillis));
     }
 
     private void startOnMain(
             long run,
             AppSettings settings,
             PersonalizationSnapshot snapshot,
-            Callback callback) {
+            Callback callback,
+            long timeoutMillis) {
         if (!generation.isCurrent(run)) return;
         destroyRecognizer();
         if (!generation.isCurrent(run)) return;
@@ -124,7 +139,7 @@ public final class SystemSpeechRecognizer {
             android.content.Intent intent = SystemRecognitionIntentFactory.create(settings, snapshot);
             recordingWatchdog.arm(
                     run,
-                    RecognitionTimeoutPolicy.milliseconds(settings.maxRecordingSeconds()),
+                    timeoutMillis,
                     () -> stopForTimeout(run, callback));
             recognizer.startListening(intent);
         } catch (RuntimeException error) {

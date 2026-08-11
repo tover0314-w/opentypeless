@@ -18,6 +18,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.opentypeless.android.R;
+import com.opentypeless.android.AppVisualSystem;
 import com.opentypeless.android.SystemBarInsets;
 
 /** Activity implementation for {@link RecognizerIntent#ACTION_RECOGNIZE_SPEECH}. */
@@ -229,7 +230,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER_HORIZONTAL);
         root.setPadding(dp(24), dp(24), dp(24), dp(20));
-        root.setBackgroundColor(getColor(R.color.ime_surface));
+        AppVisualSystem.stylePage(this, root);
 
         status = new TextView(this);
         status.setText(R.string.recognition_status_preparing);
@@ -245,15 +246,13 @@ public final class OpenTypelessRecognizerActivity extends Activity {
         partial.setPadding(0, dp(20), 0, dp(20));
         root.addView(partial, matchWidthWrap());
 
-        LinearLayout buttons = new LinearLayout(this);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
-        buttons.setGravity(Gravity.CENTER);
+        LinearLayout buttons = AppVisualSystem.actionGroup(this);
         stop = button(R.string.recognition_action_stop, ignored -> stopRecognition());
         stop.setEnabled(false);
-        buttons.addView(stop, buttonLayoutParams());
+        buttons.addView(stop, AppVisualSystem.actionParams(this));
         buttons.addView(
                 button(R.string.cancel, ignored -> cancelAndFinish()),
-                buttonLayoutParams());
+                AppVisualSystem.actionParams(this));
         root.addView(buttons, matchWidthWrap());
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -263,21 +262,7 @@ public final class OpenTypelessRecognizerActivity extends Activity {
     }
 
     private Button button(int textResource, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(textResource);
-        button.setAllCaps(false);
-        button.setMinimumHeight(dp(48));
-        button.setOnClickListener(listener);
-        return button;
-    }
-
-    private LinearLayout.LayoutParams buttonLayoutParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMarginStart(dp(8));
-        params.setMarginEnd(dp(8));
-        return params;
+        return AppVisualSystem.secondaryButton(this, textResource, listener);
     }
 
     private LinearLayout.LayoutParams matchWidthWrap() {

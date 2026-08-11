@@ -67,6 +67,58 @@ public final class AdaptiveVadTest {
     }
 
     @Test
+    public void explicitManualEndpointAcceptsAThreeFrameShortUtterance() {
+        AdaptiveVad vad = new AdaptiveVad(16_000);
+        byte[] voice = pcm(640, 4_000); // 40 ms, matching the streaming capture frame.
+        long bytes = 0L;
+
+        for (int index = 0; index < 3; index++) {
+            bytes += voice.length;
+            assertEquals(AdaptiveVad.Decision.CONTINUE, vad.accept(voice, voice.length, bytes));
+        }
+
+        assertTrue("120 ms must remain below automatic confirmation", !vad.heardSpeech());
+        assertTrue("An explicit hold release supplies the missing endpoint intent",
+                vad.confirmAtManualEndpoint());
+        assertTrue(vad.heardSpeech());
+    }
+
+    @Test
+    public void manualEndpointAccumulatesThreeShortSyllablesAcrossOnsetGaps() {
+        AdaptiveVad vad = new AdaptiveVad(16_000);
+        byte[] syllable = pcm(640, 4_000); // 40 ms voiced evidence.
+        byte[] gap = pcm(640, 20);
+        long bytes = 0L;
+
+        for (int syllableIndex = 0; syllableIndex < 3; syllableIndex++) {
+            bytes += syllable.length;
+            vad.accept(syllable, syllable.length, bytes);
+            if (syllableIndex == 2) continue;
+            for (int gapIndex = 0; gapIndex < 5; gapIndex++) { // 200 ms resets the onset candidate.
+                bytes += gap.length;
+                vad.accept(gap, gap.length, bytes);
+            }
+        }
+
+        assertTrue(!vad.heardSpeech());
+        assertTrue(vad.confirmAtManualEndpoint());
+    }
+
+    @Test
+    public void manualEndpointStillRejectsSilenceAndASingleTransientFrame() {
+        AdaptiveVad silenceVad = new AdaptiveVad(16_000);
+        byte[] silence = pcm(640, 20);
+        silenceVad.accept(silence, silence.length, silence.length);
+        assertTrue(!silenceVad.confirmAtManualEndpoint());
+
+        AdaptiveVad transientVad = new AdaptiveVad(16_000);
+        byte[] transientFrame = pcm(640, 8_000);
+        transientVad.accept(transientFrame, transientFrame.length, transientFrame.length);
+        assertTrue("A 40 ms transient must remain below the manual endpoint floor",
+                !transientVad.confirmAtManualEndpoint());
+    }
+
+    @Test
     public void naturalPauseDoesNotEndDictationAndFollowingSpeechResetsSilence() {
         AdaptiveVad vad = new AdaptiveVad(16_000);
         byte[] voice = pcm(1_600, 4_000); // 100 ms

@@ -25,4 +25,10 @@ public final class RecordingSessionTest {
         assertTrue(session.isCancelled());
         assertEquals(RecordingSession.EndState.CANCELLED, session.endState());
     }
+
+    @Test
+    public void userControlledEndpointingIsExplicitAndDefaultsOff() {
+        assertFalse(new RecordingSession().userControlledEndpointing());
+        assertTrue(new RecordingSession(true).userControlledEndpointing());
+    }
 }

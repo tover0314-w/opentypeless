@@ -30,7 +30,9 @@ public final class AudioRecorder {
     static final int MAX_CONSECUTIVE_EMPTY_READS = 50;
     private static final long EMPTY_READ_BACKOFF_NANOS = 2_000_000L;
     private static final int INITIAL_PCM_CAPACITY = 64 * 1_024;
-    private static final int STREAM_FRAME_BYTES = SAMPLE_RATE * 2 * 40 / 1_000;
+    private static final int CAPTURE_FRAME_BYTES = SAMPLE_RATE * 2 * 40 / 1_000;
+    private static final int MINIMUM_AUDIO_BYTES = SAMPLE_RATE * 2 * 250 / 1_000;
+    private static final int MINIMUM_MANUAL_AUDIO_BYTES = SAMPLE_RATE * 2 * 120 / 1_000;
 
     private volatile AudioRecord activeRecord;
     private volatile RecordingSession activeSession;
@@ -57,10 +59,10 @@ public final class AudioRecorder {
                 session,
                 safeSeconds,
                 listener,
-                Integer.MAX_VALUE,
+                CAPTURE_FRAME_BYTES,
                 pcm::append);
         int trimmedLength = outcome.trimEnd() - outcome.trimStart();
-        if (trimmedLength < SAMPLE_RATE / 2) {
+        if (!hasMinimumAudio(trimmedLength, outcome.manualEndpoint())) {
             throw new IllegalStateException("Recording was too short");
         }
         long durationMs = (trimmedLength * 1_000L) / (SAMPLE_RATE * 2L);
@@ -84,10 +86,10 @@ public final class AudioRecorder {
                 session,
                 safeSeconds,
                 listener,
-                STREAM_FRAME_BYTES,
+                CAPTURE_FRAME_BYTES,
                 consumer);
         int speechBytes = outcome.trimEnd() - outcome.trimStart();
-        if (speechBytes < SAMPLE_RATE / 2) {
+        if (!hasMinimumAudio(speechBytes, outcome.manualEndpoint())) {
             throw new IllegalStateException("Recording was too short");
         }
         return new StreamingAudioResult(
@@ -164,14 +166,14 @@ public final class AudioRecorder {
                         buffer,
                         0,
                         Math.min(buffer.length, maximumBytes - capturedBytes));
-                if (read > 0) {
+                if (shouldConsumeRead(read, session.endState())) {
                     consecutiveEmptyReads = 0;
                     consumer.onPcm16Frame(buffer, 0, read);
                     listener.onAudio(buffer, read);
                     capturedBytes += read;
                     AdaptiveVad.Decision decision = vad.accept(buffer, read, capturedBytes);
                     captureEvents.speechDetected(vad.heardSpeech());
-                    if (decision == AdaptiveVad.Decision.END_OF_SPEECH) {
+                    if (shouldAutoStop(decision, session.userControlledEndpointing())) {
                         autoStopped = true;
                         session.stop();
                     } else if (decision == AdaptiveVad.Decision.NO_SPEECH_TIMEOUT) {
@@ -199,7 +201,12 @@ public final class AudioRecorder {
             activeRecord = null;
             activeSession = null;
         }
-        if (noSpeechTimeout || !vad.heardSpeech()) {
+        boolean manualEndpoint = !noSpeechTimeout
+                && session.userControlledEndpointing()
+                && session.endState() == RecordingSession.EndState.STOPPED;
+        boolean heardSpeech = vad.heardSpeech()
+                || (manualEndpoint && vad.confirmAtManualEndpoint());
+        if (noSpeechTimeout || !heardSpeech) {
             throw new IllegalStateException("No speech was detected");
         }
         return new CaptureOutcome(
@@ -207,7 +214,8 @@ public final class AudioRecorder {
                 vad.recommendedStart(capturedBytes),
                 vad.recommendedEnd(capturedBytes, autoStopped),
                 reachedLimit,
-                autoStopped);
+                autoStopped,
+                manualEndpoint);
     }
 
     private record CaptureOutcome(
@@ -215,16 +223,23 @@ public final class AudioRecorder {
             int trimStart,
             int trimEnd,
             boolean reachedLimit,
-            boolean autoStopped) {}
+            boolean autoStopped,
+            boolean manualEndpoint) {}
 
     public void stop(RecordingSession session) {
-        if (session != null) session.stop();
-        stopActiveRecord();
+        if (session == null) {
+            stopActiveRecord();
+            return;
+        }
+        session.stop();
+        // Keep an already-blocking read alive so it can deliver the final microphone frame. The
+        // loop sees STOPPED after processing that frame and exits without starting another read.
+        if (shouldInterruptActiveRead(session.endState())) stopActiveRecord();
     }
 
     public void cancel(RecordingSession session) {
         if (session != null) session.cancel();
-        stopActiveRecord();
+        if (session == null || shouldInterruptActiveRead(session.endState())) stopActiveRecord();
     }
 
     private void stopActiveRecord() {
@@ -252,6 +267,28 @@ public final class AudioRecorder {
             throw new IllegalStateException("Microphone repeatedly returned no audio");
         }
         return next;
+    }
+
+    static boolean shouldConsumeRead(int read, RecordingSession.EndState endState) {
+        // A positive read that started before a normal stop owns real tail audio and must be kept.
+        return read > 0 && endState != RecordingSession.EndState.CANCELLED;
+    }
+
+    static boolean shouldInterruptActiveRead(RecordingSession.EndState endState) {
+        return endState == RecordingSession.EndState.CANCELLED;
+    }
+
+    static boolean hasMinimumAudio(int audioBytes, boolean manualEndpoint) {
+        return audioBytes >= (manualEndpoint
+                ? MINIMUM_MANUAL_AUDIO_BYTES
+                : MINIMUM_AUDIO_BYTES);
+    }
+
+    static boolean shouldAutoStop(
+            AdaptiveVad.Decision decision,
+            boolean userControlledEndpointing) {
+        return decision == AdaptiveVad.Decision.END_OF_SPEECH
+                && !userControlledEndpointing;
     }
 
     @SuppressLint("MissingPermission")

@@ -15,6 +15,6 @@ public record InputContext(
     }
 
     public boolean hasSelection() {
-        return !selectedText.trim().isEmpty();
+        return !selectedText.isEmpty();
     }
 }

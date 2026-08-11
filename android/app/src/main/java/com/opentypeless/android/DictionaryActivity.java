@@ -6,7 +6,11 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -43,6 +47,8 @@ public final class DictionaryActivity extends Activity {
     private static final String STATE_CORRECTION_PATTERN = "correction_pattern";
     private static final String STATE_CORRECTION_REPLACEMENT = "correction_replacement";
     private static final String STATE_CORRECTION_SCOPE = "correction_scope";
+    private static final String STATE_SEARCH = "dictionary_search";
+    private static final long SEARCH_DEBOUNCE_MILLIS = 250L;
 
     private PersonalizationStore store;
     private EditText termCanonical;
@@ -52,6 +58,7 @@ public final class DictionaryActivity extends Activity {
     private EditText correctionPattern;
     private EditText correctionReplacement;
     private EditText correctionScope;
+    private EditText searchField;
     private LinearLayout termList;
     private LinearLayout correctionList;
     private int termOffset;
@@ -60,6 +67,9 @@ public final class DictionaryActivity extends Activity {
     private boolean termPageLoading;
     private boolean correctionPageLoading;
     private ExecutorService io;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable searchRefresh = this::refreshLists;
+    private String currentSearchQuery = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,34 +90,58 @@ public final class DictionaryActivity extends Activity {
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
+        AppVisualSystem.stylePage(this, root);
         scroll.addView(root);
 
         root.addView(title(R.string.dictionary_title));
         root.addView(note(R.string.dictionary_intro));
 
-        root.addView(section(R.string.section_add_term));
-        termCanonical = field(root, R.string.term_canonical_label, false);
-        termPronunciation = field(root, R.string.term_pronunciation_label, false);
-        termAliases = field(root, R.string.term_aliases_label, true);
-        termScope = field(root, R.string.app_scope_label, false);
-        root.addView(button(R.string.add_term, ignored -> addTerm()));
+        LinearLayout termEditor = card();
+        termEditor.addView(section(R.string.section_add_term));
+        termCanonical = field(termEditor, R.string.term_canonical_label, false);
+        termPronunciation = field(termEditor, R.string.term_pronunciation_label, false);
+        termAliases = field(termEditor, R.string.term_aliases_label, true);
+        termScope = field(termEditor, R.string.app_scope_label, false);
+        termEditor.addView(button(R.string.add_term, ignored -> addTerm()));
+        root.addView(termEditor);
 
-        root.addView(section(R.string.section_add_correction));
-        correctionPattern = field(root, R.string.wrong_phrase_label, true);
-        correctionReplacement = field(root, R.string.correct_phrase_label, true);
-        correctionScope = field(root, R.string.app_scope_label, false);
-        root.addView(button(R.string.add_correction, ignored -> addCorrection()));
+        LinearLayout correctionEditor = card();
+        correctionEditor.addView(section(R.string.section_add_correction));
+        correctionPattern = field(correctionEditor, R.string.wrong_phrase_label, true);
+        correctionReplacement = field(correctionEditor, R.string.correct_phrase_label, true);
+        correctionScope = field(correctionEditor, R.string.app_scope_label, false);
+        correctionEditor.addView(button(R.string.add_correction, ignored -> addCorrection()));
+        root.addView(correctionEditor);
 
-        root.addView(section(R.string.section_backup));
-        LinearLayout backupActions = horizontalLayout();
+        LinearLayout backupCard = card();
+        backupCard.addView(section(R.string.section_backup));
+        LinearLayout backupActions = AppVisualSystem.actionGroup(this);
         backupActions.addView(
                 button(R.string.import_personalization, ignored -> chooseImport()),
-                weighted());
+                AppVisualSystem.actionParams(this));
         backupActions.addView(
                 button(R.string.export_personalization, ignored -> chooseExport()),
-                weighted());
-        root.addView(backupActions, matchWrap());
-        root.addView(note(R.string.backup_privacy_note));
+                AppVisualSystem.actionParams(this));
+        backupCard.addView(backupActions, matchWrap());
+        backupCard.addView(note(R.string.backup_privacy_note));
+        root.addView(backupCard);
+
+        searchField = new EditText(this);
+        searchField.setHint(R.string.search_personalization_hint);
+        searchField.setContentDescription(getString(R.string.search_personalization_hint));
+        searchField.setSingleLine(true);
+        searchField.setMinHeight(dp(48));
+        searchField.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        searchField.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable value) {
+                mainHandler.removeCallbacks(searchRefresh);
+                mainHandler.postDelayed(searchRefresh, SEARCH_DEBOUNCE_MILLIS);
+            }
+        });
+        root.addView(searchField, matchWrap());
 
         root.addView(section(R.string.section_terms));
         termList = verticalLayout();
@@ -160,6 +194,7 @@ public final class DictionaryActivity extends Activity {
     }
 
     private void refreshLists() {
+        currentSearchQuery = searchField == null ? "" : value(searchField);
         listGeneration++;
         termOffset = 0;
         correctionOffset = 0;
@@ -179,7 +214,8 @@ public final class DictionaryActivity extends Activity {
         int requestedOffset = termOffset;
         io.execute(() -> {
             try {
-                List<PersonalTerm> terms = store.listTerms(PAGE_SIZE, requestedOffset);
+                List<PersonalTerm> terms = store.searchTerms(
+                        currentSearchQuery, PAGE_SIZE, requestedOffset);
                 postUi(() -> renderTermPage(generation, firstPage, requestedOffset, terms));
             } catch (RuntimeException error) {
                 postUi(() -> {
@@ -220,8 +256,8 @@ public final class DictionaryActivity extends Activity {
         int requestedOffset = correctionOffset;
         io.execute(() -> {
             try {
-                List<CorrectionRule> corrections =
-                        store.listCorrections(PAGE_SIZE, requestedOffset);
+                List<CorrectionRule> corrections = store.searchCorrections(
+                        currentSearchQuery, PAGE_SIZE, requestedOffset);
                 postUi(() -> renderCorrectionPage(
                         generation,
                         firstPage,
@@ -582,12 +618,8 @@ public final class DictionaryActivity extends Activity {
     }
 
     private LinearLayout card() {
-        LinearLayout card = verticalLayout();
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setBackgroundColor(getColor(R.color.ime_surface_container));
-        LinearLayout.LayoutParams parameters = matchWrap();
-        parameters.setMargins(0, dp(4), 0, dp(8));
-        card.setLayoutParams(parameters);
+        LinearLayout card = AppVisualSystem.card(this);
+        card.setLayoutParams(AppVisualSystem.cardParams(this));
         return card;
     }
 
@@ -600,33 +632,19 @@ public final class DictionaryActivity extends Activity {
     }
 
     private Button button(int labelResource, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(labelResource);
-        button.setAllCaps(false);
-        button.setMinHeight(dp(48));
-        button.setContentDescription(getString(labelResource));
-        button.setOnClickListener(listener);
-        return button;
+        return AppVisualSystem.secondaryButton(this, labelResource, listener);
     }
 
     private TextView title(int resource) {
-        TextView title = text(getString(resource), 26, true);
-        heading(title);
-        return title;
+        return AppVisualSystem.title(this, getString(resource));
     }
 
     private TextView section(int resource) {
-        TextView section = text(getString(resource), 19, true);
-        section.setPadding(0, dp(18), 0, dp(4));
-        heading(section);
-        return section;
+        return AppVisualSystem.section(this, getString(resource));
     }
 
     private TextView note(int resource) {
-        TextView note = text(getString(resource), 14, false);
-        note.setTextColor(getColor(R.color.ime_on_surface_variant));
-        note.setPadding(0, dp(8), 0, dp(12));
-        return note;
+        return AppVisualSystem.note(this, getString(resource));
     }
 
     private TextView empty(int resource) {
@@ -707,6 +725,7 @@ public final class DictionaryActivity extends Activity {
         correctionPattern.setText(state.getString(STATE_CORRECTION_PATTERN, ""));
         correctionReplacement.setText(state.getString(STATE_CORRECTION_REPLACEMENT, ""));
         correctionScope.setText(state.getString(STATE_CORRECTION_SCOPE, ""));
+        searchField.setText(state.getString(STATE_SEARCH, ""));
     }
 
     @Override
@@ -718,6 +737,7 @@ public final class DictionaryActivity extends Activity {
         state.putString(STATE_CORRECTION_PATTERN, correctionPattern.getText().toString());
         state.putString(STATE_CORRECTION_REPLACEMENT, correctionReplacement.getText().toString());
         state.putString(STATE_CORRECTION_SCOPE, correctionScope.getText().toString());
+        state.putString(STATE_SEARCH, searchField.getText().toString());
         super.onSaveInstanceState(state);
     }
 
@@ -731,6 +751,7 @@ public final class DictionaryActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacks(searchRefresh);
         listGeneration++;
         if (io != null) {
             io.execute(store::close);

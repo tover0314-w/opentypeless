@@ -83,4 +83,35 @@ public final class AudioRecorderTest {
 
         assertEquals(List.of("ready", "begin"), events);
     }
+
+    @Test
+    public void userControlledDictationDoesNotEndAtATwoSecondThinkingPause() {
+        assertTrue(AudioRecorder.shouldAutoStop(
+                AdaptiveVad.Decision.END_OF_SPEECH, false));
+        org.junit.Assert.assertFalse(AudioRecorder.shouldAutoStop(
+                AdaptiveVad.Decision.END_OF_SPEECH, true));
+        org.junit.Assert.assertFalse(AudioRecorder.shouldAutoStop(
+                AdaptiveVad.Decision.CONTINUE, false));
+    }
+
+    @Test
+    public void normalStopPreservesAnInFlightTailReadWhileCancelInterruptsIt() {
+        assertTrue(AudioRecorder.shouldConsumeRead(
+                1_280, RecordingSession.EndState.STOPPED));
+        org.junit.Assert.assertFalse(AudioRecorder.shouldConsumeRead(
+                1_280, RecordingSession.EndState.CANCELLED));
+        org.junit.Assert.assertFalse(AudioRecorder.shouldInterruptActiveRead(
+                RecordingSession.EndState.STOPPED));
+        assertTrue(AudioRecorder.shouldInterruptActiveRead(
+                RecordingSession.EndState.CANCELLED));
+    }
+
+    @Test
+    public void manualEndpointAllowsShortAudioWithoutWeakeningAutomaticCapture() {
+        int oneHundredTwentyMs = AudioRecorder.SAMPLE_RATE * 2 * 120 / 1_000;
+        org.junit.Assert.assertFalse(AudioRecorder.hasMinimumAudio(oneHundredTwentyMs, false));
+        assertTrue(AudioRecorder.hasMinimumAudio(oneHundredTwentyMs, true));
+        org.junit.Assert.assertFalse(AudioRecorder.hasMinimumAudio(
+                oneHundredTwentyMs - 2, true));
+    }
 }

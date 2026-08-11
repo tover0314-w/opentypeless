@@ -4,7 +4,6 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
-import android.speech.SpeechRecognizer;
 
 import com.opentypeless.android.security.SecurePreferences;
 
@@ -262,18 +261,17 @@ public final class SettingsRepository {
     }
 
     private RecognitionBackend defaultBackend() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                    && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
-                return RecognitionBackend.SYSTEM_ON_DEVICE;
-            }
-            if (SpeechRecognizer.isRecognitionAvailable(context)) {
-                return RecognitionBackend.SYSTEM_DEFAULT;
-            }
-        } catch (RuntimeException ignored) {
-            // Some vendor implementations throw before the speech service has finished booting.
-        }
-        return RecognitionBackend.OPENAI_COMPATIBLE;
+        // Settings are loaded on latency-sensitive paths, including IME startup. Android/OEM
+        // speech-service discovery can block for seconds while a vendor service is cold. Pick a
+        // deterministic privacy-first default here and inspect real availability asynchronously in
+        // the settings screen and at recognition start.
+        return defaultBackendForSdk(Build.VERSION.SDK_INT);
+    }
+
+    static RecognitionBackend defaultBackendForSdk(int sdkInt) {
+        return sdkInt >= Build.VERSION_CODES.S
+                ? RecognitionBackend.SYSTEM_ON_DEVICE
+                : RecognitionBackend.SYSTEM_DEFAULT;
     }
 
     private static AppSettings normalize(AppSettings settings) {

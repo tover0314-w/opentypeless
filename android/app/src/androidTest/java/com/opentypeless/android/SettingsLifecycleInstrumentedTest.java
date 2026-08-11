@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 import android.content.Intent;
 import android.widget.CheckBox;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Spinner;
 
@@ -67,6 +68,7 @@ public final class SettingsLifecycleInstrumentedTest {
     public void mainRotationKeepsEveryUnsavedValueIncludingSecretsAndAllowlist() {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             scenario.onActivity(activity -> {
+                field(activity, "recognitionAdvancedToggle", Button.class).performClick();
                 spinner(activity, "recognitionBackend").setSelection(0);
                 spinner(activity, "defaultMode").setSelection(3);
                 set(activity, "language", " zh-CN ");
@@ -81,6 +83,7 @@ public final class SettingsLifecycleInstrumentedTest {
                 checked(activity, "standardSpeechEnabled", true);
                 set(activity, "standardSpeechCallers", "com.example.one\ncom.example.two");
                 checked(activity, "polishEnabled", true);
+                field(activity, "processingAdvancedToggle", Button.class).performClick();
                 set(activity, "llmBaseUrl", "https://draft-llm.example/v1/");
                 set(activity, "llmApiKey", "llm-unsaved-secret");
                 set(activity, "llmModel", "draft-text-model");

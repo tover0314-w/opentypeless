@@ -3,17 +3,22 @@ package com.opentypeless.android.ime;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.os.SystemClock;
 import android.speech.SpeechRecognizer;
 
 import com.opentypeless.android.audio.AudioRecorder;
 import com.opentypeless.android.audio.RecordedAudio;
 import com.opentypeless.android.audio.RecordingSession;
+import com.opentypeless.android.context.FieldKind;
 import com.opentypeless.android.context.InputContext;
 import com.opentypeless.android.context.InputPolicy;
 import com.opentypeless.android.data.PersonalizationSnapshot;
+import com.opentypeless.android.diagnostics.RecognitionDiagnostics;
+import com.opentypeless.android.diagnostics.RecognitionDiagnosticsStore;
+import com.opentypeless.android.diagnostics.RecognitionRoute;
 import com.opentypeless.android.net.OpenAiCompatibleClient;
+import com.opentypeless.android.offline.LocalOfflineRecognitionClient;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
-import com.opentypeless.android.offline.LocalRealtimePreview;
 import com.opentypeless.android.offline.SafePunctuationRestorer;
 import com.opentypeless.android.net.streaming.ParaformerStreamingRecognizer;
 import com.opentypeless.android.net.streaming.StreamingRecognitionEngine;
@@ -23,6 +28,7 @@ import com.opentypeless.android.personalization.PromptComposer;
 import com.opentypeless.android.personalization.VoiceCommandProcessor;
 import com.opentypeless.android.recognition.SystemSpeechRecognizer;
 import com.opentypeless.android.recognition.ProviderCapabilities;
+import com.opentypeless.android.security.VoiceRecoveryJournal;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.RecognitionBackend;
@@ -33,15 +39,21 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
 public final class VoicePipeline {
+    private static final int MAX_TRANSCRIPT_CODE_POINTS = 20_000;
+
     public enum State { IDLE, RECORDING, TRANSCRIBING, POLISHING }
     enum AiCandidateDisposition { ACCEPT, PRESERVE_SELECTION, INSERT_EXACT_TRANSCRIPT }
 
     public interface Listener {
         void onState(State state, String message);
+        default void onRoute(RecognitionRoute route) {}
         default void onReadyForSpeech() {}
         default void onBeginningOfSpeech() {}
         default void onTranscript(TranscriptUpdate update) {
@@ -61,10 +73,17 @@ public final class VoicePipeline {
         volatile RecordingSession recordingSession;
         volatile RecognitionBackend actualBackend;
         volatile boolean systemFallbackAttempted;
+        volatile boolean stopRequested;
+        volatile String latestTranscript = "";
+        volatile String completedSystemTranscript = "";
+        final AtomicBoolean visiblePartialClaimed = new AtomicBoolean();
+        final RecognitionDiagnostics diagnostics;
         final Listener listener;
         final long startedAt;
         final AtomicLong transcriptSequence = new AtomicLong();
+        final String recoveryId;
         volatile boolean cancelled;
+        volatile boolean recoveryJournalWritten;
         volatile Future<?> task;
 
         ActiveRun(
@@ -72,14 +91,32 @@ public final class VoicePipeline {
                 DictationRequest request,
                 ProcessingMode mode,
                 RecordingSession recordingSession,
-                Listener listener) {
+                Listener listener,
+                String recoveryId) {
             this.id = id;
             this.request = request;
             this.mode = mode;
             this.recordingSession = recordingSession;
             this.actualBackend = request.settings().recognitionBackend();
+            this.diagnostics = RecognitionDiagnostics.start(
+                    this.actualBackend,
+                    request.settings().language(),
+                    System.currentTimeMillis(),
+                    SystemClock.elapsedRealtime());
             this.listener = listener;
             this.startedAt = System.currentTimeMillis();
+            this.recoveryId = recoveryId == null || recoveryId.isBlank()
+                    ? UUID.randomUUID().toString().replace("-", "")
+                    : recoveryId;
+        }
+
+        ActiveRun(
+                long id,
+                DictationRequest request,
+                ProcessingMode mode,
+                RecordingSession recordingSession,
+                Listener listener) {
+            this(id, request, mode, recordingSession, listener, "");
         }
     }
 
@@ -87,17 +124,24 @@ public final class VoicePipeline {
     private final AtomicReference<State> state = new AtomicReference<>(State.IDLE);
     private final AtomicReference<ActiveRun> active = new AtomicReference<>();
     private final AtomicLong generation = new AtomicLong();
+    private final Object lifecycleLock = new Object();
     private final AudioRecorder recorder = new AudioRecorder();
     private final OpenAiCompatibleClient client = new OpenAiCompatibleClient();
+    private final LocalOfflineRecognitionClient localOfflineClient;
     private final ParaformerStreamingRecognizer streamingRecognizer =
             new ParaformerStreamingRecognizer();
     private final SystemSpeechRecognizer systemRecognizer;
     private final Context applicationContext;
+    private final RecognitionDiagnosticsStore diagnosticsStore;
+    private final VoiceRecoveryJournal recoveryJournal;
 
     public VoicePipeline(Context context) {
         applicationContext = context.getApplicationContext();
         recorder.setAttributionContext(context);
         systemRecognizer = new SystemSpeechRecognizer(context);
+        localOfflineClient = new LocalOfflineRecognitionClient(context);
+        diagnosticsStore = new RecognitionDiagnosticsStore(context);
+        recoveryJournal = new VoiceRecoveryJournal(context);
     }
 
     /** Must be called while idle, before starting an externally attributed recording. */
@@ -114,86 +158,113 @@ public final class VoicePipeline {
         RecordingSession recordingSession = backend == RecognitionBackend.OPENAI_COMPATIBLE
                 || backend == RecognitionBackend.LOCAL_OFFLINE
                 || backend == RecognitionBackend.DASHSCOPE_STREAMING
-                ? new RecordingSession()
+                ? new RecordingSession(request.captureMode().userControlledEndpointing())
                 : null;
-        ActiveRun run = new ActiveRun(
-                generation.incrementAndGet(), request, mode, recordingSession, listener);
-        if (!active.compareAndSet(null, run)) return false;
-        state.set(State.RECORDING);
-        listener.onState(State.RECORDING, routeLabel(run) + " · listening…");
-
-        if (backend == RecognitionBackend.OPENAI_COMPATIBLE
-                || backend == RecognitionBackend.LOCAL_OFFLINE) {
-            run.task = executor.submit(() -> executeCaptured(run));
-        } else if (backend == RecognitionBackend.DASHSCOPE_STREAMING) {
-            run.task = executor.submit(() -> executeStreaming(run));
-        } else {
-            startSystem(run);
+        ActiveRun run;
+        boolean dispatched;
+        synchronized (lifecycleLock) {
+            if (active.get() != null) return false;
+            if ((backend == RecognitionBackend.OPENAI_COMPATIBLE
+                    || backend == RecognitionBackend.LOCAL_OFFLINE)
+                    && recoveryJournal.hasPending()) {
+                return false;
+            }
+            run = new ActiveRun(
+                    generation.incrementAndGet(), request, mode, recordingSession, listener);
+            active.set(run);
+            state.set(State.RECORDING);
+            try {
+                if (backend == RecognitionBackend.OPENAI_COMPATIBLE
+                        || backend == RecognitionBackend.LOCAL_OFFLINE) {
+                    run.task = executor.submit(() -> executeCaptured(run));
+                } else if (backend == RecognitionBackend.DASHSCOPE_STREAMING) {
+                    run.task = executor.submit(() -> executeStreaming(run));
+                } else {
+                    startSystem(run);
+                }
+                dispatched = true;
+            } catch (RejectedExecutionException error) {
+                active.compareAndSet(run, null);
+                state.set(State.IDLE);
+                dispatched = false;
+            }
         }
+        if (!dispatched) return false;
+        persistDiagnostics(run);
+        listener.onRoute(run.diagnostics.snapshot().route());
+        listener.onState(State.RECORDING, routeLabel(run) + " · listening…");
         return true;
     }
 
     private void executeCaptured(ActiveRun run) {
-        LocalOfflineRecognizer.Session offlineSession = null;
-        LocalRealtimePreview preview = null;
         try {
             RecognitionBackend backend = run.actualBackend;
-            if (backend == RecognitionBackend.LOCAL_OFFLINE) {
-                offlineSession = LocalOfflineRecognizer.openSession(
-                        applicationContext,
-                        run.request.settings().language());
-                LocalOfflineRecognizer.Session sessionForPreview = offlineSession;
-                preview = new LocalRealtimePreview(
-                        sessionForPreview,
-                        text -> {
-                            if (isCurrent(run)) {
-                                run.listener.onTranscript(TranscriptUpdate.unstable(
-                                        run.transcriptSequence.incrementAndGet(),
-                                        text,
-                                        TranscriptUpdate.Source.LOCAL_OFFLINE));
-                            }
-                        });
-            }
-            LocalRealtimePreview activePreview = preview;
             RecordedAudio audio = recorder.record(
                     run.recordingSession,
                     run.request.settings().boundedMaxRecordingSeconds(),
                     new AudioRecorder.CaptureListener() {
                         @Override
                         public void onReady() {
-                            if (isCurrent(run)) run.listener.onReadyForSpeech();
+                            notifyReadyForSpeech(run);
                         }
 
                         @Override
                         public void onBeginningOfSpeech() {
                             if (isCurrent(run)) run.listener.onBeginningOfSpeech();
                         }
-
-                        @Override
-                        public void onAudio(byte[] pcm16, int length) {
-                            if (activePreview != null && isCurrent(run)) {
-                                activePreview.accept(pcm16, length);
-                            }
-                        }
                     });
-            if (!isCurrent(run)) return;
-            if (preview != null) preview.close();
-            state.set(State.TRANSCRIBING);
-            run.listener.onState(State.TRANSCRIBING, routeLabel(run) + " · transcribing…");
+            // The captured waveform is the only complete representation available to batch and
+            // local engines. Protect it before any network/model work so process death cannot
+            // silently erase an utterance that the user already finished.
+            try {
+                recoveryJournal.saveAudio(
+                        run.recoveryId,
+                        backend.name(),
+                        run.request.settings().language(),
+                        backend == RecognitionBackend.OPENAI_COMPATIBLE
+                                ? run.request.settings().sttBaseUrl().trim()
+                                : "",
+                        backend == RecognitionBackend.OPENAI_COMPATIBLE
+                                ? run.request.settings().sttModel().trim()
+                                : "sensevoice-small-int8",
+                        run.startedAt,
+                        audio.durationMs(),
+                        audio.reachedLimit(),
+                        audio.autoStopped(),
+                        audio.wav());
+                run.recoveryJournalWritten = true;
+            } catch (RuntimeException ignored) {
+                // Disk-full/Keystore failure must not throw away audio that is still available in
+                // this process. Continue the current transcription; only crash recovery is lost.
+                if (isCurrent(run)) run.listener.onState(
+                        State.TRANSCRIBING,
+                        "Protected recovery unavailable · continuing current transcription…");
+            }
+            if (!transitionStateIfCurrent(
+                    run,
+                    State.TRANSCRIBING,
+                    routeLabel(run) + " · transcribing…")) {
+                return;
+            }
             String raw;
             if (backend == RecognitionBackend.LOCAL_OFFLINE) {
-                String punctuated = offlineSession.transcribeWithPunctuation(audio.wav());
-                String conservative = offlineSession.transcribe(audio.wav());
+                LocalOfflineRecognitionClient.Result local = localOfflineClient.recognize(
+                        audio.wav(),
+                        run.request.settings().language());
                 raw = SafePunctuationRestorer.choose(
-                        conservative,
-                        punctuated,
+                        local.exactText(),
+                        local.punctuatedText(),
                         run.request.inputContext().fieldKind());
             } else {
                 ProviderCapabilities capabilities = ProviderCapabilities.forBackend(backend);
                 String prompt = capabilities.asrPrompt()
                         ? PromptComposer.asrPrompt(run.request.personalization())
                         : "";
-                raw = client.transcribe(audio.wav(), run.request.settings(), prompt);
+                raw = client.transcribe(
+                        audio.wav(),
+                        run.request.settings(),
+                        prompt,
+                        () -> !isCurrent(run));
             }
             finishTranscription(
                     run,
@@ -204,10 +275,7 @@ public final class VoicePipeline {
         } catch (CancellationException ignored) {
             finishCancelled(run);
         } catch (Exception error) {
-            finishError(run, error);
-        } finally {
-            if (preview != null) preview.close();
-            if (offlineSession != null) offlineSession.close();
+            if (!recoverVisiblePartial(run, true)) finishError(run, error);
         }
     }
 
@@ -220,7 +288,7 @@ public final class VoicePipeline {
                     new AudioRecorder.CaptureListener() {
                         @Override
                         public void onReady() {
-                            if (isCurrent(run)) run.listener.onReadyForSpeech();
+                            notifyReadyForSpeech(run);
                         }
 
                         @Override
@@ -231,17 +299,15 @@ public final class VoicePipeline {
                     new StreamingRecognitionEngine.Listener() {
                         @Override
                         public void onFinishing() {
-                            if (!isCurrent(run)) return;
-                            state.set(State.TRANSCRIBING);
-                            run.listener.onState(
+                            transitionStateIfCurrent(
+                                    run,
                                     State.TRANSCRIBING,
                                     "Paraformer realtime · finalizing punctuation…");
                         }
 
                         @Override
                         public void onTranscript(String stableText, String unstableText) {
-                            if (!isCurrent(run)) return;
-                            run.listener.onTranscript(new TranscriptUpdate(
+                            publishTranscript(run, new TranscriptUpdate(
                                     run.transcriptSequence.incrementAndGet(),
                                     stableText,
                                     unstableText,
@@ -258,21 +324,26 @@ public final class VoicePipeline {
         } catch (CancellationException ignored) {
             finishCancelled(run);
         } catch (Exception error) {
-            finishError(run, error);
+            if (!recoverVisiblePartial(run, true)) finishError(run, error);
         }
     }
 
     private void startSystem(ActiveRun run) {
-        systemRecognizer.start(
-                run.request.settings(),
-                run.request.personalization(),
-                new SystemSpeechRecognizer.Callback() {
+        synchronized (lifecycleLock) {
+            if (!isCurrent(run) || run.stopRequested) return;
+            long deadlineMillis = run.startedAt
+                    + run.request.settings().boundedMaxRecordingSeconds() * 1_000L;
+            long remainingMillis = Math.max(1L, deadlineMillis - System.currentTimeMillis());
+            systemRecognizer.start(
+                    run.request.settings(),
+                    run.request.personalization(),
+                    new SystemSpeechRecognizer.Callback() {
                     @Override
                     public void onReady() {
                         if (isCurrent(run)) {
                             run.listener.onState(State.RECORDING,
                                     routeLabel(run) + " · listening…");
-                            run.listener.onReadyForSpeech();
+                            notifyReadyForSpeech(run);
                         }
                     }
 
@@ -283,34 +354,80 @@ public final class VoicePipeline {
 
                     @Override
                     public void onPartial(String text) {
-                        if (isCurrent(run)) {
-                            run.listener.onTranscript(TranscriptUpdate.unstable(
-                                    run.transcriptSequence.incrementAndGet(),
-                                    text,
-                                    TranscriptUpdate.Source.ANDROID_SYSTEM));
-                        }
+                        publishTranscript(run, TranscriptUpdate.unstable(
+                                run.transcriptSequence.incrementAndGet(),
+                                joinTranscriptSegments(run.completedSystemTranscript, text),
+                                TranscriptUpdate.Source.ANDROID_SYSTEM));
                     }
 
                     @Override
                     public void onFinal(String text) {
-                        if (!isCurrent(run)) return;
-                        state.set(State.TRANSCRIBING);
-                        run.listener.onState(State.TRANSCRIBING, "Applying personal vocabulary…");
-                        run.task = executor.submit(() -> finishTranscription(
-                                run,
-                                text,
-                                System.currentTimeMillis() - run.startedAt,
-                                false,
-                                false));
+                        String combined;
+                        boolean continueListening;
+                        boolean reachedLimit;
+                        synchronized (lifecycleLock) {
+                            if (!isCurrent(run)) return;
+                            String uncapped = reconcileSystemFinal(
+                                    run.completedSystemTranscript,
+                                    text,
+                                    run.latestTranscript,
+                                    run.request.inputContext().fieldKind());
+                            boolean reachedTextLimit = uncapped.codePointCount(
+                                    0, uncapped.length()) > MAX_TRANSCRIPT_CODE_POINTS;
+                            combined = limitCodePoints(uncapped, MAX_TRANSCRIPT_CODE_POINTS);
+                            long elapsedMs = System.currentTimeMillis() - run.startedAt;
+                            reachedLimit = elapsedMs >= run.request.settings()
+                                    .boundedMaxRecordingSeconds() * 1_000L
+                                    || reachedTextLimit;
+                            continueListening = run.request.captureMode()
+                                    .userControlledEndpointing()
+                                    && !run.stopRequested
+                                    && !reachedLimit;
+                            if (continueListening) {
+                                run.completedSystemTranscript = combined;
+                                // Queue the next platform session before releasing the decision
+                                // lock, so a concurrent user stop either prevents this restart or
+                                // is ordered after it and stops the newly queued session.
+                                startSystem(run);
+                            }
+                        }
+                        if (continueListening) {
+                            publishTranscript(run, new TranscriptUpdate(
+                                    run.transcriptSequence.incrementAndGet(),
+                                    combined,
+                                    "",
+                                    false,
+                                    TranscriptUpdate.Source.ANDROID_SYSTEM));
+                            return;
+                        }
+                        if (!transitionStateIfCurrent(
+                                run, State.TRANSCRIBING, "Applying personal vocabulary…")) {
+                            return;
+                        }
+                        try {
+                            boolean finalReachedLimit = reachedLimit;
+                            run.task = executor.submit(() -> finishTranscription(
+                                    run,
+                                    combined,
+                                    System.currentTimeMillis() - run.startedAt,
+                                    finalReachedLimit,
+                                    false));
+                        } catch (RejectedExecutionException error) {
+                            finishError(run, new IllegalStateException(
+                                    "Unable to finalize voice input while shutting down"));
+                        }
                     }
 
                     @Override
                     public void onError(int errorCode, String message) {
                         if (!isCurrent(run)) return;
+                        if (recoverVisiblePartial(run, false)) return;
                         if (tryLocalFallback(run, errorCode)) return;
                         finishError(run, new IllegalStateException(message));
                     }
-                });
+                    },
+                    remainingMillis);
+        }
     }
 
     private boolean tryLocalFallback(ActiveRun run, int errorCode) {
@@ -323,17 +440,39 @@ public final class VoicePipeline {
                 permissionGranted,
                 supported,
                 installed,
-                run.systemFallbackAttempted)) {
+                run.systemFallbackAttempted,
+                run.stopRequested)) {
             return false;
         }
-        run.systemFallbackAttempted = true;
-        run.actualBackend = RecognitionBackend.LOCAL_OFFLINE;
-        run.recordingSession = new RecordingSession();
-        state.set(State.RECORDING);
+        RejectedExecutionException rejected = null;
+        synchronized (lifecycleLock) {
+            if (!isCurrent(run) || run.stopRequested) return false;
+            run.systemFallbackAttempted = true;
+            run.actualBackend = RecognitionBackend.LOCAL_OFFLINE;
+            run.recordingSession = new RecordingSession(
+                    run.request.captureMode().userControlledEndpointing());
+            state.set(State.RECORDING);
+            try {
+                run.task = executor.submit(() -> executeCaptured(run));
+            } catch (RejectedExecutionException error) {
+                rejected = error;
+            }
+        }
+        if (rejected != null) {
+            finishError(run, new IllegalStateException(
+                    "Unable to start the offline fallback while shutting down"));
+            return false;
+        }
+        RecognitionRoute route = new RecognitionRoute(
+                run.request.settings().recognitionBackend(),
+                RecognitionBackend.LOCAL_OFFLINE,
+                RecognitionRoute.FallbackReason.ANDROID_MICROPHONE_BLOCKED);
+        run.diagnostics.updateRoute(route);
+        persistDiagnostics(run);
+        run.listener.onRoute(route);
         run.listener.onState(
                 State.RECORDING,
                 "Android speech service blocked microphone access · using OpenTypeless offline");
-        run.task = executor.submit(() -> executeCaptured(run));
         return true;
     }
 
@@ -342,12 +481,152 @@ public final class VoicePipeline {
             boolean permissionGranted,
             boolean supported,
             boolean installed,
-            boolean alreadyAttempted) {
+            boolean alreadyAttempted,
+            boolean stopRequested) {
         return errorCode == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
                 && permissionGranted
                 && supported
                 && installed
-                && !alreadyAttempted;
+                && !alreadyAttempted
+                && !stopRequested;
+    }
+
+    private void publishTranscript(ActiveRun run, TranscriptUpdate update) {
+        if (!isCurrent(run) || update == null) return;
+        String text = update.text().trim();
+        if (!text.isEmpty()) {
+            run.latestTranscript = text;
+            if (run.diagnostics.markFirstPartial(SystemClock.elapsedRealtime())) {
+                persistDiagnostics(run);
+            }
+        }
+        run.listener.onTranscript(update);
+    }
+
+    /**
+     * Recognition engines can emit usable partials and then fail before producing a final result.
+     * Preserve the last visible hypothesis for ordinary dictation regardless of the terminal
+     * failure. An explicit cancel has already detached the run and therefore cannot enter here;
+     * selected-text editing remains fail-closed because a partial spoken instruction must never
+     * replace the selection.
+     */
+    private boolean recoverVisiblePartial(ActiveRun run, boolean alreadyOnWorker) {
+        String partial;
+        synchronized (lifecycleLock) {
+            if (!isCurrent(run)) return false;
+            partial = run.latestTranscript;
+            if (!shouldRecoverVisiblePartial(
+                    run.request.inputContext().hasSelection(),
+                    partial)
+                    || !run.visiblePartialClaimed.compareAndSet(false, true)) {
+                return false;
+            }
+            state.set(State.TRANSCRIBING);
+        }
+        run.listener.onState(
+                State.TRANSCRIBING,
+                "Final result unavailable · keeping the last live transcript…");
+        if (alreadyOnWorker) {
+            // Preserve run.task so explicit cancellation still interrupts the current worker.
+            // Semantic post-processing is disabled for recovered text below, so completing on
+            // this worker cannot block on an LLM request.
+            finishTranscription(
+                    run,
+                    partial,
+                    System.currentTimeMillis() - run.startedAt,
+                    false,
+                    false,
+                    true);
+        } else {
+            RejectedExecutionException rejected = null;
+            synchronized (lifecycleLock) {
+                if (!isCurrent(run)) return true;
+                try {
+                    run.task = executor.submit(() -> finishTranscription(
+                            run,
+                            partial,
+                            System.currentTimeMillis() - run.startedAt,
+                            false,
+                            false,
+                            true));
+                } catch (RejectedExecutionException error) {
+                    rejected = error;
+                }
+            }
+            if (rejected != null) {
+                finishError(run, new IllegalStateException(
+                        "Unable to preserve the live transcript while shutting down"));
+            }
+        }
+        return true;
+    }
+
+    static String joinTranscriptSegments(String completed, String next) {
+        String originalLeft = completed == null ? "" : completed;
+        String originalRight = next == null ? "" : next;
+        boolean explicitBoundarySpace = (!originalLeft.isEmpty()
+                && Character.isWhitespace(originalLeft.codePointBefore(originalLeft.length())))
+                || (!originalRight.isEmpty()
+                && Character.isWhitespace(originalRight.codePointAt(0)));
+        String left = originalLeft.trim();
+        String right = originalRight.trim();
+        if (left.isEmpty()) return right;
+        if (right.isEmpty()) return left;
+        int leftCodePoint = left.codePointBefore(left.length());
+        int rightCodePoint = right.codePointAt(0);
+        boolean addSpace = Character.isLetterOrDigit(leftCodePoint)
+                && Character.isLetterOrDigit(rightCodePoint)
+                && leftCodePoint < 128
+                && rightCodePoint < 128;
+        return left + (explicitBoundarySpace || addSpace ? " " : "") + right;
+    }
+
+    /**
+     * Some Android providers expose a well-punctuated live hypothesis and then return the same
+     * words with nearly all internal punctuation removed in their terminal result. Prefer that
+     * visible punctuation only when the normalized lexical content is identical. A changed word,
+     * number, or word boundary keeps the provider's authoritative final and receives at most the
+     * conservative terminal punctuation supplied by {@link SafePunctuationRestorer}.
+     */
+    static String reconcileSystemFinal(
+            String completed,
+            String finalSegment,
+            String latestVisible,
+            FieldKind fieldKind) {
+        String authoritative = joinTranscriptSegments(completed, finalSegment);
+        return SafePunctuationRestorer.choose(authoritative, latestVisible, fieldKind);
+    }
+
+    static String limitCodePoints(String value, int maximum) {
+        String safe = value == null ? "" : value;
+        if (maximum <= 0) return "";
+        int count = safe.codePointCount(0, safe.length());
+        return count <= maximum
+                ? safe
+                : safe.substring(0, safe.offsetByCodePoints(0, maximum));
+    }
+
+    static boolean shouldRecoverVisiblePartial(boolean hasSelection, String latestTranscript) {
+        return !hasSelection
+                && latestTranscript != null
+                && !latestTranscript.isBlank();
+    }
+
+    static ProcessingResult applyPersonalizationFailSafe(
+            String rawText,
+            PersonalizationSnapshot snapshot,
+            boolean hasSelection) {
+        try {
+            return PersonalizedTextProcessor.apply(rawText, snapshot);
+        } catch (IllegalArgumentException error) {
+            // A corrupt or adversarial local rule must not destroy a successful ASR result.
+            // Selected-text editing remains fail-closed because raw speech may be an instruction.
+            if (hasSelection) throw error;
+            return new ProcessingResult(
+                    limitCodePoints(rawText == null ? "" : rawText, MAX_TRANSCRIPT_CODE_POINTS),
+                    java.util.List.of(),
+                    java.util.List.of());
+        }
     }
 
     private void finishTranscription(
@@ -356,13 +635,32 @@ public final class VoicePipeline {
             long durationMs,
             boolean reachedLimit,
             boolean autoStopped) {
+        finishTranscription(
+                run,
+                rawText,
+                durationMs,
+                reachedLimit,
+                autoStopped,
+                false);
+    }
+
+    private void finishTranscription(
+            ActiveRun run,
+            String rawText,
+            long durationMs,
+            boolean reachedLimit,
+            boolean autoStopped,
+            boolean recoveredPartial) {
         if (!isCurrent(run)) return;
         PersonalizationSnapshot snapshot = run.request.settings().personalizationEnabled()
                 ? run.request.personalization()
                 : PersonalizationSnapshot.empty();
         ProcessingResult personalized;
         try {
-            personalized = PersonalizedTextProcessor.apply(rawText, snapshot);
+            personalized = applyPersonalizationFailSafe(
+                    rawText,
+                    snapshot,
+                    run.request.inputContext().hasSelection());
         } catch (IllegalArgumentException error) {
             finishError(run, error);
             return;
@@ -375,13 +673,13 @@ public final class VoicePipeline {
                 : DictationResult.Outcome.INSERTED;
         boolean aiAccepted = false;
 
-        String command = run.request.inputContext().hasSelection()
+        String command = recoveredPartial || run.request.inputContext().hasSelection()
                 ? null
                 : VoiceCommandProcessor.exactReplacement(finalText);
         if (command != null) {
             finalText = command;
             outcome = DictationResult.Outcome.VOICE_COMMAND_INSERTED;
-        } else if (requiresLlm(run.mode, run.request.inputContext())) {
+        } else if (!recoveredPartial && requiresLlm(run.mode, run.request.inputContext())) {
             if (!llmReady(run.request.settings())) {
                 if (run.request.inputContext().hasSelection()) {
                     finishError(run, new IllegalStateException(
@@ -390,8 +688,12 @@ public final class VoicePipeline {
                 }
                 outcome = DictationResult.Outcome.EXACT_AI_NOT_CONFIGURED;
             } else {
-                state.set(State.POLISHING);
-                run.listener.onState(State.POLISHING, "Checking and polishing without changing facts…");
+                if (!transitionStateIfCurrent(
+                        run,
+                        State.POLISHING,
+                        "Checking and polishing without changing facts…")) {
+                    return;
+                }
                 try {
                     String systemPrompt = PromptComposer.systemPrompt(
                             run.mode,
@@ -403,7 +705,11 @@ public final class VoicePipeline {
                             finalText,
                             run.request.inputContext(),
                             run.request.settings().sendContext());
-                    String candidate = client.complete(systemPrompt, userPrompt, run.request.settings());
+                    String candidate = client.complete(
+                            systemPrompt,
+                            userPrompt,
+                            run.request.settings(),
+                            () -> !isCurrent(run));
                     ProcessingResult protectedCandidate = PersonalizedTextProcessor.apply(candidate, snapshot);
                     String integritySource = run.request.inputContext().hasSelection()
                             ? run.request.inputContext().selectedText()
@@ -454,34 +760,232 @@ public final class VoicePipeline {
                 durationMs,
                 reachedLimit,
                 aiAccepted,
+                recoveredPartial,
                 personalized.matchedTermIds(),
-                personalized.matchedCorrectionIds());
-        if (active.compareAndSet(run, null)) {
-            state.set(State.IDLE);
+                personalized.matchedCorrectionIds(),
+                run.recoveryJournalWritten ? run.recoveryId : "");
+        if (run.recoveryJournalWritten) {
+            try {
+                // Replace audio with the much smaller final text before publishing the result.
+                // The IME acknowledges/deletes this only after the editor or encrypted draft has
+                // durably accepted the text.
+                recoveryJournal.complete(
+                        run.recoveryId,
+                        run.actualBackend.name(),
+                        run.request.settings().language(),
+                        run.actualBackend == RecognitionBackend.OPENAI_COMPATIBLE
+                                ? run.request.settings().sttBaseUrl().trim()
+                                : "",
+                        run.actualBackend == RecognitionBackend.OPENAI_COMPATIBLE
+                                ? run.request.settings().sttModel().trim()
+                                : "sensevoice-small-int8",
+                        run.startedAt,
+                        durationMs,
+                        reachedLimit,
+                        autoStopped,
+                        finalText);
+            } catch (RuntimeException ignored) {
+                // Keeping the authenticated audio is a safe fallback; recovery will transcribe it
+                // again instead of losing the utterance.
+            }
+        }
+        boolean delivered;
+        synchronized (lifecycleLock) {
+            delivered = active.compareAndSet(run, null);
+            if (delivered) state.set(State.IDLE);
+        }
+        if (delivered) {
+            run.diagnostics.succeed(
+                    SystemClock.elapsedRealtime(),
+                    durationMs,
+                    finalText,
+                    recoveredPartial);
+            persistDiagnostics(run);
             run.listener.onResult(result);
         }
     }
 
     public void stopRecording() {
-        ActiveRun run = active.get();
-        if (run == null || state.get() != State.RECORDING) return;
+        ActiveRun run;
+        synchronized (lifecycleLock) {
+            run = active.get();
+            if (run == null || state.get() != State.RECORDING) return;
+            run.stopRequested = true;
+        }
         if (run.recordingSession != null) recorder.stop(run.recordingSession);
         else systemRecognizer.stop();
     }
 
     public void cancel() {
-        ActiveRun run = active.getAndSet(null);
-        generation.incrementAndGet();
+        cancel(false);
+    }
+
+    /** Explicit user discard. Unlike lifecycle cancellation this removes the durable checkpoint. */
+    public void discard() {
+        cancel(true);
+    }
+
+    private void cancel(boolean discardRecovery) {
+        ActiveRun run;
+        synchronized (lifecycleLock) {
+            run = active.getAndSet(null);
+            generation.incrementAndGet();
+            if (run != null) run.cancelled = true;
+            state.set(State.IDLE);
+        }
         if (run != null) {
-            run.cancelled = true;
+            run.diagnostics.cancel(SystemClock.elapsedRealtime());
+            persistDiagnostics(run);
             if (run.recordingSession != null) recorder.cancel(run.recordingSession);
             systemRecognizer.cancel();
             client.cancelActiveRequest();
+            localOfflineClient.cancelActive();
             streamingRecognizer.cancelActiveSession();
             Future<?> task = run.task;
             if (task != null) task.cancel(true);
         }
-        state.set(State.IDLE);
+        if (discardRecovery) {
+            if (run != null) recoveryJournal.discard(run.recoveryId);
+            else recoveryJournal.discardAny();
+        }
+    }
+
+    public boolean hasRecoverableAudio() {
+        return recoveryJournal.hasPending();
+    }
+
+    /** Removes a completed checkpoint only after its result has been safely accepted elsewhere. */
+    public boolean acknowledgeRecovery(String recoveryId) {
+        if (recoveryId == null || recoveryId.isBlank()) return true;
+        return recoveryJournal.discard(recoveryId);
+    }
+
+    /**
+     * Replays a protected batch/local checkpoint without opening the microphone. Callers should
+     * route the result to a recoverable draft, never directly to an editor captured before death.
+     */
+    public boolean recover(DictationRequest request, Listener listener) {
+        VoiceRecoveryJournal.Entry entry = recoveryJournal.read();
+        if (entry == null) return false;
+        RecognitionBackend backend;
+        try {
+            backend = RecognitionBackend.valueOf(entry.backend());
+        } catch (IllegalArgumentException error) {
+            throw new IllegalStateException("The protected recording has an unknown route", error);
+        }
+        if (backend != RecognitionBackend.OPENAI_COMPATIBLE
+                && backend != RecognitionBackend.LOCAL_OFFLINE) {
+            throw new IllegalStateException("This saved recording route cannot be recovered");
+        }
+        if (backend == RecognitionBackend.OPENAI_COMPATIBLE
+                && (!entry.endpoint().equals(request.settings().sttBaseUrl().trim())
+                || !entry.model().equals(request.settings().sttModel().trim()))) {
+            throw new IllegalStateException(
+                    "The protected recording belongs to a different provider configuration");
+        }
+        AppSettings recoverySettings = withRecoveryRoute(request.settings(), backend, entry);
+        DictationRequest recoveryRequest = new DictationRequest(
+                recoverySettings,
+                ProcessingMode.VERBATIM,
+                request.inputContext(),
+                request.personalization(),
+                DictationRequest.CaptureMode.SINGLE_UTTERANCE);
+        ActiveRun run;
+        synchronized (lifecycleLock) {
+            if (active.get() != null) return false;
+            if (!entry.id().equals(recoveryJournal.pendingId())) return false;
+            run = new ActiveRun(
+                    generation.incrementAndGet(),
+                    recoveryRequest,
+                    ProcessingMode.VERBATIM,
+                    null,
+                    listener,
+                    entry.id());
+            run.actualBackend = backend;
+            run.recoveryJournalWritten = true;
+            active.set(run);
+            state.set(State.TRANSCRIBING);
+            try {
+                run.task = executor.submit(() -> executeRecovery(run, entry));
+            } catch (RejectedExecutionException error) {
+                active.compareAndSet(run, null);
+                state.set(State.IDLE);
+                return false;
+            }
+        }
+        persistDiagnostics(run);
+        listener.onRoute(run.diagnostics.snapshot().route());
+        listener.onState(State.TRANSCRIBING, routeLabel(run) + " · recovering protected audio…");
+        return true;
+    }
+
+    private void executeRecovery(ActiveRun run, VoiceRecoveryJournal.Entry entry) {
+        try {
+            if (entry.kind() == VoiceRecoveryJournal.Kind.COMPLETED_TEXT) {
+                deliverCompletedRecovery(run, entry);
+                return;
+            }
+            String raw;
+            byte[] wav = entry.wav();
+            try {
+                if (run.actualBackend == RecognitionBackend.LOCAL_OFFLINE) {
+                    LocalOfflineRecognitionClient.Result local = localOfflineClient.recognize(
+                            wav, run.request.settings().language());
+                    raw = SafePunctuationRestorer.choose(
+                            local.exactText(),
+                            local.punctuatedText(),
+                            run.request.inputContext().fieldKind());
+                } else {
+                    ProviderCapabilities capabilities = ProviderCapabilities.forBackend(
+                            run.actualBackend);
+                    String prompt = capabilities.asrPrompt()
+                            ? PromptComposer.asrPrompt(run.request.personalization())
+                            : "";
+                    raw = client.transcribe(
+                            wav,
+                            run.request.settings(),
+                            prompt,
+                            () -> !isCurrent(run));
+                }
+            } finally {
+                java.util.Arrays.fill(wav, (byte) 0);
+            }
+            finishTranscription(
+                    run,
+                    raw,
+                    entry.durationMs(),
+                    entry.reachedLimit(),
+                    entry.autoStopped());
+        } catch (CancellationException ignored) {
+            finishCancelled(run);
+        } catch (Exception error) {
+            finishError(run, error);
+        }
+    }
+
+    private void deliverCompletedRecovery(
+            ActiveRun run, VoiceRecoveryJournal.Entry entry) {
+        String text = entry.completedText();
+        DictationResult result = new DictationResult(
+                text,
+                text,
+                text,
+                DictationResult.Outcome.INSERTED,
+                ProcessingMode.VERBATIM,
+                run.actualBackend,
+                entry.durationMs(),
+                entry.reachedLimit(),
+                false,
+                false,
+                java.util.List.of(),
+                java.util.List.of(),
+                entry.id());
+        boolean delivered;
+        synchronized (lifecycleLock) {
+            delivered = active.compareAndSet(run, null);
+            if (delivered) state.set(State.IDLE);
+        }
+        if (delivered) run.listener.onResult(result);
     }
 
     public State state() {
@@ -491,28 +995,70 @@ public final class VoicePipeline {
     public void shutdown() {
         cancel();
         systemRecognizer.destroy();
+        localOfflineClient.close();
         streamingRecognizer.shutdown();
         executor.shutdownNow();
     }
 
+    private static AppSettings withRecoveryRoute(
+            AppSettings settings,
+            RecognitionBackend backend,
+            VoiceRecoveryJournal.Entry entry) {
+        return new AppSettings(
+                backend,
+                backend == RecognitionBackend.OPENAI_COMPATIBLE
+                        ? entry.endpoint()
+                        : settings.sttBaseUrl(),
+                settings.sttApiKey(),
+                backend == RecognitionBackend.OPENAI_COMPATIBLE
+                        ? entry.model()
+                        : settings.sttModel(),
+                settings.streamingBaseUrl(),
+                settings.streamingApiKey(),
+                settings.streamingModel(),
+                settings.streamingVocabularyId(),
+                entry.language(),
+                settings.defaultMode(),
+                settings.polishEnabled(),
+                settings.llmBaseUrl(),
+                settings.llmApiKey(),
+                settings.llmModel(),
+                settings.targetLanguage(),
+                settings.customInstructions(),
+                settings.personalizationEnabled(),
+                settings.historyEnabled(),
+                settings.sendContext(),
+                settings.maxRecordingSeconds());
+    }
+
     private void finishError(ActiveRun run, Exception error) {
-        if (!active.compareAndSet(run, null)) return;
-        state.set(State.IDLE);
+        synchronized (lifecycleLock) {
+            if (!active.compareAndSet(run, null)) return;
+            state.set(State.IDLE);
+        }
+        run.diagnostics.fail(SystemClock.elapsedRealtime());
+        persistDiagnostics(run);
         String message = error.getMessage();
         run.listener.onError(message == null || message.isBlank() ? "Voice input failed" : message);
     }
 
     private void finishCancelled(ActiveRun run) {
-        clearCancelledRun(active, state, run);
+        if (clearCancelledRun(lifecycleLock, active, state, run)) {
+            run.diagnostics.cancel(SystemClock.elapsedRealtime());
+            persistDiagnostics(run);
+        }
     }
 
     static <T> boolean clearCancelledRun(
+            Object lock,
             AtomicReference<T> activeRun,
             AtomicReference<State> pipelineState,
             T cancelledRun) {
-        if (!activeRun.compareAndSet(cancelledRun, null)) return false;
-        pipelineState.set(State.IDLE);
-        return true;
+        synchronized (lock) {
+            if (!activeRun.compareAndSet(cancelledRun, null)) return false;
+            pipelineState.set(State.IDLE);
+            return true;
+        }
     }
 
     static AiCandidateDisposition aiCandidateDisposition(boolean candidateSafe, boolean hasSelection) {
@@ -524,6 +1070,29 @@ public final class VoicePipeline {
 
     private boolean isCurrent(ActiveRun run) {
         return active.get() == run && !run.cancelled && generation.get() == run.id;
+    }
+
+    private void notifyReadyForSpeech(ActiveRun run) {
+        if (!isCurrent(run)) return;
+        if (run.diagnostics.markReady(SystemClock.elapsedRealtime())) persistDiagnostics(run);
+        run.listener.onReadyForSpeech();
+    }
+
+    private void persistDiagnostics(ActiveRun run) {
+        try {
+            diagnosticsStore.save(run.diagnostics.snapshot());
+        } catch (RuntimeException ignored) {
+            // Diagnostics are best-effort and must never break dictation.
+        }
+    }
+
+    private boolean transitionStateIfCurrent(ActiveRun run, State next, String message) {
+        synchronized (lifecycleLock) {
+            if (!isCurrent(run)) return false;
+            state.set(next);
+        }
+        run.listener.onState(next, message);
+        return true;
     }
 
     private static boolean requiresLlm(ProcessingMode mode, InputContext context) {

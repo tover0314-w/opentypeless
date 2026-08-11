@@ -10,6 +10,7 @@ import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.RecognitionBackend;
 
 import java.io.IOException;
+import java.util.concurrent.CancellationException;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -94,6 +95,20 @@ public final class OpenAiCompatibleClientTest {
         AppSettings legacyControl = settings(baseUrl(), "token\u0007value");
         assertThrows(Exception.class, () -> new OpenAiCompatibleClient()
                 .transcribe(new byte[]{1, 2}, legacyControl, ""));
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    public void cancelledRunCannotOpenANewSttRequest() {
+        assertThrows(CancellationException.class, () -> new OpenAiCompatibleClient().transcribe(
+                new byte[]{1, 2}, settings(baseUrl(), "token"), "", () -> true));
+        assertEquals(0, server.getRequestCount());
+    }
+
+    @Test
+    public void cancelledRunCannotOpenANewLlmRequest() {
+        assertThrows(CancellationException.class, () -> new OpenAiCompatibleClient().complete(
+                "system", "user", settings(baseUrl(), "token"), () -> true));
         assertEquals(0, server.getRequestCount());
     }
 

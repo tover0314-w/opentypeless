@@ -32,7 +32,7 @@ public final class ProviderCapabilitiesTest {
                 RecognitionBackend.SYSTEM_ON_DEVICE).biasingStrings());
         assertTrue(ProviderCapabilities.forBackend(
                 RecognitionBackend.DASHSCOPE_STREAMING).partialResults());
-        assertTrue(ProviderCapabilities.forBackend(
+        assertFalse(ProviderCapabilities.forBackend(
                 RecognitionBackend.LOCAL_OFFLINE).partialResults());
     }
 }

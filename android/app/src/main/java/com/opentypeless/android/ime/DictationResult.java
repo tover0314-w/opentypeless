@@ -15,8 +15,43 @@ public record DictationResult(
         long durationMs,
         boolean reachedRecordingLimit,
         boolean aiOutputAccepted,
+        boolean recoveredPartial,
         List<Long> matchedTermIds,
-        List<Long> matchedCorrectionIds) {
+        List<Long> matchedCorrectionIds,
+        String recoveryId) {
+    public DictationResult {
+        recoveryId = recoveryId == null ? "" : recoveryId;
+    }
+
+    public DictationResult(
+            String rawText,
+            String personalizedText,
+            String finalText,
+            Outcome outcome,
+            ProcessingMode mode,
+            RecognitionBackend backend,
+            long durationMs,
+            boolean reachedRecordingLimit,
+            boolean aiOutputAccepted,
+            boolean recoveredPartial,
+            List<Long> matchedTermIds,
+            List<Long> matchedCorrectionIds) {
+        this(
+                rawText,
+                personalizedText,
+                finalText,
+                outcome,
+                mode,
+                backend,
+                durationMs,
+                reachedRecordingLimit,
+                aiOutputAccepted,
+                recoveredPartial,
+                matchedTermIds,
+                matchedCorrectionIds,
+                "");
+    }
+
     public enum Outcome {
         INSERTED,
         INSERTED_RECORDING_LIMIT,

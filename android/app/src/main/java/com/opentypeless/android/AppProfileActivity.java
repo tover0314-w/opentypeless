@@ -84,17 +84,19 @@ public final class AppProfileActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(20), dp(20), dp(32));
+        AppVisualSystem.stylePage(this, root);
         scroll.addView(root);
 
         root.addView(heading(getString(R.string.app_profile_heading), 24));
         root.addView(body(getString(R.string.app_profile_intro)));
 
+        LinearLayout editorCard = AppVisualSystem.card(this);
         packageName = field(getString(R.string.app_profile_package_hint), false);
-        root.addView(packageName);
+        editorCard.addView(packageName);
 
         TextView modeLabel = body(getString(R.string.app_profile_mode_label));
         modeLabel.setLabelFor(View.generateViewId());
-        root.addView(modeLabel);
+        editorCard.addView(modeLabel);
         mode = new Spinner(this);
         mode.setId(modeLabel.getLabelFor());
         List<String> modeLabels = new ArrayList<>();
@@ -103,24 +105,25 @@ public final class AppProfileActivity extends Activity {
                 this, android.R.layout.simple_spinner_dropdown_item, modeLabels));
         mode.setMinimumHeight(dp(48));
         mode.setContentDescription(getString(R.string.app_profile_mode_label));
-        root.addView(mode, matchWrap());
+        editorCard.addView(mode, matchWrap());
 
         targetLanguage = field(getString(R.string.app_profile_target_hint), false);
-        root.addView(targetLanguage);
+        editorCard.addView(targetLanguage);
         instructions = field(getString(R.string.app_profile_instructions_hint), true);
         instructions.setMinLines(3);
-        root.addView(instructions);
+        editorCard.addView(instructions);
         sendContext = new CheckBox(this);
         sendContext.setText(R.string.app_profile_context);
         sendContext.setMinHeight(dp(48));
         sendContext.setContentDescription(
                 getString(R.string.app_profile_context_description));
-        root.addView(sendContext, matchWrap());
+        editorCard.addView(sendContext, matchWrap());
 
         LinearLayout actions = row();
         actions.addView(button(getString(R.string.save_app_profile), 1f, ignored -> save()));
         actions.addView(button(getString(R.string.delete_app_profile), 1f, ignored -> confirmDelete()));
-        root.addView(actions, matchWrap());
+        editorCard.addView(actions, matchWrap());
+        root.addView(editorCard, AppVisualSystem.cardParams(this));
 
         root.addView(heading(getString(R.string.saved_app_profiles), 20));
         profiles = new LinearLayout(this);
@@ -170,9 +173,7 @@ public final class AppProfileActivity extends Activity {
             return;
         }
         for (AppProfile profile : values) {
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(dp(12), dp(8), dp(12), dp(8));
+            LinearLayout card = AppVisualSystem.card(this);
             TextView title = heading(profile.packageName(), 16);
             card.addView(title);
             String summary = modeLabel(profile.mode())
@@ -186,7 +187,7 @@ public final class AppProfileActivity extends Activity {
             edit.setContentDescription(getString(
                     R.string.edit_app_profile_description, profile.packageName()));
             card.addView(edit, matchWrap());
-            profiles.addView(card, matchWrap());
+            profiles.addView(card, AppVisualSystem.cardParams(this));
         }
     }
 
@@ -249,38 +250,24 @@ public final class AppProfileActivity extends Activity {
     }
 
     private TextView heading(String text, int size) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(getColor(R.color.ime_on_surface));
+        TextView view = size >= 24
+                ? AppVisualSystem.title(this, text)
+                : AppVisualSystem.section(this, text);
         view.setPadding(0, dp(10), 0, dp(6));
         return view;
     }
 
     private TextView body(String text) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(14);
-        view.setTextColor(getColor(R.color.ime_on_surface_variant));
-        view.setPadding(0, dp(4), 0, dp(8));
-        return view;
+        return AppVisualSystem.body(this, text);
     }
 
     private LinearLayout row() {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        return row;
+        return AppVisualSystem.actionGroup(this);
     }
 
     private Button button(String text, float weight, View.OnClickListener listener) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setMinHeight(dp(48));
-        button.setOnClickListener(listener);
-        button.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, weight));
+        Button button = AppVisualSystem.secondaryButton(this, text, listener);
+        button.setLayoutParams(AppVisualSystem.actionParams(this));
         return button;
     }
 

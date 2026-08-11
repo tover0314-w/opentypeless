@@ -13,7 +13,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 public final class OpenAiCompatibleClient {
     private static final int CONNECT_TIMEOUT_MS = 20_000;
@@ -22,14 +24,23 @@ public final class OpenAiCompatibleClient {
     private static final int MAX_AUDIO_BYTES = 32 * 1024 * 1024;
     private static final int MAX_PROVIDER_TEXT_CODE_POINTS = 20_000;
     private final AtomicReference<HttpURLConnection> activeConnection = new AtomicReference<>();
+    private final Object requestLock = new Object();
 
     public String transcribe(byte[] wav, AppSettings settings, String prompt) throws Exception {
+        return transcribe(wav, settings, prompt, () -> false);
+    }
+
+    public String transcribe(
+            byte[] wav,
+            AppSettings settings,
+            String prompt,
+            BooleanSupplier cancelled) throws Exception {
         if (wav == null || wav.length == 0 || wav.length > MAX_AUDIO_BYTES) {
             throw new IllegalArgumentException("Recorded audio has an invalid size");
         }
         String endpoint = EndpointNormalizer.endpoint(settings.sttBaseUrl(), "audio/transcriptions");
         String boundary = "----OpenTypeless" + UUID.randomUUID().toString().replace("-", "");
-        HttpURLConnection connection = open(endpoint, settings.sttApiKey());
+        HttpURLConnection connection = open(endpoint, settings.sttApiKey(), cancelled);
         try {
             connection.setDoOutput(true);
             connection.setRequestMethod("POST");
@@ -61,6 +72,14 @@ public final class OpenAiCompatibleClient {
     }
 
     public String complete(String systemPrompt, String userPrompt, AppSettings settings) throws Exception {
+        return complete(systemPrompt, userPrompt, settings, () -> false);
+    }
+
+    public String complete(
+            String systemPrompt,
+            String userPrompt,
+            AppSettings settings,
+            BooleanSupplier cancelled) throws Exception {
         String safeSystemPrompt = boundedPrompt(systemPrompt, 40_000, "System prompt");
         String safeUserPrompt = boundedPrompt(userPrompt, 40_000, "User prompt");
         JSONObject body = new JSONObject();
@@ -77,7 +96,7 @@ public final class OpenAiCompatibleClient {
         body.put("messages", messages);
 
         String endpoint = EndpointNormalizer.endpoint(settings.llmBaseUrl(), "chat/completions");
-        HttpURLConnection connection = open(endpoint, settings.llmApiKey());
+        HttpURLConnection connection = open(endpoint, settings.llmApiKey(), cancelled);
         try {
             connection.setDoOutput(true);
             connection.setRequestMethod("POST");
@@ -98,30 +117,48 @@ public final class OpenAiCompatibleClient {
         }
     }
 
-    private HttpURLConnection open(String endpoint, String apiKey) throws IOException {
-        EndpointNormalizer.requireCredentialSafeTransport(endpoint, apiKey);
-        HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(READ_TIMEOUT_MS);
-        connection.setUseCaches(false);
-        connection.setInstanceFollowRedirects(false);
-        connection.setRequestProperty("Accept", "application/json");
-        if (apiKey != null && !apiKey.trim().isEmpty()) {
-            connection.setRequestProperty(
-                    "Authorization", "Bearer " + headerSafe(apiKey, 4_096, "API key"));
+    private HttpURLConnection open(
+            String endpoint,
+            String apiKey,
+            BooleanSupplier cancelled) throws IOException {
+        synchronized (requestLock) {
+            throwIfCancelled(cancelled);
+            EndpointNormalizer.requireCredentialSafeTransport(endpoint, apiKey);
+            HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setUseCaches(false);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Accept", "application/json");
+            if (apiKey != null && !apiKey.trim().isEmpty()) {
+                connection.setRequestProperty(
+                        "Authorization", "Bearer " + headerSafe(apiKey, 4_096, "API key"));
+            }
+            throwIfCancelled(cancelled);
+            activeConnection.set(connection);
+            return connection;
         }
-        activeConnection.set(connection);
-        return connection;
     }
 
     public void cancelActiveRequest() {
-        HttpURLConnection connection = activeConnection.getAndSet(null);
-        if (connection != null) connection.disconnect();
+        synchronized (requestLock) {
+            HttpURLConnection connection = activeConnection.getAndSet(null);
+            if (connection != null) connection.disconnect();
+        }
     }
 
     private void close(HttpURLConnection connection) {
-        activeConnection.compareAndSet(connection, null);
-        connection.disconnect();
+        synchronized (requestLock) {
+            activeConnection.compareAndSet(connection, null);
+            connection.disconnect();
+        }
+    }
+
+    private static void throwIfCancelled(BooleanSupplier cancelled) {
+        if (Thread.currentThread().isInterrupted()
+                || (cancelled != null && cancelled.getAsBoolean())) {
+            throw new CancellationException("Request cancelled");
+        }
     }
 
     private static void writeField(OutputStream output, String boundary, String name, String value)

@@ -48,6 +48,11 @@
             android:label="@string/app_profiles_title" />
 
         <activity
+            android:name=".VoiceLabActivity"
+            android:exported="false"
+            android:label="@string/voice_lab_title" />
+
+        <activity
             android:name=".recognition.OpenTypelessRecognizerActivity"
             android:excludeFromRecents="true"
             android:exported="true">
@@ -69,6 +74,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
+
+        <!-- The native offline model is deliberately isolated from the IME process. Audio is
+             passed through an anonymous pipe; this component has no external entry point. -->
+        <service
+            android:name=".offline.LocalOfflineRecognitionService"
+            android:exported="false"
+            android:process=":local_asr"
+            android:stopWithTask="false" />
 
         <service
             android:name=".ime.OpenTypelessImeService"

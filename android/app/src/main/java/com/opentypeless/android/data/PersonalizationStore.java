@@ -9,6 +9,8 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 
 import com.opentypeless.android.security.LocalTextCipher;
+import com.opentypeless.android.security.LocalPersonalizationCipher;
+import com.opentypeless.android.security.LocalLookupKey;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -17,6 +19,7 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -24,7 +27,7 @@ import java.util.Set;
 
 public final class PersonalizationStore extends SQLiteOpenHelper {
     private static final String DATABASE = "opentypeless_android.db";
-    private static final int VERSION = 2;
+    private static final int VERSION = 4;
     static final int MAX_IMPORT_BYTES = 1_048_576;
     static final int MAX_IMPORT_ROWS = 10_000;
     static final int MAX_TERMS = 2_000;
@@ -33,8 +36,12 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
     private static final int MAX_HISTORY = 500;
     static final String PRIVACY_MIGRATIONS = "opentypeless_privacy_migrations";
     static final String HISTORY_STORAGE_SANITIZED = "history_text_v1_storage_sanitized";
+    static final String PERSONALIZATION_STORAGE_SANITIZED =
+            "personalization_text_v1_storage_sanitized";
 
     private final LocalTextCipher historyCipher;
+    private final LocalPersonalizationCipher personalizationCipher;
+    private final LocalLookupKey lookupKey;
     private final SharedPreferences privacyMigrations;
 
     public record ImportTerm(
@@ -156,6 +163,8 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         super(context.getApplicationContext(), DATABASE, null, VERSION);
         Context application = context.getApplicationContext();
         historyCipher = new LocalTextCipher();
+        personalizationCipher = new LocalPersonalizationCipher();
+        lookupKey = new LocalLookupKey();
         privacyMigrations = application.getSharedPreferences(
                 PRIVACY_MIGRATIONS, Context.MODE_PRIVATE);
         setWriteAheadLoggingEnabled(true);
@@ -193,6 +202,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 + "pattern TEXT NOT NULL,"
                 + "replacement TEXT NOT NULL,"
                 + "app_scope TEXT NOT NULL DEFAULT '',"
+                + "app_scope_key TEXT NOT NULL DEFAULT '',"
                 + "identity_key TEXT NOT NULL,"
                 + "use_count INTEGER NOT NULL DEFAULT 0,"
                 + "enabled INTEGER NOT NULL DEFAULT 1,"
@@ -209,7 +219,8 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 + "backend TEXT NOT NULL,"
                 + "raw_text TEXT NOT NULL,"
                 + "final_text TEXT NOT NULL,"
-                + "duration_ms INTEGER NOT NULL DEFAULT 0)");
+                + "duration_ms INTEGER NOT NULL DEFAULT 0,"
+                + "applied_rules TEXT NOT NULL DEFAULT '')");
         database.execSQL("CREATE INDEX dictation_history_created_at "
                 + "ON dictation_history(created_at DESC)");
     }
@@ -251,19 +262,35 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
             database.execSQL("CREATE UNIQUE INDEX correction_rules_identity "
                     + "ON correction_rules(identity_key)");
         }
+        if (oldVersion < 3) {
+            database.execSQL("ALTER TABLE dictation_history "
+                    + "ADD COLUMN applied_rules TEXT NOT NULL DEFAULT ''");
+        }
+        if (oldVersion < 4) {
+            database.execSQL("ALTER TABLE correction_rules "
+                    + "ADD COLUMN app_scope_key TEXT NOT NULL DEFAULT ''");
+        }
     }
 
     @Override
     @SuppressLint("ApplySharedPref") // The marker gates an at-rest privacy migration on next open.
     public void onOpen(SQLiteDatabase database) {
         super.onOpen(database);
-        if (privacyMigrations.getBoolean(HISTORY_STORAGE_SANITIZED, false)) return;
-        migrateLegacyHistoryText(database);
+        boolean historySanitized = privacyMigrations.getBoolean(
+                HISTORY_STORAGE_SANITIZED, false);
+        boolean personalizationSanitized = privacyMigrations.getBoolean(
+                PERSONALIZATION_STORAGE_SANITIZED, false);
+        if (historySanitized && personalizationSanitized) return;
+        if (!historySanitized) migrateLegacyHistoryText(database);
+        if (!personalizationSanitized) migrateLegacyPersonalization(database);
         truncateWriteAheadLog(database);
-        // Synchronous persistence is intentional: after this bit is true, a later open may skip
-        // the expensive history scan. A failed write leaves the marker false so work is retried.
-        if (!privacyMigrations.edit().putBoolean(HISTORY_STORAGE_SANITIZED, true).commit()) {
-            throw new IllegalStateException("Unable to finish secure history migration");
+        // Synchronous persistence is intentional: after these bits are true, a later open may
+        // skip the bounded scans. A failed write leaves both markers conservative and retryable.
+        if (!privacyMigrations.edit()
+                .putBoolean(HISTORY_STORAGE_SANITIZED, true)
+                .putBoolean(PERSONALIZATION_STORAGE_SANITIZED, true)
+                .commit()) {
+            throw new IllegalStateException("Unable to finish secure local-data migration");
         }
     }
 
@@ -280,12 +307,12 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         ensureCapacity("personal_terms", MAX_TERMS, "Personal dictionary is full");
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
-        values.put("canonical", cleanCanonical);
-        values.put("canonical_key", identity(cleanCanonical));
-        values.put("pronunciation", cleanPronunciation);
-        values.put("aliases", cleanAliases);
-        values.put("app_scope", cleanScope);
-        values.put("app_scope_key", identity(cleanScope));
+        values.put("canonical", personalizationCipher.encrypt(cleanCanonical));
+        values.put("canonical_key", canonicalLookup(cleanCanonical));
+        values.put("pronunciation", personalizationCipher.encrypt(cleanPronunciation));
+        values.put("aliases", personalizationCipher.encrypt(cleanAliases));
+        values.put("app_scope", personalizationCipher.encrypt(cleanScope));
+        values.put("app_scope_key", scopeLookup(cleanScope));
         values.put("created_at", now);
         values.put("updated_at", now);
         try {
@@ -305,10 +332,11 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         ensureCapacity("correction_rules", MAX_CORRECTIONS, "Correction list is full");
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
-        values.put("pattern", cleanPattern);
-        values.put("replacement", cleanReplacement);
-        values.put("app_scope", cleanScope);
-        values.put("identity_key", correctionIdentity(
+        values.put("pattern", personalizationCipher.encrypt(cleanPattern));
+        values.put("replacement", personalizationCipher.encrypt(cleanReplacement));
+        values.put("app_scope", personalizationCipher.encrypt(cleanScope));
+        values.put("app_scope_key", scopeLookup(cleanScope));
+        values.put("identity_key", correctionLookup(
                 cleanPattern, cleanReplacement, cleanScope));
         values.put("created_at", now);
         values.put("updated_at", now);
@@ -340,22 +368,28 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
     }
 
     public synchronized List<PersonalTerm> listTerms(int limit, int offset) {
+        return searchTerms("", limit, offset);
+    }
+
+    public synchronized List<PersonalTerm> searchTerms(String query, int limit, int offset) {
         int safeLimit = Math.max(1, Math.min(limit, MAX_TERMS));
         int safeOffset = Math.max(0, Math.min(offset, MAX_TERMS));
+        String normalizedQuery = identity(query);
+        List<PersonalTerm> matches = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().query(
                 "personal_terms",
                 new String[]{"id", "canonical", "pronunciation", "aliases", "app_scope",
                         "use_count", "enabled"},
-                null,
-                null,
-                null,
-                null,
-                "app_scope_key, canonical_key",
-                paginationLimit(safeLimit, safeOffset))) {
-            List<PersonalTerm> result = new ArrayList<>();
-            while (cursor.moveToNext()) result.add(readTerm(cursor));
-            return result;
+                null, null, null, null, null)) {
+            while (cursor.moveToNext()) {
+                PersonalTerm term = readTerm(cursor);
+                if (matchesTerm(term, normalizedQuery)) matches.add(term);
+            }
         }
+        matches.sort(Comparator
+                .comparing((PersonalTerm term) -> identity(term.appScope()))
+                .thenComparing(term -> identity(term.canonical())));
+        return page(matches, safeOffset, safeLimit);
     }
 
     public synchronized List<CorrectionRule> listCorrections() {
@@ -363,44 +397,49 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
     }
 
     public synchronized List<CorrectionRule> listCorrections(int limit, int offset) {
+        return searchCorrections("", limit, offset);
+    }
+
+    public synchronized List<CorrectionRule> searchCorrections(String query, int limit, int offset) {
         int safeLimit = Math.max(1, Math.min(limit, MAX_CORRECTIONS));
         int safeOffset = Math.max(0, Math.min(offset, MAX_CORRECTIONS));
+        String normalizedQuery = identity(query);
+        List<CorrectionRule> matches = new ArrayList<>();
         try (Cursor cursor = getReadableDatabase().query(
                 "correction_rules",
                 new String[]{"id", "pattern", "replacement", "app_scope", "use_count", "enabled"},
-                null,
-                null,
-                null,
-                null,
-                "app_scope, pattern COLLATE NOCASE",
-                paginationLimit(safeLimit, safeOffset))) {
-            List<CorrectionRule> result = new ArrayList<>();
-            while (cursor.moveToNext()) result.add(readCorrection(cursor));
-            return result;
+                null, null, null, null, null)) {
+            while (cursor.moveToNext()) {
+                CorrectionRule correction = readCorrection(cursor);
+                if (matchesCorrection(correction, normalizedQuery)) matches.add(correction);
+            }
         }
+        matches.sort(Comparator
+                .comparing((CorrectionRule rule) -> identity(rule.appScope()))
+                .thenComparing(rule -> identity(rule.pattern())));
+        return page(matches, safeOffset, safeLimit);
     }
 
     public synchronized PersonalizationSnapshot snapshot(String appPackage) {
-        String scopeKey = identity(appPackage);
+        String scopeKey = scopeLookup(appPackage);
+        String globalScopeKey = scopeLookup("");
         List<PersonalTerm> terms = new ArrayList<>();
         String termSql = "SELECT id, canonical, pronunciation, aliases, app_scope, use_count, enabled "
-                + "FROM personal_terms WHERE enabled = 1 AND (app_scope_key = '' OR app_scope_key = ?) "
+                + "FROM personal_terms WHERE enabled = 1 AND app_scope_key IN (?, ?) "
                 + "ORDER BY CASE WHEN app_scope_key = ? THEN 0 ELSE 1 END, use_count DESC, id ASC LIMIT 80";
         try (Cursor cursor = getReadableDatabase().rawQuery(
-                termSql, new String[]{scopeKey, scopeKey})) {
+                termSql, new String[]{globalScopeKey, scopeKey, scopeKey})) {
             while (cursor.moveToNext()) terms.add(readTerm(cursor));
         }
 
         List<CorrectionRule> corrections = new ArrayList<>();
         String correctionSql = "SELECT id, pattern, replacement, app_scope, use_count, enabled "
-                + "FROM correction_rules WHERE enabled = 1 "
-                + "AND (app_scope = '' OR lower(app_scope) = lower(?)) "
-                + "ORDER BY CASE WHEN lower(app_scope) = lower(?) THEN 0 ELSE 1 END, "
+                + "FROM correction_rules WHERE enabled = 1 AND app_scope_key IN (?, ?) "
+                + "ORDER BY CASE WHEN app_scope_key = ? THEN 0 ELSE 1 END, "
                 + "use_count DESC, id ASC LIMIT 100";
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 correctionSql,
-                new String[]{appPackage == null ? "" : appPackage,
-                        appPackage == null ? "" : appPackage})) {
+                new String[]{globalScopeKey, scopeKey, scopeKey})) {
             while (cursor.moveToNext()) corrections.add(readCorrection(cursor));
         }
         return new PersonalizationSnapshot(List.copyOf(terms), List.copyOf(corrections));
@@ -414,6 +453,16 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         incrementUseCount("correction_rules", ids);
     }
 
+    /** Human-readable, bounded evidence shown after a deterministic personal rule is applied. */
+    public synchronized List<String> describeMatches(
+            List<Long> termIds,
+            List<Long> correctionIds) {
+        List<String> descriptions = new ArrayList<>();
+        appendTermDescriptions(descriptions, boundedPositiveIds(termIds, 80));
+        appendCorrectionDescriptions(descriptions, boundedPositiveIds(correctionIds, 100));
+        return List.copyOf(descriptions);
+    }
+
     public synchronized long addHistory(HistoryEntry entry) {
         ContentValues values = new ContentValues();
         values.put("created_at", entry.createdAt());
@@ -424,6 +473,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         values.put("raw_text", historyCipher.encrypt(limit(safe(entry.rawText()), 20_000)));
         values.put("final_text", historyCipher.encrypt(limit(safe(entry.finalText()), 20_000)));
         values.put("duration_ms", Math.max(0L, entry.durationMs()));
+        values.put("applied_rules", historyCipher.encrypt(limit(safe(entry.appliedRules()), 2_000)));
         long id = getWritableDatabase().insertOrThrow("dictation_history", null, values);
         getWritableDatabase().execSQL(
                 "DELETE FROM dictation_history WHERE id NOT IN "
@@ -442,7 +492,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         try (Cursor cursor = getReadableDatabase().query(
                 "dictation_history",
                 new String[]{"id", "created_at", "app_package", "field_kind", "mode", "backend",
-                        "raw_text", "final_text", "duration_ms"},
+                        "raw_text", "final_text", "duration_ms", "applied_rules"},
                 null,
                 null,
                 null,
@@ -459,7 +509,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         try (Cursor cursor = getReadableDatabase().query(
                 "dictation_history",
                 new String[]{"id", "created_at", "app_package", "field_kind", "mode", "backend",
-                        "raw_text", "final_text", "duration_ms"},
+                        "raw_text", "final_text", "duration_ms", "applied_rules"},
                 "id = ?",
                 new String[]{Long.toString(id)},
                 null,
@@ -771,16 +821,18 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 0, Math.min(values.size(), MAX_IMPORT_PREVIEW_SAMPLES)));
     }
 
-    private static ExistingImportState readExisting(SQLiteDatabase database) {
+    private ExistingImportState readExisting(SQLiteDatabase database) {
         Set<String> terms = new LinkedHashSet<>();
         int termCount = 0;
         try (Cursor cursor = database.query(
                 "personal_terms",
-                new String[]{"canonical_key", "app_scope_key"},
+                new String[]{"canonical", "app_scope"},
                 null, null, null, null, null)) {
             while (cursor.moveToNext()) {
                 termCount++;
-                terms.add(termIdentityFromKeys(cursor.getString(0), cursor.getString(1)));
+                terms.add(termIdentity(
+                        personalizationCipher.decryptOrLegacy(cursor.getString(0)),
+                        personalizationCipher.decryptOrLegacy(cursor.getString(1))));
             }
         }
 
@@ -788,17 +840,20 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         int correctionCount = 0;
         try (Cursor cursor = database.query(
                 "correction_rules",
-                new String[]{"identity_key"},
+                new String[]{"pattern", "replacement", "app_scope"},
                 null, null, null, null, null)) {
             while (cursor.moveToNext()) {
                 correctionCount++;
-                corrections.add(cursor.getString(0));
+                corrections.add(correctionIdentity(
+                        personalizationCipher.decryptOrLegacy(cursor.getString(0)),
+                        personalizationCipher.decryptOrLegacy(cursor.getString(1)),
+                        personalizationCipher.decryptOrLegacy(cursor.getString(2))));
             }
         }
         return new ExistingImportState(terms, corrections, termCount, correctionCount);
     }
 
-    private static final class SQLiteImportTransaction implements ImportTransaction {
+    private final class SQLiteImportTransaction implements ImportTransaction {
         private final SQLiteDatabase database;
 
         private SQLiteImportTransaction(SQLiteDatabase database) {
@@ -812,7 +867,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
 
         @Override
         public ExistingImportState readExisting() {
-            return PersonalizationStore.readExisting(database);
+            return PersonalizationStore.this.readExisting(database);
         }
 
         @Override
@@ -836,7 +891,7 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         }
     }
 
-    private static ContentValues termValues(
+    private ContentValues termValues(
             String canonical,
             String pronunciation,
             String aliases,
@@ -846,22 +901,22 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 canonical, pronunciation, aliases, appScope, enabled));
     }
 
-    private static ContentValues termValues(ImportTerm term) {
+    private ContentValues termValues(ImportTerm term) {
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
-        values.put("canonical", term.canonical());
-        values.put("canonical_key", identity(term.canonical()));
-        values.put("pronunciation", term.pronunciation());
-        values.put("aliases", term.aliases());
-        values.put("app_scope", term.appScope());
-        values.put("app_scope_key", identity(term.appScope()));
+        values.put("canonical", personalizationCipher.encrypt(term.canonical()));
+        values.put("canonical_key", canonicalLookup(term.canonical()));
+        values.put("pronunciation", personalizationCipher.encrypt(term.pronunciation()));
+        values.put("aliases", personalizationCipher.encrypt(term.aliases()));
+        values.put("app_scope", personalizationCipher.encrypt(term.appScope()));
+        values.put("app_scope_key", scopeLookup(term.appScope()));
         values.put("enabled", term.enabled() ? 1 : 0);
         values.put("created_at", now);
         values.put("updated_at", now);
         return values;
     }
 
-    private static ContentValues correctionValues(
+    private ContentValues correctionValues(
             String pattern,
             String replacement,
             String appScope,
@@ -869,13 +924,14 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         return correctionValues(new ImportCorrection(pattern, replacement, appScope, enabled));
     }
 
-    private static ContentValues correctionValues(ImportCorrection correction) {
+    private ContentValues correctionValues(ImportCorrection correction) {
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
-        values.put("pattern", correction.pattern());
-        values.put("replacement", correction.replacement());
-        values.put("app_scope", correction.appScope());
-        values.put("identity_key", correctionIdentity(
+        values.put("pattern", personalizationCipher.encrypt(correction.pattern()));
+        values.put("replacement", personalizationCipher.encrypt(correction.replacement()));
+        values.put("app_scope", personalizationCipher.encrypt(correction.appScope()));
+        values.put("app_scope_key", scopeLookup(correction.appScope()));
+        values.put("identity_key", correctionLookup(
                 correction.pattern(), correction.replacement(), correction.appScope()));
         values.put("enabled", correction.enabled() ? 1 : 0);
         values.put("created_at", now);
@@ -919,15 +975,22 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         }
     }
 
-    private static PersonalTerm readTerm(Cursor cursor) {
+    private PersonalTerm readTerm(Cursor cursor) {
         return new PersonalTerm(
-                cursor.getLong(0), cursor.getString(1), cursor.getString(2), cursor.getString(3),
-                cursor.getString(4), cursor.getInt(5), cursor.getInt(6) != 0);
+                cursor.getLong(0),
+                personalizationCipher.decryptOrLegacy(cursor.getString(1)),
+                personalizationCipher.decryptOrLegacy(cursor.getString(2)),
+                personalizationCipher.decryptOrLegacy(cursor.getString(3)),
+                personalizationCipher.decryptOrLegacy(cursor.getString(4)),
+                cursor.getInt(5), cursor.getInt(6) != 0);
     }
 
-    private static CorrectionRule readCorrection(Cursor cursor) {
+    private CorrectionRule readCorrection(Cursor cursor) {
         return new CorrectionRule(
-                cursor.getLong(0), cursor.getString(1), cursor.getString(2), cursor.getString(3),
+                cursor.getLong(0),
+                personalizationCipher.decryptOrLegacy(cursor.getString(1)),
+                personalizationCipher.decryptOrLegacy(cursor.getString(2)),
+                personalizationCipher.decryptOrLegacy(cursor.getString(3)),
                 cursor.getInt(4), cursor.getInt(5) != 0);
     }
 
@@ -936,7 +999,64 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
                 cursor.getLong(0), cursor.getLong(1), cursor.getString(2), cursor.getString(3),
                 cursor.getString(4), cursor.getString(5),
                 historyCipher.decryptOrLegacy(cursor.getString(6)),
-                historyCipher.decryptOrLegacy(cursor.getString(7)), cursor.getLong(8));
+                historyCipher.decryptOrLegacy(cursor.getString(7)), cursor.getLong(8),
+                historyCipher.decryptOrLegacy(cursor.getString(9)));
+    }
+
+    private void appendTermDescriptions(List<String> output, List<Long> ids) {
+        if (ids.isEmpty()) return;
+        try (Cursor cursor = getReadableDatabase().query(
+                "personal_terms",
+                new String[]{"canonical"},
+                "id IN (" + placeholders(ids.size()) + ")",
+                stringIds(ids),
+                null,
+                null,
+                "id ASC")) {
+            while (cursor.moveToNext()) {
+                output.add(personalizationCipher.decryptOrLegacy(cursor.getString(0)));
+            }
+        }
+    }
+
+    private void appendCorrectionDescriptions(List<String> output, List<Long> ids) {
+        if (ids.isEmpty()) return;
+        try (Cursor cursor = getReadableDatabase().query(
+                "correction_rules",
+                new String[]{"pattern", "replacement"},
+                "id IN (" + placeholders(ids.size()) + ")",
+                stringIds(ids),
+                null,
+                null,
+                "id ASC")) {
+            while (cursor.moveToNext()) {
+                output.add(personalizationCipher.decryptOrLegacy(cursor.getString(0))
+                        + " → "
+                        + personalizationCipher.decryptOrLegacy(cursor.getString(1)));
+            }
+        }
+    }
+
+    private static List<Long> boundedPositiveIds(List<Long> values, int maximum) {
+        if (values == null || values.isEmpty()) return List.of();
+        Set<Long> unique = new LinkedHashSet<>();
+        for (Long value : values) {
+            if (value != null && value > 0L) unique.add(value);
+            if (unique.size() >= maximum) break;
+        }
+        return List.copyOf(unique);
+    }
+
+    private static String placeholders(int count) {
+        return String.join(",", java.util.Collections.nCopies(count, "?"));
+    }
+
+    private static String[] stringIds(List<Long> values) {
+        String[] result = new String[values.size()];
+        for (int index = 0; index < values.size(); index++) {
+            result[index] = Long.toString(values.get(index));
+        }
+        return result;
     }
 
     private boolean migrateLegacyHistoryText(SQLiteDatabase database) {
@@ -980,6 +1100,79 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
             database.endTransaction();
         }
         return !legacyIds.isEmpty();
+    }
+
+    private boolean migrateLegacyPersonalization(SQLiteDatabase database) {
+        boolean[] changed = {false};
+        database.beginTransaction();
+        try {
+            try (Cursor cursor = database.query(
+                    "personal_terms",
+                    new String[]{"id", "canonical", "canonical_key", "pronunciation", "aliases",
+                            "app_scope", "app_scope_key"},
+                    null, null, null, null, null)) {
+                while (cursor.moveToNext()) {
+                    String canonicalStored = cursor.getString(1);
+                    String pronunciationStored = cursor.getString(3);
+                    String aliasesStored = cursor.getString(4);
+                    String scopeStored = cursor.getString(5);
+                    boolean protectedRow = personalizationCipher.isEncrypted(canonicalStored)
+                            && personalizationCipher.isEncrypted(pronunciationStored)
+                            && personalizationCipher.isEncrypted(aliasesStored)
+                            && personalizationCipher.isEncrypted(scopeStored)
+                            && lookupKey.isDigest(cursor.getString(2))
+                            && lookupKey.isDigest(cursor.getString(6));
+                    if (protectedRow) continue;
+                    String canonical = personalizationCipher.decryptOrLegacy(canonicalStored);
+                    String pronunciation = personalizationCipher.decryptOrLegacy(pronunciationStored);
+                    String aliases = personalizationCipher.decryptOrLegacy(aliasesStored);
+                    String scope = personalizationCipher.decryptOrLegacy(scopeStored);
+                    ContentValues values = new ContentValues();
+                    values.put("canonical", personalizationCipher.encrypt(canonical));
+                    values.put("canonical_key", canonicalLookup(canonical));
+                    values.put("pronunciation", personalizationCipher.encrypt(pronunciation));
+                    values.put("aliases", personalizationCipher.encrypt(aliases));
+                    values.put("app_scope", personalizationCipher.encrypt(scope));
+                    values.put("app_scope_key", scopeLookup(scope));
+                    database.update("personal_terms", values, "id = ?",
+                            new String[]{Long.toString(cursor.getLong(0))});
+                    changed[0] = true;
+                }
+            }
+            try (Cursor cursor = database.query(
+                    "correction_rules",
+                    new String[]{"id", "pattern", "replacement", "app_scope",
+                            "app_scope_key", "identity_key"},
+                    null, null, null, null, null)) {
+                while (cursor.moveToNext()) {
+                    String patternStored = cursor.getString(1);
+                    String replacementStored = cursor.getString(2);
+                    String scopeStored = cursor.getString(3);
+                    boolean protectedRow = personalizationCipher.isEncrypted(patternStored)
+                            && personalizationCipher.isEncrypted(replacementStored)
+                            && personalizationCipher.isEncrypted(scopeStored)
+                            && lookupKey.isDigest(cursor.getString(4))
+                            && lookupKey.isDigest(cursor.getString(5));
+                    if (protectedRow) continue;
+                    String pattern = personalizationCipher.decryptOrLegacy(patternStored);
+                    String replacement = personalizationCipher.decryptOrLegacy(replacementStored);
+                    String scope = personalizationCipher.decryptOrLegacy(scopeStored);
+                    ContentValues values = new ContentValues();
+                    values.put("pattern", personalizationCipher.encrypt(pattern));
+                    values.put("replacement", personalizationCipher.encrypt(replacement));
+                    values.put("app_scope", personalizationCipher.encrypt(scope));
+                    values.put("app_scope_key", scopeLookup(scope));
+                    values.put("identity_key", correctionLookup(pattern, replacement, scope));
+                    database.update("correction_rules", values, "id = ?",
+                            new String[]{Long.toString(cursor.getLong(0))});
+                    changed[0] = true;
+                }
+            }
+            database.setTransactionSuccessful();
+        } finally {
+            database.endTransaction();
+        }
+        return changed[0];
     }
 
     private static void truncateWriteAheadLog(SQLiteDatabase database) {
@@ -1026,6 +1219,38 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         // Android 8.0's SQLiteQueryBuilder rejects the newer "LIMIT n OFFSET m" spelling.
         // SQLite's equivalent "LIMIT offset,count" form passes every supported API validator.
         return offset + "," + limit;
+    }
+
+    private static boolean matchesTerm(PersonalTerm term, String query) {
+        if (query.isEmpty()) return true;
+        return identity(term.canonical()).contains(query)
+                || identity(term.pronunciation()).contains(query)
+                || identity(term.aliases()).contains(query)
+                || identity(term.appScope()).contains(query);
+    }
+
+    private static boolean matchesCorrection(CorrectionRule rule, String query) {
+        if (query.isEmpty()) return true;
+        return identity(rule.pattern()).contains(query)
+                || identity(rule.replacement()).contains(query)
+                || identity(rule.appScope()).contains(query);
+    }
+
+    private static <T> List<T> page(List<T> values, int offset, int limit) {
+        if (offset >= values.size()) return List.of();
+        return List.copyOf(values.subList(offset, Math.min(values.size(), offset + limit)));
+    }
+
+    private String canonicalLookup(String canonical) {
+        return lookupKey.digest("canonical", identity(canonical));
+    }
+
+    private String scopeLookup(String appScope) {
+        return lookupKey.digest("scope", identity(appScope));
+    }
+
+    private String correctionLookup(String pattern, String replacement, String appScope) {
+        return lookupKey.digest("correction", correctionIdentity(pattern, replacement, appScope));
     }
 
     private static String limit(String value, int maximum) {
