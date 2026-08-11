@@ -63,7 +63,7 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
         startRxBytes = TrafficStats.getUidRxBytes(Process.myUid());
         startTxBytes = TrafficStats.getUidTxBytes(Process.myUid());
         startThermalStatus = currentThermalStatus();
-        samplingTask = sampler.scheduleAtFixedRate(
+        samplingTask = sampler.scheduleWithFixedDelay(
                 this::sampleSafely,
                 250L,
                 250L,

@@ -1,6 +1,6 @@
 # Maintainer handoff
 
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 OpenTypeless is maintained at `dengxuezhao/opentypeless`. Desktop release numbering continues at
 1.2.0 above the inherited 1.1.x tag line. Android Voice Studio 0.3.0 is the live-composition and
@@ -35,6 +35,10 @@ Do not distribute the unsigned Android release APK. A public binary release addi
 - published SHA-256 checksums and signature verification;
 - signed/notarized desktop packages for each target platform;
 - successful GitHub Actions checks on the exact release commit.
+
+The release workflow derives the Android version and signed APK filename from Gradle's release
+metadata. It publishes `OpenTypeless-Android-<version>.apk`, the matching AAB, and a checksum file;
+artifact names must never be copied forward from an older Android release.
 
 The locked desktop runtime dependency inventory is generated with:
 

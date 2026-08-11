@@ -1,6 +1,7 @@
 package com.opentypeless.android;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -77,6 +78,7 @@ public final class VoiceLabActivity extends Activity {
     private boolean holding;
     private boolean recognitionActive;
     private boolean microphoneReady;
+    private boolean suppressTouchGeneratedClick;
     private long releaseAtMs;
     private long attemptGeneration;
     private long activeAttempt;
@@ -108,6 +110,7 @@ public final class VoiceLabActivity extends Activity {
         super.onSaveInstanceState(outState);
     }
 
+    @SuppressLint("ClickableViewAccessibility") // Touch release calls performClick; TalkBack has a click toggle.
     private View buildContent() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -146,6 +149,11 @@ public final class VoiceLabActivity extends Activity {
         holdButton.setBackgroundResource(R.drawable.ime_primary_key_background);
         holdButton.setTextColor(getColorStateList(R.color.ime_primary_key_text));
         holdButton.setEnabled(false);
+        holdButton.setOnClickListener(ignored -> {
+            if (suppressTouchGeneratedClick) return;
+            if (holding || recognitionActive) finishQuickCheck();
+            else beginQuickCheck();
+        });
         holdButton.setOnTouchListener(this::handleHoldGesture);
         root.addView(holdButton, matchWrapWithMargins(0, 14, 0, 6));
 
@@ -234,10 +242,21 @@ public final class VoiceLabActivity extends Activity {
             beginQuickCheck();
             return true;
         }
-        if (event.getActionMasked() == MotionEvent.ACTION_UP
-                || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+        if (event.getActionMasked() == MotionEvent.ACTION_UP) {
             finishQuickCheck();
-            view.performClick();
+            // Emit the normal accessibility click event without re-running the click-to-toggle
+            // fallback. TalkBack users can invoke that fallback directly with two double taps.
+            suppressTouchGeneratedClick = true;
+            try {
+                view.performClick();
+            } finally {
+                suppressTouchGeneratedClick = false;
+            }
+            return true;
+        }
+        if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            // A window/pointer cancellation is a normal endpoint, never an explicit discard.
+            finishQuickCheck();
             return true;
         }
         return true;
@@ -517,6 +536,10 @@ public final class VoiceLabActivity extends Activity {
         if (!microphoneReady || !recognitionActive) {
             holdButton.setText(R.string.voice_lab_hold_to_record);
         }
+        holdButton.setContentDescription(getString(
+                recognitionActive
+                        ? R.string.voice_lab_cd_finish_recording
+                        : R.string.voice_lab_cd_start_recording));
         permissionButton.setVisibility(permission ? View.GONE : View.VISIBLE);
     }
 
@@ -675,7 +698,7 @@ public final class VoiceLabActivity extends Activity {
     }
 
     private static boolean usesChinesePrompts(String language) {
-        String normalized = language == null ? "" : language.trim().toLowerCase();
+        String normalized = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty()) {
             return Locale.getDefault().getLanguage().equalsIgnoreCase("zh");
         }

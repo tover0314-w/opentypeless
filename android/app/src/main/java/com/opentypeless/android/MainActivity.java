@@ -1297,9 +1297,10 @@ public final class MainActivity extends Activity {
         RecognitionDiagnostics.Snapshot latest = recognitionDiagnosticsStore == null
                 ? null
                 : recognitionDiagnosticsStore.load();
-        boolean testPassed = latest != null
-                && latest.status() == RecognitionDiagnostics.Status.SUCCEEDED
-                && latest.finalCodePointCount() > 0;
+        boolean testPassed = savedSettings != null && SetupChecklist.successfulTestMatches(
+                savedSettings.recognitionBackend(),
+                savedSettings.language(),
+                latest);
         boolean complete = granted && enabled && selectedHere && backendReady && testPassed;
         permissionStatus.setText(complete
                 ? getString(R.string.setup_complete)

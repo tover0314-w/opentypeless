@@ -19,11 +19,10 @@
 - **词汇可迁移：**Android 既能导入早期 Android 个性化备份，也能导入桌面端 `opentypeless_dictionary` v1；Android 导出的兼容超集可由桌面端读取，同时为 Android 间往返保留别名、App 作用域和启用状态。
 - **只显式学习：**不会偷偷学习用户全部键盘输入。只有用户在词典页添加，或点击 **Teach** 并确认最小的“错词 → 正词”片段后，才会保存规则。
 - **事实保护与可逆 AI：**AI 输出会复核数字、金额、日期、网址、邮箱、代码形态 token、否定词和个人词。风险输出会被拦截并回退精确转写；插入后可安全 Undo，AI 听写还可一键恢复 Raw 原始转写。
-- **结果严格绑定输入目标：**每次录音都绑定 editor epoch、App、field、`InputConnection`、选区及光标前后文本指纹。切 App、切输入框、进入密码框、移动光标或改变选区后，旧结果不会写入新位置。
+- **结果严格绑定输入目标：**每次录音都绑定 editor epoch、App、field、`InputConnection`、选区及光标前后文本指纹。切 App、切输入框、进入密码框、移动光标或改变选区后，旧结果不会写入新位置；安全的未完成文字会进入可恢复草稿。
 - **本地隐私：**API Key 与可选历史正文分别使用 Android Keystore 不可导出的 AES-GCM 密钥；历史默认关闭，支持逐条删除/全部清空，有本地数量上限，也不会进入词典导出文件。
 - **按 App 配置：**可显式设置每个 App 的 Auto/Exact/Smart/Translate 模式、翻译目标、写作偏好，以及是否允许发送有限的光标前上下文。
-- **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手结束；Android 后端使用原生 partial result，本地 SenseVoice 每 0.75 秒重识别有界前缀并在编辑框中原位修订。最终结果会再走完整识别、个人规则和“只可改标点、不可改词或数字”的安全门。上传型后端支持静音自动停录、开头静音裁剪、持久取消令牌和录音上限。
-  Paraformer 会返回增量结果；Android 系统后端会请求 partial，但系统提供方可能只返回 final。全部路径保留取消令牌和录音上限，流式路径使用有界采集。Android 允许时，设置页会显示默认语音服务包名/版本及设备端 API 是否真实可用。
+- **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手上屏；独立的“长文”操作用于持续听写。Android 后端使用原生 partial，Paraformer 提供真流式增量结果；隔离进程中的 SenseVoice 质量路线与 OpenAI 兼容 WAV 路线会明确标为 final-only。最终结果会再走个人规则和“只可改标点、不可改词或数字”的安全门。全部路径保留取消令牌、录音上限和有界采集。Android 允许时，设置页会显示默认语音服务包名/版本及设备端 API 是否真实可用。
 
 APK 不内置任何语音或语言模型。许可证说明见 [Android 第三方声明](android/THIRD_PARTY_NOTICES.md)。首个 189.85 MiB Zipformer 已被否决；第二轮在完整 1,315 条 ASCEND test 上测试了 SenseVoice 与 Paraformer。SenseVoice 达到普通话 CER 11.4%、英文 WER 25.9%、中英混说 MER 13.3%，并通过 API 36 arm64 的真实下载与原生识别烟测。现在使用经校验的 ASR-only 双 ABI 运行时，干净构建的通用 debug APK 已从上游全功能包的约 120 MiB 降到 52.54 MiB；但约 457 MiB 瞬时峰值仍使它不适合直接称为全设备默认。同体积档的 Paraformer Large 与 Whisper Small Q5_1 也已实测并被否决为中英默认。用户明确设置 `zh-*` 或 `cmn-*` 时，现在会启用 SenseVoice 普通话锁定；固定 A/B 将公开集普通话 CER 从 10.59% 降至 10.01%、混说 MER 从 20.37% 降至 18.31%。英文保持自动检测，因为强制 `en` 反而退化。详见
 [第二轮离线模型评测](docs/2026-08-09-offline-asr-candidate-round-2.md)和
@@ -58,7 +57,7 @@ APK 不内置任何语音或语言模型。许可证说明见 [Android 第三方
 2. 打开 **OpenTypeless Voice Studio**，授予麦克风权限，并确认识别路径。只有平台报告可用时，才会默认选择设备端。
 3. 可选下载质量优先离线模型，或配置批处理 BYOK STT、百炼 Paraformer 真流式识别和 LLM。AI、历史、光标前上下文默认全部关闭。
 4. 启用 OpenTypeless IME。若要使用任一 Android 标准语音入口，先配置可用的 BYOK STT，显式开启“Android 标准语音入口”，并把调用方的准确包名加入白名单；之后再把 OpenTypeless 选为语音识别服务，或由该白名单 App 启动其 `RecognizerIntent` Activity。部分闭源键盘会硬编码自家语音服务，此时使用独立 IME 或系统键盘切换。
-5. 选择 Auto、Exact、Smart 或 Translate 后，可点“开始说话”，也可按住空格说话、松手结束。本地实时文字是可修订的临时 composing text，最终识别会原位替换它；编辑选中文字时，结果返回前必须仍是同一个选区。
+5. 选择 Auto、Exact、Smart 或 Translate 后，可按住空格说短句、松手上屏；长文本使用独立的“长文”操作并明确结束。支持 partial 的路线会把实时文字作为可修订的 composing text，最终识别原位替换它；final-only 路线不会伪装成实时。编辑选中文字时，结果返回前必须仍是同一个选区。
 
 两个导出的标准语音入口都只使用用户明确配置的 BYOK/流式 STT，并且默认关闭；包名白名单与请求限流可以阻止任意拥有麦克风权限的 App 消耗用户的 provider 配额。注册为系统语音服务后若再次调用系统 recognizer，可能解析回自己。独立 IME 支持 OpenTypeless 离线、设备端、系统服务、批处理 BYOK 和 Paraformer 真流式五种后端。
 
@@ -86,7 +85,7 @@ python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-as
 [小米 15 Voice Core P0 真机矩阵](docs/2026-08-11-xiaomi15-p0-acceptance.md)是当前物理验收依据；
 [0.2 验收报告](docs/2026-08-09-byok-android-acceptance.md)保留为历史基线。
 
-本地生成的 release APK 默认未签名；没有完成签名和校验和发布前，不应把它当成可信正式包分发。
+本地生成的 release APK 默认未签名；没有完成签名和校验和发布前，不应把它当成可信正式包分发。正式发布工作流从 Gradle 元数据读取版本，并生成 `OpenTypeless-Android-<version>` APK、AAB 与校验和，避免误发写死的旧版本文件名。
 
 ## 桌面端
 

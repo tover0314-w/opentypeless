@@ -202,6 +202,22 @@ system and streaming providers also own audio outside this journal. Closing that
 window requires a chunk-authenticated PCM spool plus a recoverable background job, and must be
 evaluated for I/O, battery, and microphone-dropout cost on Xiaomi 15 before it can become a default.
 
+## Implemented P0 batch 4
+
+- first-run completion now accepts only a non-empty successful test from the currently saved
+  backend and language; an older successful diagnostic cannot make a newly changed route appear
+  ready;
+- Voice Lab's hold control exposes a stateful TalkBack click action in addition to the press/release
+  gesture, reports start/finish semantics dynamically, retains a 48 dp target, and treats pointer
+  cancellation as a normal finish rather than a silent discard;
+- performance sampling uses fixed-delay scheduling so a slow memory/thermal sample cannot queue a
+  burst of catch-up work on a constrained phone;
+- the release workflow reads Android `versionName` and the signed APK name from Gradle metadata,
+  validates both, and publishes matching APK/AAB/checksum artifacts instead of a hard-coded older
+  version;
+- the current local gate passes 253 JVM tests, 27 API 36 instrumentation tests with one explicit
+  real-model skip, Debug/Release lint with no issues, APK assembly, and AAB bundling.
+
 ## Initial release gates
 
 - each short prompt succeeds at least 19/20 times on Xiaomi 15 for every shipping route;

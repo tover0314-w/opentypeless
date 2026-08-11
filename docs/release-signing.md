@@ -34,8 +34,10 @@ Android:
 - `ANDROID_KEY_PASSWORD`
 
 The release workflow refuses to publish Android without all four signing secrets. It verifies the
-APK and AAB signatures and publishes a SHA-256 checksum file. Local builds remain unsigned unless
-the corresponding `ANDROID_KEYSTORE_*` environment variables are supplied.
+APK and AAB signatures, reads the release version and APK filename from Gradle's output metadata,
+and publishes `OpenTypeless-Android-<version>` APK/AAB assets plus a SHA-256 checksum file. Local
+builds remain unsigned unless the corresponding `ANDROID_KEYSTORE_*` environment variables are
+supplied.
 
 ## Third-Party License Material
 

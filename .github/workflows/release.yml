@@ -301,18 +301,59 @@ jobs:
       - name: Verify signatures and create checksums
         shell: bash
         run: |
-          APK="android/app/build/outputs/apk/release/app-release.apk"
+          METADATA="android/app/build/outputs/apk/release/output-metadata.json"
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          test -f "$METADATA"
+          ANDROID_ARTIFACT_METADATA="$RUNNER_TEMP/opentypeless-android-artifact.txt"
+          python3 - "$METADATA" > "$ANDROID_ARTIFACT_METADATA" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          metadata_path = pathlib.Path(sys.argv[1])
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          elements = metadata.get("elements", [])
+          if metadata.get("variantName") != "release" or len(elements) != 1:
+              raise SystemExit("Expected exactly one Android release APK artifact")
+          element = elements[0]
+          version_name = element.get("versionName")
+          output_file = element.get("outputFile")
+          if not isinstance(version_name, str) or not isinstance(output_file, str):
+              raise SystemExit("Android release metadata is missing versionName or outputFile")
+          output_path = pathlib.PurePosixPath(output_file)
+          if (
+              output_path.name != output_file
+              or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", output_file)
+          ):
+              raise SystemExit("Android release metadata contains an unsafe outputFile")
+          print(f"{version_name}|{output_file}")
+          PY
+          IFS='|' read -r ANDROID_VERSION ANDROID_OUTPUT < "$ANDROID_ARTIFACT_METADATA"
+          test -n "$ANDROID_VERSION"
+          test -n "$ANDROID_OUTPUT"
+          APK="$(dirname "$METADATA")/$ANDROID_OUTPUT"
+          if [[ ! "$ANDROID_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Unsafe Android version name: $ANDROID_VERSION"
+            exit 1
+          fi
           test -f "$APK"
           test -f "$AAB"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -n "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           jarsigner -verify -strict "$AAB"
-          cp "$APK" OpenTypeless-Android-0.2.0.apk
-          cp "$AAB" OpenTypeless-Android-0.2.0.aab
-          sha256sum OpenTypeless-Android-0.2.0.apk OpenTypeless-Android-0.2.0.aab \
-            > OpenTypeless-Android-0.2.0-SHA256SUMS.txt
+          ASSET_DIR="$RUNNER_TEMP/opentypeless-android-release"
+          ASSET_PREFIX="OpenTypeless-Android-$ANDROID_VERSION"
+          mkdir -p "$ASSET_DIR"
+          cp "$APK" "$ASSET_DIR/$ASSET_PREFIX.apk"
+          cp "$AAB" "$ASSET_DIR/$ASSET_PREFIX.aab"
+          (
+            cd "$ASSET_DIR"
+            sha256sum "$ASSET_PREFIX.apk" "$ASSET_PREFIX.aab" \
+              > "$ASSET_PREFIX-SHA256SUMS.txt"
+          )
+          printf 'ANDROID_RELEASE_ASSET_DIR=%s\n' "$ASSET_DIR" >> "$GITHUB_ENV"
 
       - name: Publish signed Android artifacts
         shell: bash
@@ -324,6 +365,4 @@ jobs:
             gh release create "$TAG_NAME" --repo dengxuezhao/opentypeless --prerelease \
               --title "OpenTypeless $TAG_NAME" --notes "See the signed assets below."
           gh release upload "$TAG_NAME" --repo dengxuezhao/opentypeless --clobber \
-            OpenTypeless-Android-0.2.0.apk \
-            OpenTypeless-Android-0.2.0.aab \
-            OpenTypeless-Android-0.2.0-SHA256SUMS.txt
+            "$ANDROID_RELEASE_ASSET_DIR"/*

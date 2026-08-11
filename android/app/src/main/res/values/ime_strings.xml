@@ -9,7 +9,6 @@
     <string name="ime_key_undo">Undo</string>
     <string name="ime_key_raw">Raw</string>
     <string name="ime_key_teach">Teach</string>
-    <string name="ime_key_cancel">Cancel</string>
     <string name="ime_key_app_profile">App profile</string>
     <string name="ime_key_dictionary">Personal dictionary</string>
     <string name="ime_key_settings">Settings</string>
@@ -46,8 +45,6 @@
     <string name="ime_transcript_preparing">Preparing microphone…</string>
     <string name="ime_transcript_listening">Listening…</string>
 
-    <string name="ime_cd_start_voice_input">Start voice input</string>
-    <string name="ime_cd_stop_voice_recording">Stop voice recording</string>
     <string name="ime_cd_delete">Delete</string>
     <string name="ime_cd_space_hold_to_talk">Insert space; touch and hold for voice input</string>
     <string name="ime_cd_space_sensitive">Insert space; voice input is unavailable in this sensitive field</string>
@@ -55,11 +52,6 @@
     <string name="ime_cd_enter">Enter or perform the editor action</string>
     <string name="ime_cd_switch_keyboard">Switch keyboard</string>
     <string name="ime_cd_undo">Undo the last voice insertion</string>
-    <string name="ime_cd_restore_raw">Restore the raw transcript</string>
-    <string name="ime_cd_teach">Teach an explicit correction</string>
-    <string name="ime_cd_cancel">Cancel voice input</string>
-    <string name="ime_cd_app_profile">Configure voice behavior for this app</string>
-    <string name="ime_cd_settings">Open OpenTypeless settings</string>
     <string name="ime_cd_choose_mode">Choose the voice processing mode</string>
     <string name="ime_cd_choose_mode_current">Voice processing mode: %1$s. Double tap to choose another mode</string>
     <string name="ime_cd_start_long_dictation">Start continuous long-text dictation</string>
@@ -124,7 +116,6 @@
     <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
     <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
     <string name="ime_status_session_active">Another voice session is already active</string>
-    <string name="ime_status_live_composition_rejected">The app cannot display a live transcript in this field; voice input was cancelled</string>
     <string name="ime_status_live_composition_fallback">This field cannot show live text; the preview remains in OpenTypeless until final insertion</string>
     <string name="ime_status_composition_cleanup_failed">The app stopped voice input but could not confirm removal of the live draft; check the field before continuing</string>
     <string name="ime_status_composition_preserve_uncertain">Voice input stopped, but the app could not confirm that the visible draft was finalized; check the field</string>
@@ -133,9 +124,7 @@
     <string name="ime_status_selection_too_long">The selected text is too long; select at most 4,000 characters</string>
     <string name="ime_status_selection_unavailable">The app did not expose the selected text; voice editing was not started</string>
     <string name="ime_status_selection_unknown">The app did not expose a safe cursor or selection state; voice input was not started</string>
-    <string name="ime_status_target_changed_discarded">Input target changed; the result was discarded for safety</string>
     <string name="ime_status_target_changed_preserved">Input target changed; stopped listening and kept the visible draft</string>
-    <string name="ime_status_no_text">No text was produced</string>
     <string name="ime_status_empty_final_partial_preserved">The final result was empty; kept the last visible draft</string>
     <string name="ime_status_result_connection_failed">The text connection failed; verify whether the result was inserted</string>
     <string name="ime_status_result_rejected">The app rejected the voice result</string>
@@ -163,7 +152,6 @@
     <string name="ime_status_finish_before_mode_change">Finish or cancel the current recording before changing mode</string>
     <string name="ime_status_mode_selected">%1$s mode selected</string>
     <string name="ime_status_ready_mode">Ready · %1$s mode</string>
-    <string name="ime_status_cursor_moved_cancelled">Cursor moved; voice input was cancelled for safety</string>
     <string name="ime_status_cursor_moved_preserved">Cursor moved; stopped listening and kept the visible draft</string>
     <string name="ime_status_voice_input_failed">Voice input failed</string>
     <string name="ime_status_listening">Listening…</string>

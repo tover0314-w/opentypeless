@@ -4,8 +4,6 @@
     <string name="ime_name">OpenTypeless 语音键盘</string>
     <string name="ime_subtype_en">OpenTypeless 多语言语音输入</string>
     <string name="status_ready">就绪</string>
-    <string name="action_speak">🎙 开始说话</string>
-    <string name="action_stop">■ 停止</string>
     <string name="recognition_status_preparing">正在准备语音识别…</string>
     <string name="recognition_status_microphone_required">需要麦克风权限</string>
     <string name="recognition_status_listening">正在聆听…</string>
@@ -151,8 +149,6 @@
     <string name="grant_microphone">1. 授予麦克风权限</string>
     <string name="enable_keyboard">2. 启用 OpenTypeless 键盘</string>
     <string name="choose_keyboard">3. 切换到 OpenTypeless 键盘</string>
-    <string name="microphone_granted">✓ 已授予麦克风权限</string>
-    <string name="microphone_required">使用语音输入前需要麦克风权限</string>
     <string name="microphone_already_granted">已经授予麦克风权限</string>
 
     <string name="voice_lab_title">语音实验室 · 快速检查</string>
@@ -162,6 +158,8 @@
     <string name="voice_lab_backend_not_ready">请先保存完整的语音识别配置，再测试此路线。</string>
     <string name="voice_lab_prompt_value">请说：“%1$s”</string>
     <string name="voice_lab_hold_to_record">按住录音</string>
+    <string name="voice_lab_cd_start_recording">开始语音实验室录音；再次双击即可结束。</string>
+    <string name="voice_lab_cd_finish_recording">结束语音实验室录音并进行评估。</string>
     <string name="voice_lab_release_to_finish">正在听 · 松手完成</string>
     <string name="voice_lab_grant_microphone">授予麦克风权限</string>
     <string name="voice_lab_permission_required">快速检查需要麦克风权限。</string>
@@ -169,7 +167,6 @@
     <string name="voice_lab_live_waiting">实时转写：正在等待语音…</string>
     <string name="voice_lab_live_value">实时转写：%1$s</string>
     <string name="voice_lab_final_empty">最终转写：—</string>
-    <string name="voice_lab_final_value">最终转写：%1$s</string>
     <string name="voice_lab_final_scored_value">最终转写：%1$s\n%2$s %3$s · %4$s</string>
     <string name="voice_lab_score_exact">字词完全一致</string>
     <string name="voice_lab_score_differs">与测试短句有差异</string>
@@ -244,9 +241,6 @@
     <string name="edit_app_profile">编辑</string>
     <string name="edit_app_profile_description">编辑 %1$s 的配置</string>
     <string name="app_profile_save_failed">无法保存 App 配置</string>
-    <string name="mode_selected_visual">✓ %1$s</string>
-    <string name="mode_accessibility">%1$s语音模式%2$s</string>
-    <string name="mode_accessibility_selected">，已选择</string>
 
     <string name="dictionary_title">个人词典</string>
     <string name="dictionary_intro">只会学习你添加或明确确认的词和规则。App 作用域可选，可填写 Android 包名把规则限制到一个 App。</string>

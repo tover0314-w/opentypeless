@@ -4,8 +4,6 @@
     <string name="ime_name">OpenTypeless Voice Keyboard</string>
     <string name="ime_subtype_en">OpenTypeless multilingual voice input</string>
     <string name="status_ready">Ready</string>
-    <string name="action_speak">🎙 Speak</string>
-    <string name="action_stop">■ Stop</string>
     <string name="recognition_status_preparing">Preparing speech recognition…</string>
     <string name="recognition_status_microphone_required">Microphone access is required</string>
     <string name="recognition_status_listening">Listening…</string>
@@ -167,9 +165,6 @@
     <string name="edit_app_profile">Edit</string>
     <string name="edit_app_profile_description">Edit profile for %1$s</string>
     <string name="app_profile_save_failed">Unable to save app profile</string>
-    <string name="mode_selected_visual">✓ %1$s</string>
-    <string name="mode_accessibility">%1$s voice mode%2$s</string>
-    <string name="mode_accessibility_selected">, selected</string>
     <string name="section_enable_keyboard">Get started</string>
     <string name="setup_status_summary">%1$s Microphone permission\n%2$s Keyboard enabled\n%3$s OpenTypeless selected\n%4$s Recognition route saved\n%5$s Successful voice test</string>
     <string name="setup_complete">✓ Setup complete: the keyboard, saved route, and a successful voice test are ready.</string>
@@ -178,8 +173,6 @@
     <string name="grant_microphone">1. Grant microphone permission</string>
     <string name="enable_keyboard">2. Enable OpenTypeless keyboard</string>
     <string name="choose_keyboard">3. Select OpenTypeless keyboard</string>
-    <string name="microphone_granted">✓ Microphone permission granted</string>
-    <string name="microphone_required">Microphone permission is required before voice input</string>
     <string name="microphone_already_granted">Microphone permission is already granted</string>
 
     <string name="voice_lab_title">Voice Lab · Quick Check</string>
@@ -189,6 +182,8 @@
     <string name="voice_lab_backend_not_ready">Save a complete recognition configuration before testing this route.</string>
     <string name="voice_lab_prompt_value">Say: “%1$s”</string>
     <string name="voice_lab_hold_to_record">Hold to record</string>
+    <string name="voice_lab_cd_start_recording">Start the Voice Lab recording. Double tap again to finish.</string>
+    <string name="voice_lab_cd_finish_recording">Finish the Voice Lab recording and evaluate it.</string>
     <string name="voice_lab_release_to_finish">Listening · release to finish</string>
     <string name="voice_lab_grant_microphone">Grant microphone permission</string>
     <string name="voice_lab_permission_required">Microphone permission is required for the quick check.</string>
@@ -196,7 +191,6 @@
     <string name="voice_lab_live_waiting">Live transcript: waiting for speech…</string>
     <string name="voice_lab_live_value">Live transcript: %1$s</string>
     <string name="voice_lab_final_empty">Final transcript: —</string>
-    <string name="voice_lab_final_value">Final transcript: %1$s</string>
     <string name="voice_lab_final_scored_value">Final transcript: %1$s\n%2$s %3$s · %4$s</string>
     <string name="voice_lab_score_exact">exact lexical match</string>
     <string name="voice_lab_score_differs">differs from the prompt</string>

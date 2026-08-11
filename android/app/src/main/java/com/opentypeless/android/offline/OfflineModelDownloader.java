@@ -176,7 +176,7 @@ public final class OfflineModelDownloader {
                 connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
                 connection.setReadTimeout(READ_TIMEOUT_MS);
                 connection.setRequestProperty("Accept", "application/octet-stream");
-                connection.setRequestProperty("User-Agent", "OpenTypeless-Android/0.2");
+                connection.setRequestProperty("User-Agent", "OpenTypeless-Android/0.3");
                 if (existing > 0) connection.setRequestProperty("Range", "bytes=" + existing + "-");
                 int code = connection.getResponseCode();
                 if (code >= 300 && code < 400) {

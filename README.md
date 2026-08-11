@@ -48,20 +48,20 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   one-tap Raw restore.
 - **Target-bound IME commits:** every recording is bound to the exact editor epoch, app, field,
   `InputConnection`, selection, and text around the cursor. Switching apps, fields, selections,
-  password fields, or cursor position cancels or discards the old result.
+  password fields, or cursor position never redirects an old result; safe unfinished text remains
+  available as a recoverable draft.
 - **Private local state:** API keys and opt-in history text use separate non-exportable Android
   Keystore AES-GCM keys. History is off by default, can be deleted entry-by-entry or all at once,
   is capped locally, and is never included in dictionary export.
 - **Per-app behavior:** an explicit app profile can choose Auto, Exact, Smart, or Translate mode,
   a target language, a writing preference, and whether limited preceding context may be sent.
-- **Voice UX:** tap Space for a space, or hold it to talk and release to stop. Android recognizers
-  use native partials; local SenseVoice re-decodes a bounded prefix every 750 ms and revises
-  composing text in place. The authoritative final pass then applies personal rules and accepts
-  ITN punctuation only when no word or number changed. Upload capture retains silence auto-stop,
-  leading-silence trim, cancellation tokens, bounded streaming capture, and an upper recording
-  limit. Paraformer supplies incremental results; Android recognizers are asked for partials but
-  may return only a final result. Settings show the configured Android speech service identity and
-  on-device API availability where Android exposes them.
+- **Voice UX:** tap Space for a space, or hold it to talk and release to finish. Use the separate
+  Long action for continuous dictation. Android recognizers use native partials and Paraformer
+  supplies true incremental results; the isolated SenseVoice quality route and OpenAI-compatible
+  WAV route are explicitly final-only. The authoritative final pass applies personal rules and
+  accepts ITN punctuation only when no word or number changed. Capture paths retain cancellation
+  tokens, bounded recording, and an upper recording limit. Settings show the configured Android
+  speech service identity and on-device API availability where Android exposes them.
 
 No model weights are bundled. See [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
 The first 189.85 MiB Zipformer was rejected. The next round tested SenseVoice and Paraformer on all
@@ -169,7 +169,9 @@ The [0.2 acceptance report](docs/2026-08-09-byok-android-acceptance.md) remains 
 baseline.
 
 The release build produced by a local checkout is unsigned unless a signing configuration is
-provided. Never distribute it as a trusted release without signing and publishing checksums.
+provided. Never distribute it as a trusted release without signing and publishing checksums. The
+release workflow derives `OpenTypeless-Android-<version>` artifact names from Gradle metadata so an
+older hard-coded Android version cannot be published accidentally.
 
 ## Desktop
 

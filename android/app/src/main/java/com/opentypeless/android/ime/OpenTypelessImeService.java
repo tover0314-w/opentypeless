@@ -2598,10 +2598,8 @@ public final class OpenTypelessImeService extends InputMethodService {
         button.setSingleLine(true);
         button.setGravity(Gravity.CENTER);
         button.setTextSize(13);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            button.setAutoSizeTextTypeUniformWithConfiguration(
-                    9, 13, 1, TypedValue.COMPLEX_UNIT_SP);
-        }
+        button.setAutoSizeTextTypeUniformWithConfiguration(
+                9, 13, 1, TypedValue.COMPLEX_UNIT_SP);
         button.setMinWidth(dp(weight >= 2f ? 96 : 48));
         button.setMinHeight(dp(48));
         button.setMinimumHeight(dp(48));
