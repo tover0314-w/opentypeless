@@ -21,6 +21,17 @@ public final class WavEncoderTest {
     }
 
     @Test
+    public void encodesShortSamplesDirectlyWithoutChangingTheirBits() {
+        byte[] wav = WavEncoder.pcm16Mono(
+                new short[]{(short) 0x1234, (short) 0xfedc}, 16_000);
+
+        assertEquals(48, wav.length);
+        assertArrayEquals(
+                new byte[]{0x34, 0x12, (byte) 0xdc, (byte) 0xfe},
+                slice(wav, 44, 48));
+    }
+
+    @Test
     public void rejectsPartialPcm16Sample() {
         assertThrows(IllegalArgumentException.class,
                 () -> WavEncoder.pcm16Mono(new byte[]{1}, 16_000));

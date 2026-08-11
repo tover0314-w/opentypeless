@@ -97,8 +97,8 @@ architecture are P0. Brand illustration, richer waveform motion, and decorative 
   first connector;
 - encrypted offline action outbox, retry, result receipt, and undo when the destination supports it;
 - complete Voice Lab A/B using one recorded take replayed across compatible routes;
-- a lightweight native-streaming local model for partials, with SenseVoice as an optional final
-  second pass;
+- Xiaomi 15 performance/thermal tuning and corpus acceptance for the implemented offline
+  Streaming Paraformer first pass + SenseVoice quality-final handoff;
 - reviewed learning suggestions derived from raw ASR, final result, and explicit user correction;
 - optional user-controlled synchronization of vocabulary and rules.
 
@@ -120,6 +120,13 @@ Two release-authority items remain intentionally open rather than being inferred
 
 Those are distinct from the SiYuan action slot and richer connectors, which remain P1 product
 differentiation and must not delay correctness of ordinary dictation.
+
+Speech Core v2 is now the engineering APK's default local-offline keyboard route, with v1 retained
+only as an explicit emergency rollback. The exact current Streaming Paraformer public run produced
+1,682 changed hypotheses but zero earlier-text rewrites, so the product does not falsely attribute
+that capability to the first-pass model: safe earlier revisions come from the segmented
+quality/punctuation/personalization pipeline. The remaining P0 release slice is Xiaomi 15 physical
+validation and tuning of this real v2 route, not another callback patch on v1.
 
 ## Long-term evolution
 

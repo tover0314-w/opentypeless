@@ -26,6 +26,7 @@ final class VoiceCompositionSession {
     private long latestSequence;
     private String composingText = "";
     private boolean liveUpdatesEnabled = true;
+    private boolean committedFallback;
 
     VoiceCompositionSession(
             InputConnection connection,
@@ -52,7 +53,7 @@ final class VoiceCompositionSession {
     }
 
     ApplyResult apply(TranscriptUpdate update) {
-        if (!enabled() || update.finalResult()) return ApplyResult.DISABLED;
+        if (!enabled()) return ApplyResult.DISABLED;
         if (update.sequence() <= latestSequence) return ApplyResult.STALE;
         String replacement = update.text();
         if (replacement.isBlank()) {
@@ -64,12 +65,16 @@ final class VoiceCompositionSession {
             return ApplyResult.UNCHANGED;
         }
 
+        if (committedFallback) {
+            return applyCommittedRevision(update.sequence(), replacement);
+        }
+
         int expectedEnd = originalSelectionStart + replacement.length();
         rememberExpectedSelection(expectedEnd);
         try {
             if (!connection.setComposingText(replacement, 1)) {
                 expectedSelectionEnds.removeLastOccurrence(expectedEnd);
-                return ApplyResult.REJECTED;
+                return commitFallbackRevision(update.sequence(), replacement);
             }
         } catch (RuntimeException ignored) {
             expectedSelectionEnds.removeLastOccurrence(expectedEnd);
@@ -104,6 +109,12 @@ final class VoiceCompositionSession {
     /** Replaces the owned composing range with the accepted final text. */
     boolean commitFinal(String finalText) {
         if (!ownsComposition()) return false;
+        if (committedFallback) {
+            MutationResult result = replaceCommittedText(finalText == null ? "" : finalText);
+            if (result != MutationResult.APPLIED) return false;
+            discardState();
+            return true;
+        }
         try {
             if (!connection.commitText(finalText == null ? "" : finalText, 1)) return false;
         } catch (RuntimeException ignored) {
@@ -119,6 +130,12 @@ final class VoiceCompositionSession {
      */
     boolean preserve() {
         if (!ownsComposition()) {
+            discardState();
+            return true;
+        }
+        if (committedFallback) {
+            // The compatibility preview is already committed in the editor. Detaching only drops
+            // our ownership; it must never append or delete text during a lifecycle transition.
             discardState();
             return true;
         }
@@ -145,9 +162,14 @@ final class VoiceCompositionSession {
         String ownedText = composingText;
         boolean removed;
         try {
-            removed = connection.setComposingText("", 1);
-            if (!removed) removed = connection.commitText("", 1);
-            if (removed) connection.finishComposingText();
+            if (committedFallback) {
+                removed = connection.deleteSurroundingTextInCodePoints(
+                        ownedText.codePointCount(0, ownedText.length()), 0);
+            } else {
+                removed = connection.setComposingText("", 1);
+                if (!removed) removed = connection.commitText("", 1);
+                if (removed) connection.finishComposingText();
+            }
             CharSequence remaining = removed
                     ? connection.getTextBeforeCursor(ownedText.length(), 0)
                     : null;
@@ -163,7 +185,94 @@ final class VoiceCompositionSession {
         composingText = "";
         expectedSelectionEnds.clear();
         liveUpdatesEnabled = false;
+        committedFallback = false;
     }
+
+    /**
+     * Some OEM/editor pairs explicitly reject composing spans. In that case, keep the live text
+     * in the host field as a replaceable committed draft. Every later revision first removes only
+     * the exact draft owned by this session; target fingerprints are revalidated by the IME before
+     * this method is called.
+     */
+    private ApplyResult commitFallbackRevision(long sequence, String replacement) {
+        int expectedEnd = originalSelectionStart + replacement.length();
+        rememberExpectedSelection(expectedEnd);
+        try {
+            // If an earlier composing revision exists, commitText replaces that composition. If
+            // this is the first revision, it inserts the new compatibility draft at the cursor.
+            if (!connection.commitText(replacement, 1)) {
+                expectedSelectionEnds.removeLastOccurrence(expectedEnd);
+                return ApplyResult.REJECTED;
+            }
+        } catch (RuntimeException ignored) {
+            expectedSelectionEnds.removeLastOccurrence(expectedEnd);
+            return ApplyResult.CONNECTION_ERROR;
+        }
+        latestSequence = sequence;
+        composingText = replacement;
+        committedFallback = true;
+        return ApplyResult.APPLIED;
+    }
+
+    private ApplyResult applyCommittedRevision(long sequence, String replacement) {
+        int expectedEnd = originalSelectionStart + replacement.length();
+        rememberExpectedSelection(expectedEnd);
+        MutationResult result = replaceCommittedText(replacement);
+        if (result != MutationResult.APPLIED) {
+            expectedSelectionEnds.removeLastOccurrence(expectedEnd);
+            return result == MutationResult.REJECTED
+                    ? ApplyResult.REJECTED
+                    : ApplyResult.CONNECTION_ERROR;
+        }
+        latestSequence = sequence;
+        composingText = replacement;
+        return ApplyResult.APPLIED;
+    }
+
+    private MutationResult replaceCommittedText(String replacement) {
+        String previous = composingText;
+        int previousCodePoints = previous.codePointCount(0, previous.length());
+        boolean deleted = false;
+        boolean batchStarted = false;
+        try {
+            batchStarted = connection.beginBatchEdit();
+            if (!connection.deleteSurroundingTextInCodePoints(previousCodePoints, 0)) {
+                return MutationResult.REJECTED;
+            }
+            deleted = true;
+            if (connection.commitText(replacement, 1)) return MutationResult.APPLIED;
+            if (connection.commitText(previous, 1)) return MutationResult.REJECTED;
+            composingText = "";
+            committedFallback = false;
+            expectedSelectionEnds.clear();
+            return MutationResult.CONNECTION_ERROR;
+        } catch (RuntimeException ignored) {
+            if (deleted) {
+                try {
+                    if (!connection.commitText(previous, 1)) {
+                        composingText = "";
+                        committedFallback = false;
+                        expectedSelectionEnds.clear();
+                    }
+                } catch (RuntimeException rollbackIgnored) {
+                    composingText = "";
+                    committedFallback = false;
+                    expectedSelectionEnds.clear();
+                }
+            }
+            return MutationResult.CONNECTION_ERROR;
+        } finally {
+            if (batchStarted) {
+                try {
+                    connection.endBatchEdit();
+                } catch (RuntimeException ignored) {
+                    // The mutation result above remains authoritative; cleanup is best effort.
+                }
+            }
+        }
+    }
+
+    private enum MutationResult { APPLIED, REJECTED, CONNECTION_ERROR }
 
     private void rememberExpectedSelection(int selectionEnd) {
         expectedSelectionEnds.addLast(selectionEnd);

@@ -29,7 +29,7 @@ public final class RecognitionDiagnosticsStore {
                 return;
             }
             preferences.edit()
-                    .putInt("schema", 1)
+                    .putInt("schema", 2)
                     .putLong("session_id", snapshot.sessionId())
                     .putLong("started_at_epoch_ms", snapshot.startedAtEpochMs())
                     .putString("selected_backend", snapshot.route().selectedBackend().name())
@@ -39,6 +39,11 @@ public final class RecognitionDiagnosticsStore {
                     .putString("status", snapshot.status().name())
                     .putLong("ready_latency_ms", snapshot.readyLatencyMs())
                     .putLong("first_partial_latency_ms", snapshot.firstPartialLatencyMs())
+                    .putLong("release_to_raw_final_latency_ms",
+                            snapshot.releaseToRawFinalLatencyMs())
+                    .putLong("text_processing_latency_ms", snapshot.textProcessingLatencyMs())
+                    .putLong("release_to_terminal_latency_ms",
+                            snapshot.releaseToTerminalLatencyMs())
                     .putLong("terminal_latency_ms", snapshot.terminalLatencyMs())
                     .putLong("audio_duration_ms", snapshot.audioDurationMs())
                     .putInt("final_code_point_count", snapshot.finalCodePointCount())
@@ -49,7 +54,8 @@ public final class RecognitionDiagnosticsStore {
 
     public RecognitionDiagnostics.Snapshot load() {
         synchronized (PROCESS_LOCK) {
-            if (preferences.getInt("schema", 0) != 1) return null;
+            int schema = preferences.getInt("schema", 0);
+            if (schema != 1 && schema != 2) return null;
             try {
                 RecognitionBackend selected = RecognitionBackend.valueOf(
                         preferences.getString("selected_backend", ""));
@@ -67,6 +73,9 @@ public final class RecognitionDiagnosticsStore {
                         status,
                         preferences.getLong("ready_latency_ms", -1L),
                         preferences.getLong("first_partial_latency_ms", -1L),
+                        preferences.getLong("release_to_raw_final_latency_ms", -1L),
+                        preferences.getLong("text_processing_latency_ms", -1L),
+                        preferences.getLong("release_to_terminal_latency_ms", -1L),
                         preferences.getLong("terminal_latency_ms", -1L),
                         preferences.getLong("audio_duration_ms", -1L),
                         preferences.getInt("final_code_point_count", -1),

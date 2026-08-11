@@ -84,9 +84,11 @@ public final class DictionaryActivity extends Activity {
     }
 
     private View buildContent() {
+        LinearLayout page = verticalLayout();
+        AppVisualSystem.stylePage(this, page);
+        SystemBarInsets.apply(page);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        SystemBarInsets.apply(scroll);
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
@@ -150,7 +152,14 @@ public final class DictionaryActivity extends Activity {
         root.addView(section(R.string.section_corrections));
         correctionList = verticalLayout();
         root.addView(correctionList, matchWrap());
-        return scroll;
+        page.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
+        page.addView(
+                AppVisualSystem.bottomNavigation(this, AppVisualSystem.Destination.DICTIONARY),
+                AppVisualSystem.matchWrap());
+        return page;
     }
 
     private void addTerm() {

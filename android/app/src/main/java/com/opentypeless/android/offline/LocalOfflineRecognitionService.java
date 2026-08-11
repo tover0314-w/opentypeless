@@ -12,11 +12,11 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Loads the large native offline model only inside the private {@code :local_asr} process. */
+/** Loads SenseVoice only inside the private {@code :local_quality} process. */
 public final class LocalOfflineRecognitionService extends Service {
     public static final String RESULT_EXACT = "exact";
     public static final String RESULT_PUNCTUATED = "punctuated";
-    static final int MAX_WAV_BYTES = 18_000_000;
+    public static final int MAX_WAV_BYTES = 18_000_000;
     private static final long NO_SESSION = -1L;
     private static final long CANCELLING = -2L;
 
@@ -24,10 +24,35 @@ public final class LocalOfflineRecognitionService extends Service {
     private final ILocalOfflineRecognitionService.Stub binder =
             new ILocalOfflineRecognitionService.Stub() {
                 @Override
+                public void prewarmRealtime() {
+                    enforceSameUid();
+                    throw new UnsupportedOperationException(
+                            "Realtime recognition belongs to the isolated streaming service");
+                }
+
+                @Override
+                public void releaseRealtimeModel() {
+                    enforceSameUid();
+                    // This process deliberately never owns the realtime model.
+                }
+
+                @Override
+                public void startRealtime(
+                        long sessionId,
+                        ParcelFileDescriptor pcm16,
+                        ILocalRealtimeRecognitionCallback callback) {
+                    enforceSameUid();
+                    closeQuietly(pcm16);
+                    throw new UnsupportedOperationException(
+                            "Realtime recognition belongs to the isolated streaming service");
+                }
+
+                @Override
                 public Bundle transcribe(
                         long sessionId,
                         ParcelFileDescriptor wav,
-                        String language) {
+                        String language,
+                        boolean useInverseTextNormalization) {
                     enforceSameUid();
                     if (sessionId <= 0L || wav == null) {
                         throw new IllegalArgumentException("Invalid offline recognition request");
@@ -43,13 +68,16 @@ public final class LocalOfflineRecognitionService extends Service {
                                      LocalOfflineRecognizer.openSession(
                                              LocalOfflineRecognitionService.this,
                                              language)) {
-                            String exact = session.transcribe(audio);
-                            requireActive(sessionId);
-                            String punctuated = session.transcribeWithPunctuation(audio);
+                            // Loading and decoding the 228 MB SenseVoice model twice made the
+                            // release-to-text path roughly twice as slow. Pick the field-safe mode
+                            // before crossing Binder and run one authoritative decode instead.
+                            String text = useInverseTextNormalization
+                                    ? session.transcribeWithPunctuation(audio)
+                                    : session.transcribe(audio);
                             requireActive(sessionId);
                             Bundle result = new Bundle();
-                            result.putString(RESULT_EXACT, exact);
-                            result.putString(RESULT_PUNCTUATED, punctuated);
+                            result.putString(RESULT_EXACT, text);
+                            result.putString(RESULT_PUNCTUATED, text);
                             return result;
                         }
                     } finally {

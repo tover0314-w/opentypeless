@@ -37,6 +37,8 @@ public final class RecognitionDiagnosticsStoreInstrumentedTest {
                 RecognitionRoute.FallbackReason.ANDROID_MICROPHONE_BLOCKED));
         trace.markReady(1_080L);
         trace.markFirstPartial(1_250L);
+        trace.markStopRequested(1_300L);
+        trace.markRawFinal(1_420L);
         trace.succeed(1_500L, 420L, "这段文字绝不能落盘", false);
         store.save(trace.snapshot());
 
@@ -46,6 +48,9 @@ public final class RecognitionDiagnosticsStoreInstrumentedTest {
         assertEquals(RecognitionBackend.LOCAL_OFFLINE, restored.route().actualBackend());
         assertEquals(80L, restored.readyLatencyMs());
         assertEquals(250L, restored.firstPartialLatencyMs());
+        assertEquals(120L, restored.releaseToRawFinalLatencyMs());
+        assertEquals(80L, restored.textProcessingLatencyMs());
+        assertEquals(200L, restored.releaseToTerminalLatencyMs());
         assertEquals(9, restored.finalCodePointCount());
         assertEquals(RecognitionDiagnostics.Status.SUCCEEDED, restored.status());
     }

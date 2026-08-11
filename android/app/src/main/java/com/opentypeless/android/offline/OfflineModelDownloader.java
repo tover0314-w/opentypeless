@@ -17,7 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Downloads a fixed, revision-pinned model without credentials into app-private storage. */
+/** Downloads the revision-pinned offline quality and live-preview models into private storage. */
 public final class OfflineModelDownloader {
     public interface Callback {
         void onProgress(int percent, long downloadedBytes, long totalBytes);
@@ -57,6 +57,8 @@ public final class OfflineModelDownloader {
         EXECUTOR.execute(() -> {
             try {
                 LocalOfflineRecognizer.deleteModel(context.getApplicationContext());
+                OfflineStreamingRecognizer.releaseShared();
+                OfflineStreamingModelStore.delete(context.getApplicationContext());
                 if (!cancelled.get()) callback.onComplete();
             } catch (RuntimeException error) {
                 if (!cancelled.get()) callback.onError(safeMessage(error));
@@ -83,7 +85,8 @@ public final class OfflineModelDownloader {
         private final Callback callback;
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private volatile HttpURLConnection activeConnection;
-        private File staging;
+        private File qualityStaging;
+        private File streamingStaging;
 
         DownloadTask(Context context, Callback callback) {
             this.context = context;
@@ -93,16 +96,44 @@ public final class OfflineModelDownloader {
         @Override
         public void run() {
             try {
-                OfflineModelSpec spec = OfflineModelSpec.QUALITY;
-                requireSpace(context, spec.downloadBytes() + FREE_SPACE_MARGIN);
-                staging = OfflineModelStore.newStagingDirectory(context);
+                OfflineModelSpec quality = OfflineModelSpec.QUALITY;
+                OfflineStreamingModelSpec streaming = OfflineStreamingModelSpec.REALTIME;
+                boolean needsQuality = OfflineModelStore.status(context)
+                        != OfflineModelStore.Status.INSTALLED;
+                boolean needsStreaming = OfflineStreamingModelStore.status(context)
+                        != OfflineStreamingModelStore.Status.INSTALLED;
+                long total = (needsQuality ? quality.downloadBytes() : 0L)
+                        + (needsStreaming ? streaming.downloadBytes() : 0L);
+                if (total == 0L) {
+                    callback.onProgress(100, 0L, 0L);
+                    callback.onComplete();
+                    return;
+                }
+                requireSpace(context, total + FREE_SPACE_MARGIN);
                 long downloaded = 0;
-                downloaded += downloadArtifact(spec.model(), staging, downloaded, spec.downloadBytes());
-                downloaded += downloadArtifact(spec.tokens(), staging, downloaded, spec.downloadBytes());
-                checkCancelled();
-                OfflineModelStore.commitVerifiedStaging(context, staging);
-                staging = null;
-                callback.onProgress(100, downloaded, spec.downloadBytes());
+                if (needsQuality) {
+                    qualityStaging = OfflineModelStore.newStagingDirectory(context);
+                    downloaded += downloadArtifact(
+                            quality.model(), qualityStaging, downloaded, total);
+                    downloaded += downloadArtifact(
+                            quality.tokens(), qualityStaging, downloaded, total);
+                    checkCancelled();
+                    OfflineModelStore.commitVerifiedStaging(context, qualityStaging);
+                    qualityStaging = null;
+                }
+                if (needsStreaming) {
+                    streamingStaging = OfflineStreamingModelStore.newStagingDirectory(context);
+                    downloaded += downloadArtifact(
+                            streaming.encoder(), streamingStaging, downloaded, total);
+                    downloaded += downloadArtifact(
+                            streaming.decoder(), streamingStaging, downloaded, total);
+                    downloaded += downloadArtifact(
+                            streaming.tokens(), streamingStaging, downloaded, total);
+                    checkCancelled();
+                    OfflineStreamingModelStore.commitVerifiedStaging(context, streamingStaging);
+                    streamingStaging = null;
+                }
+                callback.onProgress(100, downloaded, total);
                 callback.onComplete();
             } catch (Cancelled ignored) {
                 // Cancellation is an explicit UI action and is not surfaced as a failure.
@@ -111,9 +142,16 @@ public final class OfflineModelDownloader {
             } finally {
                 HttpURLConnection connection = activeConnection;
                 if (connection != null) connection.disconnect();
-                if (staging != null) {
+                if (qualityStaging != null) {
                     try {
-                        OfflineModelStore.discardStaging(context, staging);
+                        OfflineModelStore.discardStaging(context, qualityStaging);
+                    } catch (RuntimeException ignored) {
+                        // The verified fixed-path cleanup is best effort after the original error.
+                    }
+                }
+                if (streamingStaging != null) {
+                    try {
+                        OfflineStreamingModelStore.discardStaging(context, streamingStaging);
                     } catch (RuntimeException ignored) {
                         // The verified fixed-path cleanup is best effort after the original error.
                     }

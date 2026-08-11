@@ -9,9 +9,8 @@
     <string name="ime_key_app_profile">应用配置</string>
     <string name="ime_key_dictionary">个人词典</string>
     <string name="ime_key_settings">设置</string>
-    <string name="ime_key_long_dictation">长文本听写</string>
+    <string name="ime_menu_voice_diagnostics">上次语音诊断</string>
     <string name="ime_key_long_dictation_compact">长文</string>
-    <string name="ime_key_finish_dictation">结束并上屏</string>
     <string name="ime_key_finish_dictation_compact">上屏</string>
     <string name="ime_key_processing">处理中…</string>
     <string name="ime_key_processing_compact">处理</string>
@@ -21,6 +20,7 @@
     <string name="ime_key_hold_to_talk_compact">按住</string>
     <string name="ime_key_release_to_finish">松手上屏</string>
     <string name="ime_key_listening">正在听写…</string>
+    <string name="ime_key_listening_compact">听写</string>
     <string name="ime_mode_button">%1$s ▾</string>
     <string name="ime_mode_auto_compact">自动</string>
     <string name="ime_mode_verbatim_compact">精确</string>
@@ -107,7 +107,7 @@
     <string name="ime_status_configure_backend">请先配置已选语音识别后端</string>
     <string name="ime_status_target_changed_cancelled">输入目标已更改；为保证安全，已取消语音输入</string>
     <string name="ime_status_session_active">已有另一个语音会话正在进行</string>
-    <string name="ime_status_live_composition_fallback">当前输入框无法实时上屏；最终插入前，文字会保留在 OpenTypeless 预览中</string>
+    <string name="ime_status_live_composition_fallback">当前输入框无法实时上屏；草稿已保留，结束后会插入</string>
     <string name="ime_status_composition_cleanup_failed">语音输入已停止，但无法确认实时草稿已移除；继续前请检查当前字段</string>
     <string name="ime_status_composition_preserve_uncertain">语音输入已停止，但无法确认可见草稿是否已固化；请检查输入框</string>
     <string name="ime_status_field_unavailable">当前文本字段已不可用</string>
@@ -146,7 +146,10 @@
     <string name="ime_status_cursor_moved_preserved">光标已移动；已停止聆听并保留可见草稿</string>
     <string name="ime_status_voice_input_failed">语音输入失败</string>
     <string name="ime_status_listening">正在聆听…</string>
-    <string name="ime_status_transcribing">正在转写并应用个人词汇…</string>
+    <string name="ime_status_waiting_for_live_text">正在聆听 · 等待实时文字…</string>
+    <string name="ime_status_system_no_live_text_yet">Android 语音服务尚未提供实时文字；松手后会返回最终转写</string>
+    <string name="ime_status_backend_final_only">当前后端会在录音结束后转写；松手后显示结果</string>
+    <string name="ime_status_transcribing">正在完成文字…</string>
     <string name="ime_status_polishing">正在核对并整理，不改变事实…</string>
     <string name="ime_status_inserted">已插入</string>
     <string name="ime_status_inserted_recording_limit">已插入 · 已达到录音时长上限</string>

@@ -8,6 +8,27 @@ public final class WavEncoder {
         return pcm16Mono(pcm, 0, pcm.length, sampleRate);
     }
 
+    /** Encodes native-order PCM16 samples without an intermediate caller-owned byte array. */
+    public static byte[] pcm16Mono(short[] samples, int sampleRate) {
+        if (samples == null) throw new IllegalArgumentException("PCM samples are required");
+        if (samples.length > (Integer.MAX_VALUE - 44) / 2) {
+            throw new IllegalArgumentException("PCM data is too large for a WAV byte array");
+        }
+        if (sampleRate <= 0 || sampleRate > Integer.MAX_VALUE / 2) {
+            throw new IllegalArgumentException("Sample rate must be positive and supported");
+        }
+        int pcmLength = samples.length * 2;
+        byte[] wav = new byte[44 + pcmLength];
+        writeHeader(wav, pcmLength, sampleRate);
+        for (int index = 0; index < samples.length; index++) {
+            short sample = samples[index];
+            int target = 44 + index * 2;
+            wav[target] = (byte) (sample & 0xff);
+            wav[target + 1] = (byte) ((sample >>> 8) & 0xff);
+        }
+        return wav;
+    }
+
     /**
      * Encodes one slice of a PCM backing buffer directly into the final WAV allocation. This lets
      * callers trim a recording without first copying the selected PCM range into another array.
@@ -28,8 +49,14 @@ public final class WavEncoder {
         }
 
         byte[] wav = new byte[44 + length];
+        writeHeader(wav, length, sampleRate);
+        System.arraycopy(pcm, offset, wav, 44, length);
+        return wav;
+    }
+
+    private static void writeHeader(byte[] wav, int pcmLength, int sampleRate) {
         writeAscii(wav, 0, "RIFF");
-        writeInt32(wav, 4, 36 + length);
+        writeInt32(wav, 4, 36 + pcmLength);
         writeAscii(wav, 8, "WAVE");
         writeAscii(wav, 12, "fmt ");
         writeInt32(wav, 16, 16);
@@ -40,9 +67,7 @@ public final class WavEncoder {
         writeInt16(wav, 32, 2);
         writeInt16(wav, 34, 16);
         writeAscii(wav, 36, "data");
-        writeInt32(wav, 40, length);
-        System.arraycopy(pcm, offset, wav, 44, length);
-        return wav;
+        writeInt32(wav, 40, pcmLength);
     }
 
     private static void writeAscii(byte[] out, int offset, String value) {

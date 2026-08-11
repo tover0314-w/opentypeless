@@ -24,13 +24,23 @@
         android:usesCleartextTraffic="true">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".HomeActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".SettingsHomeActivity"
+            android:exported="false"
+            android:label="@string/settings_title_short" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
 
         <activity
             android:name=".DictionaryActivity"
@@ -75,12 +85,19 @@
             </intent-filter>
         </service>
 
-        <!-- The native offline model is deliberately isolated from the IME process. Audio is
-             passed through an anonymous pipe; this component has no external entry point. -->
+        <!-- Streaming and quality weights use separate private processes. This permits a warm,
+             low-latency streaming model while a bounded SenseVoice segment pass runs in parallel,
+             without either native heap entering the IME process. -->
+        <service
+            android:name=".offline.LocalStreamingRecognitionService"
+            android:exported="false"
+            android:process=":local_stream"
+            android:stopWithTask="false" />
+
         <service
             android:name=".offline.LocalOfflineRecognitionService"
             android:exported="false"
-            android:process=":local_asr"
+            android:process=":local_quality"
             android:stopWithTask="false" />
 
         <service

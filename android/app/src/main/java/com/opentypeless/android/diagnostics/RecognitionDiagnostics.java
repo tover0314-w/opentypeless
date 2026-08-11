@@ -30,6 +30,9 @@ public final class RecognitionDiagnostics {
             Status status,
             long readyLatencyMs,
             long firstPartialLatencyMs,
+            long releaseToRawFinalLatencyMs,
+            long textProcessingLatencyMs,
+            long releaseToTerminalLatencyMs,
             long terminalLatencyMs,
             long audioDurationMs,
             int finalCodePointCount,
@@ -42,6 +45,9 @@ public final class RecognitionDiagnostics {
             status = status == null ? Status.ACTIVE : status;
             readyLatencyMs = normalizeMetric(readyLatencyMs);
             firstPartialLatencyMs = normalizeMetric(firstPartialLatencyMs);
+            releaseToRawFinalLatencyMs = normalizeMetric(releaseToRawFinalLatencyMs);
+            textProcessingLatencyMs = normalizeMetric(textProcessingLatencyMs);
+            releaseToTerminalLatencyMs = normalizeMetric(releaseToTerminalLatencyMs);
             terminalLatencyMs = normalizeMetric(terminalLatencyMs);
             audioDurationMs = normalizeMetric(audioDurationMs);
             finalCodePointCount = Math.max(-1, finalCodePointCount);
@@ -49,6 +55,36 @@ public final class RecognitionDiagnostics {
 
         public boolean terminal() {
             return status != Status.ACTIVE;
+        }
+
+        /** Backward-compatible constructor for callers that do not provide stage timing yet. */
+        public Snapshot(
+                long sessionId,
+                long startedAtEpochMs,
+                RecognitionRoute route,
+                String languageTag,
+                Status status,
+                long readyLatencyMs,
+                long firstPartialLatencyMs,
+                long terminalLatencyMs,
+                long audioDurationMs,
+                int finalCodePointCount,
+                boolean recoveredPartial) {
+            this(
+                    sessionId,
+                    startedAtEpochMs,
+                    route,
+                    languageTag,
+                    status,
+                    readyLatencyMs,
+                    firstPartialLatencyMs,
+                    -1L,
+                    -1L,
+                    -1L,
+                    terminalLatencyMs,
+                    audioDurationMs,
+                    finalCodePointCount,
+                    recoveredPartial);
         }
     }
 
@@ -60,6 +96,11 @@ public final class RecognitionDiagnostics {
     private Status status = Status.ACTIVE;
     private long readyLatencyMs = -1L;
     private long firstPartialLatencyMs = -1L;
+    private long stopRequestedAtElapsedMs = -1L;
+    private long rawFinalAtElapsedMs = -1L;
+    private long releaseToRawFinalLatencyMs = -1L;
+    private long textProcessingLatencyMs = -1L;
+    private long releaseToTerminalLatencyMs = -1L;
     private long terminalLatencyMs = -1L;
     private long audioDurationMs = -1L;
     private int finalCodePointCount = -1;
@@ -109,6 +150,22 @@ public final class RecognitionDiagnostics {
         return true;
     }
 
+    public synchronized boolean markStopRequested(long elapsedRealtimeMs) {
+        if (status != Status.ACTIVE || stopRequestedAtElapsedMs >= 0L) return false;
+        stopRequestedAtElapsedMs = Math.max(0L, elapsedRealtimeMs);
+        return true;
+    }
+
+    public synchronized boolean markRawFinal(long elapsedRealtimeMs) {
+        if (status != Status.ACTIVE || rawFinalAtElapsedMs >= 0L) return false;
+        rawFinalAtElapsedMs = Math.max(0L, elapsedRealtimeMs);
+        if (stopRequestedAtElapsedMs >= 0L) {
+            releaseToRawFinalLatencyMs = Math.max(
+                    0L, rawFinalAtElapsedMs - stopRequestedAtElapsedMs);
+        }
+        return true;
+    }
+
     public synchronized boolean succeed(
             long elapsedRealtimeMs,
             long durationMs,
@@ -116,6 +173,7 @@ public final class RecognitionDiagnostics {
             boolean recovered) {
         if (status != Status.ACTIVE) return false;
         status = Status.SUCCEEDED;
+        updateTerminalStageMetrics(elapsedRealtimeMs);
         terminalLatencyMs = latency(elapsedRealtimeMs);
         audioDurationMs = Math.max(0L, durationMs);
         String safe = finalText == null ? "" : finalText;
@@ -141,6 +199,9 @@ public final class RecognitionDiagnostics {
                 status,
                 readyLatencyMs,
                 firstPartialLatencyMs,
+                releaseToRawFinalLatencyMs,
+                textProcessingLatencyMs,
+                releaseToTerminalLatencyMs,
                 terminalLatencyMs,
                 audioDurationMs,
                 finalCodePointCount,
@@ -150,8 +211,20 @@ public final class RecognitionDiagnostics {
     private boolean finish(Status terminalStatus, long elapsedRealtimeMs) {
         if (status != Status.ACTIVE) return false;
         status = terminalStatus;
+        updateTerminalStageMetrics(elapsedRealtimeMs);
         terminalLatencyMs = latency(elapsedRealtimeMs);
         return true;
+    }
+
+    private void updateTerminalStageMetrics(long elapsedRealtimeMs) {
+        long safeTerminal = Math.max(0L, elapsedRealtimeMs);
+        if (rawFinalAtElapsedMs >= 0L) {
+            textProcessingLatencyMs = Math.max(0L, safeTerminal - rawFinalAtElapsedMs);
+        }
+        if (stopRequestedAtElapsedMs >= 0L) {
+            releaseToTerminalLatencyMs = Math.max(
+                    0L, safeTerminal - stopRequestedAtElapsedMs);
+        }
     }
 
     private long latency(long elapsedRealtimeMs) {

@@ -55,7 +55,10 @@ public final class LocalOfflineRecognitionClient implements AutoCloseable {
         this.context = context.getApplicationContext();
     }
 
-    public Result recognize(byte[] wav, String language) {
+    public Result recognize(
+            byte[] wav,
+            String language,
+            boolean useInverseTextNormalization) {
         if (wav == null || wav.length < 44
                 || wav.length > LocalOfflineRecognitionService.MAX_WAV_BYTES) {
             throw new IllegalArgumentException("Offline WAV size is invalid");
@@ -77,7 +80,11 @@ public final class LocalOfflineRecognitionClient implements AutoCloseable {
                 activeWriteEnd = writeEnd;
             }
             writer = pipeWriter.submit(() -> writePipe(writeEnd, wav));
-            Bundle bundle = binding.service.transcribe(sessionId, readEnd, language);
+            Bundle bundle = binding.service.transcribe(
+                    sessionId,
+                    readEnd,
+                    language,
+                    useInverseTextNormalization);
             waitForWriter(writer);
             if (bundle == null) throw new IllegalStateException(
                     "Offline recognition returned no result");

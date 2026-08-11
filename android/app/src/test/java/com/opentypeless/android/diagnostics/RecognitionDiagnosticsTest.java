@@ -34,6 +34,10 @@ public final class RecognitionDiagnosticsTest {
         assertFalse(trace.markReady(1_500L));
         assertTrue(trace.markFirstPartial(1_310L));
         assertFalse(trace.markFirstPartial(1_800L));
+        assertTrue(trace.markStopRequested(1_400L));
+        assertFalse(trace.markStopRequested(1_450L));
+        assertTrue(trace.markRawFinal(1_540L));
+        assertFalse(trace.markRawFinal(1_580L));
         assertTrue(trace.succeed(1_620L, 540L, "没问题。", false));
         assertFalse(trace.fail(1_700L));
 
@@ -41,6 +45,9 @@ public final class RecognitionDiagnosticsTest {
         assertEquals("zh-CN", snapshot.languageTag());
         assertEquals(80L, snapshot.readyLatencyMs());
         assertEquals(310L, snapshot.firstPartialLatencyMs());
+        assertEquals(140L, snapshot.releaseToRawFinalLatencyMs());
+        assertEquals(80L, snapshot.textProcessingLatencyMs());
+        assertEquals(220L, snapshot.releaseToTerminalLatencyMs());
         assertEquals(620L, snapshot.terminalLatencyMs());
         assertEquals(540L, snapshot.audioDurationMs());
         assertEquals(4, snapshot.finalCodePointCount());

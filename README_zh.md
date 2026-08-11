@@ -11,9 +11,9 @@
 
 - **三个原生入口：**独立语音 IME、标准 `RecognitionService`、`RecognizerIntent` Activity。兼容的完整键盘可以继续提供字母、滑行输入、Emoji 和剪贴板，只把语音识别交给 OpenTypeless。
 - **本地优先：**首次安装时，只有系统确认设备端识别真正可用，才默认选择 Android 设备端；否则依次选择系统语音服务或用户明确配置的 BYOK/自建 OpenAI 兼容端点。系统语音服务是否联网由其提供方决定，界面不会把它冒充为离线。
-- **经过实测的可选离线模型：**非低内存设备可主动下载固定版本的 228.45 MiB SenseVoice Small INT8 质量模型，保存在不备份的 App 私有目录。安装前和首次识别前都会核对大小与 SHA-256，可随时在设置中删除，APK 本身不内置权重。
+- **经过实测的可选离线双通道模型：**非低内存设备可主动下载固定版本的 228.45 MiB SenseVoice Small INT8 质量模型，以及独立的 226.21 MiB Streaming Paraformer 中英 INT8 实时模型，均保存在不备份的 App 私有目录。每个文件会在原子安装前及首次使用前核对大小与 SHA-256，APK 不内置权重。Speech Core v2 要求两组模型齐全；旧安装缺少流式模型时会明确要求补下载，不会静默掉回旧的仅终稿实现。
 - **在输入框内实时出字：**Android partial 会作为可替换的 IME composing text 写入当前编辑框。词语和标点修订会原位替换，不会重复追加，也不再只显示在状态栏；输入法自身造成的光标变化与用户换目标会被分别处理，取消只移除本次语音草稿。
-- **真流式识别：**可选的百炼 Paraformer 路径通过经过白名单校验的 WSS 地址发送有界的 40 ms、16 kHz PCM 帧，实时接收带标点的增量结果，并限制待发送队列。原有 OpenAI 兼容 WAV 上传会明确标为批处理；OpenTypeless 不会静默切换服务商。
+- **真流式识别：**离线 Streaming Paraformer 通过匿名管道在私有 ASR 进程消费有界的 40 ms PCM 帧；可选百炼路径通过白名单 WSS 发送同样有界的帧。两者都返回可替换 partial。OpenAI 兼容 WAV 上传仍明确标为批处理，绝不静默切换服务商。
 - **AI 可选：**精确模式和结构化字段不需要 LLM。智能整理、翻译和选中文字编辑，只有用户开启 OpenAI 兼容 LLM 后才运行。
 - **专名真正进入识别链：**用户确认的标准写法、读音、常见错词、纠正规则和 App 作用域，会在后端支持时进入 ASR prompt、Android biasing strings，并在识别后执行一次性、非级联的确定性纠正。
 - **词汇可迁移：**Android 既能导入早期 Android 个性化备份，也能导入桌面端 `opentypeless_dictionary` v1；Android 导出的兼容超集可由桌面端读取，同时为 Android 间往返保留别名、App 作用域和启用状态。
@@ -22,11 +22,14 @@
 - **结果严格绑定输入目标：**每次录音都绑定 editor epoch、App、field、`InputConnection`、选区及光标前后文本指纹。切 App、切输入框、进入密码框、移动光标或改变选区后，旧结果不会写入新位置；安全的未完成文字会进入可恢复草稿。
 - **本地隐私：**API Key 与可选历史正文分别使用 Android Keystore 不可导出的 AES-GCM 密钥；历史默认关闭，支持逐条删除/全部清空，有本地数量上限，也不会进入词典导出文件。
 - **按 App 配置：**可显式设置每个 App 的 Auto/Exact/Smart/Translate 模式、翻译目标、写作偏好，以及是否允许发送有限的光标前上下文。
-- **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手上屏；独立的“长文”操作用于持续听写。Android 后端使用原生 partial，Paraformer 提供真流式增量结果；隔离进程中的 SenseVoice 质量路线与 OpenAI 兼容 WAV 路线会明确标为 final-only。最终结果会再走个人规则和“只可改标点、不可改词或数字”的安全门。全部路径保留取消令牌、录音上限和有界采集。Android 允许时，设置页会显示默认语音服务包名/版本及设备端 API 是否真实可用。
+- **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手上屏；独立的“长文”操作用于持续听写。Speech Core v2 会把流式首遍作为可替换 composition 直接写入宿主输入框，在软停顿处加入可撤回标点，并允许隔离的 SenseVoice 质量遍在句段关闭后原位修订。OpenAI 兼容 WAV 仍明确标为“仅终稿”。最终结果会再走个人规则和事实安全门。
+- **Speech Core v2 已成为本地主管线：**连续录音、软/硬分段、不可变 `VoiceDraft` 修订、加密多段恢复和严格绑定目标的 `EditorProjection` 已接入普通离线键盘会话。Streaming Paraformer 常驻于 `:local_stream`，SenseVoice 按需运行在 `:local_quality`；语音实验室显示实际路径与修订。v1 只保留为显式紧急回滚，不再按模型状态静默启用。
 
 APK 不内置任何语音或语言模型。许可证说明见 [Android 第三方声明](android/THIRD_PARTY_NOTICES.md)。首个 189.85 MiB Zipformer 已被否决；第二轮在完整 1,315 条 ASCEND test 上测试了 SenseVoice 与 Paraformer。SenseVoice 达到普通话 CER 11.4%、英文 WER 25.9%、中英混说 MER 13.3%，并通过 API 36 arm64 的真实下载与原生识别烟测。现在使用经校验的 ASR-only 双 ABI 运行时，干净构建的通用 debug APK 已从上游全功能包的约 120 MiB 降到 52.54 MiB；但约 457 MiB 瞬时峰值仍使它不适合直接称为全设备默认。同体积档的 Paraformer Large 与 Whisper Small Q5_1 也已实测并被否决为中英默认。用户明确设置 `zh-*` 或 `cmn-*` 时，现在会启用 SenseVoice 普通话锁定；固定 A/B 将公开集普通话 CER 从 10.59% 降至 10.01%、混说 MER 从 20.37% 降至 18.31%。英文保持自动检测，因为强制 `en` 反而退化。详见
 [第二轮离线模型评测](docs/2026-08-09-offline-asr-candidate-round-2.md)和
 [可复现测试工具](benchmarks/offline_asr/README.md)。
+
+Android 当前实际使用的 226.21 MiB 流式模型也已单独跑过固定 200 条 ASCEND/FLEURS 公开集：普通话 CER 12.5%、英文 WER 40.2%、中英混说 MER 22.9%，95.5% 样本能看到 partial，首个 partial 的音频位置 p50/p95 为 0.64/3.04 秒。但 1,682 次变化的 hypothesis 中，改写前面已显示文字的次数为 0。因此它单独使用时不能冒充百度式“边说边回头纠词”。Speech Core v2 现在把它作为低延迟首遍，再通过软停顿临时标点和 SenseVoice 分段质量复核实现前文修订；两组模型位于独立私有进程，内存/热策略可选择并发、顺序或仅流式。详见 [v2 架构](docs/2026-08-11-speech-core-v2-architecture.md)和[固定流式模型结果](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json)。
 
 ## 场景策略
 
@@ -79,6 +82,7 @@ python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-as
 `scripts/build_sherpa_asr_runtime.py --help`。
 
 自动化测试覆盖：转写修订、编辑框 composing/取消竞态、Paraformer 协议与传输事件、确定性个性化、NFKC span 映射、prompt 信任边界、事实完整性、VAD、取消状态、编辑目标身份、HTTP 重定向/错误/header、RecognitionService 契约、真实 SQLite 导入事务、Android Keystore 历史加密与旧明文迁移。显式大模型门槛还覆盖固定版本真实下载、精确哈希、arm64 原生加载/识别和内存测量。常规 CI 不使用真实 API Key，也不会重复下载 229 MiB 模型，会执行 JVM、Lint、APK 构建和 API 26/33/35/36 模拟器矩阵。
+Speech Core v2 另外覆盖确定性 trace replay、句段事件乱序/重复属性测试、连续边界组装、加密多段恢复、质量任务 generation 隔离、Unicode 安全编辑器投影、整次语音撤销、生产路径诊断和显式紧急回滚边界。
 
 0.3 的代码审查、自动化证据、真机步骤和未完成门槛见
 [Android 0.3 审查与验收报告](docs/2026-08-09-android-0.3-review-acceptance.md)；

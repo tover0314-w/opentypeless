@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ime_primary">@android:color/system_accent1_600</color>
-    <color name="ime_primary_pressed">@android:color/system_accent1_700</color>
-    <color name="ime_primary_container">@android:color/system_accent1_100</color>
-    <color name="ime_on_primary">@android:color/system_accent1_0</color>
-    <color name="ime_on_primary_container">@android:color/system_accent1_900</color>
+    <!-- Keep the voice keyboard and companion app visually stable across OEM accent palettes. -->
+    <color name="ime_primary">#5B57D9</color>
+    <color name="ime_primary_container">#E4E1FF</color>
+    <color name="ime_on_primary_container">#201B6C</color>
 </resources>

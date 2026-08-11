@@ -19,18 +19,20 @@ than a mandatory-cloud “ASR + LLM” keyboard.
   genuinely available, otherwise the installed system service, otherwise an explicit BYOK or
   self-hosted OpenAI-compatible endpoint. “System service” is labelled separately because its
   network behavior belongs to that provider and is not guaranteed offline.
-- **Tested optional offline model:** non-low-RAM devices may explicitly download the pinned
-  228.45 MiB SenseVoice Small INT8 quality model into private no-backup storage. Exact size and
-  SHA-256 are checked before atomic installation and again before first decode; the model can be
-  deleted in Settings and is never bundled into the APK.
+- **Tested optional offline two-pass models:** non-low-RAM devices may explicitly download the
+  pinned 228.45 MiB SenseVoice Small INT8 quality model and a separate 226.21 MiB Streaming
+  Paraformer zh/en INT8 live-text model into private no-backup storage. Every artifact is
+  size/SHA-256 checked before atomic installation and again before first use; neither model is
+  bundled into the APK. Speech Core v2 requires both artifacts and never silently drops an
+  upgraded install back to the older final-only implementation.
 - **Live text in the editor:** Android partial hypotheses use replaceable IME composing text. Word
   and punctuation revisions replace the previous draft instead of being appended or shown only in
   a status label. Cursor movement created by OpenTypeless is distinguished from a user target
   change, and cancellation removes only the owned composition.
-- **True realtime streaming:** the optional DashScope Paraformer route sends bounded 40 ms,
-  16 kHz PCM frames over an allowlisted WSS endpoint, consumes incremental punctuated results, and
-  caps the outgoing queue. The existing OpenAI-compatible completed-WAV upload remains clearly
-  labelled as batch recognition; OpenTypeless never silently switches providers.
+- **True realtime streaming:** the offline Streaming Paraformer consumes bounded 40 ms PCM through
+  an anonymous pipe in the private ASR process; the optional DashScope route sends the same bounded
+  frames over an allowlisted WSS endpoint. Both emit replaceable partials. The OpenAI-compatible
+  completed-WAV route remains clearly labelled as batch; OpenTypeless never silently switches.
 - **AI is optional:** Exact mode and structured fields do not require an LLM. Smart editing,
   selected-text editing, and translation run only after the user enables an OpenAI-compatible LLM.
 - **Personal names that actually reach ASR:** confirmed canonical spellings, pronunciations,
@@ -56,12 +58,16 @@ than a mandatory-cloud “ASR + LLM” keyboard.
 - **Per-app behavior:** an explicit app profile can choose Auto, Exact, Smart, or Translate mode,
   a target language, a writing preference, and whether limited preceding context may be sent.
 - **Voice UX:** tap Space for a space, or hold it to talk and release to finish. Use the separate
-  Long action for continuous dictation. Android recognizers use native partials and Paraformer
-  supplies true incremental results; the isolated SenseVoice quality route and OpenAI-compatible
-  WAV route are explicitly final-only. The authoritative final pass applies personal rules and
-  accepts ITN punctuation only when no word or number changed. Capture paths retain cancellation
-  tokens, bounded recording, and an upper recording limit. Settings show the configured Android
-  speech service identity and on-device API availability where Android exposes them.
+  Long action for continuous dictation. Speech Core v2 writes the streaming first pass into the
+  host editor as replaceable composition, adds provisional punctuation at a soft pause, and can
+  revise a closed segment after the isolated SenseVoice quality pass. OpenAI-compatible WAV remains
+  clearly final-only. The authoritative final applies personal rules and accepts ITN punctuation
+  only when no word or number changed.
+- **Speech Core v2 is the local production route:** continuous capture, soft/hard segmentation,
+  immutable `VoiceDraft` revisions, encrypted multi-segment recovery and target-bound
+  `EditorProjection` now drive ordinary local-offline keyboard sessions. Streaming Paraformer stays
+  warm in `:local_stream`; SenseVoice is loaded on demand in `:local_quality`. Voice Lab reports the
+  actual route and revisions. V1 is retained only behind an explicit emergency rollback switch.
 
 No model weights are bundled. See [Android third-party notices](android/THIRD_PARTY_NOTICES.md).
 The first 189.85 MiB Zipformer was rejected. The next round tested SenseVoice and Paraformer on all
@@ -76,6 +82,17 @@ and mixed MER from 20.37% to 18.31%. English remains auto-detected because forci
 See
 the [round-2 evaluation](docs/2026-08-09-offline-asr-candidate-round-2.md) and
 [reproducible harness](benchmarks/offline_asr/README.md).
+
+The exact 226.21 MiB streaming model used by Android has now also been run on the fixed 200-case
+ASCEND/FLEURS public subset: Mandarin CER 12.5%, English WER 40.2%, mixed MER 22.9%, 95.5% partial
+coverage, and first-partial audio position p50/p95 0.64/3.04 s. Across 1,682 changed hypotheses it
+did not revise earlier visible text once. It therefore does not by itself provide Baidu-style
+earlier-word correction. Speech Core v2 uses it as the low-latency first pass, then permits
+provisional punctuation and per-segment SenseVoice revision without stopping continuous capture.
+The models run in separate private processes; memory/thermal policy may choose concurrent,
+sequential or streaming-only execution. See the
+[v2 architecture](docs/2026-08-11-speech-core-v2-architecture.md) and
+[pinned streaming result](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json).
 
 ## Processing policy
 
@@ -162,6 +179,10 @@ RecognitionService contracts, real SQLite import transactions, and Android Keyst
 encryption/migration. The opt-in large-model gate additionally covers a real revision-pinned model
 download, exact hashes, native arm64 load/decode, and measured memory. CI runs JVM, lint, APK
 assembly, and API 26/33/35/36 emulator tests without real API keys or a 229 MiB model download.
+Speech Core v2 adds deterministic trace replay, segment permutation/property tests, continuous
+boundary assembly, encrypted multi-segment journal recovery, quality-job generation isolation,
+Unicode-safe editor projection, one-session undo, production-route diagnostics, and a tested
+emergency rollback boundary.
 
 The 0.3 review, automated evidence, physical-device procedure, and open gates are documented in
 [the Android 0.3 review and acceptance report](docs/2026-08-09-android-0.3-review-acceptance.md).

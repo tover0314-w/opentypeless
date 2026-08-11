@@ -15,6 +15,7 @@ public record TranscriptUpdate(
 
     public enum Source {
         ANDROID_SYSTEM,
+        SPEECH_CORE_V2,
         LOCAL_OFFLINE,
         DASHSCOPE_PARAFORMER,
         FUNASR,

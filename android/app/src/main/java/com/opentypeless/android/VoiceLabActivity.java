@@ -24,17 +24,21 @@ import com.opentypeless.android.diagnostics.RecognitionDiagnostics;
 import com.opentypeless.android.diagnostics.RecognitionDiagnosticsJson;
 import com.opentypeless.android.diagnostics.RecognitionDiagnosticsStore;
 import com.opentypeless.android.diagnostics.RecognitionRoute;
+import com.opentypeless.android.diagnostics.SpeechCoreShadowEvaluator;
+import com.opentypeless.android.diagnostics.SpeechCoreShadowSnapshot;
 import com.opentypeless.android.diagnostics.VoiceLabScorer;
 import com.opentypeless.android.diagnostics.VoiceLabPerformanceProbe;
 import com.opentypeless.android.ime.DictationRequest;
 import com.opentypeless.android.ime.DictationResult;
 import com.opentypeless.android.ime.TranscriptUpdate;
 import com.opentypeless.android.ime.VoicePipeline;
+import com.opentypeless.android.offline.OfflineStreamingRecognizer;
 import com.opentypeless.android.recognition.SystemRecognitionDiagnostics;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.RecognitionBackend;
 import com.opentypeless.android.settings.SettingsRepository;
+import com.opentypeless.android.speech.engine.ProcessingLocation;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,6 +67,7 @@ public final class VoiceLabActivity extends Activity {
     private TextView promptView;
     private TextView liveView;
     private TextView finalView;
+    private TextView shadowView;
     private TextView metricsView;
     private TextView performanceView;
     private TextView progressView;
@@ -80,8 +85,12 @@ public final class VoiceLabActivity extends Activity {
     private boolean microphoneReady;
     private boolean suppressTouchGeneratedClick;
     private long releaseAtMs;
+    private long rawFinalAtMs;
+    private long completedAtMs;
     private long attemptGeneration;
     private long activeAttempt;
+    private SpeechCoreShadowEvaluator shadowEvaluator;
+    private boolean productionV2Observed;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,7 +130,7 @@ public final class VoiceLabActivity extends Activity {
         AppVisualSystem.stylePage(this, root);
         scroll.addView(root);
 
-        root.addView(AppVisualSystem.title(this, getString(R.string.voice_lab_title)));
+        root.addView(AppVisualSystem.backHeader(this, getString(R.string.voice_lab_title)));
         TextView intro = text(getString(R.string.voice_lab_intro), 15, false);
         intro.setTextColor(getColor(R.color.ime_on_surface_variant));
         intro.setPadding(0, dp(8), 0, dp(14));
@@ -171,6 +180,11 @@ public final class VoiceLabActivity extends Activity {
         finalView.setMinHeight(dp(72));
         root.addView(finalView, matchWrapWithMargins(0, 8, 0, 0));
 
+        shadowView = cardText(getString(R.string.voice_lab_v2_shadow_empty), 14);
+        shadowView.setId(R.id.voice_lab_v2_shadow);
+        shadowView.setTextIsSelectable(true);
+        root.addView(shadowView, matchWrapWithMargins(0, 8, 0, 0));
+
         metricsView = cardText(getString(R.string.voice_lab_metrics_empty), 14);
         metricsView.setTextIsSelectable(true);
         root.addView(metricsView, matchWrapWithMargins(0, 8, 0, 0));
@@ -205,6 +219,9 @@ public final class VoiceLabActivity extends Activity {
         settingsExecutor.submit(() -> {
             try {
                 AppSettings loaded = new SettingsRepository(this).load();
+                if (loaded.recognitionBackend() == RecognitionBackend.LOCAL_OFFLINE) {
+                    pipeline.prewarmLocalOffline();
+                }
                 if (destroyed) return;
                 runOnUiThread(() -> {
                     if (destroyed) return;
@@ -278,8 +295,13 @@ public final class VoiceLabActivity extends Activity {
         recognitionActive = true;
         microphoneReady = false;
         releaseAtMs = 0L;
+        rawFinalAtMs = 0L;
+        completedAtMs = 0L;
         liveView.setText(R.string.voice_lab_live_waiting);
         finalView.setText(R.string.voice_lab_final_empty);
+        shadowEvaluator = null;
+        productionV2Observed = false;
+        shadowView.setText(R.string.voice_lab_v2_shadow_waiting);
         metricsView.setText(R.string.voice_lab_metrics_waiting);
         statusView.setText(R.string.voice_lab_preparing_microphone);
         nextButton.setEnabled(false);
@@ -359,6 +381,10 @@ public final class VoiceLabActivity extends Activity {
                 postUi(() -> {
                     if (!isAttemptCurrent(attempt)) return;
                     route = actualRoute;
+                    shadowEvaluator = new SpeechCoreShadowEvaluator(
+                            attempt,
+                            processingLocation(actualRoute.actualBackend()));
+                    renderShadow(shadowEvaluator.snapshot());
                     renderRoute();
                 });
             }
@@ -382,7 +408,17 @@ public final class VoiceLabActivity extends Activity {
                     if (!isAttemptCurrent(attempt)
                             || update == null
                             || update.text().isBlank()) return;
+                    if (update.source() == TranscriptUpdate.Source.SPEECH_CORE_V2) {
+                        productionV2Observed = true;
+                    }
+                    if (update.finalResult() && rawFinalAtMs <= 0L) {
+                        rawFinalAtMs = SystemClock.elapsedRealtime();
+                    }
                     liveView.setText(getString(R.string.voice_lab_live_value, update.text()));
+                    if (shadowEvaluator != null) {
+                        renderShadow(shadowEvaluator.accept(update));
+                    }
+                    renderMetrics(diagnosticsStore.load());
                 });
             }
 
@@ -402,10 +438,14 @@ public final class VoiceLabActivity extends Activity {
         if (!isAttemptCurrent(attempt)) return;
         recognitionActive = false;
         holding = false;
+        completedAtMs = SystemClock.elapsedRealtime();
         attempts++;
         boolean success = result != null && !result.finalText().isBlank();
         if (success) successes++;
         if (success) {
+            if (shadowEvaluator != null) {
+                renderShadow(shadowEvaluator.complete(result.rawText()));
+            }
             VoiceLabScorer.Score score = VoiceLabScorer.score(
                     prompts[promptIndex],
                     result.finalText());
@@ -421,6 +461,7 @@ public final class VoiceLabActivity extends Activity {
                             : R.string.voice_lab_score_differs)));
             statusView.setText(R.string.voice_lab_attempt_complete);
         } else {
+            if (shadowEvaluator != null) renderShadow(shadowEvaluator.fail());
             finalView.setText(getString(
                     R.string.voice_lab_error_value,
                     error == null || error.isBlank()
@@ -448,8 +489,12 @@ public final class VoiceLabActivity extends Activity {
                 : R.string.voice_lab_backend_not_ready);
         liveView.setText(R.string.voice_lab_live_empty);
         finalView.setText(R.string.voice_lab_final_empty);
+        shadowEvaluator = null;
+        productionV2Observed = false;
+        shadowView.setText(R.string.voice_lab_v2_shadow_empty);
         performanceView.setText(R.string.voice_lab_performance_empty);
         RecognitionDiagnostics.Snapshot last = diagnosticsStore.load();
+        if (last != null) route = last.route();
         renderMetrics(last);
         exportButton.setEnabled(last != null);
         renderProgress();
@@ -464,6 +509,12 @@ public final class VoiceLabActivity extends Activity {
         statusView.setText(R.string.voice_lab_ready);
         liveView.setText(R.string.voice_lab_live_empty);
         finalView.setText(R.string.voice_lab_final_empty);
+        shadowEvaluator = null;
+        productionV2Observed = false;
+        shadowView.setText(R.string.voice_lab_v2_shadow_empty);
+        releaseAtMs = 0L;
+        rawFinalAtMs = 0L;
+        completedAtMs = 0L;
         nextButton.setEnabled(false);
     }
 
@@ -486,14 +537,36 @@ public final class VoiceLabActivity extends Activity {
             metricsView.setText(R.string.voice_lab_metrics_empty);
             return;
         }
-        long stopToFinal = releaseAtMs > 0L
-                ? Math.max(0L, SystemClock.elapsedRealtime() - releaseAtMs)
-                : -1L;
+        long asrFinalLatency = releaseAtMs > 0L && rawFinalAtMs > 0L
+                ? Math.max(0L, rawFinalAtMs - releaseAtMs)
+                : snapshot.releaseToRawFinalLatencyMs();
+        long textProcessingLatency = rawFinalAtMs > 0L && completedAtMs > 0L
+                ? Math.max(0L, completedAtMs - rawFinalAtMs)
+                : snapshot.textProcessingLatencyMs();
+        long totalInsertionLatency = releaseAtMs > 0L && completedAtMs > 0L
+                ? Math.max(0L, completedAtMs - releaseAtMs)
+                : snapshot.releaseToTerminalLatencyMs();
+        String firstLiveText = snapshot.firstPartialLatencyMs() >= 0L
+                ? metric(snapshot.firstPartialLatencyMs())
+                : completedAtMs > 0L
+                ? getString(R.string.voice_lab_no_live_partial)
+                : metric(-1L);
+        String readyToFirstLive = snapshot.readyLatencyMs() >= 0L
+                        && snapshot.firstPartialLatencyMs() >= 0L
+                ? metric(Math.max(
+                        0L,
+                        snapshot.firstPartialLatencyMs() - snapshot.readyLatencyMs()))
+                : snapshot.terminal()
+                ? getString(R.string.voice_lab_no_live_partial)
+                : metric(-1L);
         metricsView.setText(getString(
                 R.string.voice_lab_metrics_value,
                 metric(snapshot.readyLatencyMs()),
-                metric(snapshot.firstPartialLatencyMs()),
-                metric(stopToFinal),
+                firstLiveText,
+                readyToFirstLive,
+                metric(asrFinalLatency),
+                metric(textProcessingLatency),
+                metric(totalInsertionLatency),
                 metric(snapshot.audioDurationMs()),
                 diagnosticsStatus(snapshot.status())));
     }
@@ -526,6 +599,27 @@ public final class VoiceLabActivity extends Activity {
                 successes,
                 attempts,
                 exactMatches));
+    }
+
+    private void renderShadow(SpeechCoreShadowSnapshot snapshot) {
+        if (snapshot == null) {
+            shadowView.setText(R.string.voice_lab_v2_shadow_empty);
+            return;
+        }
+        String text = snapshot.renderedText().isBlank()
+                ? getString(R.string.voice_lab_v2_shadow_no_text)
+                : snapshot.renderedText();
+        shadowView.setText(getString(
+                productionV2Observed
+                        ? R.string.voice_lab_v2_active_value
+                        : R.string.voice_lab_v2_compatibility_value,
+                text,
+                snapshot.acceptedRevisions(),
+                snapshot.earlierTextRevisions(),
+                snapshot.provisionalPunctuationObserved()
+                        ? getString(R.string.voice_lab_v2_shadow_yes)
+                        : getString(R.string.voice_lab_v2_shadow_no),
+                snapshot.captureState().name()));
     }
 
     private void renderControls() {
@@ -634,7 +728,9 @@ public final class VoiceLabActivity extends Activity {
             case DASHSCOPE_STREAMING -> safeIdentity(
                     settings.streamingModel(),
                     getString(R.string.voice_lab_engine_dashscope));
-            case LOCAL_OFFLINE -> getString(R.string.voice_lab_engine_sensevoice);
+            case LOCAL_OFFLINE -> getString(OfflineStreamingRecognizer.isInstalled(this)
+                    ? R.string.voice_lab_engine_offline_hybrid
+                    : R.string.voice_lab_engine_sensevoice);
             case SYSTEM_ON_DEVICE -> getString(R.string.voice_lab_engine_system_on_device);
             case SYSTEM_DEFAULT -> {
                 SystemRecognitionDiagnostics.Snapshot system = systemDiagnostics;
@@ -682,6 +778,14 @@ public final class VoiceLabActivity extends Activity {
             case FAILED -> R.string.voice_lab_status_failed;
             case CANCELLED -> R.string.voice_lab_status_cancelled;
         });
+    }
+
+    private static ProcessingLocation processingLocation(RecognitionBackend backend) {
+        return switch (backend) {
+            case LOCAL_OFFLINE -> ProcessingLocation.ON_DEVICE;
+            case SYSTEM_ON_DEVICE, SYSTEM_DEFAULT -> ProcessingLocation.ANDROID_SYSTEM_SERVICE;
+            case OPENAI_COMPATIBLE, DASHSCOPE_STREAMING -> ProcessingLocation.NETWORK;
+        };
     }
 
     private String thermalLabel(int status) {

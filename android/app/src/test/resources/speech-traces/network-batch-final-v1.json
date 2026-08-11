@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "engine": {
+    "engineId": "openai-compatible-batch",
+    "displayName": "OpenAI-compatible batch transcription",
+    "modelRevision": "user-configured",
+    "processingLocation": "NETWORK",
+    "capabilities": ["SEGMENT_FINALS"]
+  },
+  "sessionId": "fixture-batch",
+  "events": [
+    {"type":"prepare","engineId":"openai-compatible-batch","eventSequence":1,"sessionId":"fixture-batch"},
+    {"type":"ready","engineId":"openai-compatible-batch","eventSequence":2,"sessionId":"fixture-batch"},
+    {"type":"openSegment","engineId":"openai-compatible-batch","eventSequence":3,"sessionId":"fixture-batch","segmentId":1,"joinBefore":"NONE"},
+    {"type":"hardBoundary","engineId":"openai-compatible-batch","eventSequence":4,"sessionId":"fixture-batch","segmentId":1},
+    {"type":"transcript","engineId":"openai-compatible-batch","eventSequence":5,"revision":{"sessionId":"fixture-batch","segmentId":1,"revisionId":1,"stage":"LIVE","fullText":"final only result","audioStartMs":0,"audioEndMs":900,"origin":"STREAM_ASR","providerFinal":true,"tokenEvidence":[]}},
+    {"type":"sealSegment","engineId":"openai-compatible-batch","eventSequence":6,"sessionId":"fixture-batch","segmentId":1},
+    {"type":"stopRequested","engineId":"openai-compatible-batch","eventSequence":7,"sessionId":"fixture-batch"},
+    {"type":"captureEnded","engineId":"openai-compatible-batch","eventSequence":8,"sessionId":"fixture-batch","reason":"USER_FINISH"}
+  ]
+}

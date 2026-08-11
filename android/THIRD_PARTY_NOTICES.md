@@ -1,6 +1,6 @@
 # Android third-party notices
 
-OpenTypeless Android 0.2 is an MIT-licensed clean-room implementation. It does not copy code or
+OpenTypeless Android 0.3 is an MIT-licensed clean-room implementation. It does not copy code or
 bundle model weights from Typeless, Gboard, FUTO Voice Input, HeliBoard, Sayboard, whisperIME, or
 Offline Voice Input.
 
@@ -46,3 +46,11 @@ the SenseVoice/FunAudioLLM/FunASR/Alibaba model names and attribution, and prese
 Open Source License Agreement before consent. The exact model source and license snapshot are also
 included in the in-app legal notices. Release remains gated on final legal review of the conversion
 artifact's model-card/license history.
+
+The optional offline live-text package is independently downloaded from the Apache-2.0
+`csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en` revision
+`8e40c43232a1c5c66c82111efc5820d3accca11b`. OpenTypeless pins and verifies the INT8 encoder
+(`81a70226…90e9a`), decoder (`f3cca9f7…594f`), and tokens (`59aba887…6e6`) before installation.
+The model card attributes the converted source to ModelScope
+`damo/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8404-online`. It is used only as the
+replaceable first pass; SenseVoice remains the quality final pass.

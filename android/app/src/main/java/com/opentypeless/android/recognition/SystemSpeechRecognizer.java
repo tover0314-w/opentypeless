@@ -230,22 +230,33 @@ public final class SystemSpeechRecognizer {
 
             @Override
             public void onPartialResults(Bundle partialResults) {
-                if (current(run)) {
-                    String text;
-                    try {
-                        text = firstResult(partialResults);
-                    } catch (IllegalArgumentException error) {
-                        if (finishCurrent(run)) {
-                            callback.onError(SpeechRecognizer.ERROR_CLIENT, error.getMessage());
-                        }
-                        return;
-                    }
-                    if (!text.isBlank()) callback.onPartial(text);
-                }
+                deliverPartial(run, callback, partialResults);
+            }
+
+            @Override
+            public void onSegmentResults(Bundle segmentResults) {
+                // API 33+ recognizers may surface an intermediate hypothesis as a segment even
+                // when their vendor implementation never invokes onPartialResults(). Treat it as
+                // replaceable preview text; the authoritative onResults callback still wins.
+                deliverPartial(run, callback, segmentResults);
             }
 
             @Override public void onEvent(int eventType, Bundle params) {}
         };
+    }
+
+    private void deliverPartial(long run, Callback callback, Bundle results) {
+        if (!current(run)) return;
+        String text;
+        try {
+            text = firstResult(results);
+        } catch (IllegalArgumentException error) {
+            if (finishCurrent(run)) {
+                callback.onError(SpeechRecognizer.ERROR_CLIENT, error.getMessage());
+            }
+            return;
+        }
+        if (!text.isBlank()) callback.onPartial(text);
     }
 
     private boolean current(long run) {

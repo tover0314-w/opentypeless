@@ -38,6 +38,8 @@ import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.offline.OfflineModelOperationCoordinator;
 import com.opentypeless.android.offline.OfflineModelSpec;
 import com.opentypeless.android.offline.OfflineModelStore;
+import com.opentypeless.android.offline.OfflineStreamingModelSpec;
+import com.opentypeless.android.offline.OfflineStreamingModelStore;
 import com.opentypeless.android.ime.OpenTypelessImeService;
 import com.opentypeless.android.recognition.SystemSpeechRecognizer;
 import com.opentypeless.android.recognition.SystemRecognitionDiagnostics;
@@ -203,7 +205,7 @@ public final class MainActivity extends Activity {
                 0,
                 1f));
 
-        root.addView(AppVisualSystem.title(this, getString(R.string.settings_title)));
+        root.addView(AppVisualSystem.backHeader(this, getString(R.string.settings_title)));
         TextView intro = text(getString(R.string.settings_intro), 15, false);
         intro.setTextColor(getColor(R.color.ime_on_surface_variant));
         intro.setPadding(0, dp(8), 0, dp(16));
@@ -595,36 +597,67 @@ public final class MainActivity extends Activity {
             return;
         }
         OfflineModelStore.Status status = OfflineModelStore.status(this);
+        OfflineStreamingModelStore.Status streamingStatus =
+                OfflineStreamingModelStore.status(this);
         boolean supported = LocalOfflineRecognizer.isSupportedDevice(this);
-        int message = switch (status) {
-            case MISSING -> supported
-                    ? R.string.offline_model_missing
-                    : R.string.offline_model_unsupported_low_memory;
-            case INSTALLED -> R.string.offline_model_installed;
-            case CORRUPT -> R.string.offline_model_corrupt;
-        };
+        boolean qualityInstalled = status == OfflineModelStore.Status.INSTALLED;
+        boolean streamingInstalled = streamingStatus
+                == OfflineStreamingModelStore.Status.INSTALLED;
+        int message;
+        if (!supported) {
+            message = R.string.offline_model_unsupported_low_memory;
+        } else if (status == OfflineModelStore.Status.MISSING) {
+            message = R.string.offline_model_missing;
+        } else if (status == OfflineModelStore.Status.CORRUPT) {
+            message = R.string.offline_model_corrupt;
+        } else if (streamingStatus == OfflineStreamingModelStore.Status.CORRUPT) {
+            message = R.string.offline_preview_model_corrupt;
+        } else if (!streamingInstalled) {
+            message = R.string.offline_model_quality_only;
+        } else {
+            message = R.string.offline_model_installed;
+        }
         localModelStatus.setText(message);
-        localModelStatus.setTextColor(status == OfflineModelStore.Status.INSTALLED
+        localModelStatus.setTextColor(supported && qualityInstalled && streamingInstalled
                 ? getColor(R.color.ime_primary)
+                : supported && qualityInstalled
+                ? getColor(R.color.ime_warning)
                 : getColor(R.color.ime_error));
         localModelStatus.setContentDescription(localModelStatus.getText());
+        downloadOfflineModel.setText(qualityInstalled && !streamingInstalled
+                ? R.string.download_offline_live_preview
+                : R.string.download_offline_model);
         downloadOfflineModel.setEnabled(supported
-                && status != OfflineModelStore.Status.INSTALLED);
+                && (!qualityInstalled || !streamingInstalled));
         deleteOfflineModel.setVisibility(status == OfflineModelStore.Status.MISSING
+                && streamingStatus == OfflineStreamingModelStore.Status.MISSING
                 ? View.GONE
                 : View.VISIBLE);
     }
 
     private void confirmOfflineModelDownload() {
         if (OfflineModelOperationCoordinator.snapshot().running()) return;
-        OfflineModelSpec spec = OfflineModelSpec.QUALITY;
+        OfflineModelSpec quality = OfflineModelSpec.QUALITY;
+        OfflineStreamingModelSpec streaming = OfflineStreamingModelSpec.REALTIME;
+        boolean needsQuality = OfflineModelStore.status(this)
+                != OfflineModelStore.Status.INSTALLED;
+        boolean needsStreaming = OfflineStreamingModelStore.status(this)
+                != OfflineStreamingModelStore.Status.INSTALLED;
+        long missingBytes = (needsQuality ? quality.downloadBytes() : 0L)
+                + (needsStreaming ? streaming.downloadBytes() : 0L);
+        String models = needsQuality && needsStreaming
+                ? quality.displayName() + " + " + streaming.displayName()
+                : needsQuality ? quality.displayName() : streaming.displayName();
+        String revisions = needsQuality && needsStreaming
+                ? quality.revision() + " / " + streaming.revision()
+                : needsQuality ? quality.revision() : streaming.revision();
         new AlertDialog.Builder(this)
                 .setTitle(R.string.download_offline_model_title)
                 .setMessage(getString(
                         R.string.download_offline_model_confirmation,
-                        spec.displayName(),
-                        spec.downloadBytes() / (1024L * 1024L),
-                        spec.revision()))
+                        models,
+                        missingBytes / (1024L * 1024L),
+                        revisions))
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.download_offline_model, (ignored, which) ->
                         startOfflineModelDownload())

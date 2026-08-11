@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="home_route_value" type="id" />
+    <item name="settings_home_route_card" type="id" />
+    <item name="settings_home_voice_row" type="id" />
+    <item name="settings_home_privacy_row" type="id" />
+    <item name="voice_lab_v2_shadow" type="id" />
+</resources>

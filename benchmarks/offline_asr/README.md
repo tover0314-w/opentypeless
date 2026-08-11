@@ -52,6 +52,21 @@ Use `--model-type paraformer` for the lightweight candidate. These recognizers r
 result; the runner deliberately reports zero partial-result coverage rather than presenting them as
 streaming models.
 
+The Android live-preview model is a different, revision-pinned online Paraformer. Benchmark that
+exact encoder/decoder pair with the same 40 ms chunks and explicit final flush used on device:
+
+```bash
+uv run --python 3.11 --with-requirements benchmarks/offline_asr/requirements.txt \
+  python benchmarks/offline_asr/run_sherpa_streaming_paraformer.py \
+  --model-dir /path/to/streaming-paraformer-current \
+  --manifest /tmp/opentypeless-asr-bench/public-stratified/manifest.jsonl \
+  --output-dir /tmp/opentypeless-asr-bench/streaming-paraformer-results
+```
+
+This runner also counts hypotheses that revise earlier text rather than merely appending. Those
+revisions are expected input to Speech Core v2's `SegmentRevision` reducer; they must never be
+implemented as blind `commitText` appends.
+
 Keep the audited baseline runner unchanged when testing SenseVoice inverse text normalization. Use
 the provenance-checked companion instead:
 

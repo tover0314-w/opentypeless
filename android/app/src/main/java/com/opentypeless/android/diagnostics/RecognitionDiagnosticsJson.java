@@ -10,7 +10,7 @@ public final class RecognitionDiagnosticsJson {
         if (snapshot == null) throw new IllegalArgumentException("Diagnostics snapshot is required");
         RecognitionRoute route = snapshot.route();
         return "{\n"
-                + "  \"schema\": 1,\n"
+                + "  \"schema\": 2,\n"
                 + "  \"session_id\": " + snapshot.sessionId() + ",\n"
                 + "  \"started_at_epoch_ms\": " + snapshot.startedAtEpochMs() + ",\n"
                 + "  \"selected_backend\": \"" + route.selectedBackend().name() + "\",\n"
@@ -22,6 +22,12 @@ public final class RecognitionDiagnosticsJson {
                 + "  \"ready_latency_ms\": " + snapshot.readyLatencyMs() + ",\n"
                 + "  \"first_partial_latency_ms\": "
                 + snapshot.firstPartialLatencyMs() + ",\n"
+                + "  \"release_to_raw_final_latency_ms\": "
+                + snapshot.releaseToRawFinalLatencyMs() + ",\n"
+                + "  \"text_processing_latency_ms\": "
+                + snapshot.textProcessingLatencyMs() + ",\n"
+                + "  \"release_to_terminal_latency_ms\": "
+                + snapshot.releaseToTerminalLatencyMs() + ",\n"
                 + "  \"terminal_latency_ms\": " + snapshot.terminalLatencyMs() + ",\n"
                 + "  \"audio_duration_ms\": " + snapshot.audioDurationMs() + ",\n"
                 + "  \"final_code_point_count\": " + snapshot.finalCodePointCount() + ",\n"

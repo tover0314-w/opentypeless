@@ -18,6 +18,14 @@ require(actualSherpaAsrRuntimeSha256 == expectedSherpaAsrRuntimeSha256) {
         "got $actualSherpaAsrRuntimeSha256"
 }
 
+// Normal CI/release builds remain universal. Direct device handoffs can request one pinned ABI
+// so the native ASR runtime stays below messaging-platform attachment limits.
+val deliveryAbi = providers.gradleProperty("opentypeless.deliveryAbi").orNull
+val supportedDeliveryAbis = setOf("arm64-v8a", "x86_64")
+require(deliveryAbi == null || deliveryAbi in supportedDeliveryAbis) {
+    "Unsupported OpenTypeless delivery ABI: $deliveryAbi"
+}
+
 val releaseStorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
 val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
@@ -47,6 +55,12 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "0.3.0"
+
+        if (deliveryAbi != null) {
+            ndk {
+                abiFilters += deliveryAbi
+            }
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

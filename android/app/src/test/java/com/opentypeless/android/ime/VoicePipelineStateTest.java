@@ -12,6 +12,10 @@ import com.opentypeless.android.context.FieldKind;
 import com.opentypeless.android.data.CorrectionRule;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.personalization.ProcessingResult;
+import com.opentypeless.android.speech.delivery.ProjectionDocument;
+import com.opentypeless.android.speech.delivery.ProjectionMode;
+import com.opentypeless.android.speech.journal.JournalToken;
+import com.opentypeless.android.settings.RecognitionBackend;
 
 import org.junit.Test;
 
@@ -22,6 +26,48 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class VoicePipelineStateTest {
+    @Test
+    public void localOfflineUsesV2WithoutSilentlyInspectingModelAvailability() {
+        assertTrue(VoicePipeline.shouldUseSpeechCoreV2(RecognitionBackend.LOCAL_OFFLINE, true));
+        assertFalse(VoicePipeline.shouldUseSpeechCoreV2(RecognitionBackend.LOCAL_OFFLINE, false));
+        assertFalse(VoicePipeline.shouldUseSpeechCoreV2(RecognitionBackend.SYSTEM_DEFAULT, true));
+    }
+
+    @Test
+    public void v2FinalProjectionNeverRewritesASealedLongPrefix() {
+        ProjectionDocument latest = new ProjectionDocument("第一段。", "第二段");
+
+        assertEquals(
+                new ProjectionDocument("第一段。", "第二段修订。"),
+                OpenTypelessImeService.finalProjectionDocument(
+                        ProjectionMode.LONG_DICTATION,
+                        latest,
+                        "第一段。第二段修订。"));
+        assertSame(
+                null,
+                OpenTypelessImeService.finalProjectionDocument(
+                        ProjectionMode.LONG_DICTATION,
+                        latest,
+                        "第一段被改写。第二段修订。"));
+        assertEquals(
+                ProjectionDocument.shortDraft("可整体替换"),
+                OpenTypelessImeService.finalProjectionDocument(
+                        ProjectionMode.SHORT_DICTATION,
+                        latest,
+                        "可整体替换"));
+    }
+
+    @Test
+    public void speechCoreRecoveryIdRoundTripsAndRejectsMalformedInput() {
+        JournalToken token = VoicePipeline.parseSpeechCoreRecoveryId(
+                "v2:42:local-v2-session");
+
+        assertEquals(42L, token.generation());
+        assertEquals("local-v2-session", token.sessionId().value());
+        assertSame(null, VoicePipeline.parseSpeechCoreRecoveryId("v2:not-a-number:id"));
+        assertSame(null, VoicePipeline.parseSpeechCoreRecoveryId("legacy"));
+    }
+
     @Test
     public void staleCancellationCannotResetAnImmediatelyRestartedRun() {
         Object cancelled = new Object();

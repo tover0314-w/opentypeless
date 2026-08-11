@@ -55,8 +55,14 @@ public final class PersonalizedTextProcessor {
         if (original.codePointCount(0, original.length()) > MAX_INPUT_CODE_POINTS) {
             throw new IllegalArgumentException("Transcript is too long");
         }
+        PersonalizationSnapshot safeSnapshot = snapshot == null
+                ? PersonalizationSnapshot.empty()
+                : snapshot;
+        if (safeSnapshot.terms().isEmpty() && safeSnapshot.corrections().isEmpty()) {
+            return new ProcessingResult(original, List.of(), List.of());
+        }
         List<Replacement> replacements = new ArrayList<>();
-        for (CorrectionRule rule : snapshot.corrections()) {
+        for (CorrectionRule rule : safeSnapshot.corrections()) {
             if (rule.enabled() && !rule.pattern().isBlank() && !rule.replacement().isBlank()) {
                 replacements.add(new Replacement(
                         rule.pattern().trim(), rule.replacement().trim(), rule.id(), false));
@@ -64,7 +70,7 @@ public final class PersonalizedTextProcessor {
             }
         }
         outer:
-        for (PersonalTerm term : snapshot.terms()) {
+        for (PersonalTerm term : safeSnapshot.terms()) {
             if (!term.enabled() || term.canonical().isBlank()) continue;
             for (String alias : term.aliasList()) {
                 replacements.add(new Replacement(
@@ -139,7 +145,7 @@ public final class PersonalizedTextProcessor {
         output.append(original, cursor, original.length());
         String result = output.toString();
         NormalizedView resultView = normalizedView(result);
-        for (PersonalTerm term : snapshot.terms()) {
+        for (PersonalTerm term : safeSnapshot.terms()) {
             if (term.enabled() && matches(resultView, term.canonical().trim())) termIds.add(term.id());
         }
         return new ProcessingResult(result, List.copyOf(termIds), List.copyOf(correctionIds));

@@ -82,9 +82,11 @@ public final class HistoryActivity extends Activity {
     }
 
     private View buildContent() {
+        LinearLayout page = verticalLayout();
+        AppVisualSystem.stylePage(this, page);
+        SystemBarInsets.apply(page);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        SystemBarInsets.apply(scroll);
         LinearLayout root = verticalLayout();
         int padding = dp(20);
         root.setPadding(padding, padding, padding, padding);
@@ -101,7 +103,14 @@ public final class HistoryActivity extends Activity {
         historyList = verticalLayout();
         historyList.setPadding(0, dp(12), 0, 0);
         root.addView(historyList, matchWrap());
-        return scroll;
+        page.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
+        page.addView(
+                AppVisualSystem.bottomNavigation(this, AppVisualSystem.Destination.HISTORY),
+                AppVisualSystem.matchWrap());
+        return page;
     }
 
     private void refreshHistory() {

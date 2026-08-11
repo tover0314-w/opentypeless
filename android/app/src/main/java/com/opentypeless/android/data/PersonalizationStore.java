@@ -367,6 +367,11 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
         return listTerms(MAX_TERMS, 0);
     }
 
+    /** Lightweight count for status surfaces; unlike listTerms(), this decrypts no user text. */
+    public synchronized int countTerms() {
+        return tableCount("personal_terms");
+    }
+
     public synchronized List<PersonalTerm> listTerms(int limit, int offset) {
         return searchTerms("", limit, offset);
     }
@@ -394,6 +399,11 @@ public final class PersonalizationStore extends SQLiteOpenHelper {
 
     public synchronized List<CorrectionRule> listCorrections() {
         return listCorrections(MAX_CORRECTIONS, 0);
+    }
+
+    /** Lightweight count for status surfaces; unlike listCorrections(), this decrypts no rules. */
+    public synchronized int countCorrections() {
+        return tableCount("correction_rules");
     }
 
     public synchronized List<CorrectionRule> listCorrections(int limit, int offset) {

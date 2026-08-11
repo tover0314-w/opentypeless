@@ -31,7 +31,8 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
     private final ScheduledExecutorService sampler = Executors.newSingleThreadScheduledExecutor();
     private final PowerManager powerManager;
     private final ActivityManager activityManager;
-    private final String localAsrProcessName;
+    private final String streamingProcessName;
+    private final String qualityProcessName;
     private ScheduledFuture<?> samplingTask;
     private boolean running;
     private long startPssKb;
@@ -49,7 +50,8 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
                 Context.POWER_SERVICE);
         activityManager = (ActivityManager) applicationContext.getSystemService(
                 Context.ACTIVITY_SERVICE);
-        localAsrProcessName = applicationContext.getPackageName() + ":local_asr";
+        streamingProcessName = applicationContext.getPackageName() + ":local_stream";
+        qualityProcessName = applicationContext.getPackageName() + ":local_quality";
     }
 
     public synchronized void start() {
@@ -117,14 +119,26 @@ public final class VoiceLabPerformanceProbe implements AutoCloseable {
             java.util.List<ActivityManager.RunningAppProcessInfo> processes =
                     activityManager.getRunningAppProcesses();
             if (processes == null) return -1L;
+            java.util.ArrayList<Integer> pids = new java.util.ArrayList<>(2);
             for (ActivityManager.RunningAppProcessInfo process : processes) {
-                if (!localAsrProcessName.equals(process.processName) || process.pid <= 0) continue;
-                Debug.MemoryInfo[] memory = activityManager.getProcessMemoryInfo(
-                        new int[]{process.pid});
-                if (memory.length == 1 && memory[0] != null) {
-                    return Math.max(0L, memory[0].getTotalPss());
+                if (process.pid > 0
+                        && (streamingProcessName.equals(process.processName)
+                                || qualityProcessName.equals(process.processName))) {
+                    pids.add(process.pid);
                 }
             }
+            if (pids.isEmpty()) return -1L;
+            int[] pidArray = new int[pids.size()];
+            for (int index = 0; index < pids.size(); index++) pidArray[index] = pids.get(index);
+            Debug.MemoryInfo[] memory = activityManager.getProcessMemoryInfo(pidArray);
+            long total = 0L;
+            boolean measured = false;
+            for (Debug.MemoryInfo info : memory) {
+                if (info == null) continue;
+                total += Math.max(0L, info.getTotalPss());
+                measured = true;
+            }
+            return measured ? total : -1L;
         } catch (RuntimeException ignored) {
             // Process visibility and meminfo access differ across Android releases/OEMs.
         }

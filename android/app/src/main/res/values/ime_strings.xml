@@ -12,10 +12,9 @@
     <string name="ime_key_app_profile">App profile</string>
     <string name="ime_key_dictionary">Personal dictionary</string>
     <string name="ime_key_settings">Settings</string>
-    <string name="ime_key_long_dictation">Long dictation</string>
+    <string name="ime_menu_voice_diagnostics">Last voice diagnostics</string>
     <string name="ime_key_long_dictation_compact">Long</string>
-    <string name="ime_key_finish_dictation">Finish &amp; insert</string>
-    <string name="ime_key_finish_dictation_compact">Insert</string>
+    <string name="ime_key_finish_dictation_compact">Done</string>
     <string name="ime_key_processing">Processing…</string>
     <string name="ime_key_processing_compact">Finish…</string>
     <string name="ime_key_preparing">Preparing…</string>
@@ -24,6 +23,7 @@
     <string name="ime_key_hold_to_talk_compact">Hold</string>
     <string name="ime_key_release_to_finish">Release to insert</string>
     <string name="ime_key_listening">Listening…</string>
+    <string name="ime_key_listening_compact">Live</string>
     <string name="ime_key_more" translatable="false">⋮</string>
     <string name="ime_key_punctuation" translatable="false">，。</string>
     <string name="ime_key_action_send" translatable="false">➤</string>
@@ -116,7 +116,7 @@
     <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
     <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
     <string name="ime_status_session_active">Another voice session is already active</string>
-    <string name="ime_status_live_composition_fallback">This field cannot show live text; the preview remains in OpenTypeless until final insertion</string>
+    <string name="ime_status_live_composition_fallback">This field cannot show live text; the current draft is preserved and will be inserted when you finish</string>
     <string name="ime_status_composition_cleanup_failed">The app stopped voice input but could not confirm removal of the live draft; check the field before continuing</string>
     <string name="ime_status_composition_preserve_uncertain">Voice input stopped, but the app could not confirm that the visible draft was finalized; check the field</string>
     <string name="ime_status_field_unavailable">The current text field is no longer available</string>
@@ -155,7 +155,10 @@
     <string name="ime_status_cursor_moved_preserved">Cursor moved; stopped listening and kept the visible draft</string>
     <string name="ime_status_voice_input_failed">Voice input failed</string>
     <string name="ime_status_listening">Listening…</string>
-    <string name="ime_status_transcribing">Transcribing and applying personal vocabulary…</string>
+    <string name="ime_status_waiting_for_live_text">Listening · waiting for live text…</string>
+    <string name="ime_status_system_no_live_text_yet">The Android speech service has not supplied live text yet; release to get its final transcript</string>
+    <string name="ime_status_backend_final_only">This backend transcribes after recording; release to show the result</string>
+    <string name="ime_status_transcribing">Finalizing text…</string>
     <string name="ime_status_polishing">Checking and polishing without changing facts…</string>
     <string name="ime_status_inserted">Inserted</string>
     <string name="ime_status_inserted_recording_limit">Inserted · recording time limit reached</string>

@@ -158,15 +158,27 @@ The first implementation slice is now in the Android app:
   bound, supports one active request, and releases native model memory after every turn;
 - explicit cancellation terminates only the local-model process because the pinned native decoder
   has no cooperative cancellation primitive; the keyboard process and its visible draft survive;
-- SenseVoice is now reported honestly as final-only. The former repeated-prefix pseudo-streaming
-  decoder was removed from the production route because it loaded the large model in the IME and
-  froze after a bounded prefix;
+- SenseVoice-only installations are reported honestly as final-only. Repeated-prefix SenseVoice
+  pseudo-streaming is not used in production because it repeatedly decodes a growing prefix;
 - API 36 instrumentation verifies that the service is non-exported and has a PID distinct from the
   app process. Voice Lab measures its PSS separately when Android exposes process memory data.
 
 The quick check deliberately does not record or retain audio. Exact one-take backend replay, full
 30–50 prompt sessions, encrypted opt-in audio, and Xiaomi 15 physical measurements remain later
 stages rather than being simulated by this screen.
+
+## Implemented P0 batch 4
+
+- an independently downloadable, hash-pinned Streaming Paraformer zh/en INT8 model provides true
+  offline first-pass partials through an anonymous PCM pipe to the same private ASR process;
+- the online model is released before SenseVoice loads, preventing both native weight sets from
+  remaining resident together; first-pass text remains visible while SenseVoice produces the
+  authoritative quality final;
+- SenseVoice-only installations remain valid and are labelled final-only; installing or repairing
+  the realtime package does not invalidate or redownload an already verified quality model;
+- an API 36 arm64 native/Binder gate feeds the upstream official test wave, observes multiple live
+  revisions, flushes a non-empty first-pass final, and immediately starts a non-empty SenseVoice
+  quality pass to verify model handoff rather than only Java-level mocks.
 
 ## Implemented P0 batch 3
 
@@ -215,8 +227,29 @@ evaluated for I/O, battery, and microphone-dropout cost on Xiaomi 15 before it c
 - the release workflow reads Android `versionName` and the signed APK name from Gradle metadata,
   validates both, and publishes matching APK/AAB/checksum artifacts instead of a hard-coded older
   version;
-- the current local gate passes 253 JVM tests, 27 API 36 instrumentation tests with one explicit
-  real-model skip, Debug/Release lint with no issues, APK assembly, and AAB bundling.
+- the current local gate passes 410 JVM tests and an API 36 suite of 41 tests (37 pass plus four
+  designed model/download skips), plus 3/3 separately provisioned native two-model tests;
+  Debug/Release lint has zero errors and one intentional arm64-delivery ChromeOS warning, and APK
+  assembly passes.
+
+## Speech Core v2 production diagnostics
+
+For local offline, Voice Lab observes the same Speech Core v2 production revisions used by the
+keyboard. For other engines it displays a clearly labelled compatibility trace. Its card reports
+the rendered document, accepted revision count, earlier-visible-text revisions, provisional
+punctuation and capture state. The lab itself has no `InputConnection`; the ordinary IME owns all
+editor writes.
+
+The exact Android Streaming Paraformer model was screened on the fixed 200-case ASCEND/FLEURS
+subset. It produced partials on 95.5% of cases, but none of 1,682 changed hypotheses revised earlier
+visible text. Voice Lab therefore distinguishes raw streaming revisions from provisional pause
+punctuation and later SenseVoice segment-quality revisions; it never attributes the latter to the
+Paraformer model or fabricates unsupported token stability.
+
+The production integration now retains Streaming Paraformer in `:local_stream` and starts
+SenseVoice in `:local_quality` only for closed quality segments. Voice Lab reports microphone-ready,
+ready-to-first-live, release-to-ASR-final, text processing, total commit, process PSS, app CPU,
+network and thermal measurements separately so model preparation cannot be hidden in a total.
 
 ## Initial release gates
 

@@ -4,11 +4,13 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -29,23 +31,35 @@ import android.widget.PopupMenu;
 import android.widget.TextView;
 
 import com.opentypeless.android.HistoryActivity;
-import com.opentypeless.android.MainActivity;
 import com.opentypeless.android.AppProfileActivity;
 import com.opentypeless.android.DictionaryActivity;
 import com.opentypeless.android.R;
+import com.opentypeless.android.SettingsHomeActivity;
+import com.opentypeless.android.VoiceLabActivity;
 import com.opentypeless.android.context.FieldKind;
 import com.opentypeless.android.context.InputContext;
 import com.opentypeless.android.context.InputContextClassifier;
 import com.opentypeless.android.data.HistoryEntry;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
+import com.opentypeless.android.offline.OfflineStreamingRecognizer;
 import com.opentypeless.android.data.PersonalizationStore;
+import com.opentypeless.android.diagnostics.RecognitionRoute;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.AppProfile;
 import com.opentypeless.android.settings.AppProfileRepository;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.SettingsRepository;
 import com.opentypeless.android.security.SecurePreferences;
+import com.opentypeless.android.speech.delivery.AndroidInputConnectionAdapter;
+import com.opentypeless.android.speech.delivery.EditorProjection;
+import com.opentypeless.android.speech.delivery.ProjectionContext;
+import com.opentypeless.android.speech.delivery.ProjectionDocument;
+import com.opentypeless.android.speech.delivery.ProjectionMode;
+import com.opentypeless.android.speech.delivery.ProjectionOutcome;
+import com.opentypeless.android.speech.delivery.ProjectionResult;
+import com.opentypeless.android.speech.delivery.ProjectionState;
+import com.opentypeless.android.speech.runtime.SpeechCoreV2Config;
 
 import java.util.List;
 import java.util.Map;
@@ -74,12 +88,15 @@ public final class OpenTypelessImeService extends InputMethodService {
     private static final int MENU_DICTIONARY = 207;
     private static final int MENU_RECOVER_AUDIO = 208;
     private static final int MENU_DISCARD_AUDIO = 209;
+    private static final int MENU_UNDO = 210;
+    private static final int MENU_VOICE_DIAGNOSTICS = 211;
     private static final int MENU_PUNCTUATION_BASE = 300;
     private static final long DISCARD_CONFIRM_WINDOW_MILLIS = 10_000L;
     // Two bounded network stages may run after capture: ASR and optional AI processing. Each may
     // legally consume a 20s connect + 120s read timeout, so teardown must cover the whole chain.
     private static final long DESTROY_FINALIZATION_TIMEOUT_MILLIS = 330_000L;
     private static final long DETACHED_STATE_REFRESH_MILLIS = 500L;
+    private static final long NO_PARTIAL_HINT_DELAY_MILLIS = 2_000L;
     private static final String RECOVERABLE_DRAFT_PREFERENCE = "recoverable_voice_draft";
     private static final String RECOVERABLE_DRAFT_AUDIO_ID_PREFERENCE =
             "recoverable_voice_draft_audio_id";
@@ -285,6 +302,7 @@ public final class OpenTypelessImeService extends InputMethodService {
     private ExecutorService localIo;
     private TextView status;
     private TextView transcript;
+    private VoicePulseView voicePulse;
     private Button microphone;
     private Button modeButton;
     private Button undoButton;
@@ -304,6 +322,7 @@ public final class OpenTypelessImeService extends InputMethodService {
     private String latestPreviewText = "";
     private final RecoverableDraftSlot recoverableDraft = PROCESS_RECOVERABLE_DRAFT;
     private DictationRequest.CaptureMode activeCaptureMode;
+    private RecognitionRoute activeRecognitionRoute;
     private volatile CommitTarget detachedTargetAwaitingResult;
     private volatile boolean serviceDestroyed;
     private boolean resourcesClosed;
@@ -323,6 +342,9 @@ public final class OpenTypelessImeService extends InputMethodService {
     private ProcessingMode selectedMode = ProcessingMode.AUTO;
     private CommitTarget activeTarget;
     private VoiceCompositionSession activeComposition;
+    private EditorProjection activeV2Projection;
+    private ProjectionDocument latestV2Document;
+    private ProjectionMode activeV2ProjectionMode;
     private LastVoiceCommit lastCommit;
 
     @Override
@@ -337,8 +359,12 @@ public final class OpenTypelessImeService extends InputMethodService {
         localIo = Executors.newSingleThreadExecutor();
         selectedMode = settingsRepository.loadDefaultMode();
         localIo.execute(() -> {
-            settingsRepository.load();
+            AppSettings initialSettings = settingsRepository.load();
             personalizationStore.getReadableDatabase();
+            if (initialSettings.recognitionBackend()
+                    == com.opentypeless.android.settings.RecognitionBackend.LOCAL_OFFLINE) {
+                pipeline.prewarmLocalOffline();
+            }
         });
         localIo.execute(() -> {
             synchronized (DRAFT_STORAGE_LOCK) {
@@ -363,8 +389,11 @@ public final class OpenTypelessImeService extends InputMethodService {
     public View onCreateInputView() {
         compactLayout = getResources().getConfiguration().screenWidthDp < 360
                 || getResources().getConfiguration().fontScale >= 1.3f;
+        boolean landscape = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setMinimumHeight(dp(landscape ? 190 : compactLayout ? 280 : 300));
         root.setPadding(dp(8), dp(8), dp(8), dp(10));
         root.setBackgroundResource(R.drawable.ime_panel_background);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -375,43 +404,40 @@ public final class OpenTypelessImeService extends InputMethodService {
             return insets;
         });
 
+        LinearLayout toolbar = horizontalRow();
+        toolbar.setPadding(dp(2), 0, dp(2), dp(4));
+
+        voicePulse = new VoicePulseView(this);
+        voicePulse.setPhase(VoicePulseView.Phase.IDLE);
+        LinearLayout.LayoutParams pulseParams = new LinearLayout.LayoutParams(dp(30), dp(40));
+        pulseParams.setMarginStart(dp(2));
+        pulseParams.setMarginEnd(dp(4));
+        toolbar.addView(voicePulse, pulseParams);
+
         status = new TextView(this);
         status.setText(R.string.status_ready);
         status.setTextColor(getColor(R.color.ime_on_surface_variant));
         status.setTextSize(12);
         status.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        status.setPadding(dp(6), dp(2), dp(6), dp(6));
+        status.setSingleLine(true);
+        status.setEllipsize(TextUtils.TruncateAt.END);
+        status.setAutoSizeTextTypeUniformWithConfiguration(
+                9, 12, 1, TypedValue.COMPLEX_UNIT_SP);
+        status.setPadding(dp(2), 0, dp(4), 0);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        root.addView(status, matchWrap());
+        addWeighted(toolbar, status, 1.35f);
 
-        transcript = new TextView(this);
-        transcript.setText(R.string.ime_transcript_hint);
-        transcript.setTextColor(getColor(R.color.ime_on_surface));
-        transcript.setTextSize(17);
-        transcript.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        transcript.setPadding(dp(12), dp(8), dp(12), dp(8));
-        transcript.setMinHeight(dp(52));
-        transcript.setMaxLines(2);
-        transcript.setTextIsSelectable(true);
-        transcript.setBackgroundResource(R.drawable.ime_transcript_background);
-        transcript.setVisibility(View.GONE);
-        transcript.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_NONE);
-        root.addView(transcript, matchWrap());
-
-        LinearLayout toolbar = horizontalRow();
         modeButton = key("", getString(R.string.ime_cd_choose_mode), 1f,
                 ignored -> showModeMenu());
-        addWeighted(toolbar, modeButton, 1.15f);
-        microphone = key(getString(voiceLabel(
-                        R.string.ime_key_long_dictation,
-                        R.string.ime_key_long_dictation_compact)),
+        addWeighted(toolbar, modeButton, .82f);
+        microphone = key(getString(R.string.ime_key_long_dictation_compact),
                 getString(R.string.ime_cd_start_long_dictation), 2f,
                 ignored -> toggleRecording(DictationRequest.CaptureMode.CONTINUOUS));
-        addWeighted(toolbar, microphone, 1.35f);
+        addWeighted(toolbar, microphone, .92f);
         undoButton = key(R.string.ime_key_undo, R.string.ime_cd_undo, 1f,
                 ignored -> undoLastVoiceCommit());
         undoButton.setVisibility(View.GONE);
-        addWeighted(toolbar, undoButton, 1f);
+        addFixed(toolbar, undoButton, 48);
         addFixed(toolbar, key(
                 R.string.ime_key_more,
                 R.string.ime_cd_more,
@@ -419,6 +445,30 @@ public final class OpenTypelessImeService extends InputMethodService {
                 this::showMoreMenu), 48);
         root.addView(toolbar, matchWrap());
         refreshModeButton();
+
+        transcript = new TextView(this);
+        transcript.setText(R.string.ime_transcript_hint);
+        transcript.setTextColor(getColor(R.color.ime_on_surface));
+        transcript.setTextSize(17);
+        transcript.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        transcript.setPadding(dp(12), dp(8), dp(12), dp(8));
+        transcript.setMinHeight(dp(76));
+        transcript.setMaxLines(2);
+        transcript.setTextIsSelectable(true);
+        transcript.setBackgroundResource(R.drawable.ime_transcript_background);
+        // Ordinary dictation is rendered directly in the host editor through composing text.
+        // This compact panel is reserved for selected-text instructions and recoverable drafts,
+        // where writing a provisional transcript into the editor would be unsafe.
+        transcript.setVisibility(View.GONE);
+        transcript.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_NONE);
+        LinearLayout.LayoutParams transcriptParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        transcriptParams.setMarginStart(dp(2));
+        transcriptParams.setMarginEnd(dp(2));
+        transcriptParams.topMargin = dp(2);
+        transcriptParams.bottomMargin = dp(2);
+        root.addView(transcript, transcriptParams);
 
         LinearLayout typing = horizontalRow();
         switchKeyboardButton = key(
@@ -448,7 +498,23 @@ public final class OpenTypelessImeService extends InputMethodService {
         enterButton = key(R.string.ime_key_enter, R.string.ime_cd_enter, 1f,
                 ignored -> sendEnter());
         addFixed(typing, enterButton, 48);
-        root.addView(typing, matchWrap());
+
+        // Keep the primary typing controls in the visual centre. The bottom reserve is an
+        // intentional product slot for future actions (for example notes, commands or clipboard)
+        // and must not be consumed by an invisible transcript view.
+        LinearLayout keyStage = new LinearLayout(this);
+        keyStage.setOrientation(LinearLayout.VERTICAL);
+        keyStage.setGravity(Gravity.CENTER);
+        keyStage.addView(typing, matchWrap());
+        root.addView(keyStage, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
+        View extensionReserve = new View(this);
+        extensionReserve.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        root.addView(extensionReserve, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(landscape ? 20 : compactLayout ? 52 : 64)));
 
         refreshEnterKey();
         refreshPostCommitActions();
@@ -511,17 +577,21 @@ public final class OpenTypelessImeService extends InputMethodService {
         preparingVoiceInput = true;
         finishingVoiceInput = false;
         activeCaptureMode = captureMode;
+        activeRecognitionRoute = null;
         discardConfirmationDeadline = 0L;
         latestPreviewText = "";
         activeComposition = new VoiceCompositionSession(
                 target.connection,
                 target.selectionStart,
                 target.selectionEnd);
+        activeV2Projection = null;
+        latestV2Document = null;
+        activeV2ProjectionMode = null;
         setEditingKeysEnabled(false, false);
         showPreparingState();
         lastCommit = null;
         refreshPostCommitActions();
-        if (target.replacedSelection() || !activeComposition.enabled()) {
+        if (target.replacedSelection()) {
             showTranscript(getString(R.string.ime_transcript_preparing));
         } else {
             clearTranscript();
@@ -654,7 +724,9 @@ public final class OpenTypelessImeService extends InputMethodService {
             if (settings.recognitionBackend()
                     == com.opentypeless.android.settings.RecognitionBackend.LOCAL_OFFLINE
                     && (!LocalOfflineRecognizer.isSupportedDevice(this)
-                    || !LocalOfflineRecognizer.isInstalled(this))) {
+                    || !LocalOfflineRecognizer.isInstalled(this)
+                    || (SpeechCoreV2Config.enabled(this)
+                    && !OfflineStreamingRecognizer.isInstalled(this)))) {
                 postUi(() -> {
                     if (activeTarget != target) return;
                     preparingVoiceInput = false;
@@ -728,6 +800,13 @@ public final class OpenTypelessImeService extends InputMethodService {
     private VoicePipeline.Listener listenerFor(CommitTarget target) {
         return new VoicePipeline.Listener() {
             @Override
+            public void onRoute(RecognitionRoute route) {
+                postUi(() -> {
+                    if (activeTarget == target) activeRecognitionRoute = route;
+                });
+            }
+
+            @Override
             public void onState(VoicePipeline.State state, String message) {
                 postUi(() -> {
                     if (activeTarget != target) return;
@@ -755,10 +834,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     preparingVoiceInput = false;
                     setStatus(R.string.ime_status_listening, false);
                     updateMicrophone(VoicePipeline.State.RECORDING);
-                    if (latestPreviewText.isBlank()
-                            && (target.replacedSelection()
-                            || activeComposition == null
-                            || !activeComposition.enabled())) {
+                    if (target.replacedSelection() && latestPreviewText.isBlank()) {
                         showTranscript(getString(R.string.ime_transcript_listening));
                     }
                     View readyControl = activeCaptureMode
@@ -768,6 +844,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     if (readyControl != null) {
                         readyControl.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                     }
+                    scheduleNoPartialHint(target);
                 });
             }
 
@@ -893,13 +970,26 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void applyTranscriptUpdate(CommitTarget target, TranscriptUpdate update) {
-        if (activeTarget != target || update == null || update.finalResult()) return;
+        if (activeTarget != target || update == null) return;
         String text = update.text().trim();
         if (text.isEmpty()) return;
         latestPreviewText = text;
+        setStatus(R.string.ime_status_listening, false);
+        if (update.source() == TranscriptUpdate.Source.SPEECH_CORE_V2
+                && !target.replacedSelection()) {
+            applySpeechCoreProjection(target, update);
+            return;
+        }
         VoiceCompositionSession composition = activeComposition;
-        if (target.replacedSelection() || composition == null || !composition.enabled()) {
+        if (target.replacedSelection()) {
+            // A spoken edit instruction must never overwrite the selected source text before the
+            // requested transform has passed the integrity guard.
             showTranscript(compact(text, 180));
+            return;
+        }
+        if (composition == null || !composition.enabled()) {
+            clearTranscript();
+            setStatus(R.string.ime_status_live_composition_fallback, true);
             return;
         }
         if (!targetStillValid(target)) {
@@ -908,15 +998,119 @@ public final class OpenTypelessImeService extends InputMethodService {
             return;
         }
         VoiceCompositionSession.ApplyResult result = composition.apply(update);
-        if (result == VoiceCompositionSession.ApplyResult.REJECTED
-                || result == VoiceCompositionSession.ApplyResult.CONNECTION_ERROR) {
-            composition.disableLiveUpdates();
-            showTranscript(compact(text, 180));
-            setStatus(R.string.ime_status_live_composition_fallback, true);
-        } else if (result == VoiceCompositionSession.ApplyResult.APPLIED
+        if (result == VoiceCompositionSession.ApplyResult.APPLIED
                 || result == VoiceCompositionSession.ApplyResult.UNCHANGED) {
             clearTranscript();
         }
+        if (result == VoiceCompositionSession.ApplyResult.REJECTED
+                || result == VoiceCompositionSession.ApplyResult.CONNECTION_ERROR) {
+            composition.disableLiveUpdates();
+            clearTranscript();
+            setStatus(R.string.ime_status_live_composition_fallback, true);
+        }
+    }
+
+    private void applySpeechCoreProjection(CommitTarget target, TranscriptUpdate update) {
+        EditorProjection projection = activeV2Projection;
+        if (projection == null) {
+            try {
+                ProjectionMode mode = activeCaptureMode == DictationRequest.CaptureMode.CONTINUOUS
+                        ? ProjectionMode.LONG_DICTATION
+                        : ProjectionMode.SHORT_DICTATION;
+                projection = EditorProjection.capture(
+                        new AndroidInputConnectionAdapter(
+                                target.connection,
+                                () -> currentProjectionContext(target)),
+                        mode);
+                activeV2Projection = projection;
+                activeV2ProjectionMode = mode;
+                VoiceCompositionSession legacy = activeComposition;
+                activeComposition = null;
+                if (legacy != null) legacy.discardState();
+            } catch (RuntimeException error) {
+                // A provider that withholds a trustworthy cursor snapshot cannot receive v2
+                // automatic writes. Keep the complete draft recoverable instead of guessing.
+                saveRecoverableDraft(target, update.text());
+                latestV2Document = null;
+                setStatus(R.string.ime_status_live_composition_fallback, true);
+                if (pipeline.state() == VoicePipeline.State.RECORDING) pipeline.stopRecording();
+                return;
+            }
+        }
+        ProjectionDocument document = activeV2ProjectionMode == ProjectionMode.LONG_DICTATION
+                ? new ProjectionDocument(update.stableText(), update.unstableText())
+                : ProjectionDocument.shortDraft(update.text());
+        latestV2Document = document;
+        ProjectionResult result = projection.project(document);
+        if (result.outcome() == ProjectionOutcome.APPLIED
+                || result.outcome() == ProjectionOutcome.UNCHANGED) {
+            clearTranscript();
+            return;
+        }
+        String recoverable = result.recoverableText().orElse(document.fullText());
+        if (!recoverable.isBlank()) saveRecoverableDraft(target, recoverable);
+        showRecoverableDraftOrClear();
+        setStatus(result.mutationUncertain()
+                ? R.string.ime_status_composition_preserve_uncertain
+                : R.string.ime_status_live_composition_fallback, true);
+        if (pipeline.state() == VoicePipeline.State.RECORDING) {
+            pipeline.stopRecording();
+            finishingVoiceInput = true;
+            updateMicrophone(VoicePipeline.State.TRANSCRIBING);
+        }
+    }
+
+    private ProjectionContext currentProjectionContext(CommitTarget target) {
+        EditorInfo editor = currentEditor;
+        int selectionStart = currentSelectionStart;
+        int selectionEnd = currentSelectionEnd;
+        try {
+            ExtractedText extracted = target.connection.getExtractedText(
+                    new ExtractedTextRequest(), 0);
+            if (extracted != null
+                    && extracted.selectionStart >= 0
+                    && extracted.selectionEnd >= 0) {
+                selectionStart = extracted.selectionStart;
+                selectionEnd = extracted.selectionEnd;
+            }
+        } catch (RuntimeException ignored) {
+            // Some editors do not implement extracted text. The latest selection callback remains
+            // a valid fallback; unknown/stale coordinates still fail closed in ProjectionTarget.
+        }
+        return new ProjectionContext(
+                editorEpoch,
+                editor == null ? target.packageName : safe(editor.packageName),
+                editor == null ? target.fieldId : editor.fieldId,
+                selectionStart,
+                selectionEnd,
+                sensitiveField);
+    }
+
+    private void scheduleNoPartialHint(CommitTarget target) {
+        if (mainHandler == null) return;
+        mainHandler.postDelayed(() -> {
+            if (serviceDestroyed
+                    || activeTarget != target
+                    || pipeline.state() != VoicePipeline.State.RECORDING
+                    || !latestPreviewText.isBlank()) {
+                return;
+            }
+            RecognitionRoute route = activeRecognitionRoute;
+            if (route == null) {
+                setStatus(R.string.ime_status_waiting_for_live_text, false);
+                return;
+            }
+            int message = switch (route.actualBackend()) {
+                case DASHSCOPE_STREAMING -> R.string.ime_status_waiting_for_live_text;
+                case SYSTEM_DEFAULT, SYSTEM_ON_DEVICE ->
+                        R.string.ime_status_system_no_live_text_yet;
+                case LOCAL_OFFLINE -> OfflineStreamingRecognizer.isInstalled(this)
+                        ? R.string.ime_status_waiting_for_live_text
+                        : R.string.ime_status_backend_final_only;
+                case OPENAI_COMPATIBLE -> R.string.ime_status_backend_final_only;
+            };
+            setStatus(message, false);
+        }, NO_PARTIAL_HINT_DELAY_MILLIS);
     }
 
     private CommitTarget captureTarget() {
@@ -1015,6 +1209,10 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void commitResult(CommitTarget target, DictationResult result) {
         if (activeTarget != target) return;
+        if (activeV2Projection != null) {
+            commitSpeechCoreV2Result(target, result);
+            return;
+        }
         if (!targetStillValid(target)) {
             preserveActiveDraft();
             if (!target.replacedSelection()
@@ -1070,9 +1268,79 @@ public final class OpenTypelessImeService extends InputMethodService {
                     : R.string.ime_status_result_rejected, true);
             return;
         }
+        acceptSuccessfulCommit(target, result, finalText);
+    }
 
+    /** Finalizes the exact document that v2 has already projected into the host editor. */
+    private void commitSpeechCoreV2Result(CommitTarget target, DictationResult result) {
+        EditorProjection projection = activeV2Projection;
+        if (projection == null) return;
+        String finalText = result.finalText() == null ? "" : result.finalText().trim();
+        if (finalText.isEmpty()) {
+            boolean preserved = preserveActiveDraft();
+            finishActiveUiSession(target);
+            showRecoverableDraftOrClear();
+            setStatus(preserved
+                    ? R.string.ime_status_empty_final_partial_preserved
+                    : R.string.ime_status_composition_preserve_uncertain, true);
+            return;
+        }
+
+        ProjectionDocument finalDocument = finalProjectionDocument(finalText);
+        if (finalDocument == null) {
+            // Long mode may have safely sealed earlier segments. A later global rewrite must never
+            // rewrite those committed bytes speculatively. Freeze what is proven and retain the
+            // authoritative final as an explicit recovery draft.
+            projection.freeze();
+            boolean saved = saveRecoverableDraftFromResult(target, finalText, result);
+            clearSpeechCoreProjectionState();
+            finishActiveUiSession(target);
+            showRecoverableDraftOrClear();
+            setStatus(saved
+                    ? R.string.ime_status_result_recoverable
+                    : R.string.ime_status_composition_preserve_uncertain, true);
+            return;
+        }
+
+        ProjectionResult projected = projection.finish(finalDocument);
+        boolean committed = projected.outcome() == ProjectionOutcome.COMMITTED;
+        boolean saved = false;
+        if (!committed) {
+            String recoverable = projected.recoverableText().orElse(finalText);
+            if (recoverable.isBlank()) recoverable = finalText;
+            saved = saveRecoverableDraftFromResult(target, recoverable, result);
+        }
+        clearSpeechCoreProjectionState();
+        finishActiveUiSession(target);
+        if (!committed) {
+            showRecoverableDraftOrClear();
+            setStatus(saved
+                    ? R.string.ime_status_result_recoverable
+                    : projected.mutationUncertain()
+                    ? R.string.ime_status_composition_preserve_uncertain
+                    : R.string.ime_status_result_rejected, true);
+            return;
+        }
+        acceptSuccessfulCommit(target, result, finalText);
+    }
+
+    private ProjectionDocument finalProjectionDocument(String finalText) {
+        return finalProjectionDocument(activeV2ProjectionMode, latestV2Document, finalText);
+    }
+
+    static ProjectionDocument finalProjectionDocument(
+            ProjectionMode mode, ProjectionDocument latest, String finalText) {
+        if (mode != ProjectionMode.LONG_DICTATION) {
+            return ProjectionDocument.shortDraft(finalText);
+        }
+        String sealed = latest == null ? "" : latest.sealedPrefix();
+        if (!finalText.startsWith(sealed)) return null;
+        return new ProjectionDocument(sealed, finalText.substring(sealed.length()));
+    }
+
+    private void acceptSuccessfulCommit(
+            CommitTarget target, DictationResult result, String finalText) {
         pipeline.acknowledgeRecovery(result.recoveryId());
-
         lastCommit = new LastVoiceCommit(
                 target.editorEpoch,
                 target.connection,
@@ -1154,6 +1422,8 @@ public final class OpenTypelessImeService extends InputMethodService {
         if (currentEditor == null) return false;
         InputConnection currentConnection = getCurrentInputConnection();
         if (currentConnection == null) return false;
+        EditorProjection v2Projection = activeTarget == target ? activeV2Projection : null;
+        if (v2Projection != null) return v2Projection.targetStillValid();
         VoiceCompositionSession composition = activeTarget == target ? activeComposition : null;
         if (composition != null && composition.ownsComposition()) {
             return composedTargetStillValid(target, composition, currentConnection);
@@ -1520,7 +1790,13 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void openSettings() {
-        Intent intent = new Intent(this, MainActivity.class);
+        Intent intent = new Intent(this, SettingsHomeActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+
+    private void openVoiceDiagnostics() {
+        Intent intent = new Intent(this, VoiceLabActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         startActivity(intent);
     }
@@ -1571,7 +1847,9 @@ public final class OpenTypelessImeService extends InputMethodService {
         if (modeButton == null) return;
         String label = localizedModeLabel(selectedMode);
         String displayLabel = compactLayout ? localizedCompactModeLabel(selectedMode) : label;
-        modeButton.setText(getString(R.string.ime_mode_button, displayLabel));
+        modeButton.setText(compactLayout
+                ? displayLabel
+                : getString(R.string.ime_mode_button, displayLabel));
         modeButton.setContentDescription(getString(R.string.ime_cd_choose_mode_current, label));
     }
 
@@ -1608,6 +1886,13 @@ public final class OpenTypelessImeService extends InputMethodService {
                             : R.string.ime_menu_discard_current);
         } else {
             LastVoiceCommit commit = lastCommit;
+            if (commit != null) {
+                popup.getMenu().add(
+                        Menu.NONE,
+                        MENU_UNDO,
+                        0,
+                        R.string.ime_key_undo);
+            }
             if (pendingAudio && !sensitiveField) {
                 popup.getMenu().add(
                         Menu.NONE,
@@ -1664,6 +1949,11 @@ public final class OpenTypelessImeService extends InputMethodService {
                     MENU_SETTINGS,
                     5,
                     R.string.ime_key_settings);
+            popup.getMenu().add(
+                    Menu.NONE,
+                    MENU_VOICE_DIAGNOSTICS,
+                    6,
+                    R.string.ime_menu_voice_diagnostics);
         }
         popup.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
@@ -1673,10 +1963,12 @@ public final class OpenTypelessImeService extends InputMethodService {
                 case MENU_DICTIONARY -> openDictionary();
                 case MENU_APP_PROFILE -> openAppProfile();
                 case MENU_SETTINGS -> openSettings();
+                case MENU_VOICE_DIAGNOSTICS -> openVoiceDiagnostics();
                 case MENU_INSERT_RECOVERABLE_DRAFT -> insertRecoverableDraft();
                 case MENU_DISCARD_RECOVERABLE_DRAFT -> discardRecoverableDraft();
                 case MENU_RECOVER_AUDIO -> recoverSavedAudio();
                 case MENU_DISCARD_AUDIO -> discardSavedAudio();
+                case MENU_UNDO -> undoLastVoiceCommit();
                 default -> {
                     return false;
                 }
@@ -1707,7 +1999,9 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void refreshPostCommitActions() {
         if (undoButton != null) {
-            undoButton.setVisibility(lastCommit == null ? View.GONE : View.VISIBLE);
+            undoButton.setVisibility(lastCommit == null || compactLayout
+                    ? View.GONE
+                    : View.VISIBLE);
         }
     }
 
@@ -1731,7 +2025,13 @@ public final class OpenTypelessImeService extends InputMethodService {
             showRecoverableDraftOrClear();
             setStatus(R.string.ime_status_recoverable_draft_available, false);
         } else if (activeTarget != null || state != VoicePipeline.State.IDLE) {
-            if (!latestPreviewText.isBlank()) showTranscript(compact(latestPreviewText, 180));
+            if (activeTarget != null
+                    && activeTarget.replacedSelection()
+                    && !latestPreviewText.isBlank()) {
+                showTranscript(compact(latestPreviewText, 180));
+            } else {
+                clearTranscript();
+            }
             setStatus(preparingVoiceInput
                     ? getString(R.string.ime_status_preparing_local_data)
                     : finishingVoiceInput && state == VoicePipeline.State.IDLE
@@ -1742,8 +2042,9 @@ public final class OpenTypelessImeService extends InputMethodService {
             setStatus(R.string.ime_status_recoverable_audio_available, false);
         } else {
             clearTranscript();
-            setStatus(getString(
-                    R.string.ime_status_ready_mode, localizedModeLabel(selectedMode)), false);
+            // The adjacent mode chip already names the active mode; repeating it here made the
+            // compact toolbar noisy and squeezed the long-dictation action.
+            setStatus(R.string.status_ready, false);
         }
     }
 
@@ -1764,16 +2065,19 @@ public final class OpenTypelessImeService extends InputMethodService {
         boolean externalFinalizing = editorKeysAllowed && pendingDetachedTarget() != null;
         boolean voiceUnavailable = editorKeysAllowed && !startAllowed && !externalFinalizing;
 
+        if (voicePulse != null) {
+            voicePulse.setPhase(preparingVoiceInput
+                    ? VoicePulseView.Phase.PREPARING
+                    : recording
+                    ? VoicePulseView.Phase.LISTENING
+                    : processing || externalFinalizing
+                    ? VoicePulseView.Phase.PROCESSING
+                    : VoicePulseView.Phase.IDLE);
+        }
+
         setEditingKeysEnabled(editorKeysAllowed, startAllowed);
         setPrimaryKeyStyle(microphone, longRecording);
         microphone.setSelected(longRecording);
-        int longRegularLabel = longRecording
-                ? R.string.ime_key_finish_dictation
-                : processing && longSession
-                ? R.string.ime_key_processing
-                : preparingVoiceInput && longSession
-                ? R.string.ime_key_preparing
-                : R.string.ime_key_long_dictation;
         int longCompactLabel = longRecording
                 ? R.string.ime_key_finish_dictation_compact
                 : processing && longSession
@@ -1781,7 +2085,9 @@ public final class OpenTypelessImeService extends InputMethodService {
                 : preparingVoiceInput && longSession
                 ? R.string.ime_key_preparing_compact
                 : R.string.ime_key_long_dictation_compact;
-        microphone.setText(voiceLabel(longRegularLabel, longCompactLabel));
+        // This control lives in a compact status toolbar; its accessible description carries the
+        // full wording while the visual label stays short at every screen width.
+        microphone.setText(longCompactLabel);
         microphone.setEnabled(startAllowed || longRecording);
         microphone.setContentDescription(getString(longRecording
                 ? R.string.ime_cd_finish_long_dictation
@@ -1820,7 +2126,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     : preparingVoiceInput && holdSession
                     ? R.string.ime_key_preparing_compact
                     : longRecording
-                    ? R.string.ime_key_listening
+                    ? R.string.ime_key_listening_compact
                     : R.string.ime_key_hold_to_talk_compact;
             holdToTalkButton.setText(voiceLabel(holdRegularLabel, holdCompactLabel));
             holdToTalkButton.setEnabled(shouldEnableHoldKey(
@@ -1966,9 +2272,17 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private boolean cancelActiveComposition() {
+        EditorProjection projection = activeV2Projection;
+        clearSpeechCoreProjectionState();
         VoiceCompositionSession composition = activeComposition;
         activeComposition = null;
-        return composition == null || composition.cancel();
+        boolean projectionSafe = true;
+        if (projection != null) {
+            ProjectionOutcome outcome = projection.discardConfirmed().outcome();
+            projectionSafe = outcome == ProjectionOutcome.DISCARDED
+                    || outcome == ProjectionOutcome.DISCARD_EDITOR_RETAINED;
+        }
+        return projectionSafe && (composition == null || composition.cancel());
     }
 
     /**
@@ -2029,6 +2343,26 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private boolean preserveActiveDraft() {
         CommitTarget target = activeTarget;
+        EditorProjection projection = activeV2Projection;
+        if (projection != null) {
+            String latest = latestV2Document == null
+                    ? latestPreviewText
+                    : latestV2Document.fullText();
+            ProjectionResult frozen = projection.freeze();
+            boolean preserved = frozen.outcome() == ProjectionOutcome.FROZEN
+                    || frozen.outcome() == ProjectionOutcome.COMMITTED;
+            String recoverable = frozen.recoverableText().orElse("");
+            if (recoverable.isBlank()
+                    && (!preserved || !latest.equals(projection.projectedFullText()))) {
+                recoverable = latest;
+            }
+            boolean saved = recoverable.isBlank()
+                    || saveRecoverableDraft(target, recoverable);
+            latestPreviewText = "";
+            clearSpeechCoreProjectionState();
+            activeComposition = null;
+            return (preserved || saved) && saved;
+        }
         VoiceCompositionSession composition = activeComposition;
         boolean editorDraft = composition != null && composition.ownsComposition();
         String editorText = editorDraft ? composition.composingText() : "";
@@ -2321,6 +2655,8 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private boolean hasVisibleVoiceDraft() {
         if (recoverableDraft.hasDraft() || pipeline.hasRecoverableAudio()) return true;
+        EditorProjection projection = activeV2Projection;
+        if (projection != null && !projection.projectedFullText().isBlank()) return true;
         VoiceCompositionSession composition = activeComposition;
         if (composition != null && composition.ownsComposition()) return true;
         if (transcript == null || transcript.getVisibility() != View.VISIBLE) return false;
@@ -2331,9 +2667,16 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void discardActiveComposition() {
+        clearSpeechCoreProjectionState();
         VoiceCompositionSession composition = activeComposition;
         activeComposition = null;
         if (composition != null) composition.discardState();
+    }
+
+    private void clearSpeechCoreProjectionState() {
+        activeV2Projection = null;
+        latestV2Document = null;
+        activeV2ProjectionMode = null;
     }
 
     private void invalidateLastCommit() {
@@ -2410,6 +2753,14 @@ public final class OpenTypelessImeService extends InputMethodService {
         currentSelectionStart = newSelStart;
         currentSelectionEnd = newSelEnd;
         VoiceCompositionSession composition = activeComposition;
+        EditorProjection v2Projection = activeV2Projection;
+        boolean ownedV2Move = target != null
+                && v2Projection != null
+                && v2Projection.acceptsSelection(
+                        newSelStart,
+                        newSelEnd,
+                        candidatesStart,
+                        candidatesEnd);
         boolean ownedCompositionMove = target != null
                 && composition != null
                 && composition.ownsComposition()
@@ -2419,6 +2770,13 @@ public final class OpenTypelessImeService extends InputMethodService {
                         candidatesStart,
                         candidatesEnd);
         if (target != null
+                && v2Projection != null
+                && !ownedV2Move) {
+            stopPipelinePreservingDraft(
+                    getString(R.string.ime_status_cursor_moved_preserved), true);
+            return;
+        }
+        if (target != null
                 && composition != null
                 && composition.ownsComposition()
                 && !ownedCompositionMove) {
@@ -2427,6 +2785,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             return;
         }
         if (!ownedCompositionMove
+                && !ownedV2Move
                 && target != null
                 && target.selectionStart >= 0
                 && target.selectionEnd >= 0

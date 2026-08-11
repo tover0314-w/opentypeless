@@ -44,6 +44,22 @@ public final class VoiceCompositionSessionTest {
     }
 
     @Test
+    public void authoritativeRawFinalCanBeShownBeforePostProcessingCompletes() {
+        FakeConnection fake = new FakeConnection();
+        VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 4, 4);
+
+        assertEquals(
+                VoiceCompositionSession.ApplyResult.APPLIED,
+                session.apply(TranscriptUpdate.finalText(
+                        1,
+                        "这段原始识别先上屏。",
+                        TranscriptUpdate.Source.LOCAL_OFFLINE)));
+        assertEquals(List.of("这段原始识别先上屏。"), fake.composingTexts);
+        assertTrue(session.commitFinal("这段个性化后的文字先上屏。"));
+        assertEquals(List.of("这段个性化后的文字先上屏。"), fake.committedTexts);
+    }
+
+    @Test
     public void acceptsOwnedSelectionCallbacksButRejectsUserCursorMovement() {
         FakeConnection fake = new FakeConnection();
         VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 10, 10);
@@ -98,9 +114,37 @@ public final class VoiceCompositionSessionTest {
         VoiceCompositionSession rejectedSession = new VoiceCompositionSession(
                 rejected.connection(), 2, 2);
         assertEquals(
-                VoiceCompositionSession.ApplyResult.REJECTED,
+                VoiceCompositionSession.ApplyResult.APPLIED,
                 rejectedSession.apply(partial(1, "not inserted")));
-        assertFalse(rejectedSession.ownsComposition());
+        assertTrue(rejectedSession.ownsComposition());
+        assertEquals(List.of("not inserted"), rejected.committedTexts);
+    }
+
+    @Test
+    public void rejectedComposingUsesReplaceableCommittedPreviewWithoutAppending() {
+        FakeConnection fake = new FakeConnection(false);
+        VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 0, 0);
+
+        assertEquals(VoiceCompositionSession.ApplyResult.APPLIED,
+                session.apply(partial(1, "你")));
+        assertEquals(VoiceCompositionSession.ApplyResult.APPLIED,
+                session.apply(partial(2, "你好")));
+        assertTrue(session.commitFinal("你好。"));
+
+        assertEquals(List.of("你", "你好", "你好。"), fake.committedTexts);
+        assertEquals(List.of(1, 2), fake.deletedCodePoints);
+        assertFalse(session.ownsComposition());
+    }
+
+    @Test
+    public void explicitCancelRemovesCommittedPreviewOwnedByThisSession() {
+        FakeConnection fake = new FakeConnection(false);
+        VoiceCompositionSession session = new VoiceCompositionSession(fake.connection(), 0, 0);
+        session.apply(partial(1, "draft"));
+
+        assertTrue(session.cancel());
+        assertEquals(List.of(5), fake.deletedCodePoints);
+        assertFalse(session.ownsComposition());
     }
 
     @Test
@@ -123,6 +167,7 @@ public final class VoiceCompositionSessionTest {
         final Deque<Boolean> composingResults = new ArrayDeque<>();
         final List<String> composingTexts = new ArrayList<>();
         final List<String> committedTexts = new ArrayList<>();
+        final List<Integer> deletedCodePoints = new ArrayList<>();
         int finishCalls;
         String beforeCursor;
 
@@ -148,6 +193,11 @@ public final class VoiceCompositionSessionTest {
                     committedTexts.add(String.valueOf(arguments[0]));
                     yield true;
                 }
+                case "deleteSurroundingTextInCodePoints" -> {
+                    deletedCodePoints.add((Integer) arguments[0]);
+                    yield true;
+                }
+                case "beginBatchEdit", "endBatchEdit" -> true;
                 case "finishComposingText" -> {
                     finishCalls++;
                     yield true;

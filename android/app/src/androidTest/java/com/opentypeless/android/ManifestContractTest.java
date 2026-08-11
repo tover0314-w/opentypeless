@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
@@ -18,6 +19,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.opentypeless.android.ime.OpenTypelessImeService;
 import com.opentypeless.android.offline.LocalOfflineRecognitionService;
+import com.opentypeless.android.offline.LocalStreamingRecognitionService;
 import com.opentypeless.android.recognition.OpenTypelessRecognitionService;
 import com.opentypeless.android.recognition.OpenTypelessRecognizerActivity;
 
@@ -55,7 +57,24 @@ public final class ManifestContractTest {
                 manager,
                 new ComponentName(context, LocalOfflineRecognitionService.class));
         assertFalse(localOffline.exported);
-        assertEquals(context.getPackageName() + ":local_asr", localOffline.processName);
+        assertEquals(context.getPackageName() + ":local_quality", localOffline.processName);
+
+        ServiceInfo localStreaming = getServiceInfo(
+                manager,
+                new ComponentName(context, LocalStreamingRecognitionService.class));
+        assertFalse(localStreaming.exported);
+        assertEquals(context.getPackageName() + ":local_stream", localStreaming.processName);
+    }
+
+    @Test
+    public void launchesIntoStatusFirstHomeInsteadOfTechnicalSettings() {
+        Context context = ApplicationProvider.getApplicationContext();
+        Intent launch = context.getPackageManager().getLaunchIntentForPackage(
+                context.getPackageName());
+
+        assertNotNull(launch);
+        assertNotNull(launch.getComponent());
+        assertEquals(HomeActivity.class.getName(), launch.getComponent().getClassName());
     }
 
     @SuppressWarnings("deprecation")

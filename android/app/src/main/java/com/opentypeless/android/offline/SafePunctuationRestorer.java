@@ -15,7 +15,7 @@ public final class SafePunctuationRestorer {
         String raw = safe(conservative).trim();
         String candidate = safe(punctuated).trim();
         if (raw.isEmpty()) return raw;
-        if (!punctuationAppropriate(fieldKind)) return raw;
+        if (!prefersPunctuation(fieldKind)) return raw;
         if (!candidate.isEmpty()
                 && candidate.codePointCount(0, candidate.length()) <= MAX_CODE_POINTS
                 && contentKey(raw).equals(contentKey(candidate))) {
@@ -46,7 +46,8 @@ public final class SafePunctuationRestorer {
         return result.toString();
     }
 
-    private static boolean punctuationAppropriate(FieldKind fieldKind) {
+    /** Whether the field can safely request the recognizer's formatted/ITN output directly. */
+    public static boolean prefersPunctuation(FieldKind fieldKind) {
         FieldKind safeKind = fieldKind == null ? FieldKind.GENERAL : fieldKind;
         return safeKind == FieldKind.GENERAL
                 || safeKind == FieldKind.SHORT_MESSAGE
