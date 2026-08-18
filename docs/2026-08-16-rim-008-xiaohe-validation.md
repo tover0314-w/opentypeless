@@ -83,8 +83,10 @@ DONE
   `32e39a8b6b659b073a8e79756036fb0e3106553e691ceb884ef5fceeaf200709`.
 - final AndroidTest APK: 1,093,646 bytes, SHA-256
   `58f8d3c5967f010350278b2b8cd9acd3581db31a82651b2c87c0e722c12b2605`.
+- Xiaomi/Telegram arm64 Debug handoff APK: 32,247,058 bytes, SHA-256
+  `b71054689f52d41100e93692349ee82d7c4ba7cbc4b2b4e95d272da0a913aefe`.
 - resource-policy canonical SHA-256:
-  `66085339d4919ff730d3e2a3547a96691029242a86efbb376355ab59f23ea5fb`.
+  `b5ac1cbbca36dc793f5e3cdaf269c3c5bc008e3c69c298ca0a0f937b914dc5f7`.
 
 ## Risks
 

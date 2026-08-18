@@ -748,6 +748,15 @@
       "profiles": ["test"],
       "required_synthetic_fixture_ids": [],
       "required_native_engine_ids": []
+    },
+    {
+      "sha256": "b71054689f52d41100e93692349ee82d7c4ba7cbc4b2b4e95d272da0a913aefe",
+      "profiles": ["product"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": [
+        "rime-arm64-adapter", "rime-arm64-engine",
+        "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk"
+      ]
     }
   ],
   "opaque_binary_baseline": [
