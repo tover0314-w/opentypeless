@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Streams PCM to the private ASR process without loading native weights inside the IME. */
 public final class LocalRealtimeRecognitionClient implements AutoCloseable {
     public interface Listener {
+        default void onReady() {}
+
         void onPartial(String text);
     }
 
@@ -264,6 +266,7 @@ public final class LocalRealtimeRecognitionClient implements AutoCloseable {
         public void onReady(long callbackSessionId) {
             if (callbackSessionId != sessionId) return;
             ready.countDown();
+            listener.onReady();
         }
 
         @Override

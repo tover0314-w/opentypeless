@@ -3,7 +3,9 @@ package com.opentypeless.android;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -17,6 +19,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.opentypeless.android.config.AppPickerModel;
 import com.opentypeless.android.settings.AppProfile;
 import com.opentypeless.android.settings.AppProfileDraft;
 import com.opentypeless.android.settings.AppProfileRepository;
@@ -31,15 +34,24 @@ public final class AppProfileActivity extends Activity {
     public static final String EXTRA_PACKAGE = "app_package";
     private static final String STATE_PREFIX = "profile_draft_";
     private static final String STATE_HAS_DRAFT = STATE_PREFIX + "present";
+    private static final String STATE_ADVANCED_PACKAGE = STATE_PREFIX + "advanced_package";
+    private static final String STATE_SELECTED_LABEL = STATE_PREFIX + "selected_label";
 
     private AppProfileRepository repository;
     private SettingsRepository settingsRepository;
     private EditText packageName;
+    private TextView selectedApp;
+    private Button chooseInstalledApp;
+    private Button advancedPackageEntry;
     private Spinner mode;
     private EditText targetLanguage;
     private EditText instructions;
     private CheckBox sendContext;
     private LinearLayout profiles;
+    private AlertDialog appPickerDialog;
+    private boolean advancedPackageVisible;
+    private boolean settingPackage;
+    private String selectedAppLabel = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +65,9 @@ public final class AppProfileActivity extends Activity {
         if (savedInstanceState != null
                 && savedInstanceState.getBoolean(STATE_HAS_DRAFT, false)) {
             applyDraft(readDraft(savedInstanceState));
+            selectedAppLabel = savedInstanceState.getString(STATE_SELECTED_LABEL, "");
+            setAdvancedPackageVisible(
+                    savedInstanceState.getBoolean(STATE_ADVANCED_PACKAGE, false));
         } else {
             String requestedPackage = getIntent().getStringExtra(EXTRA_PACKAGE);
             if (requestedPackage != null && !requestedPackage.isBlank()) {
@@ -63,6 +78,7 @@ public final class AppProfileActivity extends Activity {
                 populateNew("");
             }
         }
+        updateSelectedApp();
         refreshProfiles();
     }
 
@@ -75,7 +91,18 @@ public final class AppProfileActivity extends Activity {
         outState.putString(key("target"), draft.targetLanguage());
         outState.putString(key("instructions"), draft.customInstructions());
         outState.putBoolean(key("context"), draft.sendContext());
+        outState.putBoolean(STATE_ADVANCED_PACKAGE, advancedPackageVisible);
+        outState.putString(STATE_SELECTED_LABEL, selectedAppLabel);
         super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (appPickerDialog != null) {
+            appPickerDialog.dismiss();
+            appPickerDialog = null;
+        }
+        super.onDestroy();
     }
 
     private View buildView() {
@@ -91,7 +118,36 @@ public final class AppProfileActivity extends Activity {
         root.addView(body(getString(R.string.app_profile_intro)));
 
         LinearLayout editorCard = AppVisualSystem.card(this);
+        selectedApp = body(getString(R.string.app_profile_no_app_selected));
+        selectedApp.setId(R.id.app_profile_selected_app);
+        editorCard.addView(selectedApp, matchWrap());
+
+        chooseInstalledApp = button(getString(R.string.app_picker_choose_installed), 1f,
+                ignored -> showAppPicker());
+        chooseInstalledApp.setId(R.id.app_profile_choose_app);
+        editorCard.addView(chooseInstalledApp, matchWrap());
+
+        advancedPackageEntry = button(getString(R.string.app_picker_advanced_package), 1f,
+                ignored -> setAdvancedPackageVisible(!advancedPackageVisible));
+        advancedPackageEntry.setId(R.id.app_profile_advanced_package);
+        editorCard.addView(advancedPackageEntry, matchWrap());
+
         packageName = field(getString(R.string.app_profile_package_hint), false);
+        packageName.setId(R.id.app_profile_package_input);
+        packageName.setVisibility(View.GONE);
+        packageName.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (!settingPackage) selectedAppLabel = "";
+                updateSelectedApp();
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {}
+        });
         editorCard.addView(packageName);
 
         TextView modeLabel = body(getString(R.string.app_profile_mode_label));
@@ -192,7 +248,7 @@ public final class AppProfileActivity extends Activity {
     }
 
     private void populate(AppProfile profile) {
-        packageName.setText(profile.packageName());
+        setSelectedPackage(profile.packageName(), "");
         mode.setSelection(profile.mode().ordinal());
         targetLanguage.setText(profile.targetLanguage());
         instructions.setText(profile.customInstructions());
@@ -201,11 +257,64 @@ public final class AppProfileActivity extends Activity {
     }
 
     private void populateNew(String appPackage) {
-        packageName.setText(appPackage);
+        setSelectedPackage(appPackage, "");
         mode.setSelection(settingsRepository.loadDefaultMode().ordinal());
         targetLanguage.setText(settingsRepository.loadTargetLanguage());
         instructions.setText("");
         sendContext.setChecked(false);
+    }
+
+    private void showAppPicker() {
+        if (appPickerDialog != null && appPickerDialog.isShowing()) return;
+        appPickerDialog = AppPickerDialog.show(this, new AppPickerDialog.Listener() {
+            @Override
+            public void onAppSelected(AppPickerModel.Entry entry) {
+                setSelectedPackage(entry.packageName(), entry.label());
+                setAdvancedPackageVisible(false);
+                appPickerDialog = null;
+            }
+
+            @Override
+            public void onAdvancedPackageRequested() {
+                setAdvancedPackageVisible(true);
+                packageName.requestFocus();
+                appPickerDialog = null;
+            }
+        });
+    }
+
+    private void setSelectedPackage(String appPackage, String label) {
+        settingPackage = true;
+        try {
+            selectedAppLabel = label == null ? "" : label;
+            packageName.setText(appPackage == null ? "" : appPackage);
+        } finally {
+            settingPackage = false;
+        }
+        updateSelectedApp();
+    }
+
+    private void setAdvancedPackageVisible(boolean visible) {
+        advancedPackageVisible = visible;
+        if (packageName == null || advancedPackageEntry == null) return;
+        packageName.setVisibility(visible ? View.VISIBLE : View.GONE);
+        advancedPackageEntry.setText(visible
+                ? R.string.app_picker_hide_advanced_package
+                : R.string.app_picker_advanced_package);
+        advancedPackageEntry.setContentDescription(advancedPackageEntry.getText());
+    }
+
+    private void updateSelectedApp() {
+        if (selectedApp == null || packageName == null) return;
+        String appPackage = packageName.getText().toString().trim();
+        if (appPackage.isEmpty()) {
+            selectedApp.setText(R.string.app_profile_no_app_selected);
+        } else if (selectedAppLabel.isBlank()) {
+            selectedApp.setText(getString(R.string.app_profile_selected_package, appPackage));
+        } else {
+            selectedApp.setText(getString(
+                    R.string.app_profile_selected_app, selectedAppLabel, appPackage));
+        }
     }
 
     private AppProfileDraft captureDraft() {

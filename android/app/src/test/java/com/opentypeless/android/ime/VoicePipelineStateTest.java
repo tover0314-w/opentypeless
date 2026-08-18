@@ -246,15 +246,15 @@ public final class VoicePipelineStateTest {
         assertSame(
                 OpenTypelessImeService.HoldReleaseAction.WAIT_FOR_RESULT,
                 OpenTypelessImeService.holdReleaseAction(
-                        VoicePipeline.State.IDLE, true, false));
+                        VoiceController.State.IDLE, true, false));
         assertSame(
                 OpenTypelessImeService.HoldReleaseAction.CANCEL_PREPARATION,
                 OpenTypelessImeService.holdReleaseAction(
-                        VoicePipeline.State.IDLE, true, true));
+                        VoiceController.State.IDLE, true, true));
         assertSame(
                 OpenTypelessImeService.HoldReleaseAction.STOP_AND_COMMIT,
                 OpenTypelessImeService.holdReleaseAction(
-                        VoicePipeline.State.RECORDING, true, false));
+                        VoiceController.State.RECORDING, true, false));
     }
 
     @Test
@@ -262,7 +262,7 @@ public final class VoicePipelineStateTest {
         assertSame(
                 OpenTypelessImeService.HoldReleaseAction.CANCEL_PREPARATION,
                 OpenTypelessImeService.holdReleaseAction(
-                        VoicePipeline.State.RECORDING, true, true));
+                        VoiceController.State.RECORDING, true, true));
     }
 
     @Test
@@ -303,33 +303,39 @@ public final class VoicePipelineStateTest {
     }
 
     @Test
-    public void serviceShutdownWaitsOnlyWhenAStoppedRunStillOwesAFinalResult() {
-        assertTrue(OpenTypelessImeService.shouldDeferServiceShutdown(new Object()));
-        assertFalse(OpenTypelessImeService.shouldDeferServiceShutdown(null));
+    public void terminalOrReplacedTargetDropsEveryQueuedVoiceCallback() {
+        Object target = new Object();
+
+        assertTrue(OpenTypelessImeService.shouldDispatchVoiceCallback(
+                target, target, false));
+        assertFalse(OpenTypelessImeService.shouldDispatchVoiceCallback(
+                target, target, true));
+        assertFalse(OpenTypelessImeService.shouldDispatchVoiceCallback(
+                new Object(), target, false));
+        assertFalse(OpenTypelessImeService.shouldDispatchVoiceCallback(
+                null, target, false));
     }
 
     @Test
-    public void terminalArrivalBeatsTimeoutEvenBeforeItsMainThreadHandlerRuns() {
-        OpenTypelessImeService.DetachedFinalizationGate gate =
-                new OpenTypelessImeService.DetachedFinalizationGate();
-        gate.begin();
+    public void lifecycleBoundaryCancelsInsteadOfStoppingForAFinalResult() {
+        RecordingVoiceController controller = new RecordingVoiceController();
 
-        assertTrue(gate.terminalArrived());
-        assertFalse(gate.claimTimeout());
-        assertTrue(gate.claimTerminalHandler());
-        assertFalse(gate.claimTerminalHandler());
+        OpenTypelessImeService.cancelControllerForLifecycle(controller);
+
+        assertEquals(1, controller.cancelCalls);
+        assertEquals(0, controller.stopCalls);
+        assertSame(VoiceController.State.IDLE, controller.state());
+        assertThrows(
+                NullPointerException.class,
+                () -> OpenTypelessImeService.cancelControllerForLifecycle(null));
     }
 
     @Test
-    public void timeoutWinningMakesEveryLateTerminalANoOp() {
-        OpenTypelessImeService.DetachedFinalizationGate gate =
-                new OpenTypelessImeService.DetachedFinalizationGate();
-        gate.begin();
-
-        assertTrue(gate.claimTimeout());
-        assertFalse(gate.terminalArrived());
-        assertFalse(gate.claimTerminalHandler());
-        assertFalse(gate.claimTimeout());
+    public void uncertainLifecycleCleanupBlocksRestartUntilTheEditorSessionRotates() {
+        assertTrue(OpenTypelessImeService.lifecycleRestartBlocked(false, false, false));
+        assertTrue(OpenTypelessImeService.lifecycleRestartBlocked(true, true, false));
+        assertFalse(OpenTypelessImeService.lifecycleRestartBlocked(false, true, false));
+        assertFalse(OpenTypelessImeService.lifecycleRestartBlocked(true, false, true));
     }
 
     @Test
@@ -374,13 +380,46 @@ public final class VoicePipelineStateTest {
                 List.of(new CorrectionRule(
                         1L, "a", "x".repeat(1_000), "", 0, true)));
 
-        ProcessingResult result = VoicePipeline.applyPersonalizationFailSafe(
-                raw, explosive, false);
+        DeterministicPersonalizationStage stage = new DeterministicPersonalizationStage();
+        ProcessingResult result = stage.apply(
+                raw,
+                explosive,
+                TextProcessingPipeline.DeterministicFailurePolicy.PRESERVE_INPUT);
 
         assertEquals(raw, result.text());
         assertTrue(result.matchedTermIds().isEmpty());
         assertTrue(result.matchedCorrectionIds().isEmpty());
         assertThrows(IllegalArgumentException.class, () ->
-                VoicePipeline.applyPersonalizationFailSafe(raw, explosive, true));
+                stage.apply(
+                        raw,
+                        explosive,
+                        TextProcessingPipeline.DeterministicFailurePolicy.PROPAGATE));
+    }
+
+    private static final class RecordingVoiceController implements VoiceController {
+        private int stopCalls;
+        private int cancelCalls;
+        private State state = State.RECORDING;
+
+        @Override
+        public boolean start(DictationRequest request, Events events) {
+            throw new AssertionError("not used");
+        }
+
+        @Override
+        public void stop() {
+            stopCalls++;
+        }
+
+        @Override
+        public void cancel() {
+            cancelCalls++;
+            state = State.IDLE;
+        }
+
+        @Override
+        public State state() {
+            return state;
+        }
     }
 }

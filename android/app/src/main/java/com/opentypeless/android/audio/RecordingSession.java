@@ -2,7 +2,7 @@ package com.opentypeless.android.audio;
 
 import java.util.concurrent.atomic.AtomicReference;
 
-public final class RecordingSession {
+final class RecordingSession {
     public enum EndState { ACTIVE, STOPPED, CANCELLED }
 
     private final AtomicReference<EndState> state = new AtomicReference<>(EndState.ACTIVE);

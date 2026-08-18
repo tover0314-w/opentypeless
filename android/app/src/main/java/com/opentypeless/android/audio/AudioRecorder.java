@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.locks.LockSupport;
 
-public final class AudioRecorder {
+final class AudioRecorder {
     public interface CaptureListener {
         default void onReady() {}
         default void onBeginningOfSpeech() {}
@@ -26,7 +26,7 @@ public final class AudioRecorder {
     }
 
     private static final CaptureListener NO_CAPTURE_LISTENER = new CaptureListener() {};
-    public static final int SAMPLE_RATE = 16_000;
+    public static final int SAMPLE_RATE = AudioCapture.SAMPLE_RATE;
     static final int MAX_CONSECUTIVE_EMPTY_READS = 50;
     private static final long EMPTY_READ_BACKOFF_NANOS = 2_000_000L;
     private static final int INITIAL_PCM_CAPACITY = 64 * 1_024;
@@ -52,7 +52,7 @@ public final class AudioRecorder {
             RecordingSession session,
             int maximumSeconds,
             CaptureListener listener) {
-        int safeSeconds = Math.max(5, Math.min(maximumSeconds, 540));
+        int safeSeconds = boundedMaximumSeconds(maximumSeconds);
         int maximumBytes = SAMPLE_RATE * 2 * safeSeconds;
         PcmAccumulator pcm = new PcmAccumulator(maximumBytes, INITIAL_PCM_CAPACITY);
         CaptureOutcome outcome = capture(
@@ -81,7 +81,7 @@ public final class AudioRecorder {
             CaptureListener listener,
             FrameConsumer consumer) {
         if (consumer == null) throw new IllegalArgumentException("Frame consumer is required");
-        int safeSeconds = Math.max(5, Math.min(maximumSeconds, 540));
+        int safeSeconds = boundedMaximumSeconds(maximumSeconds);
         CaptureOutcome outcome = capture(
                 session,
                 safeSeconds,
@@ -256,6 +256,10 @@ public final class AudioRecorder {
     public boolean isRecording() {
         RecordingSession session = activeSession;
         return session != null && session.isActive();
+    }
+
+    static int boundedMaximumSeconds(int maximumSeconds) {
+        return Math.max(5, Math.min(maximumSeconds, 540));
     }
 
     static int nextEmptyReadCount(int read, int previousEmptyReads, boolean sessionActive) {

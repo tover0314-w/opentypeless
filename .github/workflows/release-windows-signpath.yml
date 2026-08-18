@@ -21,11 +21,32 @@ permissions:
   contents: read
 
 jobs:
+  verify-release-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Fetch protected main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Verify release tag is on protected main
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag }}
+        run: python3 scripts/verify_release_source.py --repo-root . --tag "$TAG_NAME"
+
   build-sign-publish:
+    needs: verify-release-source
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag }}
 
       - name: Sync version from tag
         shell: bash
@@ -72,7 +93,7 @@ jobs:
             exit 1
           }
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: 'npm'
@@ -111,7 +132,7 @@ jobs:
 
       - name: Upload unsigned artifact
         id: upload-unsigned-artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: opentypeless-windows-unsigned-${{ github.event.inputs.tag }}
           path: signpath-unsigned/*

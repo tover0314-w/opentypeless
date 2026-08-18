@@ -1,9 +1,13 @@
 package com.opentypeless.android.offline;
 
-import com.opentypeless.android.audio.AudioRecorder;
+import android.content.Context;
+
+import com.opentypeless.android.audio.AudioCapture;
 import com.opentypeless.android.audio.WavEncoder;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -16,20 +20,23 @@ import java.util.concurrent.TimeUnit;
  * deliberately non-terminal: the complete recording still receives the authoritative final pass.
  */
 public final class LocalRealtimePreview implements AutoCloseable {
-    interface Decoder {
+    interface Decoder extends AutoCloseable {
         String decode(byte[] wav);
+
+        @Override
+        default void close() {}
     }
 
     public interface Listener {
         void onPartial(String text);
     }
 
-    static final int INITIAL_PCM_BYTES = AudioRecorder.SAMPLE_RATE * 2 * 3 / 4;
-    static final int STEP_PCM_BYTES = AudioRecorder.SAMPLE_RATE * 2 * 3 / 4;
-    static final int MAX_PCM_BYTES = AudioRecorder.SAMPLE_RATE * 2 * 30;
+    public static final int INITIAL_PCM_BYTES = AudioCapture.SAMPLE_RATE * 2 * 3 / 4;
+    public static final int STEP_PCM_BYTES = AudioCapture.SAMPLE_RATE * 2 * 3 / 4;
+    public static final int MAX_PCM_BYTES = AudioCapture.SAMPLE_RATE * 2 * 30;
 
-    private final Decoder decoder;
-    private final Listener listener;
+    private Decoder decoder;
+    private Listener listener;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final byte[] pcm = new byte[MAX_PCM_BYTES];
     private int size;
@@ -40,7 +47,15 @@ public final class LocalRealtimePreview implements AutoCloseable {
     public LocalRealtimePreview(
             LocalOfflineRecognizer.Session session,
             Listener listener) {
-        this(session::transcribeWithPunctuation, listener);
+        this(Objects.requireNonNull(session, "session")::transcribeWithPunctuation, listener);
+    }
+
+    /** Creates a lazy, worker-owned SenseVoice session without model work on the caller thread. */
+    public LocalRealtimePreview(
+            Context context,
+            String configuredLanguage,
+            Listener listener) {
+        this(new LazySessionDecoder(context, configuredLanguage), listener);
     }
 
     LocalRealtimePreview(Decoder decoder, Listener listener) {
@@ -74,18 +89,53 @@ public final class LocalRealtimePreview implements AutoCloseable {
 
     private void decode(byte[] snapshot) {
         try {
-            String text = decoder.decode(WavEncoder.pcm16Mono(
-                    snapshot,
-                    AudioRecorder.SAMPLE_RATE));
-            if (text != null && !text.isBlank()) listener.onPartial(text.trim());
+            Decoder currentDecoder;
+            synchronized (this) {
+                if (closed || decoder == null) return;
+                currentDecoder = decoder;
+            }
+            byte[] wav = WavEncoder.pcm16Mono(snapshot, AudioCapture.SAMPLE_RATE);
+            String text;
+            try {
+                text = currentDecoder.decode(wav);
+            } finally {
+                Arrays.fill(wav, (byte) 0);
+            }
+            Listener currentListener;
+            synchronized (this) {
+                currentListener = closed ? null : listener;
+            }
+            if (currentListener != null && text != null && !text.isBlank()) {
+                currentListener.onPartial(text.trim());
+            }
         } catch (RuntimeException ignored) {
             // Prefixes can be too short or contain only noise. Final recognition remains decisive.
         } finally {
+            Arrays.fill(snapshot, (byte) 0);
+            boolean release;
             synchronized (this) {
                 decoding = false;
-                scheduleIfReady();
+                if (!closed) scheduleIfReady();
+                release = closed;
             }
+            if (release) releaseReferences();
         }
+    }
+
+    /** Revokes preview work without waiting for a running decode on the caller thread. */
+    public void cancel() {
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            clearPcmLocked();
+        }
+        List<Runnable> queued = executor.shutdownNow();
+        boolean release;
+        synchronized (this) {
+            if (!queued.isEmpty()) decoding = false;
+            release = !decoding;
+        }
+        if (release) releaseReferences();
     }
 
     /** Stops new previews and waits for the current decode before the authoritative final pass. */
@@ -94,6 +144,7 @@ public final class LocalRealtimePreview implements AutoCloseable {
         synchronized (this) {
             if (closed) return;
             closed = true;
+            clearPcmLocked();
         }
         executor.shutdown();
         try {
@@ -104,6 +155,66 @@ public final class LocalRealtimePreview implements AutoCloseable {
         } catch (InterruptedException error) {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
+        } finally {
+            releaseReferences();
+        }
+    }
+
+    @Override
+    public synchronized String toString() {
+        return "LocalRealtimePreview{bufferedBytes=" + size
+                + ", decoding=" + decoding
+                + ", closed=" + closed
+                + ", content=<redacted>}";
+    }
+
+    private void clearPcmLocked() {
+        Arrays.fill(pcm, (byte) 0);
+        size = 0;
+        lastScheduledSize = 0;
+    }
+
+    private void releaseReferences() {
+        Decoder release;
+        synchronized (this) {
+            release = decoder;
+            decoder = null;
+            listener = null;
+        }
+        if (release != null) {
+            try {
+                release.close();
+            } catch (RuntimeException ignored) {
+                // Preview authority is already revoked; native details remain private.
+            }
+        }
+    }
+
+    private static final class LazySessionDecoder implements Decoder {
+        private final Context context;
+        private final String configuredLanguage;
+        private LocalOfflineRecognizer.Session session;
+
+        private LazySessionDecoder(Context context, String configuredLanguage) {
+            Context safe = Objects.requireNonNull(context, "context");
+            Context application = safe.getApplicationContext();
+            this.context = application == null ? safe : application;
+            this.configuredLanguage = configuredLanguage == null ? "" : configuredLanguage;
+        }
+
+        @Override
+        public String decode(byte[] wav) {
+            if (session == null) {
+                session = LocalOfflineRecognizer.openSession(context, configuredLanguage);
+            }
+            return session.transcribeWithPunctuation(wav);
+        }
+
+        @Override
+        public void close() {
+            LocalOfflineRecognizer.Session current = session;
+            session = null;
+            if (current != null) current.close();
         }
     }
 }

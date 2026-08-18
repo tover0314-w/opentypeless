@@ -6,6 +6,14 @@
     <string name="ime_key_space">Space</string>
     <string name="ime_key_enter" translatable="false">↵</string>
     <string name="ime_key_switch_keyboard" translatable="false">⌨</string>
+    <string name="ime_key_engine_latin" translatable="false">EN</string>
+    <string name="ime_key_engine_rime">中</string>
+    <string name="ime_key_shift" translatable="false">⇧</string>
+    <string name="ime_key_caps_lock" translatable="false">⇪</string>
+    <string name="ime_key_symbols" translatable="false">123</string>
+    <string name="ime_key_letters" translatable="false">ABC</string>
+    <string name="ime_key_symbols_next_page" translatable="false">2/2</string>
+    <string name="ime_key_symbols_previous_page" translatable="false">1/2</string>
     <string name="ime_key_undo">Undo</string>
     <string name="ime_key_raw">Raw</string>
     <string name="ime_key_teach">Teach</string>
@@ -21,6 +29,11 @@
     <string name="ime_key_preparing_compact">Wait…</string>
     <string name="ime_key_hold_to_talk">Space · hold to talk</string>
     <string name="ime_key_hold_to_talk_compact">Hold</string>
+    <string name="ime_tab_voice">Voice</string>
+    <string name="ime_tab_keyboard">Keyboard</string>
+    <string name="ime_cd_open_voice_tab">Open voice input</string>
+    <string name="ime_cd_open_keyboard_tab">Open the QWERTY keyboard</string>
+    <string name="ime_voice_tap_hint">Tap the microphone, then speak</string>
     <string name="ime_key_release_to_finish">Release to insert</string>
     <string name="ime_key_listening">Listening…</string>
     <string name="ime_key_listening_compact">Live</string>
@@ -46,11 +59,21 @@
     <string name="ime_transcript_listening">Listening…</string>
 
     <string name="ime_cd_delete">Delete</string>
+    <string name="ime_cd_space">Insert a space</string>
     <string name="ime_cd_space_hold_to_talk">Insert space; touch and hold for voice input</string>
     <string name="ime_cd_space_sensitive">Insert space; voice input is unavailable in this sensitive field</string>
     <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
     <string name="ime_cd_enter">Enter or perform the editor action</string>
-    <string name="ime_cd_switch_keyboard">Switch keyboard</string>
+    <string name="ime_cd_switch_keyboard">Switch to the next keyboard; touch and hold to choose a keyboard</string>
+    <string name="ime_cd_engine_latin">Latin input active; switch to Chinese input</string>
+    <string name="ime_cd_engine_rime">Chinese input active; switch to Latin input</string>
+    <string name="ime_cd_shift">Shift once; double tap for Caps Lock</string>
+    <string name="ime_cd_caps_lock">Caps Lock on; tap to turn off</string>
+    <string name="ime_cd_open_symbols">Open numbers and symbols</string>
+    <string name="ime_cd_return_to_letters">Return to letters</string>
+    <string name="ime_cd_symbols_next_page">Open the second symbol page</string>
+    <string name="ime_cd_symbols_previous_page">Return to the first symbol page</string>
+    <string name="ime_cd_letter_with_long_press">%1$s; touch and hold for %2$s</string>
     <string name="ime_cd_undo">Undo the last voice insertion</string>
     <string name="ime_cd_choose_mode">Choose the voice processing mode</string>
     <string name="ime_cd_choose_mode_current">Voice processing mode: %1$s. Double tap to choose another mode</string>
@@ -116,6 +139,7 @@
     <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
     <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
     <string name="ime_status_session_active">Another voice session is already active</string>
+    <string name="ime_status_lifecycle_guard_unavailable">Voice input is unavailable because screen-lock monitoring could not start</string>
     <string name="ime_status_live_composition_fallback">This field cannot show live text; the current draft is preserved and will be inserted when you finish</string>
     <string name="ime_status_composition_cleanup_failed">The app stopped voice input but could not confirm removal of the live draft; check the field before continuing</string>
     <string name="ime_status_composition_preserve_uncertain">Voice input stopped, but the app could not confirm that the visible draft was finalized; check the field</string>
@@ -172,4 +196,24 @@
     <string name="ime_status_smart_edited">Smart edit inserted · Undo available</string>
     <string name="ime_status_ai_blocked_exact">AI edit blocked to protect facts · exact transcript inserted</string>
     <string name="ime_status_exact_ai_failed">Inserted exact transcript because AI polish failed</string>
+    <string name="ime_cd_keyboard_profile_general">Standard keyboard</string>
+    <string name="ime_cd_keyboard_profile_email">Email keyboard</string>
+    <string name="ime_cd_keyboard_profile_uri">Web address keyboard</string>
+    <string name="ime_cd_keyboard_profile_phone">Phone keyboard</string>
+    <string name="ime_cd_keyboard_profile_number">Number keyboard</string>
+    <string name="ime_cd_keyboard_profile_date">Date keyboard</string>
+    <string name="ime_cd_keyboard_profile_password">Password keyboard</string>
+    <string name="ime_candidate_previous">‹</string>
+    <string name="ime_candidate_next">›</string>
+    <string name="ime_candidate_numbered">%1$d %2$s</string>
+    <string name="ime_cd_candidate_previous">Previous candidate page</string>
+    <string name="ime_cd_candidate_next">Next candidate page</string>
+    <string name="ime_cd_candidate_numbered">Candidate %1$d: %2$s</string>
+    <string name="ime_status_candidate_engine_unavailable">Candidate source is not active</string>
+    <string name="ime_status_keyboard_picker_opened">Choose an input method</string>
+    <string name="ime_status_keyboard_switch_failed">Android could not switch input methods</string>
+    <string name="ime_status_finish_before_engine_change">Finish the current voice input before switching input engines</string>
+    <string name="ime_status_second_engine_unavailable">The Chinese input engine is not installed yet</string>
+    <string name="ime_status_engine_latin">Latin input active</string>
+    <string name="ime_status_engine_rime">Chinese input active</string>
 </resources>

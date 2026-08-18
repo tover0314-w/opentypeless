@@ -17,13 +17,14 @@ final class SystemRecognitionSupportApi34 {
             SystemRecognitionSupport.DownloadCallback callback) {
         recognizer.triggerModelDownload(
                 intent,
-                command -> operation.main.post(command),
+                operation::post,
                 new ModelDownloadListener() {
                     @Override
                     public void onProgress(int percent) {
-                        if (operation.isActive()) {
-                            callback.onProgress(Math.max(0, Math.min(percent, 100)));
-                        }
+                        SystemRecognitionSupport.reportDownloadProgress(
+                                operation,
+                                callback,
+                                percent);
                     }
 
                     @Override
@@ -33,8 +34,7 @@ final class SystemRecognitionSupportApi34 {
                                 callback,
                                 new SystemRecognitionSupport.DownloadResult(
                                         SystemRecognitionSupport.DownloadStatus.COMPLETED,
-                                        "The selected on-device language model is installed",
-                                        0));
+                                        null));
                     }
 
                     @Override
@@ -44,8 +44,7 @@ final class SystemRecognitionSupportApi34 {
                                 callback,
                                 new SystemRecognitionSupport.DownloadResult(
                                         SystemRecognitionSupport.DownloadStatus.SCHEDULED,
-                                        "Android scheduled the language model download",
-                                        0));
+                                        null));
                     }
 
                     @Override
@@ -63,8 +62,7 @@ final class SystemRecognitionSupportApi34 {
                                 callback,
                                 new SystemRecognitionSupport.DownloadResult(
                                         SystemRecognitionSupport.DownloadStatus.FAILED,
-                                        "Android could not download the speech model (" + error + ")",
-                                        error));
+                                        RecognitionFailureMapper.fromAndroidSystem(error, "")));
                     }
                 });
     }

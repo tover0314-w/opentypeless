@@ -17,6 +17,22 @@ public final class LocalOfflineRecognizerTest {
     }
 
     @Test
+    public void deviceSupportClassifiesLowMemoryAbiAndMissingSystemService() {
+        assertEquals(
+                LocalOfflineRecognizer.DeviceSupport.SYSTEM_UNAVAILABLE,
+                LocalOfflineRecognizer.classifyDevice(false, false, new String[] {"arm64-v8a"}));
+        assertEquals(
+                LocalOfflineRecognizer.DeviceSupport.LOW_MEMORY,
+                LocalOfflineRecognizer.classifyDevice(true, true, new String[] {"arm64-v8a"}));
+        assertEquals(
+                LocalOfflineRecognizer.DeviceSupport.UNSUPPORTED_ABI,
+                LocalOfflineRecognizer.classifyDevice(true, false, new String[] {"armeabi-v7a"}));
+        assertEquals(
+                LocalOfflineRecognizer.DeviceSupport.SUPPORTED,
+                LocalOfflineRecognizer.classifyDevice(true, false, new String[] {"x86_64"}));
+    }
+
+    @Test
     public void locksOnlyExplicitMandarinLanguageFamilies() {
         assertEquals("zh", LocalOfflineRecognizer.senseVoiceLanguage("zh"));
         assertEquals("zh", LocalOfflineRecognizer.senseVoiceLanguage(" ZH_hans-CN "));

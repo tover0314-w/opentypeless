@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "OpenTypelessAndroid"
 include(":app")
+include(":architecture-gate")
+include(":test-host")

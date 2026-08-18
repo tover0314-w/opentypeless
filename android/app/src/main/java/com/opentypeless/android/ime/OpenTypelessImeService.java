@@ -2,19 +2,20 @@ package com.opentypeless.android.ime;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.inputmethodservice.InputMethodService;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
-import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
@@ -25,6 +26,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
@@ -39,17 +41,54 @@ import com.opentypeless.android.VoiceLabActivity;
 import com.opentypeless.android.context.FieldKind;
 import com.opentypeless.android.context.InputContext;
 import com.opentypeless.android.context.InputContextClassifier;
+import com.opentypeless.android.editor.CommitRecord;
+import com.opentypeless.android.editor.CompositionConflictPolicy;
+import com.opentypeless.android.editor.CompositionCoordinator;
+import com.opentypeless.android.editor.CompositionState;
+import com.opentypeless.android.editor.EditorSessionSnapshot;
+import com.opentypeless.android.editor.EditorTransactionResult;
+import com.opentypeless.android.editor.SessionValidationResult;
+import com.opentypeless.android.editor.SessionValidator;
+import com.opentypeless.android.editor.TransactionReceipt;
+import com.opentypeless.android.editor.TextRange;
+import com.opentypeless.android.editor.host.EditorSessionManager;
+import com.opentypeless.android.keyboard.candidate.CandidatePage;
+import com.opentypeless.android.keyboard.candidate.KeyboardCandidateBar;
+import com.opentypeless.android.keyboard.latin.LatinKeyboardLayout;
+import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
+import com.opentypeless.android.keyboard.feedback.AndroidKeyboardFeedback;
+import com.opentypeless.android.keyboard.rime.NativeRimeInputEngine;
+import com.opentypeless.android.keyboard.rime.RimeEngineSnapshot;
+import com.opentypeless.android.keyboard.rime.RimeInputController;
+import com.opentypeless.android.keyboard.rime.RimeInputEngine;
+import com.opentypeless.android.keyboard.rime.RimeRuntimeConfig;
+import com.opentypeless.android.keyboard.shell.KeyboardShellConfig;
+import com.opentypeless.android.keyboard.shell.KeyboardShellFrame;
+import com.opentypeless.android.keyboard.shell.KeyboardInputModeLayout;
+import com.opentypeless.android.keyboard.shell.KeyboardShellRoute;
+import com.opentypeless.android.keyboard.shell.KeyboardShellSelector;
+import com.opentypeless.android.keyboard.switching.KeyboardEngineSelection;
+import com.opentypeless.android.keyboard.switching.KeyboardSystemImeSwitcher;
+import com.opentypeless.android.keyboard.toolbar.KeyboardToolbarLayout;
+import com.opentypeless.android.keyboard.toolbar.KeyboardToolbarPrivacyPolicy;
 import com.opentypeless.android.data.HistoryEntry;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
 import com.opentypeless.android.offline.OfflineStreamingRecognizer;
 import com.opentypeless.android.data.PersonalizationStore;
 import com.opentypeless.android.diagnostics.RecognitionRoute;
+import com.opentypeless.android.personalization.TeachCorrectionResolver;
+import com.opentypeless.android.recognition.RecognitionRouterVoiceConfig;
+import com.opentypeless.android.rime.importer.RimeImportException;
+import com.opentypeless.android.rime.importer.RimeResourceStore;
+import com.opentypeless.android.rime.importer.RimeRuntimePreferences;
+import com.opentypeless.android.rime.userdata.RimeUserDataStore;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.AppProfile;
 import com.opentypeless.android.settings.AppProfileRepository;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.SettingsRepository;
+import com.opentypeless.android.security.PrivacyPolicyEngine;
 import com.opentypeless.android.security.SecurePreferences;
 import com.opentypeless.android.speech.delivery.AndroidInputConnectionAdapter;
 import com.opentypeless.android.speech.delivery.EditorProjection;
@@ -60,12 +99,17 @@ import com.opentypeless.android.speech.delivery.ProjectionOutcome;
 import com.opentypeless.android.speech.delivery.ProjectionResult;
 import com.opentypeless.android.speech.delivery.ProjectionState;
 import com.opentypeless.android.speech.runtime.SpeechCoreV2Config;
+import com.opentypeless.android.speech.runtime.VoiceEditorTransactionConfig;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -73,7 +117,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * A deliberately small voice keyboard. It binds every asynchronous recognition run to an exact
  * editor epoch and cursor fingerprint so a late result can never spill into a different field.
  */
-public final class OpenTypelessImeService extends InputMethodService {
+public final class OpenTypelessImeService extends InputMethodService
+        implements EditorSessionManager.KeyboardHost {
     private static final int CONTEXT_CHAR_LIMIT = 800;
     private static final int FINGERPRINT_CODE_POINTS = 64;
     private static final int MAX_SELECTION_CODE_POINTS = 4_000;
@@ -92,9 +137,6 @@ public final class OpenTypelessImeService extends InputMethodService {
     private static final int MENU_VOICE_DIAGNOSTICS = 211;
     private static final int MENU_PUNCTUATION_BASE = 300;
     private static final long DISCARD_CONFIRM_WINDOW_MILLIS = 10_000L;
-    // Two bounded network stages may run after capture: ASR and optional AI processing. Each may
-    // legally consume a 20s connect + 120s read timeout, so teardown must cover the whole chain.
-    private static final long DESTROY_FINALIZATION_TIMEOUT_MILLIS = 330_000L;
     private static final long DETACHED_STATE_REFRESH_MILLIS = 500L;
     private static final long NO_PARTIAL_HINT_DELAY_MILLIS = 2_000L;
     private static final String RECOVERABLE_DRAFT_PREFERENCE = "recoverable_voice_draft";
@@ -108,6 +150,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             new AtomicReference<>();
     private static final Object DRAFT_STORAGE_LOCK = new Object();
     private static final AtomicLong DRAFT_STORAGE_GENERATION = new AtomicLong();
+    private static final AtomicLong VOICE_TRANSACTION_GENERATION = new AtomicLong();
     private static final AtomicReference<String> PROCESS_RECOVERABLE_AUDIO_ID =
             new AtomicReference<>("");
     private static boolean processDraftStorageLoaded;
@@ -123,37 +166,9 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     enum HoldReleaseAction { STOP_AND_COMMIT, CANCEL_PREPARATION, WAIT_FOR_RESULT }
 
-    static final class DetachedFinalizationGate {
-        enum State { INACTIVE, WAITING, TERMINAL_ARRIVED, CLOSED }
+    private enum VoiceReleaseProof { RELEASED, UNCHANGED, UNCERTAIN }
 
-        private final AtomicReference<State> state = new AtomicReference<>(State.INACTIVE);
-
-        void begin() {
-            state.compareAndSet(State.INACTIVE, State.WAITING);
-        }
-
-        boolean terminalArrived() {
-            State current = state.get();
-            return current == State.TERMINAL_ARRIVED
-                    || state.compareAndSet(State.WAITING, State.TERMINAL_ARRIVED);
-        }
-
-        boolean claimTerminalHandler() {
-            while (true) {
-                State current = state.get();
-                if (current == State.CLOSED || current == State.INACTIVE) return false;
-                if (state.compareAndSet(current, State.CLOSED)) return true;
-            }
-        }
-
-        boolean claimTimeout() {
-            return state.compareAndSet(State.WAITING, State.CLOSED);
-        }
-
-        void close() {
-            state.set(State.CLOSED);
-        }
-    }
+    private enum RimeReleaseProof { RELEASED, UNCHANGED, UNCERTAIN }
 
     record SelectionEvidence(
             boolean known,
@@ -162,6 +177,13 @@ public final class OpenTypelessImeService extends InputMethodService {
             int start,
             int end,
             String text) {}
+
+    enum SelectionCaptureDecision {
+        ACCEPT,
+        UNKNOWN,
+        UNAVAILABLE,
+        TOO_LONG
+    }
 
     private static final class CommitTarget {
         final long editorEpoch;
@@ -176,7 +198,11 @@ public final class OpenTypelessImeService extends InputMethodService {
         final boolean learningAllowed;
         final int selectionStart;
         final int selectionEnd;
+        final boolean transactionWriter;
+        final long voiceGeneration;
+        final EditorSessionManager.CaptureResult editorSessionCapture;
         final Object recoveryToken = new Object();
+        final AtomicBoolean voiceTerminal = new AtomicBoolean();
 
         CommitTarget(
                 long editorEpoch,
@@ -190,7 +216,10 @@ public final class OpenTypelessImeService extends InputMethodService {
                 String precedingContext,
                 boolean learningAllowed,
                 int selectionStart,
-                int selectionEnd) {
+                int selectionEnd,
+                boolean transactionWriter,
+                long voiceGeneration,
+                EditorSessionManager.CaptureResult editorSessionCapture) {
             this.editorEpoch = editorEpoch;
             this.connection = connection;
             this.packageName = packageName;
@@ -203,10 +232,519 @@ public final class OpenTypelessImeService extends InputMethodService {
             this.learningAllowed = learningAllowed;
             this.selectionStart = selectionStart;
             this.selectionEnd = selectionEnd;
+            this.transactionWriter = transactionWriter;
+            this.voiceGeneration = voiceGeneration;
+            this.editorSessionCapture = editorSessionCapture;
         }
 
         boolean replacedSelection() {
             return !selectedText.isEmpty();
+        }
+
+        boolean markVoiceTerminal() {
+            return voiceTerminal.compareAndSet(false, true);
+        }
+
+        boolean voiceTerminal() {
+            return voiceTerminal.get();
+        }
+    }
+
+    /**
+     * Session-local generation, transcript ordering and ETM composition state.
+     *
+     * <p>This object contains no Android editor capability. It is created only for the frozen
+     * transaction-writer branch and becomes terminal before the final callback performs a write,
+     * so a queued partial with any larger provider sequence is still rejected.
+     */
+    static final class VoiceTransactionSession {
+        private static final int MAX_PENDING_SELECTIONS = 8;
+
+        /** Opaque, session-owned handle for one Voice-to-keyboard preemption. */
+        static final class KeyboardPreemption {
+            private final VoiceTransactionSession owner;
+            private final CompositionCoordinator.PreemptTicket ticket;
+            private final CompositionConflictPolicy.Decision decision;
+            private boolean keyboardAcquired;
+            private boolean closed;
+
+            private KeyboardPreemption(
+                    VoiceTransactionSession owner,
+                    CompositionCoordinator.PreemptTicket ticket,
+                    CompositionConflictPolicy.Decision decision) {
+                this.owner = owner;
+                this.ticket = ticket;
+                this.decision = decision;
+            }
+
+            CompositionCoordinator.ReleaseDirective directive() {
+                return decision.releaseDirective();
+            }
+
+            boolean routeLateResult() {
+                return decision.routeDisplacedResultToPanel();
+            }
+
+            @Override
+            public String toString() {
+                return "KeyboardPreemption{directive="
+                        + directive()
+                        + ", routeLateResult="
+                        + routeLateResult()
+                        + ", ticket=<redacted>}";
+            }
+        }
+
+        final long generation;
+        final TextRange originalSelection;
+        final int originalCursor;
+        final Deque<Integer> expectedSelectionEnds = new ArrayDeque<>();
+        private final CompositionCoordinator coordinator;
+        private CompositionCoordinator.Observation compositionObservation;
+        EditorSessionSnapshot snapshot;
+        long latestSequence;
+        long revision;
+        String compositionText = "";
+        boolean compositionActive;
+        boolean terminal;
+        private boolean coordinatorReleased;
+        private boolean finalCallbackClaimed;
+        private KeyboardPreemption keyboardPreemption;
+
+        private VoiceTransactionSession(
+                long generation,
+                EditorSessionSnapshot snapshot,
+                CompositionCoordinator coordinator,
+                CompositionCoordinator.Observation compositionObservation) {
+            if (generation <= 0) throw new IllegalArgumentException("generation must be positive");
+            this.generation = generation;
+            this.snapshot = java.util.Objects.requireNonNull(snapshot, "snapshot");
+            this.coordinator = java.util.Objects.requireNonNull(coordinator, "coordinator");
+            this.compositionObservation = java.util.Objects.requireNonNull(
+                    compositionObservation, "compositionObservation");
+            originalSelection = snapshot.selection();
+            originalCursor = originalSelection.isKnown()
+                    ? Math.min(originalSelection.start(), originalSelection.end())
+                    : -1;
+        }
+
+        static VoiceTransactionSession acquire(
+                long generation,
+                EditorSessionSnapshot snapshot,
+                CompositionCoordinator coordinator) {
+            if (generation <= 0) throw new IllegalArgumentException("generation must be positive");
+            java.util.Objects.requireNonNull(snapshot, "snapshot");
+            java.util.Objects.requireNonNull(coordinator, "coordinator");
+            CompositionCoordinator.Transition acquired = coordinator.acquire(
+                    coordinator.observe(), new CompositionCoordinator.Acquisition.Voice());
+            if (acquired.disposition() != CompositionCoordinator.Disposition.APPLIED) return null;
+            return new VoiceTransactionSession(
+                    generation, snapshot, coordinator, acquired.after());
+        }
+
+        synchronized boolean markReady(long expectedGeneration) {
+            if (expectedGeneration != generation || terminal || coordinatorReleased) return false;
+            CompositionCoordinator.Transition transition =
+                    coordinator.voiceReady(compositionObservation);
+            if (!accepted(transition, CompositionCoordinator.Disposition.IGNORED_DUPLICATE)) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            return true;
+        }
+
+        synchronized boolean acceptsPartial(long expectedGeneration, long sequence) {
+            return expectedGeneration == generation
+                    && !terminal
+                    && !coordinatorReleased
+                    && sequence > latestSequence;
+        }
+
+        synchronized long prepareComposition(long sequence, String text) {
+            if (terminal && !compositionActive) {
+                throw new IllegalStateException("voice transaction is terminal");
+            }
+            if (coordinatorReleased) {
+                throw new IllegalStateException("voice coordinator already released");
+            }
+            String committedText = java.util.Objects.requireNonNull(text, "text");
+            long nextRevision = Math.addExact(revision, 1L);
+            if (nextRevision <= 0) {
+                throw new IllegalStateException("voice revision exhausted");
+            }
+            int expectedEnd = Math.addExact(originalCursor, committedText.length());
+            CompositionCoordinator.Transition transition = coordinator.voicePartial(
+                    compositionObservation, nextRevision);
+            if (transition.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+                throw new IllegalStateException("voice partial transition rejected");
+            }
+            compositionObservation = transition.after();
+            revision = nextRevision;
+            latestSequence = Math.max(latestSequence, sequence);
+            compositionText = committedText;
+            compositionActive = true;
+            rememberExpectedSelection(expectedEnd);
+            return revision;
+        }
+
+        synchronized void completeComposition(EditorSessionSnapshot captured) {
+            snapshot = java.util.Objects.requireNonNull(captured, "captured");
+        }
+
+        synchronized void recordIgnoredSequence(long sequence) {
+            latestSequence = Math.max(latestSequence, sequence);
+        }
+
+        synchronized void prepareFinalSelection(String text) {
+            rememberExpectedSelection(Math.addExact(originalCursor, text.length()));
+        }
+
+        synchronized boolean beginTerminal(long expectedGeneration) {
+            if (expectedGeneration != generation
+                    || coordinatorReleased
+                    || finalCallbackClaimed
+                    || keyboardPreemption != null) {
+                return false;
+            }
+            finalCallbackClaimed = true;
+            terminal = true;
+            return true;
+        }
+
+        synchronized boolean beginFinalizing() {
+            if (!terminal || coordinatorReleased) return false;
+            CompositionCoordinator.Transition transition =
+                    coordinator.beginVoiceFinalizing(compositionObservation);
+            if (!accepted(transition, CompositionCoordinator.Disposition.IGNORED_DUPLICATE)) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            return true;
+        }
+
+        synchronized boolean beginPreserving() {
+            if (coordinatorReleased) return false;
+            terminal = true;
+            if (!compositionActive) return true;
+            return beginFinalizing();
+        }
+
+        synchronized boolean completeCoordinatorAfterCommit() {
+            if (coordinatorReleased) return true;
+            CompositionCoordinator.Transition transition =
+                    coordinator.complete(compositionObservation);
+            if (transition.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            coordinatorReleased = true;
+            return true;
+        }
+
+        synchronized boolean cancelCoordinatorAfterCleanup() {
+            if (coordinatorReleased) return true;
+            terminal = true;
+            CompositionCoordinator.Transition transition =
+                    coordinator.cancel(compositionObservation);
+            if (!accepted(transition, CompositionCoordinator.Disposition.IGNORED_DUPLICATE)) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            coordinatorReleased = true;
+            return true;
+        }
+
+        synchronized boolean releaseAfterEditorLifecycle() {
+            if (keyboardPreemption != null) {
+                KeyboardPreemption preemption = keyboardPreemption;
+                if (!preemption.keyboardAcquired) {
+                    CompositionCoordinator.Transition released = coordinator.finishPreempt(
+                            preemption.ticket,
+                            CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED);
+                    if (released.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+                        return false;
+                    }
+                    compositionObservation = released.after();
+                    preemption.keyboardAcquired = true;
+                }
+                CompositionCoordinator.Transition cancelled =
+                        coordinator.cancel(compositionObservation);
+                if (cancelled.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+                    return false;
+                }
+                compositionObservation = cancelled.after();
+                preemption.closed = true;
+                keyboardPreemption = null;
+                coordinatorReleased = true;
+                terminal = true;
+                return true;
+            }
+            return cancelCoordinatorAfterCleanup();
+        }
+
+        synchronized KeyboardPreemption beginKeyboardPreemption(
+                CompositionConflictPolicy policy, boolean finalPending) {
+            java.util.Objects.requireNonNull(policy, "policy");
+            if (coordinatorReleased || keyboardPreemption != null) return null;
+            CompositionConflictPolicy.Decision decision;
+            try {
+                CompositionState policyState = compositionObservation.state();
+                if (finalPending) {
+                    policyState = new CompositionState.VoiceFinalizing(
+                            policyState.coordinationGeneration(),
+                            compositionActive ? revision : 0L);
+                }
+                decision = policy.voiceToKeyboardDecision(policyState);
+            } catch (RuntimeException wrongState) {
+                return null;
+            }
+            CompositionCoordinator.PreemptStart started = coordinator.beginPreempt(
+                    compositionObservation,
+                    decision.releaseDirective(),
+                    new CompositionCoordinator.Acquisition.Latin(1L));
+            if (!(started instanceof CompositionCoordinator.PreemptPrepared prepared)) {
+                return null;
+            }
+            terminal = true;
+            compositionObservation = prepared.observation();
+            keyboardPreemption = new KeyboardPreemption(this, prepared.ticket(), decision);
+            return keyboardPreemption;
+        }
+
+        synchronized long prepareKeyboardCancellation(KeyboardPreemption preemption) {
+            requireActiveKeyboardPreemption(preemption, false);
+            if (preemption.directive()
+                    != CompositionCoordinator.ReleaseDirective.CANCEL_CURRENT) {
+                throw new IllegalStateException("keyboard preemption is not cancellation");
+            }
+            if (!compositionActive) {
+                throw new IllegalStateException("voice composition is not active");
+            }
+            long nextRevision = Math.addExact(revision, 1L);
+            if (nextRevision <= 0L) {
+                throw new IllegalStateException("voice revision exhausted");
+            }
+            rememberExpectedSelection(originalCursor);
+            return nextRevision;
+        }
+
+        synchronized void completeKeyboardCancellation(
+                KeyboardPreemption preemption, long appliedRevision) {
+            requireActiveKeyboardPreemption(preemption, false);
+            if (appliedRevision != Math.addExact(revision, 1L)) {
+                throw new IllegalStateException("keyboard cancellation revision drifted");
+            }
+            revision = appliedRevision;
+            compositionText = "";
+        }
+
+        synchronized boolean finishKeyboardRelease(
+                KeyboardPreemption preemption,
+                CompositionCoordinator.ReleaseResolution resolution) {
+            java.util.Objects.requireNonNull(resolution, "resolution");
+            requireActiveKeyboardPreemption(preemption, false);
+            CompositionCoordinator.Transition transition =
+                    coordinator.finishPreempt(preemption.ticket, resolution);
+            if (resolution == CompositionCoordinator.ReleaseResolution.UNCERTAIN) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            if (resolution == CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED
+                    && transition.disposition() == CompositionCoordinator.Disposition.APPLIED) {
+                preemption.keyboardAcquired = true;
+                return true;
+            }
+            if (resolution == CompositionCoordinator.ReleaseResolution.PROVEN_UNCHANGED
+                    && transition.disposition()
+                            == CompositionCoordinator.Disposition.RELEASE_PROVEN_UNCHANGED) {
+                preemption.closed = true;
+                keyboardPreemption = null;
+            }
+            return false;
+        }
+
+        synchronized boolean finishKeyboardEvent(
+                KeyboardPreemption preemption, boolean applied) {
+            requireActiveKeyboardPreemption(preemption, true);
+            CompositionCoordinator.Transition transition = applied
+                    ? coordinator.commit(compositionObservation, 1L)
+                    : coordinator.cancel(compositionObservation);
+            if (transition.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+                return false;
+            }
+            compositionObservation = transition.after();
+            preemption.closed = true;
+            keyboardPreemption = null;
+            coordinatorReleased = true;
+            terminal = true;
+            return true;
+        }
+
+        synchronized boolean keyboardPreemptionActive() {
+            return keyboardPreemption != null
+                    && keyboardPreemption.keyboardAcquired
+                    && !keyboardPreemption.closed;
+        }
+
+        synchronized boolean coordinatorReleased() {
+            return coordinatorReleased;
+        }
+
+        synchronized boolean acceptsSelection(
+                int start, int end, int candidatesStart, int candidatesEnd) {
+            if (originalCursor < 0) return false;
+            if (!compositionActive
+                    && start == originalSelection.start()
+                    && end == originalSelection.end()) {
+                return true;
+            }
+            if (start != end) return false;
+            if (!expectedSelectionEnds.contains(end)) return false;
+            boolean rangeOmitted = candidatesStart < 0 && candidatesEnd < 0;
+            boolean ownedRange = candidatesStart == originalCursor
+                    && expectedSelectionEnds.contains(candidatesEnd);
+            return rangeOmitted || ownedRange;
+        }
+
+        synchronized void close() {
+            terminal = true;
+            compositionActive = false;
+            compositionText = "";
+            expectedSelectionEnds.clear();
+        }
+
+        private void requireActiveKeyboardPreemption(
+                KeyboardPreemption preemption, boolean requireKeyboardAcquired) {
+            if (preemption == null
+                    || preemption.owner != this
+                    || preemption != keyboardPreemption
+                    || preemption.closed
+                    || (requireKeyboardAcquired && !preemption.keyboardAcquired)) {
+                throw new IllegalStateException("keyboard preemption is not active");
+            }
+        }
+
+        private static boolean accepted(
+                CompositionCoordinator.Transition transition,
+                CompositionCoordinator.Disposition idempotent) {
+            return transition.disposition() == CompositionCoordinator.Disposition.APPLIED
+                    || transition.disposition() == idempotent;
+        }
+
+        private void rememberExpectedSelection(int end) {
+            if (end < 0) return;
+            expectedSelectionEnds.remove(end);
+            expectedSelectionEnds.addLast(end);
+            while (expectedSelectionEnds.size() > MAX_PENDING_SELECTIONS) {
+                expectedSelectionEnds.removeFirst();
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "VoiceTransactionSession{generation=" + generation + ", <redacted>}";
+        }
+    }
+
+    /**
+     * Opaque Rime-to-Voice handoff. Policy selects an intent, the editor-host proves its physical
+     * release, and only this owner-bound handle can publish or cancel the reserved Voice owner.
+     */
+    static final class RimeVoicePreemption {
+        enum Finish {
+            VOICE_ACQUIRED,
+            RIME_UNCHANGED,
+            UNCERTAIN
+        }
+
+        private final CompositionCoordinator coordinator;
+        private final CompositionCoordinator.PreemptTicket ticket;
+        private final CompositionConflictPolicy.Decision decision;
+        private CompositionCoordinator.Observation observation;
+        private Finish finish;
+        private boolean claimed;
+
+        private RimeVoicePreemption(
+                CompositionCoordinator coordinator,
+                CompositionCoordinator.PreemptTicket ticket,
+                CompositionConflictPolicy.Decision decision,
+                CompositionCoordinator.Observation observation) {
+            this.coordinator = coordinator;
+            this.ticket = ticket;
+            this.decision = decision;
+            this.observation = observation;
+        }
+
+        static RimeVoicePreemption begin(
+                CompositionCoordinator coordinator,
+                CompositionCoordinator.Observation expectedRime,
+                CompositionConflictPolicy policy) {
+            java.util.Objects.requireNonNull(coordinator, "coordinator");
+            java.util.Objects.requireNonNull(expectedRime, "expectedRime");
+            java.util.Objects.requireNonNull(policy, "policy");
+            if (!(expectedRime.state() instanceof CompositionState.RimeComposing)) return null;
+            CompositionConflictPolicy.Decision decision = policy.rimeToVoiceDecision();
+            CompositionCoordinator.PreemptStart started = coordinator.beginPreempt(
+                    expectedRime,
+                    decision.releaseDirective(),
+                    new CompositionCoordinator.Acquisition.Voice());
+            if (!(started instanceof CompositionCoordinator.PreemptPrepared prepared)) return null;
+            return new RimeVoicePreemption(
+                    coordinator, prepared.ticket(), decision, prepared.observation());
+        }
+
+        synchronized CompositionCoordinator.ReleaseDirective directive() {
+            return decision.releaseDirective();
+        }
+
+        synchronized Finish finish(CompositionCoordinator.ReleaseResolution resolution) {
+            java.util.Objects.requireNonNull(resolution, "resolution");
+            if (finish != null) throw new IllegalStateException("Rime preemption already finished");
+            CompositionCoordinator.Transition transition = coordinator.finishPreempt(
+                    ticket, resolution);
+            observation = transition.after();
+            if (resolution == CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED
+                    && transition.disposition() == CompositionCoordinator.Disposition.APPLIED
+                    && observation.state() instanceof CompositionState.VoicePreparing) {
+                finish = Finish.VOICE_ACQUIRED;
+            } else if (resolution == CompositionCoordinator.ReleaseResolution.PROVEN_UNCHANGED
+                    && transition.disposition()
+                            == CompositionCoordinator.Disposition.RELEASE_PROVEN_UNCHANGED
+                    && observation.state() instanceof CompositionState.RimeComposing) {
+                finish = Finish.RIME_UNCHANGED;
+            } else {
+                finish = Finish.UNCERTAIN;
+            }
+            return finish;
+        }
+
+        synchronized CompositionCoordinator.Observation restoredRimeObservation() {
+            if (finish != Finish.RIME_UNCHANGED || claimed) {
+                throw new IllegalStateException("Rime owner was not restored");
+            }
+            claimed = true;
+            return observation;
+        }
+
+        synchronized VoiceTransactionSession claimVoiceSession(
+                long generation, EditorSessionSnapshot snapshot) {
+            if (finish != Finish.VOICE_ACQUIRED || claimed) return null;
+            claimed = true;
+            return new VoiceTransactionSession(generation, snapshot, coordinator, observation);
+        }
+
+        synchronized boolean cancelUnclaimedVoice() {
+            if (finish != Finish.VOICE_ACQUIRED || claimed) return false;
+            CompositionCoordinator.Transition cancelled = coordinator.cancel(observation);
+            if (cancelled.disposition() != CompositionCoordinator.Disposition.APPLIED) return false;
+            observation = cancelled.after();
+            claimed = true;
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return "RimeVoicePreemption{directive=" + directive() + ", token=<redacted>}";
         }
     }
 
@@ -260,6 +798,9 @@ public final class OpenTypelessImeService extends InputMethodService {
         final long historyId;
         final String packageName;
         final boolean learningAllowed;
+        final String commitId;
+        final long voiceGeneration;
+        final CommitRecord teachRecord;
 
         LastVoiceCommit(
                 long editorEpoch,
@@ -270,6 +811,57 @@ public final class OpenTypelessImeService extends InputMethodService {
                 long historyId,
                 String packageName,
                 boolean learningAllowed) {
+            this(
+                    editorEpoch,
+                    connection,
+                    insertedText,
+                    originalSelection,
+                    rawText,
+                    historyId,
+                    packageName,
+                    learningAllowed,
+                    "",
+                    0L,
+                    null);
+        }
+
+        LastVoiceCommit(
+                long editorEpoch,
+                InputConnection connection,
+                String insertedText,
+                String originalSelection,
+                String rawText,
+                long historyId,
+                String packageName,
+                boolean learningAllowed,
+                String commitId,
+                long voiceGeneration) {
+            this(
+                    editorEpoch,
+                    connection,
+                    insertedText,
+                    originalSelection,
+                    rawText,
+                    historyId,
+                    packageName,
+                    learningAllowed,
+                    commitId,
+                    voiceGeneration,
+                    null);
+        }
+
+        LastVoiceCommit(
+                long editorEpoch,
+                InputConnection connection,
+                String insertedText,
+                String originalSelection,
+                String rawText,
+                long historyId,
+                String packageName,
+                boolean learningAllowed,
+                String commitId,
+                long voiceGeneration,
+                CommitRecord teachRecord) {
             this.editorEpoch = editorEpoch;
             this.connection = connection;
             this.insertedText = insertedText;
@@ -278,6 +870,13 @@ public final class OpenTypelessImeService extends InputMethodService {
             this.historyId = historyId;
             this.packageName = packageName;
             this.learningAllowed = learningAllowed;
+            this.commitId = commitId == null ? "" : commitId;
+            this.voiceGeneration = voiceGeneration;
+            this.teachRecord = teachRecord;
+        }
+
+        boolean transactionBacked() {
+            return !commitId.isEmpty();
         }
 
         LastVoiceCommit withInsertedText(String replacement) {
@@ -289,28 +888,53 @@ public final class OpenTypelessImeService extends InputMethodService {
                     rawText,
                     historyId,
                     packageName,
-                    learningAllowed);
+                    learningAllowed,
+                    commitId,
+                    voiceGeneration,
+                    teachRecord);
         }
     }
 
     private VoicePipeline pipeline;
+    private VoiceController voiceController;
     private SettingsRepository settingsRepository;
     private AppProfileRepository appProfileRepository;
     private PersonalizationStore personalizationStore;
+    private EditorSessionManager editorSessionManager;
+    private KeyboardShellRoute keyboardShellRoute;
+    private boolean editorSessionShadowHealthy;
     private SecurePreferences draftPreferences;
     private Handler mainHandler;
     private ExecutorService localIo;
+    private RimeResourceStore rimeResourceStore;
+    private RimeRuntimePreferences rimeRuntimePreferences;
+    private RimeUserDataStore rimeUserDataStore;
     private TextView status;
     private TextView transcript;
     private VoicePulseView voicePulse;
     private Button microphone;
     private Button modeButton;
-    private Button undoButton;
+    private Button moreButton;
     private Button holdToTalkButton;
     private Button switchKeyboardButton;
     private Button punctuationButton;
     private Button deleteButton;
     private Button enterButton;
+    private LatinKeyboardLayout latinKeyboardLayout;
+    private KeyboardInputModeLayout keyboardInputModeLayout;
+    private AndroidKeyboardFeedback keyboardFeedback;
+    private KeyboardCandidateBar keyboardCandidateBar;
+    private KeyboardToolbarLayout keyboardToolbarLayout;
+    private KeyboardToolbarPrivacyPolicy.State keyboardToolbarPrivacy =
+            restrictedToolbarPrivacy();
+    private boolean compactToolbar;
+    private KeyboardFieldProfile currentKeyboardFieldProfile = KeyboardFieldProfile.GENERAL;
+    private KeyboardEngineSelection keyboardEngineSelection = KeyboardEngineSelection.latinOnly();
+    private RimeResourceStore.RuntimePackage availableRimePackage;
+    private RimeRuntimeConfig availableRimeConfig;
+    private long rimeAvailabilityRequest;
+    private boolean currentLearningAllowed;
+    private RimeCompositionLease activeRimeLease;
     private boolean holdToTalkActive;
     private boolean preparingVoiceInput;
     private boolean finishingVoiceInput;
@@ -326,14 +950,23 @@ public final class OpenTypelessImeService extends InputMethodService {
     private volatile CommitTarget detachedTargetAwaitingResult;
     private volatile boolean serviceDestroyed;
     private boolean resourcesClosed;
-    private final Runnable destroyFinalizationTimeout = this::forceCloseDestroyedService;
+    private boolean screenOffReceiverRegistered;
+    private boolean voiceRestartBlockedByLifecycle;
+    private final BroadcastReceiver screenOffReceiver = createScreenOffReceiver(
+            this::cancelVoiceForLifecycle);
     private final Runnable pendingDetachedRefresh = () -> {
         if (!serviceDestroyed) renderInputViewState();
     };
-    private final DetachedFinalizationGate destroyFinalizationGate =
-            new DetachedFinalizationGate();
 
     private long editorEpoch;
+    // EditorTransactionManager intentionally retains an owner-specific revision high-watermark
+    // after finishComposingText so a delayed callback from an earlier Rime composition cannot be
+    // replayed. Every independent native Rime session in this service must therefore continue the
+    // same monotonic revision space instead of restarting at one.
+    private long rimeRevisionHighWatermark;
+    private final CompositionCoordinator compositionCoordinator = new CompositionCoordinator();
+    private final CompositionConflictPolicy compositionConflictPolicy =
+            CompositionConflictPolicy.defaults();
     private EditorInfo currentEditor;
     private FieldKind currentFieldKind = FieldKind.GENERAL;
     private boolean sensitiveField;
@@ -343,17 +976,75 @@ public final class OpenTypelessImeService extends InputMethodService {
     private CommitTarget activeTarget;
     private VoiceCompositionSession activeComposition;
     private EditorProjection activeV2Projection;
+    private VoiceTransactionSession activeVoiceTransaction;
     private ProjectionDocument latestV2Document;
     private ProjectionMode activeV2ProjectionMode;
     private LastVoiceCommit lastCommit;
 
+    /** Main-thread lease binding native callbacks to one original editor target and coordinator. */
+    private static final class RimeCompositionLease {
+        final long editorEpoch;
+        EditorSessionSnapshot editorSnapshot;
+        final long coordinationGeneration;
+        final int baseSelectionStart;
+        CompositionCoordinator.Observation observation;
+        RimeInputController controller;
+        long revision;
+        int expectedCaret;
+        int pendingKeyCommands;
+        String preedit = "";
+        CandidatePage candidatePage;
+        CandidatePage.Selection pendingSelection;
+        CandidatePage.PageRequest pendingPageRequest;
+
+        RimeCompositionLease(
+                long editorEpoch,
+                EditorSessionSnapshot editorSnapshot,
+                long coordinationGeneration,
+                CompositionCoordinator.Observation observation,
+                long initialRevision) {
+            this.editorEpoch = editorEpoch;
+            this.editorSnapshot = editorSnapshot;
+            this.coordinationGeneration = coordinationGeneration;
+            this.observation = observation;
+            revision = initialRevision;
+            baseSelectionStart = Math.min(
+                    editorSnapshot.selection().start(), editorSnapshot.selection().end());
+            expectedCaret = baseSelectionStart;
+        }
+
+        boolean matches(long callbackEditorEpoch, long callbackCoordinationGeneration) {
+            return editorEpoch == callbackEditorEpoch
+                    && coordinationGeneration == callbackCoordinationGeneration;
+        }
+
+        boolean acceptsSelection(int start, int end, int candidatesStart, int candidatesEnd) {
+            if (start != expectedCaret || end != expectedCaret) return false;
+            return (candidatesStart == -1 && candidatesEnd == -1)
+                    || (candidatesStart == baseSelectionStart && candidatesEnd == expectedCaret);
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        editorSessionManager = new EditorSessionManager();
+        // Freeze exactly one Shell for this service lifetime. Preference changes take effect only
+        // after the IME process restarts, so an editor session cannot cross routes or double-write.
+        keyboardShellRoute = KeyboardShellConfig.selectedRoute(this);
+        editorSessionShadowHealthy = true;
         mainHandler = new Handler(Looper.getMainLooper());
+        registerScreenOffReceiver();
         pipeline = new VoicePipeline(this);
+        voiceController = RecognitionRouterVoiceConfig.select(
+                this,
+                new VoicePipelineAdapter(pipeline));
         settingsRepository = new SettingsRepository(this);
         appProfileRepository = new AppProfileRepository(this);
+        rimeResourceStore = new RimeResourceStore(this);
+        rimeRuntimePreferences = new RimeRuntimePreferences(this);
+        rimeUserDataStore = new RimeUserDataStore(this);
+        keyboardFeedback = new AndroidKeyboardFeedback(this);
         personalizationStore = new PersonalizationStore(this);
         draftPreferences = new SecurePreferences(this);
         localIo = Executors.newSingleThreadExecutor();
@@ -391,8 +1082,13 @@ public final class OpenTypelessImeService extends InputMethodService {
                 || getResources().getConfiguration().fontScale >= 1.3f;
         boolean landscape = getResources().getConfiguration().orientation
                 == Configuration.ORIENTATION_LANDSCAPE;
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
+        compactToolbar = compactLayout || landscape;
+        KeyboardShellFrame shellFrame = KeyboardShellSelector.select(
+                keyboardShellRoute,
+                () -> KeyboardShellFrame.routeA(this),
+                () -> KeyboardShellFrame.legacyVoice(this));
+        boolean routeACandidateBar = shellFrame.route() == KeyboardShellRoute.ROUTE_A;
+        LinearLayout root = shellFrame.root();
         root.setMinimumHeight(dp(landscape ? 190 : compactLayout ? 280 : 300));
         root.setPadding(dp(8), dp(8), dp(8), dp(10));
         root.setBackgroundResource(R.drawable.ime_panel_background);
@@ -404,15 +1100,13 @@ public final class OpenTypelessImeService extends InputMethodService {
             return insets;
         });
 
-        LinearLayout toolbar = horizontalRow();
+        LinearLayout toolbar = shellFrame.toolbar();
         toolbar.setPadding(dp(2), 0, dp(2), dp(4));
+        keyboardToolbarLayout = new KeyboardToolbarLayout(this, toolbar);
 
         voicePulse = new VoicePulseView(this);
         voicePulse.setPhase(VoicePulseView.Phase.IDLE);
-        LinearLayout.LayoutParams pulseParams = new LinearLayout.LayoutParams(dp(30), dp(40));
-        pulseParams.setMarginStart(dp(2));
-        pulseParams.setMarginEnd(dp(4));
-        toolbar.addView(voicePulse, pulseParams);
+        keyboardToolbarLayout.attachStatusIndicator(voicePulse, 30);
 
         status = new TextView(this);
         status.setText(R.string.status_ready);
@@ -425,26 +1119,44 @@ public final class OpenTypelessImeService extends InputMethodService {
                 9, 12, 1, TypedValue.COMPLEX_UNIT_SP);
         status.setPadding(dp(2), 0, dp(4), 0);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        addWeighted(toolbar, status, 1.35f);
+        keyboardToolbarLayout.attachStatusText(status);
 
         modeButton = key("", getString(R.string.ime_cd_choose_mode), 1f,
                 ignored -> showModeMenu());
-        addWeighted(toolbar, modeButton, .82f);
+        keyboardToolbarLayout.attachPrimaryAction("voice.mode", modeButton, 64);
         microphone = key(getString(R.string.ime_key_long_dictation_compact),
                 getString(R.string.ime_cd_start_long_dictation), 2f,
                 ignored -> toggleRecording(DictationRequest.CaptureMode.CONTINUOUS));
-        addWeighted(toolbar, microphone, .92f);
-        undoButton = key(R.string.ime_key_undo, R.string.ime_cd_undo, 1f,
-                ignored -> undoLastVoiceCommit());
-        undoButton.setVisibility(View.GONE);
-        addFixed(toolbar, undoButton, 48);
-        addFixed(toolbar, key(
+        moreButton = key(
                 R.string.ime_key_more,
                 R.string.ime_cd_more,
                 1f,
-                this::showMoreMenu), 48);
-        root.addView(toolbar, matchWrap());
+                this::showMoreMenu);
+        keyboardToolbarLayout.attachOverflowAnchor("more", moreButton);
+        applyKeyboardToolbarPrivacy();
         refreshModeButton();
+
+        LinearLayout compositionStage = new LinearLayout(this);
+        compositionStage.setOrientation(LinearLayout.VERTICAL);
+        if (routeACandidateBar) {
+            keyboardCandidateBar = new KeyboardCandidateBar(
+                    this,
+                    new KeyboardCandidateBar.Listener() {
+                        @Override
+                        public void onCandidateSelected(CandidatePage.Selection selection) {
+                            routeRimeCandidateSelection(selection);
+                        }
+
+                        @Override
+                        public void onPageRequested(CandidatePage.PageRequest request) {
+                            routeRimeCandidatePage(request);
+                        }
+                    });
+            keyboardCandidateBar.setPlaintextVisible(currentEditor != null && !sensitiveField);
+            compositionStage.addView(keyboardCandidateBar.root(), matchWrap());
+        } else {
+            keyboardCandidateBar = null;
+        }
 
         transcript = new TextView(this);
         transcript.setText(R.string.ime_transcript_hint);
@@ -468,36 +1180,91 @@ public final class OpenTypelessImeService extends InputMethodService {
         transcriptParams.setMarginEnd(dp(2));
         transcriptParams.topMargin = dp(2);
         transcriptParams.bottomMargin = dp(2);
-        root.addView(transcript, transcriptParams);
+        compositionStage.addView(transcript, transcriptParams);
+        shellFrame.attachComposition(compositionStage, matchWrap());
+        shellFrame.attachToolbar(matchWrap());
 
-        LinearLayout typing = horizontalRow();
-        switchKeyboardButton = key(
-                R.string.ime_key_switch_keyboard,
-                R.string.ime_cd_switch_keyboard,
-                1f,
-                ignored -> switchKeyboard());
-        addFixed(typing, switchKeyboardButton, 48);
-        punctuationButton = key(
-                R.string.ime_key_punctuation,
-                R.string.ime_cd_punctuation,
-                1f,
-                this::showPunctuationMenu);
-        addFixed(typing, punctuationButton, 48);
-        holdToTalkButton = key(
-                voiceLabel(
-                        R.string.ime_key_hold_to_talk,
-                        R.string.ime_key_hold_to_talk_compact),
-                R.string.ime_cd_space_hold_to_talk,
-                2f,
-                ignored -> commitText(" "));
-        configureHoldToTalk(holdToTalkButton);
-        addWeighted(typing, holdToTalkButton, 3f);
-        deleteButton = key(R.string.ime_key_delete, R.string.ime_cd_delete, 1f,
-                ignored -> backspace());
-        addFixed(typing, deleteButton, 48);
-        enterButton = key(R.string.ime_key_enter, R.string.ime_cd_enter, 1f,
-                ignored -> sendEnter());
-        addFixed(typing, enterButton, 48);
+        View typing;
+        if (shellFrame.route() == KeyboardShellRoute.ROUTE_A) {
+            punctuationButton = null;
+            latinKeyboardLayout = new LatinKeyboardLayout(
+                    this,
+                    (label, description, weight, action) -> key(
+                            label,
+                            description,
+                            weight,
+                            ignored -> action.run()),
+                    new LatinKeyboardLayout.Listener() {
+                        @Override
+                        public void insertText(String text) {
+                            routeTypingText(text);
+                        }
+
+                        @Override
+                        public void deleteBackward() {
+                            routeDeleteBackward();
+                        }
+
+                        @Override
+                        public void performEnter() {
+                            routeKeyboardEnter();
+                        }
+
+                        @Override
+                        public void switchKeyboard() {
+                            OpenTypelessImeService.this.switchKeyboard();
+                        }
+
+                        @Override
+                        public void showKeyboardPicker() {
+                            OpenTypelessImeService.this.showKeyboardPicker();
+                        }
+
+                        @Override
+                        public void switchInputEngine() {
+                            OpenTypelessImeService.this.switchInputEngine();
+                        }
+                    },
+                    keyboardFeedback);
+            latinKeyboardLayout.setFieldProfile(currentKeyboardFieldProfile);
+            latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
+            switchKeyboardButton = latinKeyboardLayout.switchKeyboardButton();
+            holdToTalkButton = null;
+            deleteButton = latinKeyboardLayout.deleteButton();
+            enterButton = latinKeyboardLayout.enterButton();
+            typing = latinKeyboardLayout.root();
+        } else {
+            latinKeyboardLayout = null;
+            LinearLayout legacyTyping = horizontalRow();
+            switchKeyboardButton = key(
+                    R.string.ime_key_switch_keyboard,
+                    R.string.ime_cd_switch_keyboard,
+                    1f,
+                    ignored -> switchKeyboard());
+            addFixed(legacyTyping, switchKeyboardButton, 48);
+            punctuationButton = key(
+                    R.string.ime_key_punctuation,
+                    R.string.ime_cd_punctuation,
+                    1f,
+                    this::showPunctuationMenu);
+            addFixed(legacyTyping, punctuationButton, 48);
+            holdToTalkButton = key(
+                    voiceLabel(
+                            R.string.ime_key_hold_to_talk,
+                            R.string.ime_key_hold_to_talk_compact),
+                    R.string.ime_cd_space_hold_to_talk,
+                    2f,
+                    ignored -> insertKeyboardText(" "));
+            configureHoldToTalk(holdToTalkButton);
+            addWeighted(legacyTyping, holdToTalkButton, 3f);
+            deleteButton = key(R.string.ime_key_delete, R.string.ime_cd_delete, 1f,
+                    ignored -> deleteKeyboardBackward());
+            addFixed(legacyTyping, deleteButton, 48);
+            enterButton = key(R.string.ime_key_enter, R.string.ime_cd_enter, 1f,
+                    ignored -> performKeyboardEnter());
+            addFixed(legacyTyping, enterButton, 48);
+            typing = legacyTyping;
+        }
 
         // Keep the primary typing controls in the visual centre. The bottom reserve is an
         // intentional product slot for future actions (for example notes, commands or clipboard)
@@ -505,21 +1272,89 @@ public final class OpenTypelessImeService extends InputMethodService {
         LinearLayout keyStage = new LinearLayout(this);
         keyStage.setOrientation(LinearLayout.VERTICAL);
         keyStage.setGravity(Gravity.CENTER);
-        keyStage.addView(typing, matchWrap());
-        root.addView(keyStage, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f));
+        if (shellFrame.route() == KeyboardShellRoute.ROUTE_A) {
+            LinearLayout voicePage = createVoiceInputPage();
+            Button voiceTab = key(
+                    R.string.ime_tab_voice,
+                    R.string.ime_cd_open_voice_tab,
+                    1f,
+                    ignored -> {});
+            Button qwertyTab = key(
+                    R.string.ime_tab_keyboard,
+                    R.string.ime_cd_open_keyboard_tab,
+                    1f,
+                    ignored -> {});
+            keyboardInputModeLayout = new KeyboardInputModeLayout(
+                    this,
+                    voiceTab,
+                    qwertyTab,
+                    voicePage,
+                    typing,
+                    sensitiveField
+                            ? KeyboardInputModeLayout.Mode.QWERTY
+                            : KeyboardInputModeLayout.Mode.VOICE,
+                    mode -> {
+                        if (mode == KeyboardInputModeLayout.Mode.VOICE
+                                && latinKeyboardLayout != null) {
+                            latinKeyboardLayout.cancelTransientGestures();
+                        }
+                    });
+            keyboardInputModeLayout.setVoiceAvailable(!sensitiveField);
+            keyStage.addView(keyboardInputModeLayout.root(), matchWrap());
+        } else {
+            keyboardInputModeLayout = null;
+            keyStage.addView(typing, matchWrap());
+        }
+        // The key stage must size to its rows. Giving a WRAP_CONTENT IME window a weighted
+        // zero-height child makes the platform expand it to the full display, which separates
+        // the QWERTY rows by large empty areas and obscures the host editor.
+        shellFrame.attachKeys(keyStage, matchWrap());
         View extensionReserve = new View(this);
         extensionReserve.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        root.addView(extensionReserve, new LinearLayout.LayoutParams(
+        shellFrame.attachExtensions(extensionReserve, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(landscape ? 20 : compactLayout ? 52 : 64)));
 
         refreshEnterKey();
         refreshPostCommitActions();
+        applyKeyboardToolbarPrivacy();
         renderInputViewState();
         return root;
+    }
+
+    private LinearLayout createVoiceInputPage() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER);
+        page.setMinimumHeight(dp(compactLayout ? 184 : 208));
+        page.setPadding(dp(8), dp(8), dp(8), dp(10));
+
+        microphone.setText("");
+        microphone.setCompoundDrawablesWithIntrinsicBounds(
+                0, R.drawable.ime_ic_microphone, 0, 0);
+        microphone.setBackgroundResource(R.drawable.ime_voice_button_background);
+        microphone.setBackgroundTintList(null);
+        microphone.setTextColor(getColor(R.color.ime_on_voice_primary));
+        microphone.setMinWidth(dp(112));
+        microphone.setMinimumWidth(dp(112));
+        microphone.setMinHeight(dp(112));
+        microphone.setMinimumHeight(dp(112));
+        microphone.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams microphoneParams = new LinearLayout.LayoutParams(
+                dp(112), dp(112));
+        microphoneParams.gravity = Gravity.CENTER_HORIZONTAL;
+        page.addView(microphone, microphoneParams);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.ime_voice_tap_hint);
+        hint.setTextColor(getColor(R.color.ime_on_surface_variant));
+        hint.setTextSize(14);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(8), 0, 0);
+        page.addView(hint, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        return page;
     }
 
     @Override
@@ -529,6 +1364,10 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void toggleRecording(DictationRequest.CaptureMode captureMode) {
+        if (!screenOffReceiverRegistered) {
+            setStatus(R.string.ime_status_lifecycle_guard_unavailable, true);
+            return;
+        }
         if (sensitiveField) {
             setStatus(R.string.ime_status_sensitive_disabled, true);
             return;
@@ -549,14 +1388,14 @@ public final class OpenTypelessImeService extends InputMethodService {
             setStatus(R.string.ime_status_recoverable_draft_resolve_first, true);
             return;
         }
-        if (pipeline.state() == VoicePipeline.State.RECORDING) {
-            pipeline.stopRecording();
+        if (voiceController.state() == VoiceController.State.RECORDING) {
+            voiceController.stop();
             finishingVoiceInput = true;
-            updateMicrophone(VoicePipeline.State.TRANSCRIBING);
+            updateMicrophone(VoiceController.State.TRANSCRIBING);
             setStatus(R.string.ime_status_finishing_recording, false);
             return;
         }
-        if (pipeline.state() != VoicePipeline.State.IDLE) {
+        if (voiceController.state() != VoiceController.State.IDLE) {
             setStatus(R.string.ime_status_processing_cancel_hint, true);
             return;
         }
@@ -571,8 +1410,34 @@ public final class OpenTypelessImeService extends InputMethodService {
             return;
         }
 
+        RimeVoicePreemption rimePreemption = null;
+        if (activeRimeLease != null) {
+            rimePreemption = preemptRimeForVoice();
+            if (rimePreemption == null) return;
+        }
         CommitTarget target = captureTarget();
-        if (target == null) return;
+        if (target == null) {
+            if (rimePreemption != null) rimePreemption.cancelUnclaimedVoice();
+            return;
+        }
+        VoiceTransactionSession transactionSession = null;
+        if (target.transactionWriter) {
+            EditorSessionSnapshot snapshot =
+                    ((EditorSessionManager.Captured) target.editorSessionCapture).snapshot();
+            transactionSession = rimePreemption == null
+                    ? VoiceTransactionSession.acquire(
+                            target.voiceGeneration, snapshot, compositionCoordinator)
+                    : rimePreemption.claimVoiceSession(target.voiceGeneration, snapshot);
+            if (transactionSession == null) {
+                if (rimePreemption != null) rimePreemption.cancelUnclaimedVoice();
+                setStatus(R.string.ime_status_session_active, true);
+                return;
+            }
+        } else if (rimePreemption != null) {
+            rimePreemption.cancelUnclaimedVoice();
+            setStatus(R.string.ime_status_session_active, true);
+            return;
+        }
         activeTarget = target;
         preparingVoiceInput = true;
         finishingVoiceInput = false;
@@ -580,10 +1445,16 @@ public final class OpenTypelessImeService extends InputMethodService {
         activeRecognitionRoute = null;
         discardConfirmationDeadline = 0L;
         latestPreviewText = "";
-        activeComposition = new VoiceCompositionSession(
-                target.connection,
-                target.selectionStart,
-                target.selectionEnd);
+        if (target.transactionWriter) {
+            activeVoiceTransaction = transactionSession;
+            activeComposition = null;
+        } else {
+            activeVoiceTransaction = null;
+            activeComposition = new VoiceCompositionSession(
+                    target.connection,
+                    target.selectionStart,
+                    target.selectionEnd);
+        }
         activeV2Projection = null;
         latestV2Document = null;
         activeV2ProjectionMode = null;
@@ -612,6 +1483,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                 return;
             }
             holdActivated[0] = true;
+            keyboardFeedback.onLongPress(space);
             holdToTalkActive = true;
             toggleRecording(DictationRequest.CaptureMode.HOLD_TO_TALK);
         };
@@ -655,13 +1527,13 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void finishHoldToTalk(boolean cancelled) {
         holdToTalkActive = false;
-        VoicePipeline.State currentState = pipeline.state();
+        VoiceController.State currentState = voiceController.state();
         switch (holdReleaseAction(
                 currentState, activeTarget != null, preparingVoiceInput)) {
             case STOP_AND_COMMIT -> {
-                pipeline.stopRecording();
+                voiceController.stop();
                 finishingVoiceInput = true;
-                updateMicrophone(VoicePipeline.State.TRANSCRIBING);
+                updateMicrophone(VoiceController.State.TRANSCRIBING);
                 setStatus(R.string.ime_status_finishing_recording, false);
             }
             case CANCEL_PREPARATION -> cancelPipeline(
@@ -677,7 +1549,7 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     static HoldReleaseAction holdReleaseAction(
-            VoicePipeline.State state,
+            VoiceController.State state,
             boolean hasActiveTarget,
             boolean preparing) {
         // VoicePipeline enters RECORDING before the recognizer has actually opened the
@@ -686,7 +1558,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         if (hasActiveTarget && preparing) {
             return HoldReleaseAction.CANCEL_PREPARATION;
         }
-        if (state == VoicePipeline.State.RECORDING) return HoldReleaseAction.STOP_AND_COMMIT;
+        if (state == VoiceController.State.RECORDING) return HoldReleaseAction.STOP_AND_COMMIT;
         return HoldReleaseAction.WAIT_FOR_RESULT;
     }
 
@@ -714,7 +1586,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     activeCaptureMode = null;
                     activeTarget = null;
                     discardActiveComposition();
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                    updateMicrophone(VoiceController.State.IDLE);
                     clearTranscript();
                     setStatus(R.string.ime_status_configure_backend, true);
                     openSettings();
@@ -734,7 +1606,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                     activeCaptureMode = null;
                     activeTarget = null;
                     discardActiveComposition();
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                    updateMicrophone(VoiceController.State.IDLE);
                     clearTranscript();
                     setStatus(R.string.ime_status_offline_model_missing, true);
                     openSettings();
@@ -765,19 +1637,19 @@ public final class OpenTypelessImeService extends InputMethodService {
                     activeCaptureMode = null;
                     activeTarget = null;
                     discardActiveComposition();
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                    updateMicrophone(VoiceController.State.IDLE);
                     clearTranscript();
                     setStatus(R.string.ime_status_target_changed_cancelled, true);
                     return;
                 }
-                boolean started = pipeline.start(request, listenerFor(target));
+                boolean started = voiceController.start(request, listenerFor(target));
                 if (!started) {
                     preparingVoiceInput = false;
                     finishingVoiceInput = false;
                     activeCaptureMode = null;
                     activeTarget = null;
                     discardActiveComposition();
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                    updateMicrophone(VoiceController.State.IDLE);
                     clearTranscript();
                     setStatus(R.string.ime_status_session_active, true);
                 }
@@ -790,27 +1662,33 @@ public final class OpenTypelessImeService extends InputMethodService {
                 activeCaptureMode = null;
                 activeTarget = null;
                 discardActiveComposition();
-                updateMicrophone(VoicePipeline.State.IDLE);
+                updateMicrophone(VoiceController.State.IDLE);
                 clearTranscript();
                 setStatus(safeMessage(error.getMessage()), true);
             });
         }
     }
 
-    private VoicePipeline.Listener listenerFor(CommitTarget target) {
-        return new VoicePipeline.Listener() {
+    private VoiceController.Events listenerFor(CommitTarget target) {
+        return new VoiceController.Events() {
             @Override
             public void onRoute(RecognitionRoute route) {
+                if (target.voiceTerminal()) return;
                 postUi(() -> {
-                    if (activeTarget == target) activeRecognitionRoute = route;
+                    if (shouldDispatchVoiceCallback(
+                            activeTarget, target, target.voiceTerminal())) {
+                        activeRecognitionRoute = route;
+                    }
                 });
             }
 
             @Override
-            public void onState(VoicePipeline.State state, String message) {
+            public void onState(VoiceController.State state, String message) {
+                if (target.voiceTerminal()) return;
                 postUi(() -> {
-                    if (activeTarget != target) return;
-                    if (state == VoicePipeline.State.RECORDING && preparingVoiceInput) {
+                    if (!shouldDispatchVoiceCallback(
+                            activeTarget, target, target.voiceTerminal())) return;
+                    if (state == VoiceController.State.RECORDING && preparingVoiceInput) {
                         // start() publishes RECORDING when work is dispatched. The user-facing
                         // listening state begins only after onReadyForSpeech confirms that the
                         // microphone is really available.
@@ -828,12 +1706,22 @@ public final class OpenTypelessImeService extends InputMethodService {
 
             @Override
             public void onReadyForSpeech() {
+                if (target.voiceTerminal()) return;
                 postUi(() -> {
+                    if (!shouldDispatchVoiceCallback(
+                            activeTarget, target, target.voiceTerminal())) return;
                     if (!shouldHandleSpeechReady(
                             activeTarget, target, finishingVoiceInput)) return;
+                    if (target.transactionWriter) {
+                        VoiceTransactionSession session = activeVoiceTransaction;
+                        if (session == null || !session.markReady(target.voiceGeneration)) {
+                            failVoiceTransaction(target, latestPreviewText);
+                            return;
+                        }
+                    }
                     preparingVoiceInput = false;
                     setStatus(R.string.ime_status_listening, false);
-                    updateMicrophone(VoicePipeline.State.RECORDING);
+                    updateMicrophone(VoiceController.State.RECORDING);
                     if (target.replacedSelection() && latestPreviewText.isBlank()) {
                         showTranscript(getString(R.string.ime_transcript_listening));
                     }
@@ -850,12 +1738,13 @@ public final class OpenTypelessImeService extends InputMethodService {
 
             @Override
             public void onTranscript(TranscriptUpdate update) {
+                if (target.voiceTerminal()) return;
                 postUi(() -> applyTranscriptUpdate(target, update));
             }
 
             @Override
             public void onResult(DictationResult result) {
-                markDetachedTerminalArrived(target);
+                if (!target.markVoiceTerminal()) return;
                 postUi(() -> {
                     if (runIfCurrent(activeTarget, target, () -> {
                         preparingVoiceInput = false;
@@ -871,7 +1760,7 @@ public final class OpenTypelessImeService extends InputMethodService {
 
             @Override
             public void onError(String message) {
-                markDetachedTerminalArrived(target);
+                if (!target.markVoiceTerminal()) return;
                 postUi(() -> {
                     if (activeTarget == target) {
                         preparingVoiceInput = false;
@@ -879,7 +1768,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                         activeCaptureMode = null;
                         boolean preserved = preserveActiveDraft();
                         activeTarget = null;
-                        updateMicrophone(VoicePipeline.State.IDLE);
+                        updateMicrophone(VoiceController.State.IDLE);
                         showRecoverableDraftOrClear();
                         if (!preserved) {
                             setStatus(R.string.ime_status_composition_preserve_uncertain, true);
@@ -901,23 +1790,21 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void handleDetachedResult(CommitTarget target, DictationResult result) {
         if (detachedTargetAwaitingResult != target) return;
-        if (serviceDestroyed && !destroyFinalizationGate.claimTerminalHandler()) return;
+        if (serviceDestroyed) return;
         PendingDetachedSession<CommitTarget> pending = detachedSessionFor(target);
         detachedTargetAwaitingResult = null;
         if (pending != null && pending.discarded()) {
             clearDetachedSession(pending);
-            if (serviceDestroyed) finishDestroyedService();
             return;
         }
-        String finalText = result.finalText() == null ? "" : result.finalText();
+        VoiceResult voiceResult = result.voiceResult();
+        String finalText = voiceResult.finalText();
         boolean selectionPreserved = target.replacedSelection();
         boolean saved = !selectionPreserved
                 && !finalText.isBlank()
                 && saveRecoverableDraftFromResult(target, finalText, result);
         completeDetachedSession(pending, target);
-        if (serviceDestroyed) {
-            finishDestroyedService();
-        } else if (activeTarget == null) {
+        if (activeTarget == null) {
             holdToTalkActive = false;
             preparingVoiceInput = false;
             finishingVoiceInput = false;
@@ -926,7 +1813,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                 renderInputViewState();
                 return;
             }
-            updateMicrophone(VoicePipeline.State.IDLE);
+            updateMicrophone(VoiceController.State.IDLE);
             showRecoverableDraftOrClear();
             setStatus(selectionPreserved
                     ? R.string.ime_status_detached_selection_preserved
@@ -939,20 +1826,15 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void handleDetachedError(String message) {
-        if (serviceDestroyed && !destroyFinalizationGate.claimTerminalHandler()) return;
+        if (serviceDestroyed) return;
         CommitTarget target = detachedTargetAwaitingResult;
         PendingDetachedSession<CommitTarget> pending = detachedSessionFor(target);
         detachedTargetAwaitingResult = null;
         if (pending != null && pending.discarded()) {
             clearDetachedSession(pending);
-            if (serviceDestroyed) finishDestroyedService();
             return;
         }
         completeDetachedSession(pending, target);
-        if (serviceDestroyed) {
-            finishDestroyedService();
-            return;
-        }
         if (activeTarget != null) return;
         holdToTalkActive = false;
         preparingVoiceInput = false;
@@ -962,7 +1844,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             renderInputViewState();
             return;
         }
-        updateMicrophone(VoicePipeline.State.IDLE);
+        updateMicrophone(VoiceController.State.IDLE);
         showRecoverableDraftOrClear();
         setStatus(recoverableDraft.hasDraft()
                 ? getString(R.string.ime_status_detached_partial_recoverable)
@@ -970,11 +1852,16 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void applyTranscriptUpdate(CommitTarget target, TranscriptUpdate update) {
-        if (activeTarget != target || update == null) return;
+        if (!shouldDispatchVoiceCallback(activeTarget, target, target.voiceTerminal())
+                || update == null) return;
         String text = update.text().trim();
         if (text.isEmpty()) return;
         latestPreviewText = text;
         setStatus(R.string.ime_status_listening, false);
+        if (target.transactionWriter) {
+            applyVoiceTransactionUpdate(target, update, text);
+            return;
+        }
         if (update.source() == TranscriptUpdate.Source.SPEECH_CORE_V2
                 && !target.replacedSelection()) {
             applySpeechCoreProjection(target, update);
@@ -1010,6 +1897,78 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
     }
 
+    private void applyVoiceTransactionUpdate(
+            CommitTarget target, TranscriptUpdate update, String text) {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session == null
+                || target.voiceTerminal()
+                || !session.acceptsPartial(target.voiceGeneration, update.sequence())) {
+            return;
+        }
+        if (target.replacedSelection()) {
+            // Selected source text remains untouched until the terminal transform is known.
+            session.recordIgnoredSequence(update.sequence());
+            showTranscript(compact(text, 180));
+            return;
+        }
+        if (text.equals(session.compositionText)) {
+            session.recordIgnoredSequence(update.sequence());
+            clearTranscript();
+            return;
+        }
+
+        long revision;
+        try {
+            // Register the expected selection before the framework write. OEMs may synchronously
+            // call onUpdateSelection from setComposingText.
+            revision = session.prepareComposition(update.sequence(), text);
+        } catch (RuntimeException exhausted) {
+            failVoiceTransaction(target, text);
+            return;
+        }
+
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.setVoiceComposition(
+                    this, session.snapshot, text, revision);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            failVoiceTransaction(target, text);
+            return;
+        }
+        if (!(result instanceof EditorTransactionResult.Applied)) {
+            failVoiceTransaction(target, text);
+            return;
+        }
+
+        EditorSessionSnapshot captured = captureCurrentTransactionSnapshot();
+        if (captured == null) {
+            failVoiceTransaction(target, text);
+            return;
+        }
+        session.completeComposition(captured);
+        clearTranscript();
+    }
+
+    private void failVoiceTransaction(CommitTarget target, String recoverableText) {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (recoverableText != null && !recoverableText.isBlank()) {
+            saveRecoverableDraft(target, recoverableText);
+        }
+        voiceController.cancel();
+        holdToTalkActive = false;
+        preparingVoiceInput = false;
+        finishingVoiceInput = false;
+        activeCaptureMode = null;
+        boolean cleaned = session == null || cancelVoiceTransaction(session);
+        if (activeTarget == target) activeTarget = null;
+        updateMicrophone(VoiceController.State.IDLE);
+        showRecoverableDraftOrClear();
+        setStatus(cleaned
+                ? R.string.ime_status_live_composition_fallback
+                : R.string.ime_status_composition_cleanup_failed, true);
+    }
+
     private void applySpeechCoreProjection(CommitTarget target, TranscriptUpdate update) {
         EditorProjection projection = activeV2Projection;
         if (projection == null) {
@@ -1033,7 +1992,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                 saveRecoverableDraft(target, update.text());
                 latestV2Document = null;
                 setStatus(R.string.ime_status_live_composition_fallback, true);
-                if (pipeline.state() == VoicePipeline.State.RECORDING) pipeline.stopRecording();
+                if (voiceController.state() == VoiceController.State.RECORDING) voiceController.stop();
                 return;
             }
         }
@@ -1053,10 +2012,10 @@ public final class OpenTypelessImeService extends InputMethodService {
         setStatus(result.mutationUncertain()
                 ? R.string.ime_status_composition_preserve_uncertain
                 : R.string.ime_status_live_composition_fallback, true);
-        if (pipeline.state() == VoicePipeline.State.RECORDING) {
-            pipeline.stopRecording();
+        if (voiceController.state() == VoiceController.State.RECORDING) {
+            voiceController.stop();
             finishingVoiceInput = true;
-            updateMicrophone(VoicePipeline.State.TRANSCRIBING);
+            updateMicrophone(VoiceController.State.TRANSCRIBING);
         }
     }
 
@@ -1091,7 +2050,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         mainHandler.postDelayed(() -> {
             if (serviceDestroyed
                     || activeTarget != target
-                    || pipeline.state() != VoicePipeline.State.RECORDING
+                    || voiceController.state() != VoiceController.State.RECORDING
                     || !latestPreviewText.isBlank()) {
                 return;
             }
@@ -1129,50 +2088,100 @@ public final class OpenTypelessImeService extends InputMethodService {
             setStatus(R.string.ime_status_no_active_field, true);
             return null;
         }
-        CharSequence selected = connection.getSelectedText(0);
-        ExtractedText extracted = null;
-        if (currentSelectionStart < 0 || currentSelectionEnd < 0) {
-            extracted = connection.getExtractedText(new ExtractedTextRequest(), 0);
+        if (sensitiveField) {
+            // Keep the shadow adapter's hard rule observable in the legacy path too: sensitive
+            // sessions must be rejected before any selected/surrounding text read occurs.
+            setStatus(R.string.ime_status_sensitive_disabled, true);
+            return null;
         }
+        EditorEvidenceReader.SelectionResult observed = EditorEvidenceReader.readSelectionOnce(
+                connection,
+                false,
+                currentSelectionStart < 0 || currentSelectionEnd < 0);
+        if (!(observed instanceof EditorEvidenceReader.SelectionEvidence evidence)) {
+            setStatus(R.string.ime_status_field_unavailable, true);
+            return null;
+        }
+        String selectedText = evidence.selectedText();
+        CharSequence selected = evidence.selectedTextAvailable() ? selectedText : null;
         SelectionEvidence selection = resolveSelectionEvidence(
                 currentSelectionStart,
                 currentSelectionEnd,
                 selected,
-                extracted == null ? -1 : extracted.selectionStart,
-                extracted == null ? -1 : extracted.selectionEnd,
-                extracted != null);
-        if (!selection.known()) {
-            setStatus(R.string.ime_status_selection_unknown, true);
-            return null;
+                evidence.extractedSelectionStart(),
+                evidence.extractedSelectionEnd(),
+                evidence.extractedTextAvailable());
+        switch (selectionCaptureDecision(selection, MAX_SELECTION_CODE_POINTS)) {
+            case UNKNOWN -> {
+                setStatus(R.string.ime_status_selection_unknown, true);
+                return null;
+            }
+            case UNAVAILABLE -> {
+                setStatus(R.string.ime_status_selection_unavailable, true);
+                return null;
+            }
+            case TOO_LONG -> {
+                setStatus(R.string.ime_status_selection_too_long, true);
+                return null;
+            }
+            case ACCEPT -> {
+                // Only accepted selection evidence may proceed to surrounding-context reads.
+            }
         }
-        if (selection.hasSelection() && !selection.selectedTextAvailable()) {
-            setStatus(R.string.ime_status_selection_unavailable, true);
-            return null;
-        }
-        String selectedText = selection.text();
-        if (codePointCount(selectedText) > MAX_SELECTION_CODE_POINTS) {
-            setStatus(R.string.ime_status_selection_too_long, true);
-            return null;
-        }
+        selectedText = selection.text();
         currentSelectionStart = selection.start();
         currentSelectionEnd = selection.end();
+        shadowSelectionChanged(selection.start(), selection.end());
         boolean learningAllowed = (editor.imeOptions
                 & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) == 0;
-        CharSequence before = connection.getTextBeforeCursor(CONTEXT_CHAR_LIMIT, 0);
+        EditorEvidenceReader.SurroundingResult surroundingResult =
+                EditorEvidenceReader.readSurroundingOnce(
+                        connection, CONTEXT_CHAR_LIMIT, FINGERPRINT_CODE_POINTS);
+        if (!(surroundingResult instanceof EditorEvidenceReader.SurroundingEvidence surrounding)) {
+            setStatus(R.string.ime_status_field_unavailable, true);
+            return null;
+        }
+        // All legacy target fields are frozen in their original read/materialization order. Shadow
+        // capture consumes only frozen strings, so mutable OEM CharSequences cannot perturb them.
+        EditorSessionManager.CaptureResult editorSessionCapture = shadowCaptureEditorSession(
+                connection,
+                selectedText,
+                surrounding.shadowBeforeText(),
+                surrounding.shadowAfterText());
+        boolean transactionWriter = VoiceEditorTransactionConfig.enabled(this);
+        if (transactionWriter
+                && !(editorSessionCapture instanceof EditorSessionManager.Captured)) {
+            setStatus(R.string.ime_status_field_unavailable, true);
+            return null;
+        }
+        long voiceGeneration = transactionWriter ? nextVoiceTransactionGeneration() : 0L;
         return new CommitTarget(
                 editorEpoch,
-                connection,
+                transactionWriter ? null : connection,
                 safe(editor.packageName),
                 editor.fieldId,
                 currentFieldKind,
                 selectedText,
-                tailCodePoints(before, FINGERPRINT_CODE_POINTS),
-                headCodePoints(connection.getTextAfterCursor(CONTEXT_CHAR_LIMIT, 0),
-                        FINGERPRINT_CODE_POINTS),
-                before == null ? "" : before.toString(),
+                surrounding.beforeFingerprint(),
+                surrounding.afterFingerprint(),
+                surrounding.precedingContext(),
                 learningAllowed,
                 selection.start(),
-                selection.end());
+                selection.end(),
+                transactionWriter,
+                voiceGeneration,
+                editorSessionCapture);
+    }
+
+    private static long nextVoiceTransactionGeneration() {
+        while (true) {
+            long current = VOICE_TRANSACTION_GENERATION.get();
+            if (current == Long.MAX_VALUE) {
+                throw new IllegalStateException("Voice transaction generation exhausted");
+            }
+            long next = current + 1L;
+            if (VOICE_TRANSACTION_GENERATION.compareAndSet(current, next)) return next;
+        }
     }
 
     static SelectionEvidence resolveSelectionEvidence(
@@ -1200,6 +2209,18 @@ public final class OpenTypelessImeService extends InputMethodService {
         return new SelectionEvidence(false, false, false, -1, -1, "");
     }
 
+    static SelectionCaptureDecision selectionCaptureDecision(
+            SelectionEvidence evidence, int maximumCodePoints) {
+        if (evidence == null || !evidence.known()) return SelectionCaptureDecision.UNKNOWN;
+        if (evidence.hasSelection() && !evidence.selectedTextAvailable()) {
+            return SelectionCaptureDecision.UNAVAILABLE;
+        }
+        if (maximumCodePoints < 0) throw new IllegalArgumentException("maximum must be >= 0");
+        return codePointCount(evidence.text()) > maximumCodePoints
+                ? SelectionCaptureDecision.TOO_LONG
+                : SelectionCaptureDecision.ACCEPT;
+    }
+
     /** Prevents a queued callback from an old editor session from mutating the new session's UI. */
     static boolean runIfCurrent(Object current, Object expected, Runnable callback) {
         if (current != expected) return false;
@@ -1207,18 +2228,27 @@ public final class OpenTypelessImeService extends InputMethodService {
         return true;
     }
 
+    static boolean shouldDispatchVoiceCallback(
+            Object current, Object expected, boolean terminal) {
+        return !terminal && current != null && current == expected;
+    }
+
     private void commitResult(CommitTarget target, DictationResult result) {
         if (activeTarget != target) return;
+        if (target.transactionWriter) {
+            commitVoiceTransactionResult(target, result);
+            return;
+        }
         if (activeV2Projection != null) {
             commitSpeechCoreV2Result(target, result);
             return;
         }
+        VoiceResult voiceResult = result.voiceResult();
         if (!targetStillValid(target)) {
             preserveActiveDraft();
             if (!target.replacedSelection()
-                    && result.finalText() != null
-                    && !result.finalText().isBlank()) {
-                saveRecoverableDraftFromResult(target, result.finalText(), result);
+                    && !voiceResult.finalText().isBlank()) {
+                saveRecoverableDraftFromResult(target, voiceResult.finalText(), result);
             }
             finishActiveUiSession(target);
             showRecoverableDraftOrClear();
@@ -1226,8 +2256,8 @@ public final class OpenTypelessImeService extends InputMethodService {
             return;
         }
 
-        String finalText = result.finalText();
-        if (finalText == null || finalText.isBlank()) {
+        String finalText = voiceResult.finalText();
+        if (finalText.isBlank()) {
             boolean preserved = preserveActiveDraft();
             finishActiveUiSession(target);
             showRecoverableDraftOrClear();
@@ -1271,11 +2301,129 @@ public final class OpenTypelessImeService extends InputMethodService {
         acceptSuccessfulCommit(target, result, finalText);
     }
 
+    private void commitVoiceTransactionResult(CommitTarget target, DictationResult result) {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session == null) return;
+        VoiceResult voiceResult = result.voiceResult();
+        String finalText = voiceResult.finalText();
+        if (!session.beginTerminal(target.voiceGeneration)) {
+            transactionFinalFailed(target, session, finalText);
+            return;
+        }
+        if (finalText.isBlank()) {
+            preserveVoiceTransactionDraft(target, session, latestPreviewText);
+            finishActiveUiSession(target);
+            showRecoverableDraftOrClear();
+            setStatus(R.string.ime_status_empty_final_partial_preserved, true);
+            return;
+        }
+
+        CommitRecord.RawTranscript rawTranscript;
+        try {
+            String raw = voiceResult.rawText();
+            rawTranscript = raw.isBlank()
+                    ? new CommitRecord.RawTranscript.Absent()
+                    : new CommitRecord.RawTranscript.Present(raw);
+        } catch (RuntimeException invalidRaw) {
+            transactionFinalFailed(target, session, finalText);
+            return;
+        }
+
+        TransactionReceipt receipt;
+        try {
+            if (target.replacedSelection() || !session.compositionActive) {
+                session.prepareFinalSelection(finalText);
+                if (!session.beginFinalizing()) {
+                    transactionFinalFailed(target, session, finalText);
+                    return;
+                }
+                receipt = editorSessionManager.commitVoiceText(
+                        this, session.snapshot, finalText, rawTranscript);
+            } else {
+                if (!finalText.equals(session.compositionText)) {
+                    long revision = session.prepareComposition(
+                            session.latestSequence, finalText);
+                    EditorTransactionResult set = editorSessionManager.setVoiceComposition(
+                            this, session.snapshot, finalText, revision);
+                    if (!(set instanceof EditorTransactionResult.Applied)) {
+                        transactionFinalFailed(target, session, finalText);
+                        return;
+                    }
+                    EditorSessionSnapshot captured = captureCurrentTransactionSnapshot();
+                    if (captured == null) {
+                        transactionFinalFailed(target, session, finalText);
+                        return;
+                    }
+                    session.completeComposition(captured);
+                }
+                if (!session.beginFinalizing()) {
+                    transactionFinalFailed(target, session, finalText);
+                    return;
+                }
+                receipt = editorSessionManager.commitVoiceComposition(
+                        this, session.snapshot, session.revision, rawTranscript);
+            }
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            transactionFinalFailed(target, session, finalText);
+            return;
+        }
+
+        if (!(receipt instanceof TransactionReceipt.Committed committed)) {
+            transactionFinalFailed(target, session, finalText);
+            return;
+        }
+        boolean coordinatorReleased = session.completeCoordinatorAfterCommit();
+        finishActiveUiSession(target);
+        if (coordinatorReleased) clearVoiceTransactionState();
+        acceptSuccessfulTransactionCommit(target, result, committed.record());
+        if (!coordinatorReleased) {
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+        }
+    }
+
+    private void transactionFinalFailed(
+            CommitTarget target, VoiceTransactionSession session, String finalText) {
+        preserveVoiceTransactionDraft(target, session, finalText);
+        finishActiveUiSession(target);
+        showRecoverableDraftOrClear();
+        setStatus(R.string.ime_status_result_recoverable, true);
+    }
+
+    private void acceptSuccessfulTransactionCommit(
+            CommitTarget target, DictationResult result, CommitRecord record) {
+        pipeline.acknowledgeRecovery(result.recoveryId());
+        String raw = record.rawTranscript() instanceof CommitRecord.RawTranscript.Present present
+                ? present.text()
+                : "";
+        lastCommit = new LastVoiceCommit(
+                target.editorEpoch,
+                null,
+                record.insertedText(),
+                record.originalSession().selectedText(),
+                raw,
+                -1L,
+                record.originalSession().packageName(),
+                record.originalSession().learningAllowed(),
+                record.commitId(),
+                target.voiceGeneration,
+                record);
+        refreshPostCommitActions();
+        latestPreviewText = "";
+        clearTranscript();
+        setStatus(
+                result.recoveredPartial()
+                        ? getString(R.string.ime_status_inserted_recovered_partial)
+                        : localizedResultStatus(result.outcome()),
+                result.outcome() == DictationResult.Outcome.AI_BLOCKED_EXACT);
+        localIo.execute(() -> persistSuccessfulResult(target, result));
+    }
+
     /** Finalizes the exact document that v2 has already projected into the host editor. */
     private void commitSpeechCoreV2Result(CommitTarget target, DictationResult result) {
         EditorProjection projection = activeV2Projection;
         if (projection == null) return;
-        String finalText = result.finalText() == null ? "" : result.finalText().trim();
+        String finalText = result.voiceResult().finalText().trim();
         if (finalText.isEmpty()) {
             boolean preserved = preserveActiveDraft();
             finishActiveUiSession(target);
@@ -1340,13 +2488,14 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void acceptSuccessfulCommit(
             CommitTarget target, DictationResult result, String finalText) {
+        VoiceResult voiceResult = result.voiceResult();
         pipeline.acknowledgeRecovery(result.recoveryId());
         lastCommit = new LastVoiceCommit(
                 target.editorEpoch,
                 target.connection,
                 finalText,
                 target.selectedText,
-                result.rawText(),
+                voiceResult.rawText(),
                 -1L,
                 target.packageName,
                 target.learningAllowed);
@@ -1367,11 +2516,12 @@ public final class OpenTypelessImeService extends InputMethodService {
         preparingVoiceInput = false;
         finishingVoiceInput = false;
         activeCaptureMode = null;
-        updateMicrophone(VoicePipeline.State.IDLE);
+        updateMicrophone(VoiceController.State.IDLE);
     }
 
     private long persistSuccessfulResult(CommitTarget target, DictationResult result) {
         if (!target.learningAllowed || sensitiveField) return -1L;
+        VoiceResult voiceResult = result.voiceResult();
         try {
             personalizationStore.markTermsUsed(result.matchedTermIds());
             personalizationStore.markCorrectionsUsed(result.matchedCorrectionIds());
@@ -1383,8 +2533,10 @@ public final class OpenTypelessImeService extends InputMethodService {
                 postUiIfAlive(() -> {
                     LastVoiceCommit commit = lastCommit;
                     if (commit != null
-                            && commit.connection == target.connection
-                            && commit.insertedText.equals(result.finalText())
+                            && (target.transactionWriter
+                                    ? commit.voiceGeneration == target.voiceGeneration
+                                    : commit.connection == target.connection)
+                            && commit.insertedText.equals(voiceResult.finalText())
                             && activeTarget == null) {
                         setStatus(getString(
                                 R.string.ime_status_personalization_applied,
@@ -1400,8 +2552,8 @@ public final class OpenTypelessImeService extends InputMethodService {
                     target.fieldKind.name(),
                     result.mode().name(),
                     result.backend().name(),
-                    result.rawText(),
-                    result.finalText(),
+                    voiceResult.rawText(),
+                    voiceResult.finalText(),
                     result.durationMs(),
                     appliedRules));
         } catch (RuntimeException ignored) {
@@ -1419,6 +2571,20 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private boolean targetStillValidUnchecked(CommitTarget target) {
+        if (target.transactionWriter) {
+            VoiceTransactionSession session = activeTarget == target
+                    ? activeVoiceTransaction
+                    : null;
+            if (session == null || session.generation != target.voiceGeneration) return false;
+            EditorSessionSnapshot current = captureCurrentTransactionSnapshot();
+            if (current == null
+                    || !(SessionValidator.validate(session.snapshot, current)
+                            instanceof SessionValidationResult.Valid)) {
+                return false;
+            }
+            session.snapshot = current;
+            return true;
+        }
         if (currentEditor == null) return false;
         InputConnection currentConnection = getCurrentInputConnection();
         if (currentConnection == null) return false;
@@ -1491,6 +2657,10 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void undoLastVoiceCommit() {
         LastVoiceCommit commit = lastCommit;
+        if (commit != null && commit.transactionBacked()) {
+            undoTransactionCommit(commit);
+            return;
+        }
         if (!lastCommitStillTargetsCurrentEditor(commit)) {
             setStatus(R.string.ime_status_nothing_to_undo, false);
             return;
@@ -1515,8 +2685,39 @@ public final class OpenTypelessImeService extends InputMethodService {
                 : getString(R.string.ime_status_selection_restored), false);
     }
 
+    private void undoTransactionCommit(LastVoiceCommit commit) {
+        EditorSessionSnapshot snapshot = captureCurrentTransactionSnapshot();
+        if (snapshot == null || editorSessionManager == null) {
+            invalidateLastCommit();
+            setStatus(R.string.ime_status_undo_target_changed, true);
+            return;
+        }
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.undoVoiceCommit(this, snapshot, commit.commitId);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            invalidateLastCommit();
+            setStatus(R.string.ime_status_operation_connection_failed, true);
+            return;
+        }
+        if (result instanceof EditorTransactionResult.Applied) {
+            lastCommit = null;
+            refreshPostCommitActions();
+            setStatus(commit.originalSelection.isEmpty()
+                    ? getString(R.string.ime_status_insertion_removed)
+                    : getString(R.string.ime_status_selection_restored), false);
+            return;
+        }
+        handleTransactionCommitFailure(result, R.string.ime_operation_undo);
+    }
+
     private void restoreRawTranscript() {
         LastVoiceCommit commit = lastCommit;
+        if (commit != null && commit.transactionBacked()) {
+            restoreTransactionRaw(commit);
+            return;
+        }
         if (!lastCommitStillTargetsCurrentEditor(commit)
                 || commit.rawText.isBlank()
                 || commit.originalSelection.length() > 0) {
@@ -1545,22 +2746,79 @@ public final class OpenTypelessImeService extends InputMethodService {
         setStatus(R.string.ime_status_raw_restored, false);
     }
 
+    private void restoreTransactionRaw(LastVoiceCommit commit) {
+        if (commit.rawText.isBlank() || commit.insertedText.equals(commit.rawText)) {
+            setStatus(R.string.ime_status_raw_unavailable, false);
+            return;
+        }
+        EditorSessionSnapshot snapshot = captureCurrentTransactionSnapshot();
+        if (snapshot == null || editorSessionManager == null) {
+            invalidateLastCommit();
+            setStatus(R.string.ime_status_raw_target_changed, true);
+            return;
+        }
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.restoreRawVoiceCommit(
+                    this, snapshot, commit.commitId);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            invalidateLastCommit();
+            setStatus(R.string.ime_status_operation_connection_failed, true);
+            return;
+        }
+        if (result instanceof EditorTransactionResult.Applied) {
+            // Raw consumes the original exact-ID capability. It deliberately does not mint a
+            // successor record or leave a stale Undo button.
+            lastCommit = null;
+            refreshPostCommitActions();
+            setStatus(R.string.ime_status_raw_restored, false);
+            return;
+        }
+        handleTransactionCommitFailure(result, R.string.ime_operation_raw_restore);
+    }
+
+    private void handleTransactionCommitFailure(EditorTransactionResult result, int operationId) {
+        String operation = getString(operationId);
+        if (result instanceof EditorTransactionResult.TargetChanged) {
+            invalidateLastCommit();
+            setStatus(getString(
+                    R.string.ime_status_operation_connection_failed, operation), true);
+            return;
+        }
+        if (result instanceof EditorTransactionResult.RollbackFailed) {
+            invalidateLastCommit();
+            setStatus(getString(
+                    R.string.ime_status_operation_connection_failed, operation), true);
+            return;
+        }
+        if (result instanceof EditorTransactionResult.RolledBack) {
+            setStatus(getString(
+                    R.string.ime_status_operation_rejected_restored, operation), true);
+            return;
+        }
+        setStatus(getString(
+                R.string.ime_status_operation_rejected_unchanged, operation), true);
+    }
+
     private void teachCorrection() {
         LastVoiceCommit commit = lastCommit;
-        if (commit == null || commit.rawText.isBlank()) {
+        CommitRecord record = commit == null ? null : commit.teachRecord;
+        if (record == null || !(record.rawTranscript()
+                instanceof CommitRecord.RawTranscript.Present)) {
             setStatus(R.string.ime_status_teach_requires_insertion, false);
             return;
         }
-        if (!commit.learningAllowed) {
+        if (!record.learningAllowed()) {
             setStatus(R.string.ime_status_learning_disallowed, false);
             return;
         }
-        Intent intent = new Intent(this, HistoryActivity.class);
+        Intent intent = HistoryActivity.createTeachIntent(this, record, commit.historyId);
+        if (intent == null) {
+            setStatus(R.string.ime_status_teach_requires_insertion, false);
+            return;
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        intent.putExtra("history_id", commit.historyId);
-        intent.putExtra("raw_text", commit.rawText);
-        intent.putExtra("final_text", commit.insertedText);
-        intent.putExtra("app_scope", commit.packageName);
         startActivity(intent);
     }
 
@@ -1724,69 +2982,1112 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
     }
 
-    private void backspace() {
-        InputConnection connection = getCurrentInputConnection();
-        if (connection == null) return;
-        try {
-            CharSequence selected = connection.getSelectedText(0);
-            boolean applied = selected != null && selected.length() > 0
-                    ? connection.commitText("", 1)
-                    : connection.deleteSurroundingTextInCodePoints(1, 0);
-            if (!applied) setStatus(R.string.ime_status_delete_rejected, true);
-        } catch (RuntimeException ignored) {
-            setStatus(R.string.ime_status_delete_connection_failed, true);
+    private void routeTypingText(String text) {
+        if (keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME) {
+            insertKeyboardText(text);
+            return;
         }
-        invalidateLastCommit();
+        if (" ".equals(text)) {
+            routeRimeSpace();
+            return;
+        }
+        if (text == null || text.length() != 1
+                || text.charAt(0) < 'a' || text.charAt(0) > 'z') {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        processRimeKey(RimeInputEngine.Key.printable(text.charAt(0)));
     }
 
-    private void commitText(String text) {
-        InputConnection connection = getCurrentInputConnection();
-        if (connection != null) {
+    private void routeRimeSpace() {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null) {
+            insertKeyboardText(" ");
+            return;
+        }
+        CandidatePage page = lease.candidatePage;
+        if (page == null || page.items().isEmpty()) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        routeRimeCandidateSelection(page.selection(0));
+    }
+
+    private void routeDeleteBackward() {
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME
+                && activeRimeLease != null) {
+            processRimeKey(RimeInputEngine.Key.backspace());
+            return;
+        }
+        deleteKeyboardBackward();
+    }
+
+    private void routeKeyboardEnter() {
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME
+                && activeRimeLease != null) {
+            processRimeKey(RimeInputEngine.Key.enter());
+            return;
+        }
+        performKeyboardEnter();
+    }
+
+    private void processRimeKey(RimeInputEngine.Key key) {
+        if (sensitiveField || !currentLearningAllowed || availableRimePackage == null) {
+            setStatus(R.string.ime_status_sensitive_disabled, true);
+            closeRimeComposition(false);
+            return;
+        }
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null) {
+            EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
+            if (snapshot == null) return;
+            long initialRevision = reserveNextRimeRevision();
+            if (initialRevision == 0L) {
+                setStatus(R.string.ime_status_key_rejected, true);
+                return;
+            }
+            CompositionCoordinator.Observation before = compositionCoordinator.observe();
+            CompositionCoordinator.Transition acquired = compositionCoordinator.acquire(
+                    before, new CompositionCoordinator.Acquisition.Rime(initialRevision));
+            if (acquired.disposition() != CompositionCoordinator.Disposition.APPLIED
+                    || !(acquired.after().state() instanceof CompositionState.RimeComposing rime)) {
+                setStatus(R.string.ime_status_session_active, true);
+                return;
+            }
+            lease = new RimeCompositionLease(
+                    editorEpoch,
+                    snapshot,
+                    rime.coordinationGeneration(),
+                    acquired.after(),
+                    initialRevision);
+            RimeResourceStore.RuntimePackage runtime = availableRimePackage;
+            RimeRuntimeConfig config = availableRimeConfig;
+            if (config == null || !runtime.selectedSchemas().contains(config.schemaId())) {
+                closeRimeComposition(false);
+                setStatus(R.string.ime_status_key_rejected, true);
+                return;
+            }
+            RimeCompositionLease created = lease;
+            lease.controller = new RimeInputController(
+                    lease.editorEpoch,
+                    lease.coordinationGeneration,
+                    initialRevision,
+                    () -> new NativeRimeInputEngine(
+                            runtime.root(), config, rimeUserDataStore,
+                            runtime.deploymentId()),
+                    this::postUi,
+                    (callbackEditor, callbackCoordination, result) ->
+                            onRimeResult(created, callbackEditor, callbackCoordination, result));
+            activeRimeLease = lease;
+        }
+        if (lease.pendingSelection != null || lease.pendingPageRequest != null) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        lease.pendingKeyCommands++;
+        if (keyboardCandidateBar != null) keyboardCandidateBar.setInteractionEnabled(false);
+        RimeInputController.EnqueueResult queued = lease.controller.process(key);
+        if (queued != RimeInputController.EnqueueResult.QUEUED) {
+            lease.pendingKeyCommands--;
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+        }
+    }
+
+    private void routeRimeCandidateSelection(CandidatePage.Selection selection) {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null
+                || lease.controller == null
+                || lease.pendingKeyCommands != 0
+                || lease.pendingSelection != null
+                || lease.pendingPageRequest != null
+                || sensitiveField
+                || !currentLearningAllowed
+                || keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME) {
+            rejectUnboundCandidateEvent();
+            return;
+        }
+        CandidatePage page = lease.candidatePage;
+        CandidatePage.Selection expected;
+        try {
+            expected = page == null ? null : page.selection(selection.candidateIndex());
+        } catch (RuntimeException invalid) {
+            expected = null;
+        }
+        if (expected == null || !expected.equals(selection)) {
+            rejectUnboundCandidateEvent();
+            return;
+        }
+        lease.pendingSelection = selection;
+        if (keyboardCandidateBar != null) keyboardCandidateBar.setInteractionEnabled(false);
+        RimeInputController.EnqueueResult queued = lease.controller.selectCandidate(selection);
+        if (queued != RimeInputController.EnqueueResult.QUEUED) {
+            lease.pendingSelection = null;
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+        }
+    }
+
+    private void routeRimeCandidatePage(CandidatePage.PageRequest request) {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null
+                || lease.controller == null
+                || lease.pendingKeyCommands != 0
+                || lease.pendingSelection != null
+                || lease.pendingPageRequest != null
+                || sensitiveField
+                || !currentLearningAllowed
+                || keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME) {
+            rejectUnboundCandidateEvent();
+            return;
+        }
+        CandidatePage page = lease.candidatePage;
+        CandidatePage.PageRequest expected;
+        try {
+            expected = page == null ? null : page.pageRequest(request.direction());
+        } catch (RuntimeException invalid) {
+            expected = null;
+        }
+        if (expected == null || !expected.equals(request)) {
+            rejectUnboundCandidateEvent();
+            return;
+        }
+        lease.pendingPageRequest = request;
+        if (keyboardCandidateBar != null) keyboardCandidateBar.setInteractionEnabled(false);
+        RimeInputController.EnqueueResult queued = lease.controller.requestCandidatePage(request);
+        if (queued != RimeInputController.EnqueueResult.QUEUED) {
+            lease.pendingPageRequest = null;
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+        }
+    }
+
+    private void onRimeResult(
+            RimeCompositionLease lease,
+            long callbackEditorEpoch,
+            long callbackCoordinationGeneration,
+            RimeInputEngine.ProcessResult result) {
+        if (activeRimeLease != lease
+                || !lease.matches(callbackEditorEpoch, callbackCoordinationGeneration)
+                || editorEpoch != lease.editorEpoch
+                || sensitiveField
+                || !currentLearningAllowed
+                || keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME) {
+            if (activeRimeLease == lease) closeRimeComposition(false);
+            return;
+        }
+        if (result instanceof RimeInputEngine.CommitReady committed) {
+            applyRimeCommit(lease, committed);
+            return;
+        }
+        if (!(result instanceof RimeInputEngine.StateReady ready)) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        RimeEngineSnapshot snapshot = ready.snapshot();
+        if (snapshot.editorGeneration() != lease.editorEpoch
+                || snapshot.coordinationGeneration() != lease.coordinationGeneration
+                || snapshot.revision() <= lease.revision) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        recordRimeRevision(snapshot.revision());
+        if (lease.pendingPageRequest != null) {
+            applyRimeCandidatePage(lease, snapshot);
+            return;
+        }
+        if (lease.pendingSelection != null || lease.pendingKeyCommands <= 0) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        lease.pendingKeyCommands--;
+        // Register the expected caret before the framework write. Xiaomi and other OEM editors
+        // may synchronously call onUpdateSelection from setComposingText; registering afterward
+        // would revoke the valid lease in the middle of its own transaction.
+        long caret = (long) lease.baseSelectionStart + snapshot.preedit().length();
+        if (caret > Integer.MAX_VALUE) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        lease.expectedCaret = (int) caret;
+        EditorTransactionResult applied;
+        try {
+            applied = editorSessionManager.setRimeComposition(
+                    this, lease.editorSnapshot, snapshot.preedit(), snapshot.revision());
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_typing_connection_failed, true);
+            return;
+        }
+        if (!(applied instanceof EditorTransactionResult.Applied)) {
+            closeRimeComposition(false);
+            handleKeyboardResult(
+                    applied,
+                    R.string.ime_status_key_rejected,
+                    R.string.ime_status_typing_connection_failed);
+            return;
+        }
+        EditorSessionSnapshot recaptured = captureCurrentTransactionSnapshot();
+        if (recaptured == null || recaptured.epoch() != lease.editorSnapshot.epoch()) {
             try {
-                if (!connection.commitText(text, 1)) {
-                    setStatus(R.string.ime_status_key_rejected, true);
-                }
+                editorSessionManager.finishRimeComposition(
+                        this, lease.editorSnapshot, snapshot.revision());
             } catch (RuntimeException ignored) {
-                setStatus(R.string.ime_status_typing_connection_failed, true);
+                // Do not recapture or write at a different target.
             }
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        lease.editorSnapshot = recaptured;
+        CompositionCoordinator.Transition advanced = compositionCoordinator.update(
+                lease.observation, snapshot.revision());
+        if (advanced.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+            try {
+                editorSessionManager.finishRimeComposition(
+                        this, lease.editorSnapshot, snapshot.revision());
+            } catch (RuntimeException ignored) {
+                // The lease is revoked below; no current-cursor fallback is attempted.
+            }
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        lease.observation = advanced.after();
+        lease.revision = snapshot.revision();
+        lease.preedit = snapshot.preedit();
+        lease.candidatePage = snapshot.candidatePage().orElse(null);
+        renderRimeCandidatePage(lease);
+        if (snapshot.preedit().isEmpty()) finishEmptyRimeComposition(lease);
+    }
+
+    private void applyRimeCandidatePage(
+            RimeCompositionLease lease, RimeEngineSnapshot snapshot) {
+        CandidatePage.PageRequest request = lease.pendingPageRequest;
+        CandidatePage before = lease.candidatePage;
+        CandidatePage after = snapshot.candidatePage().orElse(null);
+        int expectedPage = request == null ? -1
+                : request.direction() == CandidatePage.Direction.NEXT
+                        ? request.pageIndex() + 1 : request.pageIndex() - 1;
+        if (request == null
+                || lease.pendingSelection != null
+                || lease.pendingKeyCommands != 0
+                || before == null
+                || after == null
+                || !snapshot.preedit().equals(lease.preedit)
+                || request.pageRevision() != lease.revision
+                || request.generation() != lease.coordinationGeneration
+                || after.pageIndex() != expectedPage
+                || after.pageCount() != before.pageCount()) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        CompositionCoordinator.Transition advanced = compositionCoordinator.update(
+                lease.observation, snapshot.revision());
+        if (advanced.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        lease.observation = advanced.after();
+        lease.revision = snapshot.revision();
+        lease.candidatePage = after;
+        lease.pendingPageRequest = null;
+        renderRimeCandidatePage(lease);
+    }
+
+    private void applyRimeCommit(
+            RimeCompositionLease lease, RimeInputEngine.CommitReady ready) {
+        RimeInputEngine.Commit commit = ready.commit();
+        CandidatePage.Selection selection = lease.pendingSelection;
+        RimeEngineSnapshot snapshot = ready.snapshot();
+        boolean candidateCommit = selection != null;
+        boolean keyCommit = selection == null
+                && lease.pendingKeyCommands > 0
+                && lease.pendingPageRequest == null;
+        if ((!candidateCommit && !keyCommit)
+                || lease.pendingPageRequest != null
+                || (candidateCommit && lease.pendingKeyCommands != 0)
+                || (candidateCommit && lease.candidatePage == null)
+                || (candidateCommit
+                        && !lease.candidatePage.selection(selection.candidateIndex())
+                                .equals(selection))
+                || commit.editorGeneration() != lease.editorEpoch
+                || commit.coordinationGeneration() != lease.coordinationGeneration
+                || commit.revision() <= lease.revision
+                || (candidateCommit && !commit.text().equals(selection.expectedText()))
+                || snapshot.editorGeneration() != commit.editorGeneration()
+                || snapshot.coordinationGeneration() != commit.coordinationGeneration()
+                || snapshot.revision() != commit.revision()
+                || !snapshot.preedit().isEmpty()
+                || snapshot.candidatePage().isPresent()) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        recordRimeRevision(commit.revision());
+        long caret = (long) lease.baseSelectionStart + commit.text().length();
+        if (caret > Integer.MAX_VALUE) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        lease.expectedCaret = (int) caret;
+        EditorTransactionResult applied;
+        try {
+            applied = editorSessionManager.setRimeComposition(
+                    this, lease.editorSnapshot, commit.text(), commit.revision());
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_typing_connection_failed, true);
+            return;
+        }
+        if (!(applied instanceof EditorTransactionResult.Applied)) {
+            closeRimeComposition(false);
+            handleKeyboardResult(
+                    applied,
+                    R.string.ime_status_key_rejected,
+                    R.string.ime_status_typing_connection_failed);
+            return;
+        }
+        EditorSessionSnapshot recaptured = captureCurrentTransactionSnapshot();
+        if (recaptured == null || recaptured.epoch() != lease.editorSnapshot.epoch()) {
+            try {
+                editorSessionManager.finishRimeComposition(
+                        this, lease.editorSnapshot, commit.revision());
+            } catch (RuntimeException ignored) {
+                // The original target is the only permitted cleanup target.
+            }
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        lease.editorSnapshot = recaptured;
+        CompositionCoordinator.Transition advanced = compositionCoordinator.update(
+                lease.observation, commit.revision());
+        if (advanced.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+            try {
+                editorSessionManager.finishRimeComposition(
+                        this, lease.editorSnapshot, commit.revision());
+            } catch (RuntimeException ignored) {
+                // The lease is revoked below; no current-cursor fallback is attempted.
+            }
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        lease.observation = advanced.after();
+        lease.revision = commit.revision();
+        if (keyCommit) lease.pendingKeyCommands--;
+        lease.pendingSelection = null;
+        EditorTransactionResult finished;
+        try {
+            finished = editorSessionManager.finishRimeComposition(
+                    this, lease.editorSnapshot, commit.revision());
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        if (!(finished instanceof EditorTransactionResult.Applied)) {
+            closeRimeComposition(false);
+            handleKeyboardResult(
+                    finished,
+                    R.string.ime_status_key_rejected,
+                    R.string.ime_status_typing_connection_failed);
+            return;
+        }
+        CompositionCoordinator.Transition terminal = compositionCoordinator.commit(
+                lease.observation, commit.revision());
+        if (terminal.disposition() != CompositionCoordinator.Disposition.APPLIED) {
+            closeRimeComposition(false);
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        closeRimeControllerOnly(lease);
+        activeRimeLease = null;
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+    }
+
+    private void renderRimeCandidatePage(RimeCompositionLease lease) {
+        KeyboardCandidateBar bar = keyboardCandidateBar;
+        if (bar == null) return;
+        CandidatePage page = lease.candidatePage;
+        if (page == null) {
+            bar.clear();
+            return;
+        }
+        bar.setInteractionEnabled(
+                lease.pendingKeyCommands == 0
+                        && lease.pendingSelection == null
+                        && lease.pendingPageRequest == null);
+        bar.showPage(page);
+    }
+
+    private void finishEmptyRimeComposition(RimeCompositionLease lease) {
+        EditorTransactionResult finished;
+        try {
+            finished = editorSessionManager.finishRimeComposition(
+                    this, lease.editorSnapshot, lease.revision);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            closeRimeComposition(false);
+            return;
+        }
+        if (finished instanceof EditorTransactionResult.Applied) {
+            CompositionCoordinator.Transition committed = compositionCoordinator.commit(
+                    lease.observation, lease.revision);
+            if (committed.disposition() == CompositionCoordinator.Disposition.APPLIED) {
+                closeRimeControllerOnly(lease);
+                activeRimeLease = null;
+                return;
+            }
+        }
+        closeRimeComposition(false);
+        setStatus(R.string.ime_status_composition_cleanup_failed, true);
+    }
+
+    private boolean finishRimeCompositionForEngineSwitch() {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null) return true;
+        if (lease.revision <= 1L) {
+            closeRimeComposition(false);
+            return true;
+        }
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.finishRimeComposition(
+                    this, lease.editorSnapshot, lease.revision);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            return false;
+        }
+        if (!(result instanceof EditorTransactionResult.Applied)) return false;
+        CompositionCoordinator.Transition committed = compositionCoordinator.commit(
+                lease.observation, lease.revision);
+        if (committed.disposition() != CompositionCoordinator.Disposition.APPLIED) return false;
+        closeRimeControllerOnly(lease);
+        activeRimeLease = null;
+        return true;
+    }
+
+    private RimeVoicePreemption preemptRimeForVoice() {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null) return null;
+        if (lease.controller == null
+                || lease.pendingKeyCommands != 0
+                || lease.pendingSelection != null
+                || lease.pendingPageRequest != null) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+        RimeVoicePreemption preemption = RimeVoicePreemption.begin(
+                compositionCoordinator, lease.observation, compositionConflictPolicy);
+        if (preemption == null) {
+            setStatus(R.string.ime_status_session_active, true);
+            return null;
+        }
+        RimeReleaseProof proof = releaseRimeForVoice(lease, preemption.directive());
+        CompositionCoordinator.ReleaseResolution resolution = switch (proof) {
+            case RELEASED -> CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED;
+            case UNCHANGED -> CompositionCoordinator.ReleaseResolution.PROVEN_UNCHANGED;
+            case UNCERTAIN -> CompositionCoordinator.ReleaseResolution.UNCERTAIN;
+        };
+        RimeVoicePreemption.Finish finish;
+        try {
+            finish = preemption.finish(resolution);
+        } catch (RuntimeException invalidPreemption) {
+            finish = RimeVoicePreemption.Finish.UNCERTAIN;
+        }
+        if (finish == RimeVoicePreemption.Finish.VOICE_ACQUIRED) {
+            closeRimeControllerOnly(lease);
+            activeRimeLease = null;
+            if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+            return preemption;
+        }
+        if (finish == RimeVoicePreemption.Finish.RIME_UNCHANGED) {
+            lease.observation = preemption.restoredRimeObservation();
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return null;
+        }
+        closeRimeControllerOnly(lease);
+        activeRimeLease = null;
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+        setStatus(R.string.ime_status_composition_cleanup_failed, true);
+        return null;
+    }
+
+    private RimeReleaseProof releaseRimeForVoice(
+            RimeCompositionLease lease,
+            CompositionCoordinator.ReleaseDirective directive) {
+        if (lease.preedit.isEmpty() && lease.revision <= 1L) {
+            return RimeReleaseProof.RELEASED;
+        }
+        try {
+            if (directive == CompositionCoordinator.ReleaseDirective.COMMIT_CURRENT) {
+                return classifyUnchangedRelease(editorSessionManager.finishRimeComposition(
+                        this, lease.editorSnapshot, lease.revision));
+            }
+            long cancellationRevision = Math.addExact(lease.revision, 1L);
+            lease.expectedCaret = lease.baseSelectionStart;
+            EditorTransactionResult cleared = editorSessionManager.setRimeComposition(
+                    this, lease.editorSnapshot, "", cancellationRevision);
+            RimeReleaseProof clearedProof = classifyUnchangedRelease(cleared);
+            if (clearedProof != RimeReleaseProof.RELEASED) return clearedProof;
+            EditorSessionSnapshot recaptured = captureCurrentTransactionSnapshot();
+            if (recaptured == null || recaptured.epoch() != lease.editorSnapshot.epoch()) {
+                return RimeReleaseProof.UNCERTAIN;
+            }
+            lease.editorSnapshot = recaptured;
+            EditorTransactionResult finished = editorSessionManager.finishRimeComposition(
+                    this, lease.editorSnapshot, cancellationRevision);
+            return finished instanceof EditorTransactionResult.Applied
+                    ? RimeReleaseProof.RELEASED
+                    : RimeReleaseProof.UNCERTAIN;
+        } catch (RuntimeException unavailable) {
+            return RimeReleaseProof.UNCERTAIN;
+        }
+    }
+
+    private static RimeReleaseProof classifyUnchangedRelease(EditorTransactionResult result) {
+        if (result instanceof EditorTransactionResult.Applied) return RimeReleaseProof.RELEASED;
+        if (result instanceof EditorTransactionResult.Rejected
+                || result instanceof EditorTransactionResult.RolledBack) {
+            return RimeReleaseProof.UNCHANGED;
+        }
+        return RimeReleaseProof.UNCERTAIN;
+    }
+
+    private void closeRimeComposition(boolean clearAvailability) {
+        RimeCompositionLease lease = activeRimeLease;
+        activeRimeLease = null;
+        if (lease != null) {
+            closeRimeControllerOnly(lease);
+            compositionCoordinator.cancel(lease.observation);
+        }
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+        if (clearAvailability) {
+            availableRimePackage = null;
+            availableRimeConfig = null;
+            keyboardEngineSelection = keyboardEngineSelection.withAvailability(
+                    EnumSet.of(KeyboardEngineSelection.Engine.LATIN));
+            if (latinKeyboardLayout != null) {
+                latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
+            }
+        }
+    }
+
+    private static void closeRimeControllerOnly(RimeCompositionLease lease) {
+        RimeInputController controller = lease.controller;
+        lease.controller = null;
+        if (controller != null) controller.close();
+    }
+
+    private void refreshRimeAvailability(
+            long expectedEditorEpoch,
+            InputContextClassifier.PrivacyClassification privacy) {
+        long request = ++rimeAvailabilityRequest;
+        if (keyboardShellRoute != KeyboardShellRoute.ROUTE_A
+                || privacy.sensitive()
+                || !privacy.learningAllowed()
+                || currentKeyboardFieldProfile.usesNumericPanel()) {
+            applyRimeAvailability(request, expectedEditorEpoch, null, null);
+            return;
+        }
+        try {
+            localIo.execute(() -> {
+                RimeResourceStore.RuntimePackage runtime = null;
+                RimeRuntimeConfig config = null;
+                try {
+                    runtime = rimeResourceStore.runtimePackage();
+                    if (runtime != null) {
+                        config = rimeRuntimePreferences.load(runtime.selectedSchemas());
+                    }
+                } catch (RimeImportException ignored) {
+                    // A corrupt/busy local package is unavailable; Latin remains the fallback.
+                } catch (RuntimeException ignored) {
+                    // A corrupt local preference is repaired or fails closed to Latin.
+                }
+                RimeResourceStore.RuntimePackage result = runtime;
+                RimeRuntimeConfig selected = config;
+                postUiIfAlive(() -> applyRimeAvailability(
+                        request, expectedEditorEpoch, result, selected));
+            });
+        } catch (RejectedExecutionException ignored) {
+            applyRimeAvailability(request, expectedEditorEpoch, null, null);
+        }
+    }
+
+    private void applyRimeAvailability(
+            long request,
+            long expectedEditorEpoch,
+            RimeResourceStore.RuntimePackage runtime,
+            RimeRuntimeConfig config) {
+        if (request != rimeAvailabilityRequest || expectedEditorEpoch != editorEpoch) return;
+        availableRimePackage = runtime;
+        availableRimeConfig = runtime == null ? null : config;
+        EnumSet<KeyboardEngineSelection.Engine> available = runtime == null || config == null
+                ? EnumSet.of(KeyboardEngineSelection.Engine.LATIN)
+                : EnumSet.of(
+                        KeyboardEngineSelection.Engine.LATIN,
+                        KeyboardEngineSelection.Engine.RIME);
+        keyboardEngineSelection = keyboardEngineSelection.withAvailability(available);
+        if ((runtime == null || config == null) && activeRimeLease != null) {
+            closeRimeComposition(false);
+        }
+        if (latinKeyboardLayout != null) {
+            latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
+        }
+    }
+
+    private long reserveNextRimeRevision() {
+        if (rimeRevisionHighWatermark == Long.MAX_VALUE) return 0L;
+        rimeRevisionHighWatermark++;
+        return rimeRevisionHighWatermark;
+    }
+
+    private void recordRimeRevision(long revision) {
+        if (revision > rimeRevisionHighWatermark) {
+            rimeRevisionHighWatermark = revision;
+        }
+    }
+
+    private void deleteKeyboardBackward() {
+        boolean voiceWasActive = activeVoiceTransaction != null;
+        VoiceTransactionSession.KeyboardPreemption preemption =
+                preemptVoiceForKeyboard();
+        if (voiceWasActive && preemption == null) return;
+        EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
+        if (snapshot == null) {
+            finishVoiceKeyboardPreemption(preemption, false);
+            return;
+        }
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.deleteKeyboardBackward(this, snapshot);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            setStatus(R.string.ime_status_delete_connection_failed, true);
+            invalidateLastCommit();
+            finishVoiceKeyboardPreemption(preemption, false);
+            return;
+        }
+        boolean preemptionClosed = finishVoiceKeyboardPreemption(
+                preemption, result instanceof EditorTransactionResult.Applied);
+        handleKeyboardResult(
+                result,
+                R.string.ime_status_delete_rejected,
+                R.string.ime_status_delete_connection_failed);
+        if (!preemptionClosed) {
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
         }
         invalidateLastCommit();
     }
 
-    private void sendEnter() {
-        InputConnection connection = getCurrentInputConnection();
-        if (connection == null) return;
-        int action = currentEditor == null
-                ? EditorInfo.IME_ACTION_NONE
-                : currentEditor.imeOptions & EditorInfo.IME_MASK_ACTION;
+    @Override
+    public EditorInfo currentEditorInfo() {
+        return getCurrentInputEditorInfo();
+    }
+
+    @Override
+    public InputConnection currentInputConnection() {
+        return getCurrentInputConnection();
+    }
+
+    private void insertKeyboardText(String text) {
+        boolean voiceWasActive = activeVoiceTransaction != null;
+        VoiceTransactionSession.KeyboardPreemption preemption =
+                preemptVoiceForKeyboard();
+        if (voiceWasActive && preemption == null) {
+            invalidateLastCommit();
+            return;
+        }
+        EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
+        if (snapshot == null) {
+            finishVoiceKeyboardPreemption(preemption, false);
+            invalidateLastCommit();
+            return;
+        }
+        EditorTransactionResult result;
         try {
-            switch (action) {
-                case EditorInfo.IME_ACTION_DONE,
-                        EditorInfo.IME_ACTION_GO,
-                        EditorInfo.IME_ACTION_NEXT,
-                        EditorInfo.IME_ACTION_PREVIOUS,
-                        EditorInfo.IME_ACTION_SEARCH,
-                        EditorInfo.IME_ACTION_SEND -> connection.performEditorAction(action);
-                default -> {
-                    connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
-                    connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
-                }
-            }
-        } catch (RuntimeException ignored) {
-            setStatus(R.string.ime_status_editor_action_failed, true);
+            result = editorSessionManager.insertKeyboardText(this, snapshot, text);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            setStatus(R.string.ime_status_typing_connection_failed, true);
+            invalidateLastCommit();
+            finishVoiceKeyboardPreemption(preemption, false);
+            return;
+        }
+        boolean preemptionClosed = finishVoiceKeyboardPreemption(
+                preemption, result instanceof EditorTransactionResult.Applied);
+        handleKeyboardResult(
+                result,
+                R.string.ime_status_key_rejected,
+                R.string.ime_status_typing_connection_failed);
+        if (!preemptionClosed) {
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
         }
         invalidateLastCommit();
+    }
+
+    private void performKeyboardEnter() {
+        boolean voiceWasActive = activeVoiceTransaction != null;
+        VoiceTransactionSession.KeyboardPreemption preemption =
+                preemptVoiceForKeyboard();
+        if (voiceWasActive && preemption == null) return;
+        EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
+        if (snapshot == null) {
+            finishVoiceKeyboardPreemption(preemption, false);
+            return;
+        }
+        EditorTransactionResult result;
+        try {
+            result = editorSessionManager.performKeyboardEnter(this, snapshot);
+        } catch (RuntimeException unavailable) {
+            disableEditorSessionShadow();
+            setStatus(R.string.ime_status_editor_action_failed, true);
+            invalidateLastCommit();
+            finishVoiceKeyboardPreemption(preemption, false);
+            return;
+        }
+        boolean preemptionClosed = finishVoiceKeyboardPreemption(
+                preemption, result instanceof EditorTransactionResult.Applied);
+        handleKeyboardResult(
+                result,
+                R.string.ime_status_key_rejected,
+                R.string.ime_status_editor_action_failed);
+        if (!preemptionClosed) {
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+        }
+        invalidateLastCommit();
+    }
+
+    private VoiceTransactionSession.KeyboardPreemption preemptVoiceForKeyboard() {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session == null) return null;
+        CommitTarget target = activeTarget;
+        if (target == null || !target.transactionWriter) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+
+        VoiceTransactionSession.KeyboardPreemption preemption =
+                session.beginKeyboardPreemption(
+                        compositionConflictPolicy, finishingVoiceInput);
+        if (preemption == null) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+
+        VoiceReleaseProof proof = releaseVoiceForKeyboard(session, preemption);
+        CompositionCoordinator.ReleaseResolution resolution = switch (proof) {
+            case RELEASED -> CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED;
+            case UNCHANGED -> CompositionCoordinator.ReleaseResolution.PROVEN_UNCHANGED;
+            case UNCERTAIN -> CompositionCoordinator.ReleaseResolution.UNCERTAIN;
+        };
+        if (!session.finishKeyboardRelease(preemption, resolution)) {
+            voiceController.cancel();
+            holdToTalkActive = false;
+            preparingVoiceInput = false;
+            finishingVoiceInput = false;
+            activeCaptureMode = null;
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return null;
+        }
+
+        boolean routeLateResult = preemption.routeLateResult();
+        if (routeLateResult) {
+            detachedTargetAwaitingResult = target;
+            installPendingDetached(target);
+            if (detachedSessionFor(target) == null) {
+                detachedTargetAwaitingResult = null;
+                routeLateResult = false;
+            }
+        }
+        if (!routeLateResult) voiceController.cancel();
+        activeTarget = null;
+        holdToTalkActive = false;
+        preparingVoiceInput = false;
+        finishingVoiceInput = routeLateResult;
+        if (!routeLateResult) activeCaptureMode = null;
+        latestPreviewText = "";
+        clearTranscript();
+        updateMicrophone(routeLateResult
+                ? VoiceController.State.TRANSCRIBING
+                : VoiceController.State.IDLE);
+        return preemption;
+    }
+
+    private VoiceReleaseProof releaseVoiceForKeyboard(
+            VoiceTransactionSession session,
+            VoiceTransactionSession.KeyboardPreemption preemption) {
+        try {
+            if (preemption.directive()
+                    == CompositionCoordinator.ReleaseDirective.COMMIT_CURRENT) {
+                if (!session.compositionActive) return VoiceReleaseProof.UNCERTAIN;
+                EditorTransactionResult result = editorSessionManager.finishVoiceComposition(
+                        this, session.snapshot, session.revision);
+                if (result instanceof EditorTransactionResult.Applied) {
+                    return VoiceReleaseProof.RELEASED;
+                }
+                return result instanceof EditorTransactionResult.Rejected
+                        ? VoiceReleaseProof.UNCHANGED
+                        : VoiceReleaseProof.UNCERTAIN;
+            }
+            if (!session.compositionActive) return VoiceReleaseProof.RELEASED;
+
+            long revision = session.prepareKeyboardCancellation(preemption);
+            EditorTransactionResult cleared = editorSessionManager.setVoiceComposition(
+                    this, session.snapshot, "", revision);
+            if (!(cleared instanceof EditorTransactionResult.Applied)) {
+                return cleared instanceof EditorTransactionResult.Rejected
+                        ? VoiceReleaseProof.UNCHANGED
+                        : VoiceReleaseProof.UNCERTAIN;
+            }
+            session.completeKeyboardCancellation(preemption, revision);
+            EditorSessionSnapshot captured = captureCurrentTransactionSnapshot();
+            if (captured == null) return VoiceReleaseProof.UNCERTAIN;
+            session.completeComposition(captured);
+            EditorTransactionResult finished = editorSessionManager.finishVoiceComposition(
+                    this, session.snapshot, session.revision);
+            return finished instanceof EditorTransactionResult.Applied
+                    ? VoiceReleaseProof.RELEASED
+                    : VoiceReleaseProof.UNCERTAIN;
+        } catch (RuntimeException unavailable) {
+            return VoiceReleaseProof.UNCERTAIN;
+        }
+    }
+
+    private boolean finishVoiceKeyboardPreemption(
+            VoiceTransactionSession.KeyboardPreemption preemption,
+            boolean keyboardApplied) {
+        if (preemption == null) return true;
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session == null) return false;
+        boolean finished;
+        try {
+            finished = session.finishKeyboardEvent(preemption, keyboardApplied);
+        } catch (RuntimeException invalidLease) {
+            finished = false;
+        }
+        if (finished) clearVoiceTransactionState();
+        return finished;
+    }
+
+    private EditorSessionSnapshot captureKeyboardSnapshot() {
+        if (!editorSessionShadowHealthy || editorSessionManager == null) {
+            setStatus(R.string.ime_status_field_unavailable, true);
+            return null;
+        }
+        boolean keyboardPreemption = activeVoiceTransaction != null
+                && activeVoiceTransaction.keyboardPreemptionActive();
+        if (activeTarget != null
+                || activeComposition != null
+                || activeV2Projection != null
+                || (activeVoiceTransaction != null && !keyboardPreemption)
+                || preparingVoiceInput
+                || (finishingVoiceInput && !keyboardPreemption)) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+
+        InputConnection connection = getCurrentInputConnection();
+        EditorInfo editor = currentEditor;
+        if (connection == null || editor == null) {
+            setStatus(R.string.ime_status_no_active_field, true);
+            return null;
+        }
+
+        EditorSessionManager.CaptureResult capture;
+        if (sensitiveField) {
+            // Sensitive keyboard transactions preserve the EDT-007 zero-plaintext path. The
+            // lifecycle-reported selection is validated by the manager without any text getter.
+            capture = shadowCaptureEditorSession(connection, "", "", "");
+        } else {
+            EditorEvidenceReader.SelectionResult observed =
+                    EditorEvidenceReader.readSelectionOnce(connection, false, true);
+            if (!(observed instanceof EditorEvidenceReader.SelectionEvidence evidence)) {
+                setStatus(R.string.ime_status_field_unavailable, true);
+                return null;
+            }
+            boolean extractedKnown = evidence.extractedTextAvailable()
+                    && evidence.extractedSelectionStart() >= 0
+                    && evidence.extractedSelectionEnd() >= 0;
+            SelectionEvidence selection = resolveSelectionEvidence(
+                    extractedKnown ? -1 : currentSelectionStart,
+                    extractedKnown ? -1 : currentSelectionEnd,
+                    evidence.selectedTextAvailable() ? evidence.selectedText() : null,
+                    evidence.extractedSelectionStart(),
+                    evidence.extractedSelectionEnd(),
+                    evidence.extractedTextAvailable());
+            if (selectionCaptureDecision(selection, MAX_SELECTION_CODE_POINTS)
+                    != SelectionCaptureDecision.ACCEPT) {
+                setStatus(R.string.ime_status_selection_unavailable, true);
+                return null;
+            }
+            currentSelectionStart = selection.start();
+            currentSelectionEnd = selection.end();
+            shadowSelectionChanged(selection.start(), selection.end());
+
+            EditorEvidenceReader.SurroundingResult surroundingResult =
+                    EditorEvidenceReader.readSurroundingOnce(
+                            connection, CONTEXT_CHAR_LIMIT, FINGERPRINT_CODE_POINTS);
+            if (!(surroundingResult
+                    instanceof EditorEvidenceReader.SurroundingEvidence surrounding)) {
+                setStatus(R.string.ime_status_field_unavailable, true);
+                return null;
+            }
+            capture = shadowCaptureEditorSession(
+                    connection,
+                    selection.text(),
+                    surrounding.shadowBeforeText(),
+                    surrounding.shadowAfterText());
+        }
+
+        if (capture instanceof EditorSessionManager.Captured captured) {
+            return captured.snapshot();
+        }
+        setStatus(R.string.ime_status_field_unavailable, true);
+        return null;
+    }
+
+    /**
+     * Recaptures a transaction snapshot from one exact live editor without trusting a delayed
+     * onUpdateSelection callback. ExtractedText supplies the absolute range; the manager still
+     * performs full authority/evidence validation again before every subsequent write.
+     */
+    private EditorSessionSnapshot captureCurrentTransactionSnapshot() {
+        if (!editorSessionShadowHealthy
+                || editorSessionManager == null
+                || sensitiveField
+                || currentEditor == null) {
+            return null;
+        }
+        try {
+            InputConnection connection = getCurrentInputConnection();
+            EditorInfo editor = currentEditor;
+            if (connection == null) return null;
+
+            EditorEvidenceReader.SelectionResult observed =
+                    EditorEvidenceReader.readSelectionOnce(connection, false, true);
+            if (!(observed instanceof EditorEvidenceReader.SelectionEvidence evidence)
+                    || !evidence.extractedTextAvailable()
+                    || evidence.extractedSelectionStart() < 0
+                    || evidence.extractedSelectionEnd() < 0) {
+                return null;
+            }
+            SelectionEvidence selection = resolveSelectionEvidence(
+                    -1,
+                    -1,
+                    evidence.selectedTextAvailable() ? evidence.selectedText() : null,
+                    evidence.extractedSelectionStart(),
+                    evidence.extractedSelectionEnd(),
+                    true);
+            if (selectionCaptureDecision(selection, MAX_SELECTION_CODE_POINTS)
+                    != SelectionCaptureDecision.ACCEPT) {
+                return null;
+            }
+            if (connection != getCurrentInputConnection() || editor != currentEditor) return null;
+
+            currentSelectionStart = selection.start();
+            currentSelectionEnd = selection.end();
+            shadowSelectionChanged(selection.start(), selection.end());
+            EditorEvidenceReader.SurroundingResult surrounding =
+                    EditorEvidenceReader.readSurroundingOnce(
+                            connection, CONTEXT_CHAR_LIMIT, FINGERPRINT_CODE_POINTS);
+            if (!(surrounding instanceof EditorEvidenceReader.SurroundingEvidence evidenceText)) {
+                return null;
+            }
+            if (connection != getCurrentInputConnection() || editor != currentEditor) return null;
+            EditorSessionManager.CaptureResult capture = shadowCaptureEditorSession(
+                    connection,
+                    selection.text(),
+                    evidenceText.shadowBeforeText(),
+                    evidenceText.shadowAfterText());
+            return capture instanceof EditorSessionManager.Captured captured
+                    ? captured.snapshot()
+                    : null;
+        } catch (RuntimeException unavailable) {
+            return null;
+        }
+    }
+
+    private void handleKeyboardResult(
+            EditorTransactionResult result, int rejectedResource, int failedResource) {
+        if (result instanceof EditorTransactionResult.Applied) return;
+        if (result instanceof EditorTransactionResult.Rejected
+                || result instanceof EditorTransactionResult.RolledBack) {
+            setStatus(rejectedResource, true);
+            return;
+        }
+        setStatus(failedResource, true);
     }
 
     private void switchKeyboard() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-                && shouldOfferSwitchingToNextInputMethod()) {
-            switchToNextInputMethod(false);
-        } else {
-            Intent intent = new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
+        handleSystemImeSwitch(KeyboardSystemImeSwitcher.requestNext(systemImePlatform()));
+    }
+
+    private void showKeyboardPicker() {
+        handleSystemImeSwitch(KeyboardSystemImeSwitcher.requestPicker(systemImePlatform()));
+    }
+
+    private KeyboardSystemImeSwitcher.Platform systemImePlatform() {
+        return new KeyboardSystemImeSwitcher.Platform() {
+            @Override
+            public boolean switchToNextInputMethod() {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false;
+                return OpenTypelessImeService.this.switchToNextInputMethod(false);
+            }
+
+            @Override
+            public boolean showInputMethodPicker() {
+                InputMethodManager manager = getSystemService(InputMethodManager.class);
+                if (manager == null) return false;
+                manager.showInputMethodPicker();
+                return true;
+            }
+        };
+    }
+
+    private void handleSystemImeSwitch(KeyboardSystemImeSwitcher.Outcome outcome) {
+        if (outcome == KeyboardSystemImeSwitcher.Outcome.NEXT_INPUT_METHOD_REQUESTED) return;
+        setStatus(outcome == KeyboardSystemImeSwitcher.Outcome.FAILED
+                ? R.string.ime_status_keyboard_switch_failed
+                : R.string.ime_status_keyboard_picker_opened, outcome == KeyboardSystemImeSwitcher.Outcome.FAILED);
+    }
+
+    private void switchInputEngine() {
+        if (activeTarget != null || voiceController.state() != VoiceController.State.IDLE) {
+            setStatus(R.string.ime_status_finish_before_engine_change, true);
+            return;
         }
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME
+                && activeRimeLease != null
+                && !finishRimeCompositionForEngineSwitch()) {
+            setStatus(R.string.ime_status_composition_cleanup_failed, true);
+            return;
+        }
+        KeyboardEngineSelection.CycleResult result = keyboardEngineSelection.cycle();
+        if (result instanceof KeyboardEngineSelection.Unavailable) {
+            setStatus(R.string.ime_status_second_engine_unavailable, true);
+            return;
+        }
+        keyboardEngineSelection = result.state();
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+        if (latinKeyboardLayout != null) {
+            latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
+        }
+        setStatus(keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.LATIN
+                ? R.string.ime_status_engine_latin
+                : R.string.ime_status_engine_rime, false);
     }
 
     private void openSettings() {
@@ -1817,7 +4118,7 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private void showModeMenu() {
         if (modeButton == null) return;
-        if (pipeline.state() != VoicePipeline.State.IDLE || activeTarget != null) {
+        if (voiceController.state() != VoiceController.State.IDLE || activeTarget != null) {
             setStatus(R.string.ime_status_finish_before_mode_change, true);
             return;
         }
@@ -1846,8 +4147,8 @@ public final class OpenTypelessImeService extends InputMethodService {
     private void refreshModeButton() {
         if (modeButton == null) return;
         String label = localizedModeLabel(selectedMode);
-        String displayLabel = compactLayout ? localizedCompactModeLabel(selectedMode) : label;
-        modeButton.setText(compactLayout
+        String displayLabel = compactToolbar ? localizedCompactModeLabel(selectedMode) : label;
+        modeButton.setText(compactToolbar
                 ? displayLabel
                 : getString(R.string.ime_mode_button, displayLabel));
         modeButton.setContentDescription(getString(R.string.ime_cd_choose_mode_current, label));
@@ -1858,7 +4159,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         boolean pendingDetached = pendingDetachedTarget() != null;
         boolean pendingAudio = pipeline.hasRecoverableAudio();
         boolean sessionActive = activeTarget != null
-                || pipeline.state() != VoicePipeline.State.IDLE;
+                || voiceController.state() != VoiceController.State.IDLE;
         if (pendingDetached && activeTarget == null) {
             boolean confirmationArmed = hasVisibleVoiceDraft()
                     && System.currentTimeMillis() <= discardConfirmationDeadline;
@@ -1927,7 +4228,9 @@ public final class OpenTypelessImeService extends InputMethodService {
                         1,
                         R.string.ime_key_raw);
             }
-            if (commit != null && commit.learningAllowed && !commit.rawText.isBlank()) {
+            if (commit != null
+                    && keyboardToolbarPrivacy.teachVisible()
+                    && TeachCorrectionResolver.isEligible(commit.teachRecord)) {
                 popup.getMenu().add(
                         Menu.NONE,
                         MENU_TEACH,
@@ -1991,23 +4294,44 @@ public final class OpenTypelessImeService extends InputMethodService {
         popup.setOnMenuItemClickListener(item -> {
             int index = item.getItemId() - MENU_PUNCTUATION_BASE;
             if (index < 0 || index >= punctuation.length) return false;
-            commitText(punctuation[index]);
+            insertKeyboardText(punctuation[index]);
             return true;
         });
         popup.show();
     }
 
     private void refreshPostCommitActions() {
-        if (undoButton != null) {
-            undoButton.setVisibility(lastCommit == null || compactLayout
-                    ? View.GONE
-                    : View.VISIBLE);
+        // KBD-006 keeps Undo in the existing overflow menu. This prevents a transient,
+        // low-frequency action from shrinking the fixed 48dp toolbar targets.
+    }
+
+    private static KeyboardToolbarPrivacyPolicy.State restrictedToolbarPrivacy() {
+        return KeyboardToolbarPrivacyPolicy.resolve(
+                PrivacyPolicyEngine.hardSafety(true, false));
+    }
+
+    private void applyKeyboardToolbarPrivacy() {
+        KeyboardToolbarLayout toolbar = keyboardToolbarLayout;
+        boolean voiceVisible = keyboardToolbarPrivacy.voiceVisible();
+        if (toolbar != null) toolbar.setActionVisible("voice.mode", voiceVisible);
+        if (voicePulse != null) {
+            voicePulse.setVisibility(voiceVisible ? View.VISIBLE : View.GONE);
         }
+        if (keyboardInputModeLayout != null) {
+            keyboardInputModeLayout.setVoiceAvailable(voiceVisible);
+        }
+    }
+
+    private void rejectUnboundCandidateEvent() {
+        // KBD-007 owns only the common page and View contract. RIM-005/Latin suggestion work must
+        // bind a generation-aware engine before a page can be shown; an unbound event never writes.
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+        setStatus(R.string.ime_status_candidate_engine_unavailable, true);
     }
 
     private void renderInputViewState() {
         if (microphone == null) return;
-        VoicePipeline.State state = pipeline.state();
+        VoiceController.State state = voiceController.state();
         updateMicrophone(state);
         if (sensitiveField) {
             clearTranscript();
@@ -2024,7 +4348,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         } else if (recoverableDraft.hasDraft()) {
             showRecoverableDraftOrClear();
             setStatus(R.string.ime_status_recoverable_draft_available, false);
-        } else if (activeTarget != null || state != VoicePipeline.State.IDLE) {
+        } else if (activeTarget != null || state != VoiceController.State.IDLE) {
             if (activeTarget != null
                     && activeTarget.replacedSelection()
                     && !latestPreviewText.isBlank()) {
@@ -2034,7 +4358,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             }
             setStatus(preparingVoiceInput
                     ? getString(R.string.ime_status_preparing_local_data)
-                    : finishingVoiceInput && state == VoicePipeline.State.IDLE
+                    : finishingVoiceInput && state == VoiceController.State.IDLE
                     ? getString(R.string.ime_status_finishing_recording)
                     : localizedPipelineStatus(state), false);
         } else if (pipeline.hasRecoverableAudio()) {
@@ -2048,22 +4372,30 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
     }
 
-    private void updateMicrophone(VoicePipeline.State state) {
+    private void updateMicrophone(VoiceController.State state) {
         if (microphone == null) return;
-        boolean recording = state == VoicePipeline.State.RECORDING && !finishingVoiceInput;
+        boolean recording = state == VoiceController.State.RECORDING && !finishingVoiceInput;
         boolean processing = finishingVoiceInput
-                || state == VoicePipeline.State.TRANSCRIBING
-                || state == VoicePipeline.State.POLISHING;
-        boolean idle = state == VoicePipeline.State.IDLE && !preparingVoiceInput;
+                || state == VoiceController.State.TRANSCRIBING
+                || state == VoiceController.State.POLISHING;
+        boolean idle = state == VoiceController.State.IDLE && !preparingVoiceInput;
         boolean longSession = activeCaptureMode == DictationRequest.CaptureMode.CONTINUOUS;
         boolean holdSession = activeCaptureMode == DictationRequest.CaptureMode.HOLD_TO_TALK;
         boolean longRecording = recording && longSession;
         boolean holdRecording = recording && holdSession;
         boolean startAllowed = voiceStartAllowed();
-        boolean editorKeysAllowed = activeTarget == null;
+        boolean editorKeysAllowed = activeTarget == null
+                || (activeTarget.transactionWriter && activeVoiceTransaction != null);
         boolean spaceIsVoiceUnavailable = editorKeysAllowed && !startAllowed;
         boolean externalFinalizing = editorKeysAllowed && pendingDetachedTarget() != null;
         boolean voiceUnavailable = editorKeysAllowed && !startAllowed && !externalFinalizing;
+        if (keyboardInputModeLayout != null) {
+            keyboardInputModeLayout.setSwitchingEnabled(
+                    idle
+                            && !finishingVoiceInput
+                            && activeTarget == null
+                            && !externalFinalizing);
+        }
 
         if (voicePulse != null) {
             voicePulse.setPhase(preparingVoiceInput
@@ -2076,7 +4408,16 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
 
         setEditingKeysEnabled(editorKeysAllowed, startAllowed);
-        setPrimaryKeyStyle(microphone, longRecording);
+        if (switchKeyboardButton != null && activeTarget != null) {
+            // Switching IMEs is a lifecycle cancellation, not a content-key preemption.
+            // CMP-006 owns that path; CMP-005 only keeps concrete editor keys available.
+            switchKeyboardButton.setEnabled(false);
+        }
+        if (keyboardInputModeLayout == null) {
+            setPrimaryKeyStyle(microphone, longRecording);
+        } else {
+            microphone.setBackgroundResource(R.drawable.ime_voice_button_background);
+        }
         microphone.setSelected(longRecording);
         int longCompactLabel = longRecording
                 ? R.string.ime_key_finish_dictation_compact
@@ -2087,7 +4428,14 @@ public final class OpenTypelessImeService extends InputMethodService {
                 : R.string.ime_key_long_dictation_compact;
         // This control lives in a compact status toolbar; its accessible description carries the
         // full wording while the visual label stays short at every screen width.
-        microphone.setText(longCompactLabel);
+        if (keyboardInputModeLayout == null) {
+            microphone.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
+            microphone.setText(longCompactLabel);
+        } else {
+            microphone.setText("");
+            microphone.setCompoundDrawablesWithIntrinsicBounds(
+                    0, R.drawable.ime_ic_microphone, 0, 0);
+        }
         microphone.setEnabled(startAllowed || longRecording);
         microphone.setContentDescription(getString(longRecording
                 ? R.string.ime_cd_finish_long_dictation
@@ -2165,11 +4513,15 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void showPreparingState() {
-        updateMicrophone(VoicePipeline.State.IDLE);
+        updateMicrophone(VoiceController.State.IDLE);
     }
 
     private void setEditingKeysEnabled(boolean editorEnabled, boolean modeEnabled) {
         if (modeButton != null) modeButton.setEnabled(modeEnabled);
+        if (latinKeyboardLayout != null) latinKeyboardLayout.setInputEnabled(editorEnabled);
+        if (keyboardCandidateBar != null) {
+            keyboardCandidateBar.setInteractionEnabled(editorEnabled);
+        }
         if (switchKeyboardButton != null) switchKeyboardButton.setEnabled(editorEnabled);
         if (punctuationButton != null) punctuationButton.setEnabled(editorEnabled);
         if (deleteButton != null) deleteButton.setEnabled(editorEnabled);
@@ -2189,13 +4541,16 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private boolean voiceStartAllowed() {
         return !serviceDestroyed
+                && screenOffReceiverRegistered
+                && !voiceRestartBlockedByLifecycle
                 && !sensitiveField
                 && !recoverableDraftLoading
                 && !pipeline.hasRecoverableAudio()
                 && !recoverableDraft.hasDraft()
                 && pendingDetachedTarget() == null
                 && activeTarget == null
-                && pipeline.state() == VoicePipeline.State.IDLE;
+                && activeVoiceTransaction == null
+                && voiceController.state() == VoiceController.State.IDLE;
     }
 
     private static CommitTarget pendingDetachedTarget() {
@@ -2232,16 +4587,6 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
     }
 
-    static boolean shouldDeferServiceShutdown(Object detachedTarget) {
-        return detachedTarget != null;
-    }
-
-    private void markDetachedTerminalArrived(CommitTarget target) {
-        if (serviceDestroyed && detachedTargetAwaitingResult == target) {
-            destroyFinalizationGate.terminalArrived();
-        }
-    }
-
     private void cancelPipeline(String message, boolean announce) {
         CommitTarget cancelledTarget = activeTarget != null
                 ? activeTarget
@@ -2262,7 +4607,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         boolean cleaned = cancelActiveComposition();
         activeTarget = null;
         clearRecoverableDraftIfSource(cancelledTarget);
-        updateMicrophone(VoicePipeline.State.IDLE);
+        updateMicrophone(VoiceController.State.IDLE);
         showRecoverableDraftOrClear();
         if (announce) {
             setStatus(cleaned
@@ -2271,7 +4616,115 @@ public final class OpenTypelessImeService extends InputMethodService {
         }
     }
 
+    /**
+     * Cancels every IME-owned voice run at an editor/window/security lifecycle boundary.
+     *
+     * <p>This is intentionally different from {@link #stopPipelinePreservingDraft}: stop asks the
+     * recognizer to finish and therefore permits a later terminal result. Lifecycle cancellation
+     * first terminalizes the exact target, then invalidates the pipeline generation through
+     * {@link VoiceController#cancel()}; any callback already queued on the main thread sees neither
+     * an active nor a detached target. A non-sensitive visible partial may remain as an encrypted
+     * recoverable draft, but it is never inserted into a new editor.
+     */
+    private void cancelVoiceForLifecycle() {
+        CommitTarget cancelledTarget = activeTarget != null
+                ? activeTarget
+                : detachedTargetAwaitingResult;
+        if (cancelledTarget != null) cancelledTarget.markVoiceTerminal();
+
+        activeTarget = null;
+        detachedTargetAwaitingResult = null;
+        if (voiceController != null) cancelControllerForLifecycle(voiceController);
+
+        String recoverable = latestPreviewText;
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        if (recoverable.isBlank() && transaction != null) {
+            recoverable = transaction.compositionText;
+        }
+        if (recoverable.isBlank() && activeComposition != null) {
+            recoverable = activeComposition.composingText();
+        }
+        if (recoverable.isBlank() && activeV2Projection != null) {
+            recoverable = activeV2Projection.projectedFullText();
+        }
+        if (cancelledTarget != null
+                && !cancelledTarget.replacedSelection()
+                && cancelledTarget.fieldKind != FieldKind.SENSITIVE
+                && !sensitiveField
+                && !recoverable.isBlank()) {
+            saveRecoverableDraft(cancelledTarget, recoverable);
+        }
+
+        boolean cleanupProven = cancelActiveComposition();
+        voiceRestartBlockedByLifecycle = lifecycleRestartBlocked(
+                voiceRestartBlockedByLifecycle, cleanupProven, false);
+        PendingDetachedSession<CommitTarget> pending = detachedSessionFor(cancelledTarget);
+        if (pending != null) completeDetachedSession(pending, cancelledTarget);
+
+        holdToTalkActive = false;
+        preparingVoiceInput = false;
+        finishingVoiceInput = false;
+        activeCaptureMode = null;
+        activeRecognitionRoute = null;
+        discardConfirmationDeadline = 0L;
+        latestPreviewText = "";
+        if (!serviceDestroyed && voiceController != null) {
+            updateMicrophone(VoiceController.State.IDLE);
+            showRecoverableDraftOrClear();
+        }
+    }
+
+    static BroadcastReceiver createScreenOffReceiver(Runnable cancellation) {
+        Runnable action = java.util.Objects.requireNonNull(cancellation, "cancellation");
+        return new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent != null && Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    action.run();
+                }
+            }
+        };
+    }
+
+    static void cancelControllerForLifecycle(VoiceController controller) {
+        java.util.Objects.requireNonNull(controller, "controller").cancel();
+    }
+
+    static boolean lifecycleRestartBlocked(
+            boolean alreadyBlocked, boolean cleanupProven, boolean editorSessionRotated) {
+        return !editorSessionRotated && (alreadyBlocked || !cleanupProven);
+    }
+
+    private void registerScreenOffReceiver() {
+        IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(screenOffReceiver, filter);
+            }
+            screenOffReceiverRegistered = true;
+        } catch (RuntimeException unavailable) {
+            // Voice stays fail-closed when the process cannot observe the lock/screen boundary.
+            screenOffReceiverRegistered = false;
+        }
+    }
+
+    private void unregisterScreenOffReceiver() {
+        if (!screenOffReceiverRegistered) return;
+        screenOffReceiverRegistered = false;
+        try {
+            unregisterReceiver(screenOffReceiver);
+        } catch (RuntimeException ignored) {
+            // Cancellation already happened; teardown must continue without reopening voice.
+        }
+    }
+
     private boolean cancelActiveComposition() {
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        if (transaction != null) {
+            return cancelVoiceTransaction(transaction);
+        }
         EditorProjection projection = activeV2Projection;
         clearSpeechCoreProjectionState();
         VoiceCompositionSession composition = activeComposition;
@@ -2285,6 +4738,37 @@ public final class OpenTypelessImeService extends InputMethodService {
         return projectionSafe && (composition == null || composition.cancel());
     }
 
+    private boolean cancelVoiceTransaction(VoiceTransactionSession session) {
+        boolean cancelled = !session.compositionActive;
+        boolean coordinatorReleased = false;
+        try {
+            session.terminal = true;
+            if (session.compositionActive) {
+                long revision = session.prepareComposition(session.latestSequence, "");
+                EditorTransactionResult cleared = editorSessionManager.setVoiceComposition(
+                        this, session.snapshot, "", revision);
+                if (cleared instanceof EditorTransactionResult.Applied) {
+                    EditorSessionSnapshot captured = captureCurrentTransactionSnapshot();
+                    if (captured != null) {
+                        session.completeComposition(captured);
+                        EditorTransactionResult finished =
+                                editorSessionManager.finishVoiceComposition(
+                                        this, session.snapshot, session.revision);
+                        cancelled = finished instanceof EditorTransactionResult.Applied;
+                    }
+                }
+            }
+            if (cancelled) {
+                coordinatorReleased = session.cancelCoordinatorAfterCleanup();
+            }
+        } catch (RuntimeException unavailable) {
+            cancelled = false;
+        } finally {
+            if (coordinatorReleased) clearVoiceTransactionState();
+        }
+        return cancelled && coordinatorReleased;
+    }
+
     /**
      * Detaches from the old editor without discarding work. Recording is stopped normally so batch
      * and streaming backends can still produce a final result, which is routed to the recoverable
@@ -2294,27 +4778,27 @@ public final class OpenTypelessImeService extends InputMethodService {
         CommitTarget target = activeTarget;
         if (target == null) {
             if (detachedTargetAwaitingResult != null) return;
-            if (pipeline.state() != VoicePipeline.State.IDLE) pipeline.cancel();
+            if (voiceController.state() != VoiceController.State.IDLE) voiceController.cancel();
             holdToTalkActive = false;
             preparingVoiceInput = false;
             finishingVoiceInput = false;
             activeCaptureMode = null;
-            updateMicrophone(VoicePipeline.State.IDLE);
+            updateMicrophone(VoiceController.State.IDLE);
             showRecoverableDraftOrClear();
             return;
         }
 
-        VoicePipeline.State previousState = pipeline.state();
+        VoiceController.State previousState = voiceController.state();
         boolean wasPreparing = preparingVoiceInput;
         VoiceCompositionSession composition = activeComposition;
         boolean awaitFinalResult = !wasPreparing;
         if (awaitFinalResult) {
             detachedTargetAwaitingResult = target;
             installPendingDetached(target);
-            if (previousState == VoicePipeline.State.RECORDING) pipeline.stopRecording();
+            if (previousState == VoiceController.State.RECORDING) voiceController.stop();
         } else {
             // No recorder exists yet, so there is no speech or final result to preserve.
-            pipeline.cancel();
+            voiceController.cancel();
         }
 
         holdToTalkActive = false;
@@ -2325,8 +4809,8 @@ public final class OpenTypelessImeService extends InputMethodService {
         boolean preserved = preserveActiveDraft();
         activeTarget = null;
         updateMicrophone(awaitFinalResult
-                ? VoicePipeline.State.TRANSCRIBING
-                : VoicePipeline.State.IDLE);
+                ? VoiceController.State.TRANSCRIBING
+                : VoiceController.State.IDLE);
         showRecoverableDraftOrClear();
         if (announce) {
             setStatus(preserved
@@ -2343,6 +4827,12 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     private boolean preserveActiveDraft() {
         CommitTarget target = activeTarget;
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        if (transaction != null) {
+            String fallback = latestPreviewText;
+            latestPreviewText = "";
+            return preserveVoiceTransactionDraft(target, transaction, fallback);
+        }
         EditorProjection projection = activeV2Projection;
         if (projection != null) {
             String latest = latestV2Document == null
@@ -2387,6 +4877,46 @@ public final class OpenTypelessImeService extends InputMethodService {
             if (inserted == EditorMutationResult.APPLIED) return true;
         }
         return saveRecoverableDraft(target, fallback);
+    }
+
+    private boolean preserveVoiceTransactionDraft(
+            CommitTarget target, VoiceTransactionSession session, String fallback) {
+        boolean prepared = session.beginPreserving();
+        boolean preserved = prepared && !session.compositionActive;
+        boolean coordinatorReleased = false;
+        if (prepared && session.compositionActive && editorSessionManager != null) {
+            try {
+                EditorTransactionResult result = editorSessionManager.finishVoiceComposition(
+                        this, session.snapshot, session.revision);
+                preserved = result instanceof EditorTransactionResult.Applied;
+            } catch (RuntimeException unavailable) {
+                preserved = false;
+            }
+        }
+        if (preserved) {
+            coordinatorReleased = session.compositionActive
+                    ? session.completeCoordinatorAfterCommit()
+                    : session.cancelCoordinatorAfterCleanup();
+            preserved = coordinatorReleased;
+        }
+        String recovery = fallback == null ? "" : fallback;
+        if (recovery.isBlank() && !preserved) recovery = session.compositionText;
+        boolean saved = recovery.isBlank() || saveRecoverableDraft(target, recovery);
+        if (coordinatorReleased) clearVoiceTransactionState();
+        return (preserved || saved) && saved;
+    }
+
+    private void clearVoiceTransactionState() {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session != null && !session.coordinatorReleased()) return;
+        activeVoiceTransaction = null;
+        if (session != null) session.close();
+    }
+
+    private void releaseVoiceCoordinatorAfterEditorLifecycle() {
+        VoiceTransactionSession session = activeVoiceTransaction;
+        if (session == null) return;
+        if (session.releaseAfterEditorLifecycle()) clearVoiceTransactionState();
     }
 
     private void insertRecoverableDraft() {
@@ -2543,9 +5073,9 @@ public final class OpenTypelessImeService extends InputMethodService {
             setStatus(R.string.ime_status_recoverable_audio_unavailable, true);
             return;
         }
-        if (recoveringSavedAudio || pipeline.state() != VoicePipeline.State.IDLE) return;
+        if (recoveringSavedAudio || voiceController.state() != VoiceController.State.IDLE) return;
         recoveringSavedAudio = true;
-        updateMicrophone(VoicePipeline.State.TRANSCRIBING);
+        updateMicrophone(VoiceController.State.TRANSCRIBING);
         setStatus(R.string.ime_status_recovering_audio, false);
         try {
             localIo.execute(() -> {
@@ -2587,7 +5117,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             public void onState(VoicePipeline.State state, String message) {
                 postUiIfAlive(() -> {
                     setStatus(R.string.ime_status_recovering_audio, false);
-                    updateMicrophone(state);
+                    updateMicrophone(VoicePipelineAdapter.controllerState(state));
                 });
             }
 
@@ -2596,8 +5126,8 @@ public final class OpenTypelessImeService extends InputMethodService {
                 postUiIfAlive(() -> {
                     recoveringSavedAudio = false;
                     boolean saved = saveRecoverableDraftFromResult(
-                            null, result.finalText(), result);
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                            null, result.voiceResult().finalText(), result);
+                    updateMicrophone(VoiceController.State.IDLE);
                     showRecoverableDraftOrClear();
                     setStatus(saved
                             ? R.string.ime_status_recoverable_audio_ready
@@ -2609,7 +5139,7 @@ public final class OpenTypelessImeService extends InputMethodService {
             public void onError(String message) {
                 postUiIfAlive(() -> {
                     recoveringSavedAudio = false;
-                    updateMicrophone(VoicePipeline.State.IDLE);
+                    updateMicrophone(VoiceController.State.IDLE);
                     setStatus(getString(
                             R.string.ime_status_recoverable_audio_failed,
                             safeMessage(message)), true);
@@ -2644,17 +5174,17 @@ public final class OpenTypelessImeService extends InputMethodService {
         finishingVoiceInput = false;
         activeCaptureMode = null;
         if (serviceDestroyed) {
-            destroyFinalizationGate.close();
-            closeServiceResources();
             return;
         }
-        updateMicrophone(VoicePipeline.State.IDLE);
+        updateMicrophone(VoiceController.State.IDLE);
         showRecoverableDraftOrClear();
         setStatus(R.string.ime_status_cancelled, false);
     }
 
     private boolean hasVisibleVoiceDraft() {
         if (recoverableDraft.hasDraft() || pipeline.hasRecoverableAudio()) return true;
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        if (transaction != null && transaction.compositionActive) return true;
         EditorProjection projection = activeV2Projection;
         if (projection != null && !projection.projectedFullText().isBlank()) return true;
         VoiceCompositionSession composition = activeComposition;
@@ -2667,6 +5197,8 @@ public final class OpenTypelessImeService extends InputMethodService {
     }
 
     private void discardActiveComposition() {
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        if (transaction != null) cancelVoiceTransaction(transaction);
         clearSpeechCoreProjectionState();
         VoiceCompositionSession composition = activeComposition;
         activeComposition = null;
@@ -2717,14 +5249,122 @@ public final class OpenTypelessImeService extends InputMethodService {
         });
     }
 
+    private void shadowStartInput(EditorInfo editor) {
+        if (!editorSessionShadowHealthy || editorSessionManager == null) return;
+        try {
+            // Keep framework capability lookup inside the shadow failure boundary. An OEM getter
+            // failure must never interrupt the authoritative legacy onStartInput path.
+            InputConnection connection = getCurrentInputConnection();
+            long shadowEpoch = editorSessionManager.onStartInput(editor, connection);
+            if (shadowEpoch != editorEpoch) disableEditorSessionShadow();
+        } catch (RuntimeException shadowFailure) {
+            disableEditorSessionShadow();
+        }
+    }
+
+    private void shadowSelectionChanged(int start, int end) {
+        if (!editorSessionShadowHealthy || editorSessionManager == null) return;
+        try {
+            editorSessionManager.onSelectionChanged(start, end);
+        } catch (RuntimeException shadowFailure) {
+            disableEditorSessionShadow();
+        }
+    }
+
+    private EditorSessionManager.CaptureResult shadowCaptureEditorSession(
+            InputConnection connection,
+            CharSequence selected,
+            CharSequence before,
+            CharSequence after) {
+        if (!editorSessionShadowHealthy || editorSessionManager == null) {
+            return unavailableEditorSessionCapture();
+        }
+        try {
+            // Ordinary keys consume this snapshot through EDT-016. Legacy voice/Undo/Raw callers
+            // still treat it as a sidecar and cannot derive a fallback write from rejection.
+            return editorSessionManager.captureFromEvidence(connection, selected, before, after);
+        } catch (RuntimeException shadowFailure) {
+            disableEditorSessionShadow();
+            return unavailableEditorSessionCapture();
+        }
+    }
+
+    private static EditorSessionManager.CaptureResult unavailableEditorSessionCapture() {
+        return new EditorSessionManager.Rejected(
+                EditorSessionManager.CaptureFailure.NO_ACTIVE_SESSION);
+    }
+
+    private void shadowFinishInput() {
+        if (!editorSessionShadowHealthy || editorSessionManager == null) return;
+        try {
+            long shadowEpoch = editorSessionManager.onFinishInput();
+            if (shadowEpoch != editorEpoch) disableEditorSessionShadow();
+        } catch (RuntimeException shadowFailure) {
+            disableEditorSessionShadow();
+        }
+    }
+
+    private void disableEditorSessionShadow() {
+        editorSessionShadowHealthy = false;
+        closeRimeComposition(false);
+        EditorSessionManager manager = editorSessionManager;
+        if (manager == null) return;
+        try {
+            // Any adapter failure revokes ordinary-key authority. Legacy voice behavior remains
+            // isolated until EDT-017; migrated keys never fall back to it.
+            manager.close();
+        } catch (RuntimeException ignored) {
+            // The manager is now unreachable and migrated keys fail closed.
+        }
+        releaseVoiceCoordinatorAfterEditorLifecycle();
+    }
+
+    private void closeEditorSessionShadow() {
+        EditorSessionManager manager = editorSessionManager;
+        editorSessionShadowHealthy = false;
+        editorSessionManager = null;
+        if (manager == null) return;
+        try {
+            manager.close();
+        } catch (RuntimeException ignored) {
+            // Service teardown still proceeds; no shadow callback retains this manager instance.
+        }
+    }
+
     @Override
     public void onStartInput(EditorInfo attribute, boolean restarting) {
-        stopPipelinePreservingDraft("", false);
+        closeRimeComposition(false);
+        rimeAvailabilityRequest++;
+        cancelVoiceForLifecycle();
         super.onStartInput(attribute, restarting);
         editorEpoch++;
+        shadowStartInput(attribute);
+        releaseVoiceCoordinatorAfterEditorLifecycle();
+        voiceRestartBlockedByLifecycle = lifecycleRestartBlocked(
+                voiceRestartBlockedByLifecycle, true, true);
         currentEditor = attribute;
+        InputContextClassifier.PrivacyClassification privacy =
+                InputContextClassifier.classifyPrivacy(attribute);
         currentFieldKind = InputContextClassifier.classify(attribute);
-        sensitiveField = currentFieldKind == FieldKind.SENSITIVE;
+        currentKeyboardFieldProfile = KeyboardFieldProfile.from(attribute, currentFieldKind);
+        if (latinKeyboardLayout != null) {
+            latinKeyboardLayout.setFieldProfile(currentKeyboardFieldProfile);
+        }
+        sensitiveField = privacy.sensitive();
+        currentLearningAllowed = privacy.learningAllowed();
+        if (keyboardCandidateBar != null) {
+            keyboardCandidateBar.clear();
+            keyboardCandidateBar.setPlaintextVisible(!sensitiveField);
+        }
+        keyboardToolbarPrivacy = KeyboardToolbarPrivacyPolicy.resolve(
+                PrivacyPolicyEngine.hardSafety(
+                        privacy.sensitive(), privacy.learningAllowed()));
+        applyKeyboardToolbarPrivacy();
+        if (keyboardInputModeLayout != null) {
+            keyboardInputModeLayout.select(privacy.sensitive()
+                    ? KeyboardInputModeLayout.Mode.QWERTY
+                    : KeyboardInputModeLayout.Mode.VOICE);
+        }
         AppProfile profile = attribute == null
                 ? null
                 : appProfileRepository.get(safe(attribute.packageName));
@@ -2734,6 +5374,7 @@ public final class OpenTypelessImeService extends InputMethodService {
         refreshModeButton();
         currentSelectionStart = attribute == null ? -1 : attribute.initialSelStart;
         currentSelectionEnd = attribute == null ? -1 : attribute.initialSelEnd;
+        refreshRimeAvailability(editorEpoch, privacy);
         refreshEnterKey();
         invalidateLastCommit();
         renderInputViewState();
@@ -2752,8 +5393,21 @@ public final class OpenTypelessImeService extends InputMethodService {
         CommitTarget target = activeTarget;
         currentSelectionStart = newSelStart;
         currentSelectionEnd = newSelEnd;
+        shadowSelectionChanged(newSelStart, newSelEnd);
+        RimeCompositionLease rimeLease = activeRimeLease;
+        if (rimeLease != null
+                && !rimeLease.acceptsSelection(
+                        newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
+            closeRimeComposition(false);
+        }
         VoiceCompositionSession composition = activeComposition;
         EditorProjection v2Projection = activeV2Projection;
+        VoiceTransactionSession transaction = activeVoiceTransaction;
+        boolean ownedTransactionMove = target != null
+                && transaction != null
+                && transaction.generation == target.voiceGeneration
+                && transaction.acceptsSelection(
+                        newSelStart, newSelEnd, candidatesStart, candidatesEnd);
         boolean ownedV2Move = target != null
                 && v2Projection != null
                 && v2Projection.acceptsSelection(
@@ -2784,8 +5438,16 @@ public final class OpenTypelessImeService extends InputMethodService {
                     getString(R.string.ime_status_cursor_moved_preserved), true);
             return;
         }
+        if (target != null
+                && transaction != null
+                && !ownedTransactionMove) {
+            stopPipelinePreservingDraft(
+                    getString(R.string.ime_status_cursor_moved_preserved), true);
+            return;
+        }
         if (!ownedCompositionMove
                 && !ownedV2Move
+                && !ownedTransactionMove
                 && target != null
                 && target.selectionStart >= 0
                 && target.selectionEnd >= 0
@@ -2797,23 +5459,40 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     @Override
     public void onFinishInput() {
-        stopPipelinePreservingDraft("", false);
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        closeRimeComposition(true);
+        rimeAvailabilityRequest++;
+        cancelVoiceForLifecycle();
         editorEpoch++;
+        shadowFinishInput();
+        releaseVoiceCoordinatorAfterEditorLifecycle();
+        voiceRestartBlockedByLifecycle = lifecycleRestartBlocked(
+                voiceRestartBlockedByLifecycle, true, true);
         currentEditor = null;
         sensitiveField = false;
+        currentLearningAllowed = false;
+        if (keyboardCandidateBar != null) {
+            keyboardCandidateBar.setPlaintextVisible(false);
+        }
+        keyboardToolbarPrivacy = restrictedToolbarPrivacy();
+        applyKeyboardToolbarPrivacy();
         invalidateLastCommit();
         super.onFinishInput();
     }
 
     @Override
     public void onFinishInputView(boolean finishingInput) {
-        stopPipelinePreservingDraft("", false);
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        closeRimeComposition(false);
+        cancelVoiceForLifecycle();
         super.onFinishInputView(finishingInput);
     }
 
     @Override
     public void onWindowHidden() {
-        stopPipelinePreservingDraft("", false);
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        closeRimeComposition(false);
+        cancelVoiceForLifecycle();
         super.onWindowHidden();
     }
 
@@ -2853,53 +5532,21 @@ public final class OpenTypelessImeService extends InputMethodService {
 
     @Override
     public void onDestroy() {
-        stopPipelinePreservingDraft("", false);
-        boolean deferShutdown = shouldDeferServiceShutdown(detachedTargetAwaitingResult);
-        if (deferShutdown) destroyFinalizationGate.begin();
-        // Volatile publication happens after the target and gate are ready. A worker observing
-        // true can therefore safely arbitrate its terminal callback against the timeout.
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        closeRimeComposition(true);
+        cancelVoiceForLifecycle();
+        unregisterScreenOffReceiver();
+        closeEditorSessionShadow();
+        releaseVoiceCoordinatorAfterEditorLifecycle();
         serviceDestroyed = true;
         activeTarget = null;
-        if (deferShutdown) {
-            // Keep the headless recognition pipeline alive long enough to deliver the already
-            // requested final. The callback persists it without touching a destroyed IME view.
-            mainHandler.postDelayed(
-                    destroyFinalizationTimeout, DESTROY_FINALIZATION_TIMEOUT_MILLIS);
-        } else {
-            destroyFinalizationGate.close();
-            closeServiceResources();
-        }
+        closeServiceResources();
         super.onDestroy();
-    }
-
-    private void finishDestroyedService() {
-        if (!serviceDestroyed || detachedTargetAwaitingResult != null) return;
-        closeServiceResources();
-    }
-
-    private void forceCloseDestroyedService() {
-        if (!serviceDestroyed || resourcesClosed) return;
-        // Once a terminal callback has entered the process, its already queued headless handler
-        // owns teardown. This prevents a timeout from closing localIo ahead of the final write.
-        if (!destroyFinalizationGate.claimTimeout()) return;
-        CommitTarget target = detachedTargetAwaitingResult;
-        PendingDetachedSession<CommitTarget> pending = detachedSessionFor(target);
-        detachedTargetAwaitingResult = null;
-        if (pending != null) {
-            pending.complete();
-            RecoverableDraftSlot.Draft draft = recoverableDraft.get();
-            if (draft == null || draft.source() != pending.recoveryToken) {
-                clearDetachedSession(pending);
-            }
-        }
-        pipeline.cancel();
-        closeServiceResources();
     }
 
     private void closeServiceResources() {
         if (resourcesClosed) return;
         resourcesClosed = true;
-        if (mainHandler != null) mainHandler.removeCallbacks(destroyFinalizationTimeout);
         if (mainHandler != null) mainHandler.removeCallbacks(pendingDetachedRefresh);
         pipeline.shutdown();
         try {
@@ -3052,11 +5699,11 @@ public final class OpenTypelessImeService extends InputMethodService {
         });
     }
 
-    private String localizedPipelineState(VoicePipeline.State state) {
+    private String localizedPipelineState(VoiceController.State state) {
         return getString(localizedPipelineStateResource(state));
     }
 
-    private int localizedPipelineStateResource(VoicePipeline.State state) {
+    private int localizedPipelineStateResource(VoiceController.State state) {
         return switch (state) {
             case IDLE -> R.string.ime_state_idle;
             case RECORDING -> R.string.ime_state_recording;
@@ -3077,7 +5724,7 @@ public final class OpenTypelessImeService extends InputMethodService {
                 || capturedStart == currentStart && capturedEnd == currentEnd;
     }
 
-    private String localizedPipelineStatus(VoicePipeline.State state) {
+    private String localizedPipelineStatus(VoiceController.State state) {
         return switch (state) {
             case IDLE -> getString(
                     R.string.ime_status_ready_mode, localizedModeLabel(selectedMode));

@@ -56,6 +56,50 @@ public final class OpenAiCompatibleClientTest {
     }
 
     @Test
+    public void configuredUploadSeamBorrowsCredentialAndRejectsBoundsBeforeNetwork()
+            throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"text\":\"bounded\"}"));
+        char[] credential = "borrowed-secret".toCharArray();
+
+        String result = new OpenAiCompatibleClient().transcribe(
+                new byte[]{4, 3, 2, 1},
+                baseUrl(),
+                credential,
+                "whisper-test",
+                "zh-CN",
+                "expected term",
+                () -> false);
+
+        assertEquals("bounded", result);
+        RecordedRequest request = server.takeRequest();
+        assertEquals("Bearer borrowed-secret", request.getHeader("Authorization"));
+        assertEquals("borrowed-secret", new String(credential));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiCompatibleClient().transcribe(
+                        new byte[]{1},
+                        baseUrl(),
+                        new char[0],
+                        "whisper-test",
+                        "",
+                        "x".repeat(2_001),
+                        () -> false));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new OpenAiCompatibleClient().transcribe(
+                        new byte[0],
+                        baseUrl(),
+                        new char[0],
+                        "whisper-test",
+                        "",
+                        "",
+                        () -> false));
+        assertEquals(1, server.getRequestCount());
+    }
+
+    @Test
     public void rejectsRedirectWithoutFollowingOrLeakingAuthorization() {
         server.enqueue(new MockResponse()
                 .setResponseCode(307)
@@ -64,6 +108,10 @@ public final class OpenAiCompatibleClientTest {
         Exception error = assertThrows(Exception.class, () -> new OpenAiCompatibleClient()
                 .transcribe(new byte[]{1, 2}, settings(baseUrl(), "top-secret"), ""));
 
+        assertTrue(error instanceof OpenAiCompatibleClient.RequestException);
+        assertEquals(
+                OpenAiCompatibleClient.RequestFailure.REDIRECT_REJECTED,
+                ((OpenAiCompatibleClient.RequestException) error).failure());
         assertTrue(error.getMessage().contains("redirect was rejected"));
         assertEquals(1, server.getRequestCount());
     }
@@ -137,6 +185,10 @@ public final class OpenAiCompatibleClientTest {
         Exception error = assertThrows(Exception.class, () -> new OpenAiCompatibleClient()
                 .transcribe(new byte[]{1, 2}, settings(baseUrl(), "token"), ""));
 
+        assertTrue(error instanceof OpenAiCompatibleClient.RequestException);
+        assertEquals(
+                OpenAiCompatibleClient.RequestFailure.PROTOCOL_ERROR,
+                ((OpenAiCompatibleClient.RequestException) error).failure());
         assertTrue(error.getMessage().contains("too long"));
     }
 

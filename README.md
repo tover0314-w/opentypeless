@@ -9,6 +9,10 @@ than a mandatory-cloud “ASR + LLM” keyboard.
 
 - Fork: [dengxuezhao/opentypeless](https://github.com/dengxuezhao/opentypeless)
 - Upstream project: [tover0314-w/opentypeless](https://github.com/tover0314-w/opentypeless)
+- Architecture and implementation specification: [documentation index](docs/opentypeless_specs/00_README.md)
+- Architecture decision records: [ADR index and lifecycle](docs/adr/README.md)
+- Release history: [changelog](CHANGELOG.md)
+- Runtime, config, protocol, and schema compatibility: [compatibility matrix](docs/COMPATIBILITY.md)
 
 ## Android 0.3 highlights
 
@@ -162,16 +166,28 @@ five recognition backends.
 
 ## Build and verify Android
 
-Requirements: JDK 17, Android SDK Platform 35, and Build Tools 35.x.
+Requirements: JDK 17, Android SDK Platform 35, and Build Tools 35.0.0. Install the same
+SDK-style package paths used by CI before running the verifier:
 
 ```bash
-cd android
+sdkmanager --install \
+  "platform-tools" \
+  "platforms;android-35" \
+  "build-tools;35.0.0"
+```
+
+```bash
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/android-sdk
-python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-asr-1.13.4.aar
-./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
-./gradlew connectedDebugAndroidTest  # with an API 35+ emulator/device online
+scripts/verify_android.sh
+cd android && ./gradlew connectedDebugAndroidTest  # with an API 35+ emulator/device online
 ```
+
+`scripts/verify_android.sh` is the same non-interactive entry point used by CI. It verifies the
+pinned SDK declarations and ASR runtime, enforces strict Gradle dependency verification, starts
+from `clean`, and runs the JVM tests, release lint, debug/release assemblies, and AndroidTest
+assembly. CI also installs the exact `google_apis/x86_64` system-image coordinate selected by its
+API 26/33/35/36 matrix before starting each emulator.
 
 The checked-in native runtime supports 64-bit ARM devices and x86_64 emulators. Rebuilding that
 AAR from its pinned sources additionally requires Android NDK r27d; use
@@ -190,10 +206,12 @@ boundary assembly, encrypted multi-segment journal recovery, quality-job generat
 Unicode-safe editor projection, one-session undo, production-route diagnostics, and a tested
 emergency rollback boundary.
 
-The 0.3 review, automated evidence, physical-device procedure, and open gates are documented in
-[the Android 0.3 review and acceptance report](docs/2026-08-09-android-0.3-review-acceptance.md).
-The [0.2 acceptance report](docs/2026-08-09-byok-android-acceptance.md) remains the historical
-baseline.
+The current local build, artifact hashes, Xiaomi 10 Ultra failures, and open release gates are
+recorded in [the 2026-08-14 Android baseline acceptance report](docs/2026-08-14-android-baseline-acceptance.md).
+Advisory code-size, method-complexity, APK-size, and test-count trends are recorded in the
+[2026-08-14 engineering metrics baseline](docs/2026-08-14-engineering-metrics-baseline.md).
+The [Android 0.3 review](docs/2026-08-09-android-0.3-review-acceptance.md) and
+[0.2 acceptance report](docs/2026-08-09-byok-android-acceptance.md) remain historical baselines.
 
 The release build produced by a local checkout is unsigned unless a signing configuration is
 provided. Never distribute it as a trusted release without signing and publishing checksums. The

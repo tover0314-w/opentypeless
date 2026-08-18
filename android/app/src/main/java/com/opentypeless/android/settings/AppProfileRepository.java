@@ -3,11 +3,8 @@ package com.opentypeless.android.settings;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import com.opentypeless.android.config.AppRule;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -15,8 +12,7 @@ import java.util.regex.Pattern;
 /** Stores a bounded set of non-secret, explicit per-app processing profiles. */
 public final class AppProfileRepository {
     private static final String STORE = "opentypeless_app_profiles";
-    private static final String KEY = "profiles_v1";
-    private static final int MAX_PROFILES = 100;
+    private static final int MAX_PROFILES = LegacyAppProfileMigration.MAX_PROFILES;
     private static final Pattern PACKAGE = Pattern.compile("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+");
 
     private final SharedPreferences preferences;
@@ -40,31 +36,48 @@ public final class AppProfileRepository {
         return List.copyOf(profiles);
     }
 
+    /** Returns the validated CFG-007 compatibility shadow without making it runtime authority. */
+    public List<AppRule> loadMigratedAppRules() {
+        return LegacyAppProfileMigration.migrate(preferences);
+    }
+
     public synchronized void save(AppProfile profile) {
-        String packageName = cleanPackage(profile.packageName(), true);
-        String target = limit(profile.targetLanguage(), 80, "Target language");
-        String instructions = limit(profile.customInstructions(), 1_000, "Writing preference");
-        List<AppProfile> profiles = readAll();
-        profiles.removeIf(existing -> existing.packageName().equals(packageName));
-        if (profiles.size() >= MAX_PROFILES) {
-            throw new IllegalArgumentException("At most 100 app profiles can be stored");
+        synchronized (LegacyAppProfileMigration.class) {
+            String packageName = cleanPackage(profile.packageName(), true);
+            String target = limit(profile.targetLanguage(), 80, "Target language");
+            String instructions = limit(profile.customInstructions(), 1_000, "Writing preference");
+            List<AppProfile> profiles = new java.util.ArrayList<>(
+                    LegacyAppProfileMigration.readProfilesForUpdate(preferences));
+            profiles.removeIf(existing -> existing.packageName().equals(packageName));
+            if (profiles.size() >= MAX_PROFILES) {
+                throw new IllegalArgumentException("At most 100 app profiles can be stored");
+            }
+            profiles.add(new AppProfile(
+                    packageName,
+                    profile.mode(),
+                    target,
+                    instructions,
+                    profile.sendContext()));
+            writeAll(profiles);
         }
-        profiles.add(new AppProfile(
-                packageName,
-                profile.mode(),
-                target,
-                instructions,
-                profile.sendContext()));
-        writeAll(profiles);
     }
 
     public synchronized void delete(String packageName) {
-        String key = cleanPackage(packageName, false);
-        List<AppProfile> profiles = readAll();
-        if (profiles.removeIf(profile -> profile.packageName().equals(key))) writeAll(profiles);
+        synchronized (LegacyAppProfileMigration.class) {
+            String key = cleanPackage(packageName, false);
+            List<AppProfile> profiles = new java.util.ArrayList<>(
+                    LegacyAppProfileMigration.readProfilesForUpdate(preferences));
+            if (profiles.removeIf(profile -> profile.packageName().equals(key))) {
+                writeAll(profiles);
+            }
+        }
     }
 
     public AppSettings apply(AppSettings base, AppProfile profile) {
+        return applyProfile(base, profile);
+    }
+
+    static AppSettings applyProfile(AppSettings base, AppProfile profile) {
         if (profile == null) return base;
         return new AppSettings(
                 base.recognitionBackend(),
@@ -94,44 +107,12 @@ public final class AppProfileRepository {
     }
 
     private List<AppProfile> readAll() {
-        String encoded = preferences.getString(KEY, "[]");
-        List<AppProfile> result = new ArrayList<>();
-        try {
-            JSONArray array = new JSONArray(encoded == null ? "[]" : encoded);
-            int count = Math.min(array.length(), MAX_PROFILES);
-            for (int index = 0; index < count; index++) {
-                JSONObject item = array.optJSONObject(index);
-                if (item == null) continue;
-                String packageName = cleanPackage(item.optString("packageName"), false);
-                if (packageName.isEmpty()) continue;
-                result.add(new AppProfile(
-                        packageName,
-                        ProcessingMode.fromStored(item.optString("mode")),
-                        safeLimit(item.optString("targetLanguage"), 80),
-                        safeLimit(item.optString("customInstructions"), 1_000),
-                        item.optBoolean("sendContext", false)));
-            }
-        } catch (JSONException ignored) {
-            preferences.edit().remove(KEY).apply();
-        }
-        return result;
+        return new java.util.ArrayList<>(
+                LegacyAppProfileMigration.readLegacyProfiles(preferences));
     }
 
     private void writeAll(List<AppProfile> profiles) {
-        JSONArray array = new JSONArray();
-        for (AppProfile profile : profiles) {
-            try {
-                array.put(new JSONObject()
-                        .put("packageName", profile.packageName())
-                        .put("mode", profile.mode().name())
-                        .put("targetLanguage", profile.targetLanguage())
-                        .put("customInstructions", profile.customInstructions())
-                        .put("sendContext", profile.sendContext()));
-            } catch (JSONException error) {
-                throw new IllegalStateException("Unable to save app profile", error);
-            }
-        }
-        preferences.edit().putString(KEY, array.toString()).apply();
+        LegacyAppProfileMigration.writeProfiles(preferences, profiles);
     }
 
     private static String cleanPackage(String value, boolean required) {
@@ -152,11 +133,4 @@ public final class AppProfileRepository {
         return clean;
     }
 
-    private static String safeLimit(String value, int maximum) {
-        String clean = value == null ? "" : value.trim();
-        int count = clean.codePointCount(0, clean.length());
-        return count <= maximum
-                ? clean
-                : clean.substring(0, clean.offsetByCodePoints(0, maximum));
-    }
 }

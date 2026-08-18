@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenTypeless IME Test Host</string>
+    <string name="host_title">IME Test Host</string>
+    <string name="host_plain_text">Plain text</string>
+    <string name="host_short_message">Short message</string>
+    <string name="host_long_text">Long text</string>
+    <string name="host_person_name">Person name</string>
+    <string name="host_search">Search</string>
+    <string name="host_email">Email address</string>
+    <string name="host_uri">Web address</string>
+    <string name="host_phone">Phone number</string>
+    <string name="host_number">Decimal number</string>
+    <string name="host_date">Date</string>
+    <string name="host_password">Password</string>
+    <string name="host_visible_password">Visible password</string>
+    <string name="host_number_password">Number password</string>
+    <string name="host_otp">One-time verification code</string>
+    <string name="host_payment_card">Payment card number</string>
+    <string name="host_identity_number">Identity number</string>
+    <string name="host_no_learning">Private note without personalized learning</string>
+    <string name="host_single_line_done">Single line Done</string>
+    <string name="host_rtl_text">RTL text</string>
+    <string name="host_web_contenteditable">Web contenteditable</string>
+    <string name="host_dynamic_text">Dynamic text</string>
+</resources>

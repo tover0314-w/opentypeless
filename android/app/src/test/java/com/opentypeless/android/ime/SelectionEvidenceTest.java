@@ -76,6 +76,34 @@ public final class SelectionEvidenceTest {
         assertTrue(OpenTypelessImeService.selectionCoordinatesStillMatch(8, 8, -1, -1));
     }
 
+    @Test
+    public void surroundingReadDecisionIsExplicitForEverySelectionOutcome() {
+        assertEquals(
+                OpenTypelessImeService.SelectionCaptureDecision.ACCEPT,
+                decide(resolve(4, 4, null, -1, -1, false), 4_000));
+        assertEquals(
+                OpenTypelessImeService.SelectionCaptureDecision.UNKNOWN,
+                decide(resolve(-1, -1, null, -1, -1, false), 4_000));
+        assertEquals(
+                OpenTypelessImeService.SelectionCaptureDecision.UNAVAILABLE,
+                decide(resolve(2, 7, null, -1, -1, false), 4_000));
+        assertEquals(
+                OpenTypelessImeService.SelectionCaptureDecision.TOO_LONG,
+                decide(resolve(0, 2, "ab", -1, -1, false), 1));
+    }
+
+    @Test
+    public void selectionDecisionCountsUnicodeCodePoints() {
+        assertEquals(
+                OpenTypelessImeService.SelectionCaptureDecision.ACCEPT,
+                decide(resolve(0, 2, "\uD83D\uDE00", -1, -1, false), 1));
+    }
+
+    private static OpenTypelessImeService.SelectionCaptureDecision decide(
+            OpenTypelessImeService.SelectionEvidence evidence, int maximum) {
+        return OpenTypelessImeService.selectionCaptureDecision(evidence, maximum);
+    }
+
     private static OpenTypelessImeService.SelectionEvidence resolve(
             int reportedStart,
             int reportedEnd,

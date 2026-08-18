@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opentypeless.local/protocol/opentypeless-rime-import-manifest-v1.schema.json",
+  "title": "OpenTypeless local Rime resource manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "entrypoint",
+    "networkAccess",
+    "autoUpdate",
+    "fileSetPolicy",
+    "packageId",
+    "packageVersion",
+    "displayName",
+    "sourceUrl",
+    "sourceRevision",
+    "author",
+    "rightsholder",
+    "licenseExpression",
+    "licenseTextPath",
+    "noticePaths",
+    "usageBasis",
+    "trustState",
+    "distributionScope",
+    "compatibleLibrime",
+    "selectedSchemas",
+    "files",
+    "dependencies"
+  ],
+  "properties": {
+    "format": {
+      "const": "opentypeless.rime-resource-manifest"
+    },
+    "version": {
+      "const": 1
+    },
+    "entrypoint": {
+      "const": "ANDROID_SAF_OPEN_DOCUMENT"
+    },
+    "networkAccess": {
+      "const": false
+    },
+    "autoUpdate": {
+      "const": false
+    },
+    "fileSetPolicy": {
+      "const": "EXACT_MANIFEST_ONLY"
+    },
+    "packageId": {
+      "$ref": "#/$defs/packageId"
+    },
+    "packageVersion": {
+      "$ref": "#/$defs/versionString"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "sourceUrl": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uri",
+      "maxLength": 2048,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "sourceRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "rightsholder": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "licenseExpression": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "licenseTextPath": {
+      "$ref": "#/$defs/safeRelativePath"
+    },
+    "noticePaths": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/safeRelativePath"
+      }
+    },
+    "usageBasis": {
+      "const": "USER_PROVIDED_UNVERIFIED"
+    },
+    "trustState": {
+      "const": "USER_PROVIDED_UNVERIFIED"
+    },
+    "distributionScope": {
+      "const": "LOCAL_ONLY"
+    },
+    "compatibleLibrime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumVersion",
+        "maximumVersionExclusive"
+      ],
+      "properties": {
+        "minimumVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "maximumVersionExclusive": {
+          "$ref": "#/$defs/versionString"
+        }
+      }
+    },
+    "selectedSchemas": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/fileEntry"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/dependencyEntry"
+      }
+    }
+  },
+  "$defs": {
+    "packageId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "versionString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*\\/$)[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+    },
+    "fileEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "role"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/safeRelativePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "role": {
+          "enum": [
+            "SCHEMA_YAML",
+            "DICTIONARY_YAML",
+            "CONFIG_YAML",
+            "TEXT_TABLE",
+            "OPENCC_CONFIG",
+            "OPENCC_DATA",
+            "LICENSE_TEXT",
+            "NOTICE_TEXT",
+            "PROVENANCE_TEXT"
+          ]
+        }
+      }
+    },
+    "dependencyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packageId",
+        "packageVersion",
+        "sourceRevision",
+        "licenseExpression",
+        "files"
+      ],
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/packageId"
+        },
+        "packageVersion": {
+          "$ref": "#/$defs/versionString"
+        },
+        "sourceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+        },
+        "licenseExpression": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]+$"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/fileEntry"
+          }
+        }
+      }
+    }
+  }
+}

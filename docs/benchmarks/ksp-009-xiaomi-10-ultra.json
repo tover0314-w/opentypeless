@@ -1,0 +1,202 @@
+{
+  "schema_version": 1,
+  "task": "KSP-009",
+  "decision": "functional evidence only; KSP-010 remains the sole keyboard-base selection task",
+  "device": {
+    "adb_target": "explicit_serial_redacted",
+    "manufacturer": "Xiaomi",
+    "model": "M2007J1SC",
+    "device": "cas",
+    "android_release": "13",
+    "api": 33,
+    "hyperos_incremental": "V816.0.4.0.TJJCNXM",
+    "security_patch": "2024-03-01",
+    "screen_off_timeout_ms": 600000,
+    "stay_on_while_plugged_in": 0,
+    "original_default_ime": "com.flypy.input/PangIME.Android.InputService"
+  },
+  "device_restoration": {
+    "default_and_only_enabled_ime": "com.flypy.input/PangIME.Android.InputService",
+    "floris_enabled": false,
+    "fcitx_enabled": false,
+    "accelerometer_rotation": 1,
+    "user_rotation": 0,
+    "screen_off_timeout_ms": 600000,
+    "stay_on_while_plugged_in": 0,
+    "lock_screen_disabled": true,
+    "lock_screen_lock_after_timeout_ms": 2147483647,
+    "power_button_instantly_locks": 0,
+    "accessibility_services_restored": true,
+    "final_wakefulness": "Dozing",
+    "final_keyguard_showing": false
+  },
+  "artifacts": {
+    "A": {
+      "main_apk": {
+        "bytes": 33949144,
+        "sha256": "0e98f7458ab2aa0237afbdb3ab56c56e380fa21db397f0a72ba5bee2e436f648"
+      },
+      "android_test_apk": {
+        "sha256": "e3f0a9821cd66ed3a6ad193cf42bf7372ab09bfb5729f26910d415dd93a0c76f"
+      }
+    },
+    "B": {
+      "main_arm64_apk": {
+        "bytes": 59762479,
+        "sha256": "1471ad9e4a82502ea1bde4dbbc0f5bcd18148d712394c2f45991b5960ee5cbec"
+      },
+      "android_test_apk": {
+        "sha256": "b5ca4d367a3f57038f6889897a6205f730774386007f48e07fbd2d2ed742d603"
+      },
+      "rime_plugin_arm64_apk": {
+        "bytes": 8942660,
+        "sha256": "fc4a1f426934dae7c2de9ca2ea4413f8b693b7202285a6d252379a220d91c5a2"
+      },
+      "upstream_head": "048f581c652367567b8ee5c28c5163b805288895"
+    },
+    "test_host": {
+      "main_sha256": "4a094ecdb30edbee995d2c4592daf396de5d8b2f18a8449315464960b57ea1b5",
+      "android_test_sha256": "53d9dc5d06b095fa316aba43e40bf7c48d120661daa38fe33cf87ae0648dba3b"
+    }
+  },
+  "field_layouts": {
+    "A": {
+      "plain_short_long_name_search": "QWERTY",
+      "email": "QWERTY with a dedicated @ key",
+      "uri": "QWERTY with a dedicated / key",
+      "phone": "telephone numeric layout",
+      "decimal_number": "numeric layout",
+      "date": "generic QWERTY fallback",
+      "password": "delegated to com.miui.securityinputmethod; FLAG_SECURE produced a zero-byte adb screenshot",
+      "result": "PASS with the documented date fallback"
+    },
+    "B": {
+      "plain_short_long_name_search": "QWERTY",
+      "email": "generic QWERTY; @ is a key hint rather than a dedicated bottom-row key",
+      "uri": "generic QWERTY; / is a key hint rather than a dedicated bottom-row key",
+      "phone": "telephone numeric layout",
+      "decimal_number": "numeric layout",
+      "date": "generic QWERTY fallback",
+      "password": "delegated to com.miui.securityinputmethod; FLAG_SECURE produced a zero-byte adb screenshot",
+      "result": "PASS with weaker email/URI specialization and the documented date fallback"
+    }
+  },
+  "orientation": {
+    "A": "PASS; actual landscape IME used an extracted fullscreen editor",
+    "B": "PASS; actual landscape IME retained an inline host field above the keyboard"
+  },
+  "accessibility": {
+    "talkback_device_probe": "TalkBack bound with touch exploration enabled and a TYPE_INPUT_METHOD window observed; all MIUI permission prompts were cancelled and the original accessibility service list was restored",
+    "A": {
+      "baseline": "PASS",
+      "nodes": 128,
+      "visible_nodes": 128,
+      "labeled_visible_nodes": 56,
+      "actionable_nodes": 1,
+      "screen_reader_focusable_actionable_nodes": 1,
+      "described_screen_reader_focusable_actionable_nodes": 0,
+      "strict_descriptor_probe": "FAIL; one screen-reader-focusable action had no own or descendant label"
+    },
+    "B": {
+      "baseline": "PASS",
+      "nodes": 155,
+      "visible_nodes": 154,
+      "labeled_visible_nodes": 57,
+      "actionable_nodes": 36,
+      "described_actionable_nodes": 31,
+      "screen_reader_focusable_actionable_nodes": 0,
+      "strict_descriptor_probe": "PASS vacuously for the explicit screenReaderFocusable flag; five clickable subtrees remained unlabeled and require follow-up user-navigation testing"
+    }
+  },
+  "themes": {
+    "A": {
+      "actual_render": "dark keyboard rendered on device",
+      "modes_from_fixed_source": [
+        "ALWAYS_DAY",
+        "ALWAYS_NIGHT",
+        "FOLLOW_SYSTEM",
+        "FOLLOW_TIME"
+      ],
+      "default": "FOLLOW_SYSTEM"
+    },
+    "B": {
+      "actual_render": "dark keyboard rendered on device",
+      "actual_settings": "theme gallery opened successfully with multiple light, dark, dynamic and custom previews"
+    }
+  },
+  "clipboard": {
+    "privacy_rule": "No clipboard value was read, written, pasted, logged or stored by KSP-009",
+    "A": {
+      "actual_surface": "clipboard toolbar icon visible",
+      "fixed_source_default_history_enabled": false,
+      "fixed_source_default_sync_to_system": "NO_EVENTS",
+      "fixed_source_default_suggestions_enabled": true
+    },
+    "B": {
+      "actual_surface": "clipboard toolbar icon visible after expanding the toolbar; settings page opened without reading entries",
+      "actual_default_history_enabled": true,
+      "actual_history_limit": 10,
+      "actual_suggestions_enabled": true,
+      "actual_mask_sensitive_enabled": true
+    }
+  },
+  "rime": {
+    "A": {
+      "shell_integration": "FAIL; the KSP-003 Floris shell does not contain the KSP-004 Rime adapter and the two remain separate spike packages",
+      "separate_adapter": "KSP-004 remains independently functional but cannot be scored as an integrated route-A IME"
+    },
+    "B": {
+      "plugin_detection": "PASS; fcitx host detected domain fcitx5-rime, merged Rime data and added the plugin native library directory",
+      "functional_instrumentation": "PASS 1/1; actual Rime preedit, candidate and commit shared the OpenTypeless transaction writer with QWERTY"
+    }
+  },
+  "upstream_sync": {
+    "A": {
+      "baseline": "KSP-002 fixed upstream build tree before later KSP-008-only test additions",
+      "changed_files": 49,
+      "patch_bytes": 366089,
+      "patch_sha256": "bdf8c83f659cd545903fe3159d313f359baa06dd2e26baf613cc8c84f5dccd36",
+      "git_apply_check": "PASS",
+      "git_apply": "PASS"
+    },
+    "B": {
+      "baseline": "048f581c652367567b8ee5c28c5163b805288895",
+      "changed_files": 49,
+      "patch_bytes": 380004,
+      "patch_sha256": "94101871475aba3e2631426fc168702f2a23820beaaaeb54517a985c3ca78f7d",
+      "git_apply_check": "PASS",
+      "git_apply": "PASS"
+    }
+  },
+  "screenshot_hashes": {
+    "A_plain": "80dea79cc1d0ae6d6502750abd6dbf3b33289c2f7590cc5a72f9e229935f5d2c",
+    "A_email": "28c7cd8fe6bb3d4ef6e00e690cb1fb58d79c1d505eacc7e7495e480d60bbeb2d",
+    "A_phone": "cced7d0666093987cd6aca521ec2f9b8279c0eda57670f4eb8609979818c9064",
+    "A_password_secure_zero_bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "A_landscape": "36a968892a49f346b025a9bfc2d5d6f19f616c6bd88ccb2562a4627ce86343b5",
+    "B_email": "14d48bc66eefaae853fe28ff360ce1b8f909d225f30d2b16b74ed512e8d87e3a",
+    "B_phone": "8285b892dd85a42f808c5054e975a1cf5927c4a2a646e17b854e54a63f03bf29",
+    "B_password_secure_zero_bytes": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "B_landscape": "7128d2c3b2fc8c82058c79716efb8ce57ab39c1492ba7449cd5cf55f7abd118e",
+    "B_expanded_toolbar": "7e0004b1c286641a7f546d531db542c619455e8c17a1e39a611f290bcce07656",
+    "B_theme_settings": "b6f35ad1976db7008576c11a776604bacf605d5ca1349bfe4037cc3eaa114c08",
+    "B_clipboard_settings": "133cacd0e06211cdf0cb4baa667dc1e8a35aad3108aac6e844212e15ea160a3d"
+  },
+  "tests": {
+    "test_host_full_suite": "PASS 4/4; the candidate-specific case was skipped by an explicit assumption after both candidates were disabled during device restoration",
+    "route_a_accessibility_baseline": "PASS 1/1",
+    "route_b_accessibility_baseline": "PASS 1/1",
+    "route_a_strict_accessibility_descriptor": "FAIL; one screen-reader-focusable action lacked an accessible description",
+    "route_b_strict_accessibility_descriptor": "PASS vacuously for screenReaderFocusable; five clickable subtrees remained unlabeled",
+    "route_b_actual_rime_transaction": "PASS 1/1",
+    "test_host_build": "PASS with strict dependency verification",
+    "field_orientation_theme_clipboard_matrix": "PASS with candidate-specific caveats recorded above",
+    "upstream_patch_replay": "PASS for both routes"
+  },
+  "scope_limits": {
+    "route_a": "Rime is not integrated into the Floris shell and must not be scored as if it were",
+    "route_b": "The debug candidate exposes a functional official Rime plugin but retains upstream clipboard-history defaults that require product-policy changes",
+    "accessibility": "Tree metrics and one TalkBack activation probe do not replace a full human screen-reader navigation study",
+    "selection": "ADR-0011 remains Proposed until KSP-010"
+  }
+}

@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opentypeless.local/schema/streaming-recognition-event-v1.json",
+  "title": "OpenTypeless Streaming Recognition Event v1",
+  "description": "One JSON object per WebSocket text frame or SSE data event. Stateful sequence, revision, and terminal rules are enforced by the REC-002 validator.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/preparing"
+    },
+    {
+      "$ref": "#/$defs/ready"
+    },
+    {
+      "$ref": "#/$defs/speech_started"
+    },
+    {
+      "$ref": "#/$defs/partial"
+    },
+    {
+      "$ref": "#/$defs/endpoint"
+    },
+    {
+      "$ref": "#/$defs/final"
+    },
+    {
+      "$ref": "#/$defs/failure"
+    },
+    {
+      "$ref": "#/$defs/cancelled"
+    }
+  ],
+  "$defs": {
+    "protocol": {
+      "const": "opentypeless.streaming.v1"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F]{1,128}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detected_language_tag": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "audio_duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 540000
+        }
+      }
+    },
+    "preparing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "preparing" }
+      }
+    },
+    "ready": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "ready" }
+      }
+    },
+    "speech_started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "speech_started" }
+      }
+    },
+    "partial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type", "text"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "partial" },
+        "text": {
+          "type": "string",
+          "maxLength": 20000
+        },
+        "stable_prefix_utf16": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40000
+        },
+        "revision_of": {
+          "$ref": "#/$defs/sequence"
+        }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "endpoint" }
+      }
+    },
+    "final": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type", "text", "metadata"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "final" },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type", "failure_class"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "failure" },
+        "failure_class": {
+          "enum": [
+            "UNAVAILABLE",
+            "MODEL_MISSING",
+            "PERMISSION_DENIED",
+            "OEM_MIC_BLOCKED",
+            "AUDIO_ERROR",
+            "NETWORK_UNAVAILABLE",
+            "NETWORK_TIMEOUT",
+            "AUTHENTICATION",
+            "QUOTA_EXCEEDED",
+            "RATE_LIMITED",
+            "SERVER_ERROR",
+            "PROTOCOL_ERROR",
+            "RECOGNIZER_BUSY",
+            "NO_MATCH",
+            "SPEECH_TIMEOUT",
+            "UNSUPPORTED_LANGUAGE",
+            "TARGET_CHANGED",
+            "INTERNAL_ERROR"
+          ]
+        }
+      }
+    },
+    "cancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "session_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocol" },
+        "session_id": { "$ref": "#/$defs/session_id" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "type": { "const": "cancelled" }
+      }
+    }
+  }
+}

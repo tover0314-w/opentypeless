@@ -6,6 +6,10 @@
 
 - Fork：[dengxuezhao/opentypeless](https://github.com/dengxuezhao/opentypeless)
 - 上游项目：[tover0314-w/opentypeless](https://github.com/tover0314-w/opentypeless)
+- 架构与开发规范：[文档索引](docs/opentypeless_specs/00_README.md)
+- 架构决策记录：[ADR 索引与生命周期](docs/adr/README.md)
+- 发布与变更历史：[变更日志](CHANGELOG.md)
+- 运行时、配置、协议与 Schema 兼容性：[兼容矩阵](docs/COMPATIBILITY.md)
 
 ## Android 0.3 核心能力
 
@@ -66,16 +70,27 @@ Android 当前实际使用的 226.21 MiB 流式模型也已单独跑过固定 20
 
 ## 构建与验收
 
-需要 JDK 17、Android SDK Platform 35、Build Tools 35.x。
+需要 JDK 17、Android SDK Platform 35、Build Tools 35.0.0。运行验收脚本前，先安装与 CI
+一致的 SDK package path：
 
 ```bash
-cd android
+sdkmanager --install \
+  "platform-tools" \
+  "platforms;android-35" \
+  "build-tools;35.0.0"
+```
+
+```bash
 export JAVA_HOME=/path/to/jdk-17
 export ANDROID_HOME=/path/to/android-sdk
-python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-asr-1.13.4.aar
-./gradlew clean testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
-./gradlew connectedDebugAndroidTest  # 连接 API 35+ 模拟器或设备
+scripts/verify_android.sh
+cd android && ./gradlew connectedDebugAndroidTest  # 连接 API 35+ 模拟器或设备
 ```
+
+`scripts/verify_android.sh` 是本地与 CI 共用的非交互入口：它会校验固定的 SDK 声明和 ASR
+runtime，强制 Gradle 严格依赖校验，从 `clean` 开始执行 JVM 测试、Release Lint、Debug/Release
+构建和 AndroidTest 构建。CI 还会在启动模拟器前，按 API 26/33/35/36 矩阵显式安装对应的
+`google_apis/x86_64` system image 坐标。
 
 仓库内的原生运行时支持 64 位 ARM 真机与 x86_64 模拟器。若要从固定源码重新构建该 AAR，
 还需要 Android NDK r27d；审计构建命令和输入来源见
@@ -84,8 +99,11 @@ python3 scripts/build_sherpa_asr_runtime.py --verify-aar app/libs/sherpa-onnx-as
 自动化测试覆盖：转写修订、编辑框 composing/取消竞态、Paraformer 协议与传输事件、确定性个性化、NFKC span 映射、prompt 信任边界、事实完整性、VAD、取消状态、编辑目标身份、HTTP 重定向/错误/header、RecognitionService 契约、真实 SQLite 导入事务、Android Keystore 历史加密与旧明文迁移。显式大模型门槛还覆盖固定版本真实下载、精确哈希、arm64 原生加载/识别和内存测量。常规 CI 不使用真实 API Key，也不会重复下载 229 MiB 模型，会执行 JVM、Lint、APK 构建和 API 26/33/35/36 模拟器矩阵。
 Speech Core v2 另外覆盖确定性 trace replay、句段事件乱序/重复属性测试、连续边界组装、加密多段恢复、质量任务 generation 隔离、Unicode 安全编辑器投影、整次语音撤销、生产路径诊断和显式紧急回滚边界。
 
-0.3 的代码审查、自动化证据、真机步骤和未完成门槛见
-[Android 0.3 审查与验收报告](docs/2026-08-09-android-0.3-review-acceptance.md)；
+当前本地构建、产物哈希、小米 10 Ultra 失败证据和发布阻断项见
+[2026-08-14 Android 最新基线验收报告](docs/2026-08-14-android-baseline-acceptance.md)；
+非阻断的代码规模、方法复杂度、APK 大小和测试数量趋势见
+[2026-08-14 工程指标基线](docs/2026-08-14-engineering-metrics-baseline.md)；
+[Android 0.3 审查与验收报告](docs/2026-08-09-android-0.3-review-acceptance.md)保留为历史基线；
 [小米 15 Voice Core P0 真机矩阵](docs/2026-08-11-xiaomi15-p0-acceptance.md)是当前物理验收依据；
 [0.2 验收报告](docs/2026-08-09-byok-android-acceptance.md)保留为历史基线。
 

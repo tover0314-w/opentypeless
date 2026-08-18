@@ -180,6 +180,12 @@ public final class SettingsHomeActivity extends android.app.Activity {
                 View.NO_ID);
         addDivider();
         addSettingsRow(
+                getString(R.string.keyboard_feedback_title),
+                getString(R.string.keyboard_feedback_settings_summary),
+                KeyboardFeedbackActivity.class,
+                R.id.settings_home_feedback_row);
+        addDivider();
+        addSettingsRow(
                 getString(R.string.settings_personalization_data),
                 getString(
                         R.string.settings_personalization_summary,
@@ -196,6 +202,12 @@ public final class SettingsHomeActivity extends android.app.Activity {
                                 : R.string.settings_disabled)),
                 DictionaryActivity.class,
                 View.NO_ID);
+        addDivider();
+        addSettingsRow(
+                getString(R.string.rime_resources_title),
+                getString(R.string.rime_resources_settings_summary),
+                RimeResourceActivity.class,
+                R.id.settings_home_rime_row);
         addDivider();
         LinearLayout privacy = addSettingsRow(
                 getString(R.string.settings_privacy_security),

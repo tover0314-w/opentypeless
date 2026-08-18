@@ -38,6 +38,11 @@
             android:label="@string/settings_title_short" />
 
         <activity
+            android:name=".KeyboardFeedbackActivity"
+            android:exported="false"
+            android:label="@string/keyboard_feedback_title" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="false"
             android:label="@string/settings_title" />
@@ -46,6 +51,11 @@
             android:name=".DictionaryActivity"
             android:exported="false"
             android:label="@string/dictionary_title" />
+
+        <activity
+            android:name=".RimeResourceActivity"
+            android:exported="false"
+            android:label="@string/rime_resources_title" />
 
         <activity
             android:name=".HistoryActivity"

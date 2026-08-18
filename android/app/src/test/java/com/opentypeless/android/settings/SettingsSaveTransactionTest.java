@@ -17,7 +17,9 @@ public final class SettingsSaveTransactionTest {
 
         SettingsSaveTransaction.execute(steps);
 
-        assertEquals(List.of("journal", "secrets", "settings", "clear"), steps.events);
+        assertEquals(
+                List.of("journal", "secrets", "settings", "verify", "clear"),
+                steps.events);
         assertFalse(steps.journalPending);
         assertEquals("new", steps.secrets);
         assertEquals("new", steps.settings);
@@ -34,7 +36,8 @@ public final class SettingsSaveTransactionTest {
 
         assertEquals("settings", failure.getMessage());
         assertEquals(
-                List.of("journal", "secrets", "settings", "restore", "clear"),
+                List.of(
+                        "journal", "secrets", "settings", "restore", "verifyRestore", "clear"),
                 steps.events);
         assertEquals("old", steps.secrets);
         assertEquals("old", steps.settings);
@@ -52,7 +55,40 @@ public final class SettingsSaveTransactionTest {
 
         assertEquals("clear", failure.getMessage());
         assertEquals(
-                List.of("journal", "secrets", "settings", "clear", "restore", "clear"),
+                List.of(
+                        "journal",
+                        "secrets",
+                        "settings",
+                        "verify",
+                        "clear",
+                        "restore",
+                        "verifyRestore",
+                        "clear"),
+                steps.events);
+        assertEquals("old", steps.secrets);
+        assertEquals("old", steps.settings);
+        assertFalse(steps.journalPending);
+    }
+
+    @Test
+    public void exactReadbackFailureRollsBackBeforeJournalClear() {
+        FakeSteps steps = new FakeSteps();
+        steps.failAt = "verify";
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> SettingsSaveTransaction.execute(steps));
+
+        assertEquals("verify", failure.getMessage());
+        assertEquals(
+                List.of(
+                        "journal",
+                        "secrets",
+                        "settings",
+                        "verify",
+                        "restore",
+                        "verifyRestore",
+                        "clear"),
                 steps.events);
         assertEquals("old", steps.secrets);
         assertEquals("old", steps.settings);
@@ -78,24 +114,51 @@ public final class SettingsSaveTransactionTest {
     public void pendingJournalIsRecoveredBeforeUse() {
         List<String> events = new ArrayList<>();
 
-        SettingsSaveTransaction.recover(
-                true,
-                () -> events.add("restore"),
-                () -> events.add("clear"));
+        SettingsSaveTransaction.recover(true, new SettingsSaveTransaction.Recovery() {
+            @Override
+            public void restoreFromJournal() {
+                events.add("restore");
+            }
 
-        assertEquals(List.of("restore", "clear"), events);
+            @Override
+            public void verifyRestored() {
+                events.add("verifyRestore");
+            }
+
+            @Override
+            public void clearJournal() {
+                events.add("clear");
+            }
+        });
+
+        assertEquals(List.of("restore", "verifyRestore", "clear"), events);
     }
 
     @Test
     public void absentJournalDoesNotRunRecoveryCallbacks() {
         List<String> events = new ArrayList<>();
 
-        SettingsSaveTransaction.recover(
-                false,
-                () -> events.add("restore"),
-                () -> events.add("clear"));
+        SettingsSaveTransaction.recover(false, new SettingsSaveTransaction.Recovery() {
+            @Override public void restoreFromJournal() { events.add("restore"); }
+            @Override public void verifyRestored() { events.add("verifyRestore"); }
+            @Override public void clearJournal() { events.add("clear"); }
+        });
 
         assertTrue(events.isEmpty());
+    }
+
+    @Test
+    public void recoveryReadbackFailureLeavesTheDurableJournalPending() {
+        FakeSteps steps = new FakeSteps();
+        steps.journalPending = true;
+        steps.failAt = "verifyRestore";
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> SettingsSaveTransaction.recover(true, steps));
+
+        assertEquals(List.of("restore", "verifyRestore"), steps.events);
+        assertTrue(steps.journalPending);
     }
 
     private static final class FakeSteps implements SettingsSaveTransaction.Steps {
@@ -129,6 +192,12 @@ public final class SettingsSaveTransactionTest {
         }
 
         @Override
+        public void verifyCommitted() {
+            events.add("verify");
+            if (failAt.equals("verify")) throw new IllegalStateException("verify");
+        }
+
+        @Override
         public void clearJournal() {
             events.add("clear");
             if (clearFailuresRemaining > 0) {
@@ -144,6 +213,14 @@ public final class SettingsSaveTransactionTest {
             if (restoreFails) throw new IllegalStateException("restore");
             secrets = "old";
             settings = "old";
+        }
+
+        @Override
+        public void verifyRestored() {
+            events.add("verifyRestore");
+            if (failAt.equals("verifyRestore")) {
+                throw new IllegalStateException("verifyRestore");
+            }
         }
     }
 }

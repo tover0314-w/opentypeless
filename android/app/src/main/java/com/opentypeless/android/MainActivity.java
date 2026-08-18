@@ -124,7 +124,7 @@ public final class MainActivity extends Activity {
     private SettingsFormDraft formDraft;
     private SystemRecognitionSupport.Operation supportOperation;
     private RecognitionBackend supportBackend;
-    private long supportGeneration;
+    private SystemModelDownloadCoordinator.Subscription systemModelSubscription;
     private boolean languageDownloadAvailable;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService diagnosticsExecutor = Executors.newSingleThreadExecutor(runnable -> {
@@ -563,7 +563,9 @@ public final class MainActivity extends Activity {
         try {
             notices = readRawText(R.raw.legal_notices)
                     + "\n\n"
-                    + readRawText(R.raw.offline_asr_runtime_licenses);
+                    + readRawText(R.raw.offline_asr_runtime_licenses)
+                    + "\n\n"
+                    + readRawText(R.raw.native_engine_licenses);
         } catch (Exception error) {
             notices = getString(R.string.operation_failed);
         }
@@ -893,21 +895,22 @@ public final class MainActivity extends Activity {
         if (selectedBackend() != RecognitionBackend.SYSTEM_ON_DEVICE
                 && selectedBackend() != RecognitionBackend.SYSTEM_DEFAULT) return;
         cancelLanguageOperations();
-        long request = supportGeneration;
         languageDownloadAvailable = false;
         checkLanguageSupport.setEnabled(false);
         downloadLanguageModel.setVisibility(View.GONE);
         languageSupportStatus.setText(R.string.language_support_checking);
         languageSupportStatus.setTextColor(getColor(R.color.ime_on_surface_variant));
-        supportOperation = SystemSpeechRecognizer.checkRecognitionSupport(
+        SystemRecognitionSupport.Operation[] request = new SystemRecognitionSupport.Operation[1];
+        request[0] = SystemSpeechRecognizer.checkRecognitionSupport(
                 this,
                 languageSupportSettings(),
                 PersonalizationSnapshot.empty(),
                 result -> {
-                    if (request != supportGeneration || isFinishing() || isDestroyed()) return;
+                    if (supportOperation != request[0] || isFinishing() || isDestroyed()) return;
                     supportOperation = null;
                     showLanguageSupport(result);
                 });
+        supportOperation = request[0];
     }
 
     private void downloadLanguageModel() {
@@ -985,7 +988,7 @@ public final class MainActivity extends Activity {
             case LANGUAGE_UNSPECIFIED -> getString(R.string.language_support_unspecified);
             case LEGACY_NOT_VERIFIABLE -> getString(R.string.language_support_legacy_unverified);
             case SERVICE_UNAVAILABLE -> getString(R.string.language_support_service_unavailable);
-            case ERROR -> getString(R.string.language_support_check_failed, result.errorCode());
+            case ERROR -> getString(R.string.language_support_check_failed);
         };
     }
 
@@ -995,7 +998,7 @@ public final class MainActivity extends Activity {
             case SCHEDULED -> getString(R.string.language_model_download_scheduled);
             case COMPLETED -> getString(R.string.language_model_download_completed);
             case API_UNAVAILABLE -> getString(R.string.language_model_download_api_unavailable);
-            case FAILED -> getString(R.string.language_model_download_failed, result.errorCode());
+            case FAILED -> getString(R.string.language_model_download_failed);
         };
     }
 
@@ -1035,7 +1038,6 @@ public final class MainActivity extends Activity {
     }
 
     private void cancelLanguageOperations() {
-        supportGeneration++;
         if (supportOperation != null) supportOperation.cancel();
         supportOperation = null;
         SystemModelDownloadCoordinator.cancel();
@@ -1298,18 +1300,19 @@ public final class MainActivity extends Activity {
     protected void onStart() {
         super.onStart();
         OfflineModelOperationCoordinator.addListener(offlineModelListener);
-        SystemModelDownloadCoordinator.addListener(systemModelListener);
+        if (systemModelSubscription != null) systemModelSubscription.close();
+        systemModelSubscription = SystemModelDownloadCoordinator.subscribe(systemModelListener);
     }
 
     @Override
     protected void onStop() {
         OfflineModelOperationCoordinator.removeListener(offlineModelListener);
-        SystemModelDownloadCoordinator.removeListener(systemModelListener);
+        if (systemModelSubscription != null) systemModelSubscription.close();
+        systemModelSubscription = null;
         // A platform language-model download may temporarily launch system approval UI. Keep it
         // alive while this Activity is merely stopped. A support check has no user interaction and
         // can be safely abandoned. OpenTypeless model transfers are application-scoped separately.
         if (supportOperation != null) {
-            supportGeneration++;
             supportOperation.cancel();
             supportOperation = null;
             languageDownloadAvailable = false;
@@ -1328,7 +1331,6 @@ public final class MainActivity extends Activity {
         if (systemDiagnosticsTask != null) systemDiagnosticsTask.cancel(true);
         systemDiagnosticsTask = null;
         diagnosticsExecutor.shutdownNow();
-        supportGeneration++;
         if (supportOperation != null) supportOperation.cancel();
         supportOperation = null;
         super.onDestroy();

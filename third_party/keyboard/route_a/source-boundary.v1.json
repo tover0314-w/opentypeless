@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "route_id": "route-a",
+  "classification": "evidence-only-restricted-source-boundary",
+  "allowed_exact_paths": [
+    "gradle/verification-metadata.xml",
+    "settings.gradle.kts",
+    "tools/test_verify_route_a_safety_manifest.py",
+    "tools/verify_route_a_safety_manifest.py"
+  ],
+  "allowed_prefixes": [
+    "opentypeless-editor-host/",
+    "route-a-safety-eval/"
+  ],
+  "forbidden_prefixes": [
+    ".git/",
+    ".github/",
+    "app/",
+    "build/",
+    "gradle/caches/"
+  ],
+  "forbidden_suffixes": [
+    ".7z",
+    ".aar",
+    ".apk",
+    ".aab",
+    ".db",
+    ".dex",
+    ".jar",
+    ".model",
+    ".o",
+    ".so",
+    ".sqlite",
+    ".sqlite3",
+    ".tar",
+    ".tgz",
+    ".zip"
+  ],
+  "forbidden_patch_markers": [
+    "GIT binary patch",
+    "literal ",
+    "delta ",
+    "new file mode 120000",
+    "new file mode 160000",
+    "rename from ",
+    "rename to ",
+    "copy from ",
+    "copy to "
+  ],
+  "max_patch_count": 3,
+  "max_total_patch_bytes": 1100000,
+  "max_touched_paths": 80
+}

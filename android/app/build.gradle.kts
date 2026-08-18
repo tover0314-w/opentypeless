@@ -1,4 +1,54 @@
 import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.Directory
+import org.gradle.api.file.RegularFile
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
+import org.gradle.work.DisableCachingByDefault
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
+import com.android.build.api.artifact.ScopedArtifact
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.ScopedArtifacts
+import org.gradle.api.tasks.Exec
+import org.gradle.api.tasks.Copy
+
+@DisableCachingByDefault(
+    because = "The manifest intentionally contains absolute paths from the current Gradle invocation",
+)
+abstract class WriteCompiledClassPathManifest : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val jars: ListProperty<RegularFile>
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val directories: ListProperty<Directory>
+
+    @get:OutputFile
+    abstract val manifestFile: RegularFileProperty
+
+    @TaskAction
+    fun writeManifest() {
+        val paths = (jars.get().map { it.asFile } + directories.get().map { it.asFile })
+            .map { it.absoluteFile.normalize() }
+            .distinctBy { it.path }
+            .sortedBy { it.path }
+
+        val output = manifestFile.get().asFile
+        output.parentFile.mkdirs()
+        output.outputStream().buffered().use { stream ->
+            paths.forEach { path ->
+                stream.write(path.path.toByteArray(StandardCharsets.UTF_8))
+                stream.write(0)
+            }
+        }
+    }
+}
 
 plugins {
     id("com.android.application")
@@ -16,6 +66,22 @@ val actualSherpaAsrRuntimeSha256 = MessageDigest.getInstance("SHA-256")
 require(actualSherpaAsrRuntimeSha256 == expectedSherpaAsrRuntimeSha256) {
     "ASR-only runtime checksum mismatch: expected $expectedSherpaAsrRuntimeSha256, " +
         "got $actualSherpaAsrRuntimeSha256"
+}
+
+val rimeRuntime = layout.projectDirectory
+    .file("libs/opentypeless-rime-runtime-1.17.0.aar")
+    .asFile
+val expectedRimeRuntimeSha256 =
+    "5fce6f0e5356d1f80cc080d8ca7f55e8177caa8cbc28538ebde7e69bd1665d2d"
+require(rimeRuntime.isFile) {
+    "Missing pinned Rime runtime: ${rimeRuntime.path}"
+}
+val actualRimeRuntimeSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(rimeRuntime.readBytes())
+    .joinToString("") { "%02x".format(it) }
+require(actualRimeRuntimeSha256 == expectedRimeRuntimeSha256) {
+    "Rime runtime checksum mismatch: expected $expectedRimeRuntimeSha256, " +
+        "got $actualRimeRuntimeSha256"
 }
 
 // Normal CI/release builds remain universal. Direct device handoffs can request one pinned ABI
@@ -104,8 +170,91 @@ android {
     }
 }
 
+val exportCompiledArchitectureInputs = tasks.register("exportCompiledArchitectureInputs") {
+    group = "verification"
+    description = "Exports debug and release class inputs for the compiled architecture gate."
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        if (variant.name !in setOf("debug", "release")) {
+            return@onVariants
+        }
+
+        val variantTaskName = variant.name.replaceFirstChar { character ->
+            if (character.isLowerCase()) character.titlecase() else character.toString()
+        }
+        val outputDirectory = layout.buildDirectory.dir("editor-architecture/${variant.name}")
+
+        val projectManifest = tasks.register<WriteCompiledClassPathManifest>(
+            "export${variantTaskName}ProjectCompiledArchitecturePaths",
+        ) {
+            group = "verification"
+            description = "Exports ${variant.name} project classes for architecture verification."
+            manifestFile.set(outputDirectory.map { it.file("project.paths") })
+        }
+        variant.artifacts
+            .forScope(ScopedArtifacts.Scope.PROJECT)
+            .use(projectManifest)
+            .toGet(
+                ScopedArtifact.CLASSES,
+                WriteCompiledClassPathManifest::jars,
+                WriteCompiledClassPathManifest::directories,
+            )
+
+        val allManifest = tasks.register<WriteCompiledClassPathManifest>(
+            "export${variantTaskName}AllCompiledArchitecturePaths",
+        ) {
+            group = "verification"
+            description = "Exports ${variant.name} complete class path for architecture verification."
+            manifestFile.set(outputDirectory.map { it.file("all.paths") })
+        }
+        variant.artifacts
+            .forScope(ScopedArtifacts.Scope.ALL)
+            .use(allManifest)
+            .toGet(
+                ScopedArtifact.CLASSES,
+                WriteCompiledClassPathManifest::jars,
+                WriteCompiledClassPathManifest::directories,
+            )
+
+        exportCompiledArchitectureInputs.configure {
+            dependsOn(projectManifest, allManifest)
+        }
+
+        val mergedManifest = variant.artifacts.get(SingleArtifact.MERGED_MANIFEST)
+        val verifyKeyboardShellManifest = tasks.register<Exec>(
+            "verify${variantTaskName}KeyboardShellManifest",
+        ) {
+            group = "verification"
+            description = "Verifies the ${variant.name} KBD-001 merged-manifest boundary."
+            inputs.file(mergedManifest)
+            inputs.file(rootProject.file("scripts/verify_keyboard_shell_manifest.py"))
+            inputs.file(project.file("src/main/res/xml/data_extraction_rules.xml"))
+            doFirst {
+                commandLine(
+                    "python3",
+                    rootProject.file("scripts/verify_keyboard_shell_manifest.py").absolutePath,
+                    "--manifest",
+                    mergedManifest.get().asFile.absolutePath,
+                    "--rules",
+                    project.file("src/main/res/xml/data_extraction_rules.xml").absolutePath,
+                    "--variant",
+                    variant.name,
+                )
+            }
+        }
+        tasks.matching {
+            it.name == "check" || it.name == "assemble${variantTaskName}"
+        }.configureEach {
+            dependsOn(verifyKeyboardShellManifest)
+        }
+    }
+}
+
 dependencies {
     implementation(files(sherpaAsrRuntime))
+    implementation(files(rimeRuntime))
     //noinspection GradleDependency -- matches the pinned sherpa runtime's Kotlin ABI.
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.7.20")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
@@ -115,4 +264,5 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

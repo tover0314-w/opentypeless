@@ -114,4 +114,14 @@ public final class AudioRecorderTest {
         org.junit.Assert.assertFalse(AudioRecorder.hasMinimumAudio(
                 oneHundredTwentyMs - 2, true));
     }
+
+    @Test
+    public void recordingDurationIsBoundedForBatchAndStreamingCapture() {
+        assertEquals(5, AudioRecorder.boundedMaximumSeconds(Integer.MIN_VALUE));
+        assertEquals(5, AudioRecorder.boundedMaximumSeconds(4));
+        assertEquals(5, AudioRecorder.boundedMaximumSeconds(5));
+        assertEquals(540, AudioRecorder.boundedMaximumSeconds(540));
+        assertEquals(540, AudioRecorder.boundedMaximumSeconds(541));
+        assertEquals(540, AudioRecorder.boundedMaximumSeconds(Integer.MAX_VALUE));
+    }
 }

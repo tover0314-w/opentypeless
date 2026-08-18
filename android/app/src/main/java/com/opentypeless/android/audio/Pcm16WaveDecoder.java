@@ -22,7 +22,7 @@ public final class Pcm16WaveDecoder {
             throw new IllegalArgumentException("WAV must be mono PCM16");
         }
         int sampleRate = int32(wav, 24);
-        if (sampleRate != AudioRecorder.SAMPLE_RATE
+        if (sampleRate != AudioCapture.SAMPLE_RATE
                 || int32(wav, 28) != sampleRate * 2) {
             throw new IllegalArgumentException("WAV must use 16 kHz PCM16 audio");
         }

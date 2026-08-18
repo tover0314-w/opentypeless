@@ -9,47 +9,93 @@ on:
 permissions:
   contents: read
 
+env:
+  ANDROID_COMPILE_SDK: '35'
+  ANDROID_BUILD_TOOLS: '35.0.0'
+  ANDROID_EMULATOR_TARGET: google_apis
+  ANDROID_EMULATOR_ARCH: x86_64
+
 jobs:
   check-android:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
-
-      - name: Test, lint, and assemble Android
-        working-directory: android
+      - name: Install pinned Android SDK packages
+        shell: bash
         run: |
-          python3 -m unittest discover -s scripts -p 'test_*.py' -v
-          python3 -m unittest discover -s ../benchmarks/mobile_voice -p 'test_*.py' -v
-          python3 -m py_compile ../benchmarks/mobile_voice/*.py
-          bash -n tools/collect-xiaomi15-acceptance.sh
-          set +e
-          tools/collect-xiaomi15-acceptance.sh \
-            --output /tmp/opentypeless-collector-must-not-run \
-            >/tmp/opentypeless-collector-policy.txt 2>&1
-          collector_status=$?
-          set -e
-          test "$collector_status" -eq 2
-          test ! -e /tmp/opentypeless-collector-must-not-run
-          grep -q 'exact --serial is required' /tmp/opentypeless-collector-policy.txt
-          python3 scripts/build_sherpa_asr_runtime.py \
-            --verify-aar app/libs/sherpa-onnx-asr-1.13.4.aar
-          ./gradlew testDebugUnitTest lintRelease assembleDebug assembleRelease assembleDebugAndroidTest
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}"
+          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_COMPILE_SDK}"
+          test -d "${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Android preflight and static policy checks
+        run: scripts/verify_android.sh preflight
+
+      - name: Android unit and architecture tests
+        run: scripts/verify_android.sh unit
+
+      - name: Upload Android unit test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: opentypeless-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: android-unit-test-reports
+          path: |
+            android/**/build/test-results/**/*.xml
+            android/**/build/reports/tests/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Android release lint
+        run: scripts/verify_android.sh lint
+
+      - name: Upload Android lint reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-lint-reports
+          path: |
+            android/**/build/reports/lint-results-*.html
+            android/**/build/reports/lint-results-*.xml
+            android/**/build/reports/lint-results-*.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Assemble Android APKs
+        run: scripts/verify_android.sh assemble
+
+      - name: Generate Android engineering metrics
+        run: scripts/verify_android.sh metrics
+
+      - name: Upload Android engineering metrics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-engineering-metrics
+          path: android/build/reports/engineering-metrics/engineering-metrics.json
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-apks
+          path: android/**/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
   test-android-emulator:
     name: Android device tests (API ${{ matrix.api_level }})
@@ -60,16 +106,32 @@ jobs:
       matrix:
         api_level: [26, 33, 35, 36]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
-      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: Install pinned Android SDK and emulator image
+        shell: bash
+        run: |
+          emulator_image="system-images;android-${{ matrix.api_level }};${ANDROID_EMULATOR_TARGET};${ANDROID_EMULATOR_ARCH}"
+          sdkmanager --install \
+            "platform-tools" \
+            "emulator" \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "${emulator_image}"
+          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_COMPILE_SDK}"
+          test -d "${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}"
+          sdkmanager --list_installed | grep -F "${emulator_image}"
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Enable hardware acceleration for the Android emulator
         run: |
@@ -78,21 +140,35 @@ jobs:
           test -r /dev/kvm
           test -w /dev/kvm
 
-      - name: Run Android Keystore and SQLite device tests
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+      - name: Run Android instrumentation tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api_level }}
-          arch: x86_64
+          target: ${{ env.ANDROID_EMULATOR_TARGET }}
+          arch: ${{ env.ANDROID_EMULATOR_ARCH }}
           profile: pixel_6
           disable-animations: true
-          script: cd android && ./gradlew connectedDebugAndroidTest
+          script: scripts/verify_android.sh instrumentation
+
+      - name: Upload Android instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-instrumentation-api-${{ matrix.api_level }}
+          path: |
+            android/**/build/outputs/androidTest-results/**
+            android/**/build/reports/androidTests/**
+          if-no-files-found: warn
+          retention-days: 14
 
   check-frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: 'npm'
@@ -107,7 +183,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install benchmark dependencies from pinned requirements
         run: |
@@ -148,9 +226,11 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: 'npm'
@@ -162,7 +242,7 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy, rustfmt
 
-      - uses: swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
 
@@ -190,9 +270,11 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: 'npm'

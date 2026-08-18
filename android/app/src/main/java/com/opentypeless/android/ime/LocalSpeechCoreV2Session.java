@@ -2,7 +2,7 @@ package com.opentypeless.android.ime;
 
 import android.content.Context;
 
-import com.opentypeless.android.audio.AudioRecorder;
+import com.opentypeless.android.audio.AudioCapture;
 import com.opentypeless.android.audio.StreamingAudioResult;
 import com.opentypeless.android.audio.WavEncoder;
 import com.opentypeless.android.context.InputPolicy;
@@ -119,7 +119,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
     private final Context context;
     private final DictationRequest request;
     private final long generation;
-    private final AudioRecorder recorder;
+    private final AudioCapture audioCapture;
     private final LocalRealtimeRecognitionClient streamingClient;
     private final LocalOfflineRecognitionClient qualityClient;
     private final LocalPunctuationRecognitionClient punctuationClient;
@@ -127,8 +127,8 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
     private final ExecutorService punctuationExecutor;
     private final Observer observer;
     private final ContinuousSegmentAssembler assembler =
-            new ContinuousSegmentAssembler(AudioRecorder.SAMPLE_RATE, EndpointPolicy.DEFAULT);
-    private final StreamingFrameVad frameVad = new StreamingFrameVad(AudioRecorder.SAMPLE_RATE);
+            new ContinuousSegmentAssembler(AudioCapture.SAMPLE_RATE, EndpointPolicy.DEFAULT);
+    private final StreamingFrameVad frameVad = new StreamingFrameVad(AudioCapture.SAMPLE_RATE);
     private final StreamingHypothesisSlicer slicer = new StreamingHypothesisSlicer();
     private final SpeechSessionToken token;
     private final SpeechCoreCoordinator coordinator;
@@ -157,7 +157,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
             Context context,
             DictationRequest request,
             long generation,
-            AudioRecorder recorder,
+            AudioCapture audioCapture,
             LocalRealtimeRecognitionClient streamingClient,
             LocalOfflineRecognitionClient qualityClient,
             LocalPunctuationRecognitionClient punctuationClient,
@@ -169,7 +169,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         this.request = Objects.requireNonNull(request, "request");
         if (generation <= 0L) throw new IllegalArgumentException("generation must be positive");
         this.generation = generation;
-        this.recorder = Objects.requireNonNull(recorder, "recorder");
+        this.audioCapture = Objects.requireNonNull(audioCapture, "audioCapture");
         this.streamingClient = Objects.requireNonNull(streamingClient, "streamingClient");
         this.qualityClient = Objects.requireNonNull(qualityClient, "qualityClient");
         this.punctuationClient = Objects.requireNonNull(
@@ -244,7 +244,7 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
                         streaming.engineId(),
                         streaming.modelRevision(),
                         request.settings().language(),
-                        AudioRecorder.SAMPLE_RATE));
+                        AudioCapture.SAMPLE_RATE));
     }
 
     Result execute() {
@@ -254,10 +254,10 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
         try {
             requireCurrent();
             streamingSession = streamingClient.start(this::onStreamingHypothesis);
-            StreamingAudioResult audio = recorder.stream(
-                    requireRecordingSession(),
+            StreamingAudioResult audio = audioCapture.stream(
+                    requireCaptureSession(),
                     request.settings().boundedMaxRecordingSeconds(),
-                    new AudioRecorder.CaptureListener() {
+                    new AudioCapture.CaptureListener() {
                         @Override
                         public void onReady() {
                             CoordinatorUpdate ready = coordinator.ready(token);
@@ -392,19 +392,19 @@ final class LocalSpeechCoreV2Session implements AutoCloseable {
                 : ProjectionMode.LONG_DICTATION;
     }
 
-    private com.opentypeless.android.audio.RecordingSession requireRecordingSession() {
-        // Local v2 is entered only from VoicePipeline's captured-audio route.
+    private AudioCapture.Session requireCaptureSession() {
+        // Local v2 is entered only from VoicePipelineRuntime's captured-audio route.
         // The session is supplied through the request-scoped holder immediately before execute.
-        com.opentypeless.android.audio.RecordingSession session = recordingSession;
-        if (session == null) throw new IllegalStateException("Recording session is unavailable");
+        AudioCapture.Session session = captureSession;
+        if (session == null) throw new IllegalStateException("Capture session is unavailable");
         return session;
     }
 
-    private volatile com.opentypeless.android.audio.RecordingSession recordingSession;
+    private volatile AudioCapture.Session captureSession;
 
-    void setRecordingSession(com.opentypeless.android.audio.RecordingSession session) {
-        if (recordingSession != null) throw new IllegalStateException("Recording session already set");
-        recordingSession = Objects.requireNonNull(session, "session");
+    void setCaptureSession(AudioCapture.Session session) {
+        if (captureSession != null) throw new IllegalStateException("Capture session already set");
+        captureSession = Objects.requireNonNull(session, "session");
     }
 
     private void onPcmFrame(byte[] bytes, int offset, int length) {

@@ -15,6 +15,8 @@ import java.util.Locale;
 
 /** Quality-tier SenseVoice recognizer. Native calls are serialized and released after each turn. */
 public final class LocalOfflineRecognizer {
+    public enum DeviceSupport { SUPPORTED, LOW_MEMORY, UNSUPPORTED_ABI, SYSTEM_UNAVAILABLE }
+
     private static final Object LOCK = new Object();
     private static final int MAX_OUTPUT_CODE_POINTS = 20_000;
     private static OfflineRecognizer recognizer;
@@ -114,8 +116,26 @@ public final class LocalOfflineRecognizer {
     }
 
     public static boolean isSupportedDevice(Context context) {
+        return deviceSupport(context) == DeviceSupport.SUPPORTED;
+    }
+
+    public static DeviceSupport deviceSupport(Context context) {
+        if (context == null) throw new IllegalArgumentException("Context is required");
         ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        return manager != null && !manager.isLowRamDevice() && supportsAbi(Build.SUPPORTED_ABIS);
+        return classifyDevice(
+                manager != null,
+                manager != null && manager.isLowRamDevice(),
+                Build.SUPPORTED_ABIS);
+    }
+
+    static DeviceSupport classifyDevice(
+            boolean activityManagerAvailable,
+            boolean lowRam,
+            String[] abis) {
+        if (!activityManagerAvailable) return DeviceSupport.SYSTEM_UNAVAILABLE;
+        if (lowRam) return DeviceSupport.LOW_MEMORY;
+        if (!supportsAbi(abis)) return DeviceSupport.UNSUPPORTED_ABI;
+        return DeviceSupport.SUPPORTED;
     }
 
     static boolean supportsAbi(String[] abis) {

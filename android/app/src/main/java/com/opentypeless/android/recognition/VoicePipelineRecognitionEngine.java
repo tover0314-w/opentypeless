@@ -10,7 +10,9 @@ import com.opentypeless.android.data.PersonalizationStore;
 import com.opentypeless.android.ime.DictationRequest;
 import com.opentypeless.android.ime.DictationResult;
 import com.opentypeless.android.ime.TranscriptUpdate;
+import com.opentypeless.android.ime.VoiceController;
 import com.opentypeless.android.ime.VoicePipeline;
+import com.opentypeless.android.ime.VoicePipelineAdapter;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.RecognitionBackend;
@@ -33,6 +35,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
     private final SettingsRepository settingsRepository;
     private final PersonalizationStore personalizationStore;
     private final VoicePipeline pipeline;
+    private final VoiceController voiceController;
     private final Context baseContext;
     private final Object lifecycleLock = new Object();
     private final RecognitionPreparationState preparationState = new RecognitionPreparationState();
@@ -51,6 +54,9 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
         settingsRepository = new SettingsRepository(application);
         personalizationStore = new PersonalizationStore(application);
         pipeline = new VoicePipeline(context);
+        voiceController = RecognitionRouterVoiceConfig.select(
+                application,
+                new VoicePipelineAdapter(pipeline));
     }
 
     void setRecordingContext(Context context) {
@@ -108,7 +114,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
             AtomicBoolean ended = new AtomicBoolean();
             boolean accepted;
             try {
-                accepted = pipeline.start(
+                accepted = voiceController.start(
                         prepared.request(),
                         pipelineListener(token, callback, ended));
             } catch (RuntimeException error) {
@@ -151,15 +157,15 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
                 snapshot));
     }
 
-    private VoicePipeline.Listener pipelineListener(
+    private VoiceController.Events pipelineListener(
             long token,
             Callback callback,
             AtomicBoolean ended) {
-        return new VoicePipeline.Listener() {
+        return new VoiceController.Events() {
             @Override
-            public void onState(VoicePipeline.State state, String message) {
-                if ((state == VoicePipeline.State.TRANSCRIBING
-                        || state == VoicePipeline.State.POLISHING)
+            public void onState(VoiceController.State state, String message) {
+                if ((state == VoiceController.State.TRANSCRIBING
+                        || state == VoiceController.State.POLISHING)
                         && ended.compareAndSet(false, true)) {
                     deliverActive(token, callback::onEndOfSpeech);
                 }
@@ -188,7 +194,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
                     activeCallback = null;
                     pipeline.setRecordingContext(baseContext);
                     if (ended.compareAndSet(false, true)) callback.onEndOfSpeech();
-                    callback.onFinal(result.finalText());
+                    callback.onFinal(result.voiceResult().finalText());
                 }
             }
 
@@ -229,7 +235,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
             if (!preparationState.finish(token)) return;
             preparation = null;
             activeCallback = null;
-            pipeline.cancel();
+            voiceController.cancel();
             pipeline.setRecordingContext(baseContext);
             callback.onError(failure);
         }
@@ -248,7 +254,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
                 activeCallback = null;
                 pipeline.setRecordingContext(baseContext);
             } else if (action == RecognitionPreparationState.StopAction.STOP_PIPELINE) {
-                pipeline.stopRecording();
+                voiceController.stop();
             }
         }
         if (toCancel != null) toCancel.cancel(true);
@@ -284,7 +290,7 @@ public final class VoicePipelineRecognitionEngine implements RecognitionSessionC
             toCancel = preparation;
             preparation = null;
             activeCallback = null;
-            pipeline.cancel();
+            voiceController.cancel();
             pipeline.setRecordingContext(baseContext);
         }
         if (toCancel != null) toCancel.cancel(true);

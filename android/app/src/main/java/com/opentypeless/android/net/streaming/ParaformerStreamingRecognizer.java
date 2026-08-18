@@ -1,7 +1,6 @@
 package com.opentypeless.android.net.streaming;
 
-import com.opentypeless.android.audio.AudioRecorder;
-import com.opentypeless.android.audio.RecordingSession;
+import com.opentypeless.android.audio.AudioCapture;
 import com.opentypeless.android.audio.StreamingAudioResult;
 import com.opentypeless.android.net.EndpointNormalizer;
 import com.opentypeless.android.settings.AppSettings;
@@ -44,11 +43,15 @@ public final class ParaformerStreamingRecognizer implements StreamingRecognition
     @Override
     public Result recognize(
             AppSettings settings,
-            AudioRecorder recorder,
-            RecordingSession recordingSession,
-            AudioRecorder.CaptureListener captureListener,
+            AudioCapture audioCapture,
+            AudioCapture.Session captureSession,
+            AudioCapture.CaptureListener captureListener,
             StreamingRecognitionEngine.Listener listener) {
-        if (settings == null || recorder == null || recordingSession == null || listener == null) {
+        if (settings == null
+                || audioCapture == null
+                || captureSession == null
+                || captureListener == null
+                || listener == null) {
             throw new IllegalArgumentException("Streaming recognition arguments are required");
         }
         String endpoint = EndpointNormalizer.dashScopeWebSocket(settings.streamingBaseUrl());
@@ -63,8 +66,8 @@ public final class ParaformerStreamingRecognizer implements StreamingRecognition
         try {
             session.connect(endpoint, apiKey);
             session.awaitStarted();
-            StreamingAudioResult audio = recorder.stream(
-                    recordingSession,
+            StreamingAudioResult audio = audioCapture.stream(
+                    captureSession,
                     settings.boundedMaxRecordingSeconds(),
                     captureListener,
                     session::sendAudio);

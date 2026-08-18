@@ -32,10 +32,35 @@ public final class LocalOfflineRecognitionClient implements AutoCloseable {
             String text = value == null ? "" : value.trim();
             if (text.isEmpty()) throw new IllegalStateException(
                     "Offline recognition returned no text");
+            requireWellFormedUtf16(text);
             if (text.codePointCount(0, text.length()) > 20_000) {
                 throw new IllegalStateException("Offline recognition output exceeded the limit");
             }
             return text;
+        }
+
+        private static void requireWellFormedUtf16(String value) {
+            for (int index = 0; index < value.length(); ) {
+                char unit = value.charAt(index);
+                if (Character.isHighSurrogate(unit)) {
+                    if (index + 1 >= value.length()
+                            || !Character.isLowSurrogate(value.charAt(index + 1))) {
+                        throw new IllegalStateException(
+                                "Offline recognition output was malformed");
+                    }
+                    index += 2;
+                } else if (Character.isLowSurrogate(unit)) {
+                    throw new IllegalStateException(
+                            "Offline recognition output was malformed");
+                } else {
+                    index++;
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "LocalOfflineRecognitionResult{content=<redacted>}";
         }
     }
 

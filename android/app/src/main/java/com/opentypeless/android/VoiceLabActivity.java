@@ -31,9 +31,13 @@ import com.opentypeless.android.diagnostics.VoiceLabPerformanceProbe;
 import com.opentypeless.android.ime.DictationRequest;
 import com.opentypeless.android.ime.DictationResult;
 import com.opentypeless.android.ime.TranscriptUpdate;
+import com.opentypeless.android.ime.VoiceController;
 import com.opentypeless.android.ime.VoicePipeline;
+import com.opentypeless.android.ime.VoicePipelineAdapter;
+import com.opentypeless.android.ime.VoiceResult;
 import com.opentypeless.android.offline.OfflineStreamingRecognizer;
 import com.opentypeless.android.recognition.SystemRecognitionDiagnostics;
+import com.opentypeless.android.recognition.RecognitionRouterVoiceConfig;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.ProcessingMode;
 import com.opentypeless.android.settings.RecognitionBackend;
@@ -57,6 +61,7 @@ public final class VoiceLabActivity extends Activity {
     private final ExecutorService settingsExecutor = Executors.newSingleThreadExecutor();
     private volatile boolean destroyed;
     private VoicePipeline pipeline;
+    private VoiceController voiceController;
     private RecognitionDiagnosticsStore diagnosticsStore;
     private VoiceLabPerformanceProbe performanceProbe;
     private AppSettings settings;
@@ -103,6 +108,9 @@ public final class VoiceLabActivity extends Activity {
             exactMatches = Math.max(0, savedInstanceState.getInt(STATE_EXACT_MATCHES, 0));
         }
         pipeline = new VoicePipeline(this);
+        voiceController = RecognitionRouterVoiceConfig.select(
+                this,
+                new VoicePipelineAdapter(pipeline));
         diagnosticsStore = new RecognitionDiagnosticsStore(this);
         performanceProbe = new VoiceLabPerformanceProbe(this);
         setContentView(buildContent());
@@ -323,7 +331,7 @@ public final class VoiceLabActivity extends Activity {
                         false),
                 PersonalizationSnapshot.empty(),
                 DictationRequest.CaptureMode.HOLD_TO_TALK);
-        if (!pipeline.start(request, listener(attempt))) {
+        if (!voiceController.start(request, listener(attempt))) {
             holding = false;
             recognitionActive = false;
             activeAttempt = ++attemptGeneration;
@@ -354,23 +362,23 @@ public final class VoiceLabActivity extends Activity {
         }
         releaseAtMs = SystemClock.elapsedRealtime();
         statusView.setText(R.string.voice_lab_finalizing);
-        pipeline.stopRecording();
+        voiceController.stop();
         renderControls();
     }
 
-    private VoicePipeline.Listener listener(long attempt) {
-        return new VoicePipeline.Listener() {
+    private VoiceController.Events listener(long attempt) {
+        return new VoiceController.Events() {
             @Override
-            public void onState(VoicePipeline.State state, String message) {
+            public void onState(VoiceController.State state, String message) {
                 postUi(() -> {
                     if (!isAttemptCurrent(attempt)) return;
-                    if (state == VoicePipeline.State.RECORDING && !microphoneReady) {
+                    if (state == VoiceController.State.RECORDING && !microphoneReady) {
                         statusView.setText(R.string.voice_lab_preparing_microphone);
-                    } else if (state == VoicePipeline.State.RECORDING) {
+                    } else if (state == VoiceController.State.RECORDING) {
                         statusView.setText(R.string.voice_lab_listening_release);
-                    } else if (state == VoicePipeline.State.TRANSCRIBING) {
+                    } else if (state == VoiceController.State.TRANSCRIBING) {
                         statusView.setText(R.string.voice_lab_transcribing);
-                    } else if (state == VoicePipeline.State.POLISHING) {
+                    } else if (state == VoiceController.State.POLISHING) {
                         statusView.setText(R.string.voice_lab_processing);
                     }
                 });
@@ -440,20 +448,21 @@ public final class VoiceLabActivity extends Activity {
         holding = false;
         completedAtMs = SystemClock.elapsedRealtime();
         attempts++;
-        boolean success = result != null && !result.finalText().isBlank();
+        VoiceResult voiceResult = result == null ? null : result.voiceResult();
+        boolean success = voiceResult != null && !voiceResult.finalText().isBlank();
         if (success) successes++;
         if (success) {
             if (shadowEvaluator != null) {
-                renderShadow(shadowEvaluator.complete(result.rawText()));
+                renderShadow(shadowEvaluator.complete(voiceResult.rawText()));
             }
             VoiceLabScorer.Score score = VoiceLabScorer.score(
                     prompts[promptIndex],
-                    result.finalText());
+                    voiceResult.finalText());
             if (score.exact()) exactMatches++;
-            liveView.setText(getString(R.string.voice_lab_live_value, result.rawText()));
+            liveView.setText(getString(R.string.voice_lab_live_value, voiceResult.rawText()));
             finalView.setText(getString(
                     R.string.voice_lab_final_scored_value,
-                    result.finalText(),
+                    voiceResult.finalText(),
                     score.metric(),
                     String.format(Locale.getDefault(), "%.1f%%", score.errorRate() * 100.0d),
                     getString(score.exact()

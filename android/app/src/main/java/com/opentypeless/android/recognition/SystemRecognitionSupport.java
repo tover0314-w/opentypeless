@@ -7,10 +7,13 @@ import android.os.Looper;
 import android.speech.SpeechRecognizer;
 
 import com.opentypeless.android.data.PersonalizationSnapshot;
+import com.opentypeless.android.config.RecognitionRoute;
 import com.opentypeless.android.settings.AppSettings;
 import com.opentypeless.android.settings.RecognitionBackend;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Safe one-shot wrappers for Android language support and on-device model download APIs. */
 public final class SystemRecognitionSupport {
@@ -32,9 +35,30 @@ public final class SystemRecognitionSupport {
     public record Result(
             Status status,
             String language,
-            String message,
             boolean canDownload,
-            int errorCode) {}
+            RecognitionRoute.FailureClass failureClass) {
+        public Result {
+            status = Objects.requireNonNull(status, "status");
+            language = boundedLanguage(language);
+            boolean failureStatus = status == Status.ERROR
+                    || status == Status.SERVICE_UNAVAILABLE
+                    || status == Status.ONLINE_ONLY
+                    || status == Status.UNSUPPORTED;
+            if (failureStatus != (failureClass != null)) {
+                throw new IllegalArgumentException("Failure classification does not match status");
+            }
+            if (canDownload && status != Status.DOWNLOAD_AVAILABLE) {
+                throw new IllegalArgumentException("Only a downloadable model can be downloaded");
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "Result{status=" + status
+                    + ", language=<redacted>, canDownload=" + canDownload
+                    + ", failureClass=" + failureClass + "}";
+        }
+    }
 
     public interface Callback {
         void onResult(Result result);
@@ -48,7 +72,22 @@ public final class SystemRecognitionSupport {
         FAILED
     }
 
-    public record DownloadResult(DownloadStatus status, String message, int errorCode) {}
+    public record DownloadResult(
+            DownloadStatus status,
+            RecognitionRoute.FailureClass failureClass) {
+        public DownloadResult {
+            status = Objects.requireNonNull(status, "status");
+            if ((status == DownloadStatus.FAILED) != (failureClass != null)) {
+                throw new IllegalArgumentException("Failure classification does not match status");
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "DownloadResult{status=" + status
+                    + ", failureClass=" + failureClass + "}";
+        }
+    }
 
     public interface DownloadCallback {
         default void onProgress(int percent) {}
@@ -99,7 +138,7 @@ public final class SystemRecognitionSupport {
             Callback callback) {
         if (!operation.isActive()) return;
         if (settings == null) {
-            complete(operation, callback, error("Speech recognition settings are unavailable"));
+            complete(operation, callback, error(RecognitionRoute.FailureClass.INTERNAL_ERROR));
             return;
         }
         RecognitionSupportPlatformPolicy.Decision platform =
@@ -110,22 +149,19 @@ public final class SystemRecognitionSupport {
             complete(operation, callback, new Result(
                     Status.SERVICE_UNAVAILABLE,
                     settings.language(),
-                    "No compatible Android speech recognition service is available",
                     false,
-                    SpeechRecognizer.ERROR_CLIENT));
+                    RecognitionRoute.FailureClass.UNAVAILABLE));
             return;
         }
         if (platform == RecognitionSupportPlatformPolicy.Decision.LEGACY_NOT_VERIFIABLE) {
             complete(operation, callback, new Result(
                     Status.LEGACY_NOT_VERIFIABLE,
                     settings.language(),
-                    "A speech service exists, but Android 12L or earlier cannot preflight "
-                            + "the selected language model; offline availability is unverified",
                     false,
-                    0));
+                    null));
             return;
         }
-        SystemRecognitionSupportApi33.check(operation, context, settings, snapshot, callback);
+        SystemRecognitionSupportApi33.check(operation, context, settings, callback);
     }
 
     private static void beginDownload(
@@ -139,29 +175,25 @@ public final class SystemRecognitionSupport {
                 || settings.recognitionBackend() != RecognitionBackend.SYSTEM_ON_DEVICE) {
             completeDownload(operation, callback, new DownloadResult(
                     DownloadStatus.FAILED,
-                    "Model download requires the Android on-device recognition backend",
-                    SpeechRecognizer.ERROR_CLIENT));
+                    RecognitionRoute.FailureClass.UNAVAILABLE));
             return;
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             completeDownload(operation, callback, new DownloadResult(
                     DownloadStatus.API_UNAVAILABLE,
-                    "Android 12L or earlier cannot request a speech model download from this app",
-                    SpeechRecognizer.ERROR_CLIENT));
+                    null));
             return;
         }
         if (!serviceAvailable(context, RecognitionBackend.SYSTEM_ON_DEVICE)) {
             completeDownload(operation, callback, new DownloadResult(
                     DownloadStatus.FAILED,
-                    "No Android on-device speech recognition service is available",
-                    SpeechRecognizer.ERROR_CLIENT));
+                    RecognitionRoute.FailureClass.UNAVAILABLE));
             return;
         }
         SystemRecognitionSupportApi33.download(
                 operation,
                 context,
                 settings,
-                snapshot,
                 callback);
     }
 
@@ -176,13 +208,8 @@ public final class SystemRecognitionSupport {
         }
     }
 
-    private static Result error(String message) {
-        return new Result(Status.ERROR, "", message, false, SpeechRecognizer.ERROR_CLIENT);
-    }
-
-    static String message(RuntimeException error, String fallback) {
-        String message = error.getMessage();
-        return message == null || message.isBlank() ? fallback : message;
+    private static Result error(RecognitionRoute.FailureClass failureClass) {
+        return new Result(Status.ERROR, "", false, failureClass);
     }
 
     static void complete(
@@ -209,15 +236,48 @@ public final class SystemRecognitionSupport {
         callback.onResult(result);
     }
 
+    static void reportDownloadProgress(
+            OneShotOperation operation,
+            DownloadCallback callback,
+            int percent) {
+        operation.reportProgress(callback, percent);
+    }
+
+    interface Scheduler {
+        void post(Runnable action);
+        void postDelayed(Runnable action, long delayMillis);
+        void removeCallbacks(Runnable action);
+    }
+
     static final class OneShotOperation implements Operation {
-        final Handler main;
+        private final Scheduler main;
         private final AtomicBoolean active = new AtomicBoolean(true);
         private final AtomicBoolean resultDelivered = new AtomicBoolean();
+        private final AtomicInteger lastProgress = new AtomicInteger(-1);
         private SpeechRecognizer recognizer;
         private Runnable timeout;
 
         OneShotOperation(Handler main) {
-            this.main = main;
+            this(new Scheduler() {
+                @Override
+                public void post(Runnable action) {
+                    main.post(action);
+                }
+
+                @Override
+                public void postDelayed(Runnable action, long delayMillis) {
+                    main.postDelayed(action, delayMillis);
+                }
+
+                @Override
+                public void removeCallbacks(Runnable action) {
+                    main.removeCallbacks(action);
+                }
+            });
+        }
+
+        OneShotOperation(Scheduler main) {
+            this.main = Objects.requireNonNull(main, "main");
         }
 
         boolean isActive() {
@@ -233,6 +293,7 @@ public final class SystemRecognitionSupport {
         }
 
         void armTimeout(Runnable action) {
+            if (!isActive()) return;
             disarmTimeout();
             timeout = action;
             main.postDelayed(action, SUPPORT_TIMEOUT_MILLIS);
@@ -255,6 +316,21 @@ public final class SystemRecognitionSupport {
             return active.get()
                     && resultDelivered.compareAndSet(false, true)
                     && active.get();
+        }
+
+        void post(Runnable action) {
+            main.post(action);
+        }
+
+        void reportProgress(DownloadCallback callback, int percent) {
+            int bounded = Math.max(0, Math.min(percent, 100));
+            while (isActive() && !resultDelivered.get()) {
+                int previous = lastProgress.get();
+                if (bounded <= previous) return;
+                if (!lastProgress.compareAndSet(previous, bounded)) continue;
+                if (isActive() && !resultDelivered.get()) callback.onProgress(bounded);
+                return;
+            }
         }
 
         void finishSilentlyAfter(long delayMillis) {
@@ -290,5 +366,34 @@ public final class SystemRecognitionSupport {
         } catch (RuntimeException ignored) {
             // The operation is already terminal and no reference to the vendor object is retained.
         }
+    }
+
+    static String boundedLanguage(String value) {
+        if (value == null || value.length() > 128 || !wellFormedUtf16(value)) return "";
+        String clean = value.trim();
+        if (clean.length() > 128
+                || clean.codePointCount(0, clean.length()) > 64
+                || !wellFormedUtf16(clean)) {
+            return "";
+        }
+        return clean;
+    }
+
+    private static boolean wellFormedUtf16(String value) {
+        for (int index = 0; index < value.length(); ) {
+            char unit = value.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (index + 1 >= value.length()
+                        || !Character.isLowSurrogate(value.charAt(index + 1))) {
+                    return false;
+                }
+                index += 2;
+            } else if (Character.isLowSurrogate(unit)) {
+                return false;
+            } else {
+                index++;
+            }
+        }
+        return true;
     }
 }

@@ -2,6 +2,8 @@ package com.opentypeless.android;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
@@ -17,6 +19,7 @@ import android.widget.Toast;
 
 import com.opentypeless.android.data.HistoryEntry;
 import com.opentypeless.android.data.PersonalizationStore;
+import com.opentypeless.android.editor.CommitRecord;
 import com.opentypeless.android.personalization.TeachCorrectionResolver;
 import com.opentypeless.android.settings.SettingsRepository;
 
@@ -50,6 +53,18 @@ public final class HistoryActivity extends Activity {
     private EditText dialogPattern;
     private EditText dialogReplacement;
     private EditText dialogScope;
+
+    /** Creates the only direct-current-commit Teach launch used by the IME. */
+    public static Intent createTeachIntent(
+            Context context, CommitRecord record, long historyId) {
+        HistoryEntry current = TeachCorrectionResolver.resolve(null, record);
+        if (current == null) return null;
+        return new Intent(context, HistoryActivity.class)
+                .putExtra(EXTRA_HISTORY_ID, historyId)
+                .putExtra(EXTRA_RAW_TEXT, current.rawText())
+                .putExtra(EXTRA_FINAL_TEXT, current.finalText())
+                .putExtra(EXTRA_APP_SCOPE, current.appPackage());
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

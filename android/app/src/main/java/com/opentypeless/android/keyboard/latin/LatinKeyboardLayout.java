@@ -1,0 +1,613 @@
+package com.opentypeless.android.keyboard.latin;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.os.SystemClock;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import com.opentypeless.android.R;
+import com.opentypeless.android.keyboard.feedback.KeyboardFeedback;
+import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
+import com.opentypeless.android.keyboard.switching.KeyboardEngineSelection;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+
+/** Capability-free four-row QWERTY and paged-symbol view for KBD-002/KBD-003. */
+public final class LatinKeyboardLayout {
+    public static final String ROOT_TAG = "opentypeless-latin-qwerty";
+    public static final String SHIFT_TAG = "opentypeless-latin-shift";
+
+    @FunctionalInterface
+    public interface KeyFactory {
+        Button create(String label, String contentDescription, float weight, Runnable action);
+    }
+
+    public interface Listener {
+        void insertText(String text);
+
+        void deleteBackward();
+
+        void performEnter();
+
+        void switchKeyboard();
+
+        void showKeyboardPicker();
+
+        void switchInputEngine();
+    }
+
+    private static final String[] LETTER_ROWS = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+    private static final String[] LONG_PRESS_ROWS = {"1234567890", "@#$%&-+()", "*\"':;!?"};
+    private static final String[][] SYMBOL_ROWS_PRIMARY = {
+        {"1", "2", "3", "4", "5", "6", "7", "8", "9", "0"},
+        {"@", "#", "$", "%", "&", "-", "+", "(", ")", "/"},
+        {"*", "\"", "'", ":", ";", "!", "?", ",", "."}
+    };
+    private static final String[][] SYMBOL_ROWS_SECONDARY = {
+        {"~", "`", "|", "•", "√", "π", "÷", "×", "§", "∆"},
+        {"€", "£", "¥", "₩", "¢", "^", "°", "=", "{", "}"},
+        {"\\", "_", "[", "]", "<", ">", "…", "¿", "¡"}
+    };
+    private static final String[][] PHONE_ROWS = {
+        {"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9", "+", "0", "*", "#"}
+    };
+    private static final String[][] NUMBER_ROWS = {
+        {"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9", "-", "0", "."}
+    };
+    private static final String[][] DATE_ROWS = {
+        {"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9", "/", "0", "-", "."}
+    };
+
+    private final Context context;
+    private final KeyFactory keyFactory;
+    private final Listener listener;
+    private final KeyboardFeedback feedback;
+    private final LatinKeyboardState state = new LatinKeyboardState();
+    private final LinearLayout root;
+    private final LinearLayout firstRow;
+    private final LinearLayout secondRow;
+    private final LinearLayout thirdRow;
+    private final LinearLayout bottomRow;
+    private final Map<Character, Button> letters = new LinkedHashMap<>();
+    private final Map<String, Button> symbols = new LinkedHashMap<>();
+    private final Button shiftButton;
+    private final Button symbolsToggleButton;
+    private final Button symbolPageButton;
+    private final Button spaceButton;
+    private final Button deleteButton;
+    private final Button enterButton;
+    private final Button switchKeyboardButton;
+    private final Button engineSwitchButton;
+    private final BoundedDeleteRepeater deleteRepeater;
+    private final List<Button> profileShortcutButtons = new ArrayList<>();
+    private KeyboardFieldProfile fieldProfile = KeyboardFieldProfile.GENERAL;
+    private boolean inputEnabled = true;
+    private boolean suppressDeleteClick;
+
+    public LatinKeyboardLayout(Context context, KeyFactory keyFactory, Listener listener) {
+        this(context, keyFactory, listener, KeyboardFeedback.NONE);
+    }
+
+    public LatinKeyboardLayout(
+            Context context,
+            KeyFactory keyFactory,
+            Listener listener,
+            KeyboardFeedback feedback) {
+        this(context, keyFactory, listener, feedback, null);
+    }
+
+    LatinKeyboardLayout(
+            Context context,
+            KeyFactory keyFactory,
+            Listener listener,
+            KeyboardFeedback feedback,
+            BoundedDeleteRepeater.Scheduler repeatScheduler) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.keyFactory = Objects.requireNonNull(keyFactory, "keyFactory");
+        this.listener = Objects.requireNonNull(listener, "listener");
+        this.feedback = Objects.requireNonNull(feedback, "feedback");
+        root = new LinearLayout(context);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER);
+        root.setTag(ROOT_TAG);
+
+        firstRow = row();
+        secondRow = row();
+        thirdRow = row();
+        shiftButton = createKey(
+                context.getString(R.string.ime_key_shift),
+                context.getString(R.string.ime_cd_shift),
+                1.45f,
+                this::pressShift,
+                false);
+        shiftButton.setTag(SHIFT_TAG);
+        deleteButton = createKey(
+                context.getString(R.string.ime_key_delete),
+                context.getString(R.string.ime_cd_delete),
+                1.45f,
+                this::deleteOnceUnlessSuppressed,
+                false);
+        BoundedDeleteRepeater.Scheduler scheduler = repeatScheduler == null
+                ? (action, delayMillis) -> {
+                    deleteButton.postDelayed(action, delayMillis);
+                    return () -> deleteButton.removeCallbacks(action);
+                }
+                : repeatScheduler;
+        deleteRepeater = new BoundedDeleteRepeater(scheduler);
+        configureDeleteRepeat();
+        root.addView(firstRow, matchWrap());
+        root.addView(secondRow, matchWrap());
+        root.addView(thirdRow, matchWrap());
+
+        bottomRow = row();
+        symbolsToggleButton = createKey(
+                context.getString(R.string.ime_key_symbols),
+                context.getString(R.string.ime_cd_open_symbols),
+                1.15f,
+                this::toggleSymbols,
+                false);
+        addWeighted(bottomRow, symbolsToggleButton, 1.15f);
+        symbolPageButton = createKey(
+                context.getString(R.string.ime_key_symbols_next_page),
+                context.getString(R.string.ime_cd_symbols_next_page),
+                1.15f,
+                this::toggleSymbolPage,
+                false);
+        addWeighted(bottomRow, symbolPageButton, 1.15f);
+        for (int index = 0; index < 3; index++) {
+            int shortcutIndex = index;
+            Button shortcut = createKey("", "", .9f,
+                    () -> emitProfileShortcut(shortcutIndex), false);
+            shortcut.setVisibility(View.GONE);
+            profileShortcutButtons.add(shortcut);
+            addWeighted(bottomRow, shortcut, .9f);
+        }
+        switchKeyboardButton = createKey(
+                context.getString(R.string.ime_key_switch_keyboard),
+                context.getString(R.string.ime_cd_switch_keyboard),
+                1.2f,
+                listener::switchKeyboard,
+                false);
+        switchKeyboardButton.setOnLongClickListener(ignored -> consumeKeyboardPickerLongPress());
+        addWeighted(bottomRow, switchKeyboardButton, 1.2f);
+        engineSwitchButton = createKey(
+                context.getString(R.string.ime_key_engine_latin),
+                context.getString(R.string.ime_cd_engine_latin),
+                1.2f,
+                listener::switchInputEngine,
+                false);
+        engineSwitchButton.setVisibility(View.GONE);
+        addWeighted(bottomRow, engineSwitchButton, 1.2f);
+        spaceButton = createKey(
+                context.getString(R.string.ime_key_space),
+                context.getString(R.string.ime_cd_space),
+                4f,
+                () -> listener.insertText(" "),
+                false);
+        addWeighted(bottomRow, spaceButton, 4f);
+        enterButton = createKey(
+                context.getString(R.string.ime_key_enter),
+                context.getString(R.string.ime_cd_enter),
+                1.2f,
+                listener::performEnter,
+                false);
+        addWeighted(bottomRow, enterButton, 1.2f);
+        root.addView(bottomRow, matchWrap());
+        refreshLayer();
+    }
+
+    public LinearLayout root() {
+        return root;
+    }
+
+    public Button shiftButton() {
+        return shiftButton;
+    }
+
+    public Button symbolsToggleButton() {
+        return symbolsToggleButton;
+    }
+
+    public Button symbolPageButton() {
+        return symbolPageButton;
+    }
+
+    public Button letterButton(char lowercaseAscii) {
+        Button button = letters.get(lowercaseAscii);
+        if (button == null) throw new IllegalArgumentException("unknown letter");
+        return button;
+    }
+
+    public Button spaceButton() {
+        return spaceButton;
+    }
+
+    public Button deleteButton() {
+        return deleteButton;
+    }
+
+    public Button enterButton() {
+        return enterButton;
+    }
+
+    public Button switchKeyboardButton() {
+        return switchKeyboardButton;
+    }
+
+    public Button engineSwitchButton() {
+        return engineSwitchButton;
+    }
+
+    public Button symbolButton(String symbol) {
+        Button button = symbols.get(symbol);
+        if (button == null) throw new IllegalArgumentException("unknown or hidden symbol");
+        return button;
+    }
+
+    public LatinKeyboardState.ShiftMode shiftMode() {
+        return state.shiftMode();
+    }
+
+    public LatinKeyboardState.Layer layer() {
+        return state.layer();
+    }
+
+    public KeyboardFieldProfile fieldProfile() {
+        return fieldProfile;
+    }
+
+    public Button profileShortcutButton(int index) {
+        if (index < 0 || index >= profileShortcutButtons.size()) {
+            throw new IllegalArgumentException("shortcut index out of range");
+        }
+        return profileShortcutButtons.get(index);
+    }
+
+    public void setFieldProfile(KeyboardFieldProfile profile) {
+        KeyboardFieldProfile next = Objects.requireNonNull(profile, "profile");
+        if (fieldProfile == next) return;
+        fieldProfile = next;
+        state.resetToLetters();
+        refreshLayer();
+    }
+
+    public void setInputEnabled(boolean enabled) {
+        if (!enabled) cancelTransientGestures();
+        inputEnabled = enabled;
+        shiftButton.setEnabled(enabled);
+        symbolsToggleButton.setEnabled(enabled);
+        symbolPageButton.setEnabled(enabled);
+        spaceButton.setEnabled(enabled);
+        deleteButton.setEnabled(enabled);
+        enterButton.setEnabled(enabled);
+        switchKeyboardButton.setEnabled(enabled);
+        engineSwitchButton.setEnabled(enabled);
+        for (Button button : letters.values()) button.setEnabled(enabled);
+        for (Button button : symbols.values()) button.setEnabled(enabled);
+        for (Button button : profileShortcutButtons) button.setEnabled(enabled);
+    }
+
+    /** Stops touch-owned work when the editor or IME view leaves its active lifecycle. */
+    public void cancelTransientGestures() {
+        deleteRepeater.stop();
+        deleteButton.setPressed(false);
+    }
+
+    public void setEngineSelection(KeyboardEngineSelection selection) {
+        KeyboardEngineSelection safe = Objects.requireNonNull(selection, "selection");
+        state.resetToLetters();
+        engineSwitchButton.setVisibility(safe.hasAlternative() ? View.VISIBLE : View.GONE);
+        boolean latin = safe.active() == KeyboardEngineSelection.Engine.LATIN;
+        engineSwitchButton.setText(latin
+                ? R.string.ime_key_engine_latin
+                : R.string.ime_key_engine_rime);
+        engineSwitchButton.setContentDescription(context.getString(latin
+                ? R.string.ime_cd_engine_latin
+                : R.string.ime_cd_engine_rime));
+        refreshLayer();
+    }
+
+    private void populateLetterRow(
+            LinearLayout row, String rowLetters, String longPressSymbols, float sideWeight) {
+        if (rowLetters.length() != longPressSymbols.length()) {
+            throw new IllegalStateException("letter and long-press rows must have equal length");
+        }
+        if (sideWeight > 0f) addSpacer(row, sideWeight);
+        for (int index = 0; index < rowLetters.length(); index++) {
+            addLetter(row, rowLetters.charAt(index), longPressSymbols.substring(index, index + 1));
+        }
+        if (sideWeight > 0f) addSpacer(row, sideWeight);
+    }
+
+    private void addLetter(LinearLayout row, char letter, String longPressSymbol) {
+        Button button = createKey(
+                Character.toString(letter),
+                context.getString(
+                        R.string.ime_cd_letter_with_long_press,
+                        Character.toString(letter),
+                        longPressSymbol),
+                1f,
+                () -> {
+                    listener.insertText(state.consumeLetter(letter));
+                    refreshLabels();
+                },
+                true);
+        button.setTag("opentypeless-latin-letter-" + letter);
+        button.setOnLongClickListener(ignored -> {
+            feedback.onLongPress(button);
+            listener.insertText(longPressSymbol);
+            return true;
+        });
+        letters.put(letter, button);
+        addWeighted(row, button, 1f);
+    }
+
+    private boolean consumeKeyboardPickerLongPress() {
+        feedback.onLongPress(switchKeyboardButton);
+        listener.showKeyboardPicker();
+        return true;
+    }
+
+    private void addSymbol(LinearLayout row, String symbol) {
+        Button button = createKey(symbol, symbol, 1f, () -> listener.insertText(symbol), true);
+        button.setTag("opentypeless-symbol-" + symbol);
+        button.setEnabled(inputEnabled);
+        symbols.put(symbol, button);
+        addWeighted(row, button, 1f);
+    }
+
+    private void toggleSymbols() {
+        state.pressSymbolsToggle();
+        refreshLayer();
+    }
+
+    private void toggleSymbolPage() {
+        state.pressSymbolPage();
+        refreshLayer();
+    }
+
+    private void emitProfileShortcut(int index) {
+        String[] shortcuts = shortcutsFor(fieldProfile);
+        if (index < 0 || index >= shortcuts.length) {
+            throw new IllegalStateException("hidden profile shortcut invoked");
+        }
+        listener.insertText(shortcuts[index]);
+    }
+
+    private void refreshLayer() {
+        firstRow.removeAllViews();
+        secondRow.removeAllViews();
+        thirdRow.removeAllViews();
+        letters.clear();
+        symbols.clear();
+        if (fieldProfile.usesNumericPanel()) {
+            String[][] rows = switch (fieldProfile) {
+                case PHONE -> PHONE_ROWS;
+                case NUMBER -> NUMBER_ROWS;
+                case DATE -> DATE_ROWS;
+                default -> throw new IllegalStateException("numeric profile mismatch");
+            };
+            for (String symbol : rows[0]) addSymbol(firstRow, symbol);
+            for (String symbol : rows[1]) addSymbol(secondRow, symbol);
+            for (String symbol : rows[2]) addSymbol(thirdRow, symbol);
+            addWeighted(thirdRow, deleteButton, 1.45f);
+            symbolsToggleButton.setVisibility(View.GONE);
+            symbolPageButton.setVisibility(View.GONE);
+            configureProfileShortcuts(new String[0]);
+            spaceButton.setVisibility(View.GONE);
+        } else if (state.layer() == LatinKeyboardState.Layer.LETTERS) {
+            populateLetterRow(firstRow, LETTER_ROWS[0], LONG_PRESS_ROWS[0], 0f);
+            populateLetterRow(secondRow, LETTER_ROWS[1], LONG_PRESS_ROWS[1], 0.5f);
+            addWeighted(thirdRow, shiftButton, 1.45f);
+            populateLetterRow(thirdRow, LETTER_ROWS[2], LONG_PRESS_ROWS[2], 0f);
+            addWeighted(thirdRow, deleteButton, 1.45f);
+            symbolPageButton.setVisibility(View.GONE);
+            symbolsToggleButton.setVisibility(View.VISIBLE);
+            symbolsToggleButton.setText(R.string.ime_key_symbols);
+            symbolsToggleButton.setContentDescription(
+                    context.getString(R.string.ime_cd_open_symbols));
+            refreshLabels();
+            configureProfileShortcuts(shortcutsFor(fieldProfile));
+            spaceButton.setVisibility(View.VISIBLE);
+        } else {
+            String[][] rows = state.layer() == LatinKeyboardState.Layer.SYMBOLS_PRIMARY
+                    ? SYMBOL_ROWS_PRIMARY
+                    : SYMBOL_ROWS_SECONDARY;
+            for (String symbol : rows[0]) addSymbol(firstRow, symbol);
+            for (String symbol : rows[1]) addSymbol(secondRow, symbol);
+            for (String symbol : rows[2]) addSymbol(thirdRow, symbol);
+            addWeighted(thirdRow, deleteButton, 1.45f);
+            symbolPageButton.setVisibility(View.VISIBLE);
+            symbolsToggleButton.setVisibility(View.VISIBLE);
+            symbolPageButton.setText(state.layer() == LatinKeyboardState.Layer.SYMBOLS_PRIMARY
+                    ? R.string.ime_key_symbols_next_page
+                    : R.string.ime_key_symbols_previous_page);
+            symbolPageButton.setContentDescription(context.getString(
+                    state.layer() == LatinKeyboardState.Layer.SYMBOLS_PRIMARY
+                            ? R.string.ime_cd_symbols_next_page
+                            : R.string.ime_cd_symbols_previous_page));
+            symbolsToggleButton.setText(R.string.ime_key_letters);
+            symbolsToggleButton.setContentDescription(
+                    context.getString(R.string.ime_cd_return_to_letters));
+            configureProfileShortcuts(new String[0]);
+            spaceButton.setVisibility(View.VISIBLE);
+        }
+        root.setContentDescription(context.getString(profileDescription(fieldProfile)));
+        setInputEnabled(inputEnabled);
+    }
+
+    private void configureProfileShortcuts(String[] shortcuts) {
+        for (int index = 0; index < profileShortcutButtons.size(); index++) {
+            Button button = profileShortcutButtons.get(index);
+            if (index >= shortcuts.length) {
+                button.setText("");
+                button.setContentDescription("");
+                button.setVisibility(View.GONE);
+                continue;
+            }
+            button.setText(shortcuts[index]);
+            button.setContentDescription(shortcuts[index]);
+            button.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private static String[] shortcutsFor(KeyboardFieldProfile profile) {
+        return switch (profile) {
+            case EMAIL -> new String[] {"@", "."};
+            case URI -> new String[] {"/", ".", ":"};
+            default -> new String[0];
+        };
+    }
+
+    private static int profileDescription(KeyboardFieldProfile profile) {
+        return switch (profile) {
+            case GENERAL -> R.string.ime_cd_keyboard_profile_general;
+            case EMAIL -> R.string.ime_cd_keyboard_profile_email;
+            case URI -> R.string.ime_cd_keyboard_profile_uri;
+            case PHONE -> R.string.ime_cd_keyboard_profile_phone;
+            case NUMBER -> R.string.ime_cd_keyboard_profile_number;
+            case DATE -> R.string.ime_cd_keyboard_profile_date;
+            case PASSWORD -> R.string.ime_cd_keyboard_profile_password;
+        };
+    }
+
+    private void pressShift() {
+        state.pressShift(SystemClock.uptimeMillis());
+        refreshLabels();
+    }
+
+    private void refreshLabels() {
+        for (Map.Entry<Character, Button> entry : letters.entrySet()) {
+            String label = state.displayLetter(entry.getKey());
+            entry.getValue().setText(label);
+            entry.getValue().setContentDescription(context.getString(
+                    R.string.ime_cd_letter_with_long_press,
+                    label,
+                    longPressSymbolFor(entry.getKey())));
+        }
+        boolean caps = state.shiftMode() == LatinKeyboardState.ShiftMode.CAPS_LOCKED;
+        shiftButton.setText(context.getString(
+                caps ? R.string.ime_key_caps_lock : R.string.ime_key_shift));
+        shiftButton.setSelected(state.uppercase());
+        shiftButton.setContentDescription(context.getString(
+                caps ? R.string.ime_cd_caps_lock : R.string.ime_cd_shift));
+    }
+
+    private static String longPressSymbolFor(char letter) {
+        for (int row = 0; row < LETTER_ROWS.length; row++) {
+            int index = LETTER_ROWS[row].indexOf(letter);
+            if (index >= 0) return LONG_PRESS_ROWS[row].substring(index, index + 1);
+        }
+        throw new IllegalArgumentException("unknown letter");
+    }
+
+    private Button createKey(
+            String label,
+            String contentDescription,
+            float weight,
+            Runnable action,
+            boolean letter) {
+        Button button = Objects.requireNonNull(
+                keyFactory.create(label, contentDescription, weight, action),
+                "key factory returned null");
+        button.setOnClickListener(ignored -> {
+            feedback.onPress(button);
+            action.run();
+        });
+        if (letter) {
+            button.setMinWidth(0);
+            button.setMinimumWidth(0);
+            button.setPadding(0, 0, 0, 0);
+            button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+        }
+        return button;
+    }
+
+    private void deleteOnceUnlessSuppressed() {
+        if (!suppressDeleteClick) listener.deleteBackward();
+    }
+
+    @SuppressLint("ClickableViewAccessibility") // ACTION_UP delegates to performClick.
+    private void configureDeleteRepeat() {
+        deleteButton.setOnClickListener(ignored -> {
+            if (suppressDeleteClick) return;
+            feedback.onPress(deleteButton);
+            listener.deleteBackward();
+        });
+        deleteButton.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN -> {
+                    if (!inputEnabled) return true;
+                    view.setPressed(true);
+                    feedback.onPress(view);
+                    deleteRepeater.press(listener::deleteBackward);
+                    return true;
+                }
+                case MotionEvent.ACTION_UP -> {
+                    deleteRepeater.stop();
+                    view.setPressed(false);
+                    suppressDeleteClick = true;
+                    try {
+                        view.performClick();
+                    } finally {
+                        suppressDeleteClick = false;
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
+                    deleteRepeater.stop();
+                    view.setPressed(false);
+                    return true;
+                }
+                default -> {
+                    return true;
+                }
+            }
+        });
+    }
+
+    private LinearLayout row() {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    private void addWeighted(LinearLayout row, View child, float weight) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                dp(48),
+                weight);
+        params.setMarginStart(dp(2));
+        params.setMarginEnd(dp(2));
+        params.topMargin = dp(2);
+        params.bottomMargin = dp(2);
+        row.addView(child, params);
+    }
+
+    private void addSpacer(LinearLayout row, float weight) {
+        View spacer = new View(context);
+        spacer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // A plain View with WRAP_CONTENT height can consume the IME's entire AT_MOST height
+        // during LinearLayout's weighted-width measurement pass. Keep the indent spacer
+        // heightless so the row height is determined exclusively by its 48dp keys.
+        row.addView(spacer, new LinearLayout.LayoutParams(0, 0, weight));
+    }
+
+    private static LinearLayout.LayoutParams matchWrap() {
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+}

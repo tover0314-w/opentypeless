@@ -1,6 +1,7 @@
 package com.opentypeless.android;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -14,6 +15,12 @@ import android.widget.EditText;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+
+import com.opentypeless.android.context.FieldKind;
+import com.opentypeless.android.editor.CommitRecord;
+import com.opentypeless.android.editor.EditorSessionSnapshot;
+import com.opentypeless.android.editor.OperationSource;
+import com.opentypeless.android.editor.TextRange;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -62,10 +69,8 @@ public final class ManagementStateInstrumentedTest {
     @Test
     public void teachCorrectionDraftSurvivesActivityRecreation() {
         Context context = ApplicationProvider.getApplicationContext();
-        Intent intent = new Intent(context, HistoryActivity.class)
-                .putExtra("raw_text", "等学校")
-                .putExtra("final_text", "邓雪昭")
-                .putExtra("app_scope", "com.example.editor");
+        Intent intent = HistoryActivity.createTeachIntent(context, teachRecord(), -1L);
+        assertNotNull(intent);
         try (ActivityScenario<HistoryActivity> scenario = ActivityScenario.launch(intent)) {
             assertTrue(awaitDialogFields(scenario));
             scenario.onActivity(activity -> activity.correctionDialogFieldsForTest()
@@ -81,6 +86,30 @@ public final class ManagementStateInstrumentedTest {
                 assertEquals("com.example.editor", restored.get(2).getText().toString());
             });
         }
+    }
+
+    private static CommitRecord teachRecord() {
+        EditorSessionSnapshot origin = EditorSessionSnapshot.capture(
+                1L,
+                2L,
+                "com.example.editor",
+                3,
+                FieldKind.GENERAL,
+                0,
+                0,
+                new TextRange(4, 4),
+                "",
+                "before",
+                "after",
+                true,
+                false,
+                5L);
+        return CommitRecord.create(
+                "instrumented-teach-record",
+                OperationSource.VOICE,
+                origin,
+                "邓雪昭",
+                new CommitRecord.RawTranscript.Present("等学校"));
     }
 
     private static EditText editWithDescription(Activity activity, String description) {

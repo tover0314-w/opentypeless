@@ -1,7 +1,6 @@
 package com.opentypeless.android.net.streaming;
 
-import com.opentypeless.android.audio.AudioRecorder;
-import com.opentypeless.android.audio.RecordingSession;
+import com.opentypeless.android.audio.AudioCapture;
 import com.opentypeless.android.settings.AppSettings;
 
 /** Provider-neutral realtime recognition boundary used by Voice Core. */
@@ -19,9 +18,9 @@ public interface StreamingRecognitionEngine {
 
     Result recognize(
             AppSettings settings,
-            AudioRecorder recorder,
-            RecordingSession recordingSession,
-            AudioRecorder.CaptureListener captureListener,
+            AudioCapture audioCapture,
+            AudioCapture.Session captureSession,
+            AudioCapture.CaptureListener captureListener,
             Listener listener);
 
     void cancelActiveSession();

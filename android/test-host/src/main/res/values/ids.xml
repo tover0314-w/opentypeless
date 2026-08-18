@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="host_plain_text" type="id" />
+    <item name="host_short_message" type="id" />
+    <item name="host_long_text" type="id" />
+    <item name="host_person_name" type="id" />
+    <item name="host_search" type="id" />
+    <item name="host_email" type="id" />
+    <item name="host_uri" type="id" />
+    <item name="host_phone" type="id" />
+    <item name="host_number" type="id" />
+    <item name="host_date" type="id" />
+    <item name="host_password" type="id" />
+    <item name="host_visible_password" type="id" />
+    <item name="host_number_password" type="id" />
+    <item name="host_otp" type="id" />
+    <item name="host_payment_card" type="id" />
+    <item name="host_identity_number" type="id" />
+    <item name="host_no_learning" type="id" />
+    <item name="host_single_line_done" type="id" />
+    <item name="host_rtl_text" type="id" />
+    <item name="host_web_contenteditable" type="id" />
+    <item name="host_dynamic_container" type="id" />
+    <item name="host_dynamic_text" type="id" />
+</resources>
