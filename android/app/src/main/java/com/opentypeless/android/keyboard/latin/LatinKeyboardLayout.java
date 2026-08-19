@@ -24,6 +24,12 @@ public final class LatinKeyboardLayout {
     public static final String ROOT_TAG = "opentypeless-latin-qwerty";
     public static final String SHIFT_TAG = "opentypeless-latin-shift";
 
+    // KBD-009 portrait sizing slice: match the compact Xiaohe geometry while keeping the
+    // existing four-row structure and the 48dp minimum touch-height contract.
+    private static final int KEY_HEIGHT_DP = 50;
+    private static final int KEY_SIDE_MARGIN_DP = 1;
+    private static final int KEY_VERTICAL_MARGIN_DP = 2;
+
     @FunctionalInterface
     public interface KeyFactory {
         Button create(String label, String contentDescription, float weight, Runnable action);
@@ -583,12 +589,12 @@ public final class LatinKeyboardLayout {
     private void addWeighted(LinearLayout row, View child, float weight) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 0,
-                dp(48),
+                dp(KEY_HEIGHT_DP),
                 weight);
-        params.setMarginStart(dp(2));
-        params.setMarginEnd(dp(2));
-        params.topMargin = dp(2);
-        params.bottomMargin = dp(2);
+        params.setMarginStart(dp(KEY_SIDE_MARGIN_DP));
+        params.setMarginEnd(dp(KEY_SIDE_MARGIN_DP));
+        params.topMargin = dp(KEY_VERTICAL_MARGIN_DP);
+        params.bottomMargin = dp(KEY_VERTICAL_MARGIN_DP);
         row.addView(child, params);
     }
 
@@ -597,7 +603,7 @@ public final class LatinKeyboardLayout {
         spacer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         // A plain View with WRAP_CONTENT height can consume the IME's entire AT_MOST height
         // during LinearLayout's weighted-width measurement pass. Keep the indent spacer
-        // heightless so the row height is determined exclusively by its 48dp keys.
+        // heightless so the row height is determined exclusively by its 50dp keys.
         row.addView(spacer, new LinearLayout.LayoutParams(0, 0, weight));
     }
 

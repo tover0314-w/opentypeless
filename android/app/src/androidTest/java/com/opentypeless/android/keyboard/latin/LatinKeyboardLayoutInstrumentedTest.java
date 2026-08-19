@@ -252,6 +252,37 @@ public final class LatinKeyboardLayoutInstrumentedTest {
     }
 
     @Test
+    public void qwertyRowsUseCompactXiaoheGeometryAndKeepTouchHeight() {
+        onMain(() -> {
+            Harness harness = new Harness();
+            LinearLayout root = harness.layout.root();
+            root.measure(
+                    View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(2200, View.MeasureSpec.AT_MOST));
+            root.layout(0, 0, root.getMeasuredWidth(), root.getMeasuredHeight());
+
+            LinearLayout firstRow = row(harness.layout, 0);
+            LinearLayout secondRow = row(harness.layout, 1);
+            LinearLayout thirdRow = row(harness.layout, 2);
+            LinearLayout bottomRow = row(harness.layout, 3);
+            Button q = harness.layout.letterButton('q');
+            Button a = harness.layout.letterButton('a');
+            Button z = harness.layout.letterButton('z');
+
+            assertEquals(10, firstRow.getChildCount());
+            assertEquals(11, secondRow.getChildCount()); // two indent spacers + 9 letters
+            assertEquals(9, thirdRow.getChildCount()); // shift + 7 letters + delete
+            assertEquals(dp(root.getContext(), 50), q.getLayoutParams().height);
+            assertEquals(q.getHeight(), a.getHeight());
+            assertTrue(q.getHeight() >= dp(root.getContext(), 48));
+            assertTrue(a.getLeft() > q.getLeft());
+            assertTrue(z.getLeft() > q.getLeft());
+            assertTrue(harness.layout.spaceButton().getWidth() > q.getWidth() * 3);
+            assertTrue(bottomRow.getMeasuredHeight() > 0);
+        });
+    }
+
+    @Test
     public void emailAndUriProfilesExposeDirectShortcutsWithoutBypassingListener() {
         onMain(() -> {
             Harness harness = new Harness();
@@ -350,6 +381,10 @@ public final class LatinKeyboardLayoutInstrumentedTest {
 
     private static LinearLayout row(LatinKeyboardLayout layout, int index) {
         return (LinearLayout) layout.root().getChildAt(index);
+    }
+
+    private static int dp(Context context, int value) {
+        return Math.round(value * context.getResources().getDisplayMetrics().density);
     }
 
     private static final class Harness implements LatinKeyboardLayout.Listener {

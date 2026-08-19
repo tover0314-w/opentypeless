@@ -833,7 +833,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `KBD-006` | P0 | M | 键盘工具栏容器 | KBD-001 | 固定按钮、overflow、Placement 插槽 | 48dp 触控、横屏适配 | DONE |
 | `KBD-007` | P0 | M | 候选栏统一模型 | KBD-001, CMP-002 | CandidatePage/selection/paging，不依赖具体引擎 | Latin/Rime 可复用 | DONE |
 | `KBD-008` | P1 | M | 输入法切换和语言切换 | KBD-002 | next IME、subtype/engine 切换 | OEM/HyperOS 可用 | DONE |
-| `KBD-009` | P1 | M | 横屏和尺寸配置 | KBD-002 | 高度、边距、横屏压缩 | 小米15横竖屏无截断 | TODO |
+| `KBD-009` | P1 | M | 横屏和尺寸配置 | KBD-002 | 高度、边距、横屏压缩 | 小米15横竖屏无截断 | IN_PROGRESS |
 | `KBD-010` | P1 | L | Emoji 面板 | KBD-001 | 分类、最近使用、敏感字段策略 | 不阻塞 IME 热路径 | TODO |
 | `KBD-011` | P1 | L | 剪贴板面板 | KBD-001, SEC-005 | 权限/Android 版本、保留、敏感字段隐藏 | 默认不静默上传/记录 | TODO |
 | `KBD-012` | P2 | L | 单手/紧凑模式 | KBD-002 | 左右/居中、尺寸 | 触控与横屏测试 | TODO |
@@ -972,6 +972,10 @@ preedit/candidate/选择提交仍由 RIM-001/004/005 和后续 Latin 任务负�
 9/9 hostile fixtures、switching JVM 10/10、两机 View 11/11、clean app JVM 1004/1004、architecture 114/114、
 compiled 2/2 和 strict 191-task graph 全 PASS。Xiaomi 10 Ultra 上短按 picker fallback、选择 PangIME 后系统默认值变化、
 长按 picker 均实测 PASS；结束时小米恢复 PangIME，模拟器保持 LatinIME。Rime 注册仍由 RIM-001..005 负责。
+
+**KBD-009 进行中说明（2026-08-19，个人竖屏尺寸切片）：** QWERTY 字母行主键统一为 50dp 高，横向按键
+间距收紧为 1dp，保留第二行缩进、第三行 Shift/Delete 比例和底部功能键权重，目标是接近用户小鹤音形键盘的
+紧凑几何。此切片不宣称已经完成小米 15 横屏无截断验收；横屏压缩和全设备矩阵仍待后续验证。
 
 **RIM-001 完成说明（2026-08-16，`DONE`）：** 新的纯 Java `RimeInputEngine` 与
 `RimeEngineSnapshot` 定义 activate/deactivate/process/snapshot/candidate page/selection 的闭合请求与结果；每项异步
