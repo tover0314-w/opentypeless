@@ -1107,8 +1107,8 @@ Boolean，也不包含 Session、正文、hash、Android capability 或序列化
 | `LatinComposing` | 开始语音 | `COMMIT_CURRENT` | 固定，不丢可见 Latin composition |
 | `VoicePreparing` / `VoiceListening` | 键盘按键 | `CANCEL_CURRENT` | 无 visible partial，固定取消 |
 | `VoicePartial` | 键盘按键 | `COMMIT_CURRENT` | `CANCEL_CURRENT` |
-| `VoiceFinalizing(latestRevision > 0)` | 键盘按键 | `COMMIT_CURRENT_AND_ROUTE_RESULT` | `CANCEL_CURRENT_AND_ROUTE_RESULT` |
-| `VoiceFinalizing(latestRevision = 0)` | 键盘按键 | `CANCEL_CURRENT_AND_ROUTE_RESULT` | 固定，无 partial 可提交 |
+| `VoiceFinalizing(latestRevision > 0)` | 键盘按键 | `COMMIT_CURRENT` | `CANCEL_CURRENT` |
+| `VoiceFinalizing(latestRevision = 0)` | 键盘按键 | `CANCEL_CURRENT` | 固定，无 partial 可提交 |
 | `ActionRunning` / `ActionPreview` | 开始语音 | `CANCEL_CURRENT_AND_ROUTE_RESULT` | `CANCEL_CURRENT`（丢弃 displaced result） |
 | `LatinComposing` / `RimeComposing` | 开始 Action | `COMMIT_CURRENT` | 固定；提交后必须重新捕获 Session |
 | 敏感字段 | 云端语音/动作 | PrivacyPolicy 拒绝 | 不属于可放宽的冲突配置 |
@@ -1156,7 +1156,7 @@ CMP-006；Rime/Action 抢占接线属于各自后续任务。
 每次键盘事件先在同一 `VoiceTransactionSession` 冻结一次 `CompositionConflictPolicy.Decision`，以 exact
 `Observation` 调用 `beginPreempt(..., Acquisition.Latin(1))`。Preparing/Listening 没有可见正文时取消 Voice；
 `VoicePartial` 按冻结配置提交可见 partial 或以一次严格递增 revision 清空并 finish；等待 Final 时沿用同一选择，
-但把迟到 Final 只路由到结果面板/可恢复草稿，不再写回已被键盘接管的 editor。
+同时把按键视为用户明确取消迟到 Final，不再生成阻塞下一次录音的可恢复草稿，也不写回已被键盘接管的 editor。
 
 物理 release 仍只经 Manager/ETM：提交路径调用 `finishVoiceComposition`；取消路径执行
 `setVoiceComposition("", nextRevision)`，重新捕获 fresh Session 后再 `finishVoiceComposition`。只有 typed
@@ -1166,8 +1166,10 @@ CMP-006；Rime/Action 抢占接线属于各自后续任务。
 
 release 成功后才重新捕获 Session 并执行一次既有键盘 Manager façade。键写入 `Applied` 时以 LATIN revision 1
 提交到 Idle；键写入失败则取消 LATIN owner，同样不重复发送。Voice session 在 preempt 开始时即 terminal，
-provider late partial 全部拒绝；独立 `finalCallbackClaimed` 只允许一个正常 Final handler，detached result gate 也只
-允许一个迟到 Final 进入结果面板。因此成功键不丢失、不双写，失败键有显式本地错误且不会偷偷写入旧目标。
+provider late partial 与迟到 Final 全部拒绝。因此成功键不丢失、不双写，失败键有显式本地错误且不会偷偷写入旧目标。
+
+恢复草稿与受保护录音仍可从“⋮”显式恢复，但不再占据主状态或禁用按键/麦克风。用户主动开始下一次录音时，
+该动作视为用新录音替换旧恢复项；显式选择“插入”或“放弃”均单次执行，不再增加二次确认。
 
 `KeyboardPreemption` 只保存 owner identity、opaque ticket、content-free decision 与两个布尔状态，不持有正文、
 Session、`InputConnection`、receipt 或 CommitRecord；其 `toString()` 脱敏。source/compiled gate 锁定精确 shape、

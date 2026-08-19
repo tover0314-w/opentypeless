@@ -32,7 +32,7 @@ POLICY_REL = Path("third_party/rime/resource-policy.v1.json")
 IMPORT_SCHEMA_REL = Path("protocol/opentypeless-rime-import-manifest-v1.schema.json")
 ROUTE_A_SERIES_REL = Path("third_party/keyboard/route_a/patches/series.v1.json")
 
-TRUSTED_POLICY_CANONICAL_SHA256 = "b5ac1cbbca36dc793f5e3cdaf269c3c5bc008e3c69c298ca0a0f937b914dc5f7"
+TRUSTED_POLICY_CANONICAL_SHA256 = "7aac69048b6ea5327d91083cafbdc8ade2fd1109851bcfa04e2f4e1640234064"
 TRUSTED_IMPORT_SCHEMA_CANONICAL_SHA256 = "5d466e6bf38959deb47fc15bd946e3429e559ad4342367b9435ce1d9330f30cf"
 
 HEX40 = re.compile(r"[0-9a-f]{40}")

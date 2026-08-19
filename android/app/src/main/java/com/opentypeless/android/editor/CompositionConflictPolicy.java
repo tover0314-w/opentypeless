@@ -95,9 +95,9 @@ public record CompositionConflictPolicy(
     /**
      * Resolves a keyboard event against an exact voice phase.
      *
-     * <p>Preparing/listening has no visible partial to preserve. Finalizing always routes the late
-     * Final to the result panel; when a partial exists, the configured visible-partial choice is
-     * still honored before the keyboard event proceeds.
+     * <p>Preparing/listening has no visible partial to preserve. A keyboard event during Finalizing
+     * keeps or cancels the already visible partial according to the configured choice, then treats
+     * the key as an explicit cancellation of the displaced late Final.
      */
     public Decision voiceToKeyboardDecision(CompositionState voiceState) {
         Objects.requireNonNull(voiceState, "voiceState");
@@ -115,8 +115,8 @@ public record CompositionConflictPolicy(
                     && voicePartialToKeyboard
                             == VoicePartialToKeyboard.COMMIT_VISIBLE_PARTIAL;
             return commitVisible
-                    ? Decision.COMMIT_CURRENT_AND_ROUTE_RESULT
-                    : Decision.CANCEL_CURRENT_AND_ROUTE_RESULT;
+                    ? Decision.COMMIT_CURRENT
+                    : Decision.CANCEL_CURRENT;
         }
         throw wrongState();
     }

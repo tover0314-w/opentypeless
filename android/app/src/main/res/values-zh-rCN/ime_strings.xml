@@ -88,17 +88,12 @@
     <!-- 语音键盘状态与错误信息。 -->
     <string name="ime_status_cancelled">已放弃本次语音输入</string>
     <string name="ime_status_confirm_discard">已显示的语音文字将被删除。请在 10 秒内再次打开“⋮”并确认放弃。</string>
-    <string name="ime_status_recoverable_draft_available">上一输入框未能接收语音草稿；可从“⋮”将它插入当前输入框。</string>
     <string name="ime_status_recoverable_draft_loading">正在恢复上次加密保存的语音草稿…</string>
-    <string name="ime_status_recoverable_draft_resolve_first">开始下一次录音前，请先从“⋮”插入或放弃已保留的语音草稿</string>
-    <string name="ime_status_recoverable_audio_available">有一段已完成的录音加密保存在本机；请从“⋮”恢复或放弃。</string>
-    <string name="ime_status_recoverable_audio_resolve_first">开始下一段录音前，请先从“⋮”恢复或放弃已加密保存的录音</string>
     <string name="ime_status_recovering_audio">正在恢复加密录音，不会重新打开麦克风…</string>
     <string name="ime_status_recoverable_audio_ready">恢复出的文字已加密保护，可从“⋮”插入</string>
     <string name="ime_status_recoverable_audio_unavailable">没有可恢复的加密录音</string>
     <string name="ime_status_recoverable_audio_failed">恢复失败：%1$s。加密录音仍已保留。</string>
     <string name="ime_status_recoverable_audio_failed_local">无法开始恢复；加密录音仍已保留。</string>
-    <string name="ime_status_confirm_discard_audio">这段加密录音将被永久删除。请在 10 秒内再次打开“⋮”并选择“放弃加密保存的录音”。</string>
     <string name="ime_status_recoverable_audio_discarded">已永久放弃加密保存的录音</string>
     <string name="ime_status_previous_voice_finalizing">上一段语音仍在生成最终结果</string>
     <string name="ime_status_recoverable_draft_inserted">已插入保留的语音草稿</string>
@@ -108,7 +103,6 @@
     <string name="ime_status_detached_selection_preserved">输入框已改变；原选区保持不变</string>
     <string name="ime_status_detached_final_recoverable">输入框已改变；完整语音结果已保留，可从“⋮”恢复</string>
     <string name="ime_status_recoverable_draft_memory_only">语音草稿目前仍可恢复，但加密保存失败；请在关闭键盘前插入或复制它</string>
-    <string name="ime_status_confirm_recoverable_insert">这份草稿可能与上一输入框已保留的文字重叠。请再次打开“⋮”并选择“插入已保留的语音草稿”，以单独插入一份副本。</string>
     <string name="ime_cd_space_voice_unavailable">插入空格；语音输入暂时不可用</string>
     <string name="ime_status_detached_partial_recoverable">语音处理失败；最后可见草稿仍受保护，可从“⋮”恢复</string>
     <string name="ime_status_sensitive_disabled">敏感字段中已禁用语音输入</string>
@@ -154,7 +148,7 @@
     <string name="ime_status_operation_connection_failed">在%1$s期间文本连接失败；继续前请检查字段</string>
     <string name="ime_status_delete_rejected">当前应用拒绝了删除操作</string>
     <string name="ime_status_delete_connection_failed">删除期间文本连接失败</string>
-    <string name="ime_status_key_rejected">当前应用拒绝了按键操作</string>
+    <string name="ime_status_key_rejected">输入状态刚刚变化，请再按一次</string>
     <string name="ime_status_typing_connection_failed">输入时文本连接失败</string>
     <string name="ime_status_editor_action_failed">执行编辑器操作时文本连接失败</string>
     <string name="ime_status_finish_before_mode_change">请先结束或取消当前录音，再更改模式</string>

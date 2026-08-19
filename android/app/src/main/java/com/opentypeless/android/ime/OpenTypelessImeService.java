@@ -942,7 +942,6 @@ public final class OpenTypelessImeService extends InputMethodService
     private boolean recoverableDraftLoading = true;
     private boolean recoveringSavedAudio;
     private long discardConfirmationDeadline;
-    private long recoverableInsertConfirmationDeadline;
     private String latestPreviewText = "";
     private final RecoverableDraftSlot recoverableDraft = PROCESS_RECOVERABLE_DRAFT;
     private DictationRequest.CaptureMode activeCaptureMode;
@@ -1376,16 +1375,8 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_status_recoverable_draft_loading, false);
             return;
         }
-        if (pipeline.hasRecoverableAudio()) {
-            setStatus(R.string.ime_status_recoverable_audio_resolve_first, true);
-            return;
-        }
         if (pendingDetachedTarget() != null) {
             setStatus(R.string.ime_status_previous_voice_finalizing, false);
-            return;
-        }
-        if (recoverableDraft.hasDraft()) {
-            setStatus(R.string.ime_status_recoverable_draft_resolve_first, true);
             return;
         }
         if (voiceController.state() == VoiceController.State.RECORDING) {
@@ -1458,7 +1449,6 @@ public final class OpenTypelessImeService extends InputMethodService
         activeV2Projection = null;
         latestV2Document = null;
         activeV2ProjectionMode = null;
-        setEditingKeysEnabled(false, false);
         showPreparingState();
         lastCommit = null;
         refreshPostCommitActions();
@@ -1642,6 +1632,7 @@ public final class OpenTypelessImeService extends InputMethodService
                     setStatus(R.string.ime_status_target_changed_cancelled, true);
                     return;
                 }
+                replaceRecoverableVoiceForNewRecording();
                 boolean started = voiceController.start(request, listenerFor(target));
                 if (!started) {
                     preparingVoiceInput = false;
@@ -4345,9 +4336,6 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_status_recovering_audio, false);
         } else if (recoverableDraftLoading) {
             setStatus(R.string.ime_status_recoverable_draft_loading, false);
-        } else if (recoverableDraft.hasDraft()) {
-            showRecoverableDraftOrClear();
-            setStatus(R.string.ime_status_recoverable_draft_available, false);
         } else if (activeTarget != null || state != VoiceController.State.IDLE) {
             if (activeTarget != null
                     && activeTarget.replacedSelection()
@@ -4361,9 +4349,6 @@ public final class OpenTypelessImeService extends InputMethodService
                     : finishingVoiceInput && state == VoiceController.State.IDLE
                     ? getString(R.string.ime_status_finishing_recording)
                     : localizedPipelineStatus(state), false);
-        } else if (pipeline.hasRecoverableAudio()) {
-            clearTranscript();
-            setStatus(R.string.ime_status_recoverable_audio_available, false);
         } else {
             clearTranscript();
             // The adjacent mode chip already names the active mode; repeating it here made the
@@ -4545,8 +4530,6 @@ public final class OpenTypelessImeService extends InputMethodService
                 && !voiceRestartBlockedByLifecycle
                 && !sensitiveField
                 && !recoverableDraftLoading
-                && !pipeline.hasRecoverableAudio()
-                && !recoverableDraft.hasDraft()
                 && pendingDetachedTarget() == null
                 && activeTarget == null
                 && activeVoiceTransaction == null
@@ -4927,17 +4910,10 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_status_no_active_field, true);
             return;
         }
-        long now = System.currentTimeMillis();
-        if (now > recoverableInsertConfirmationDeadline) {
-            recoverableInsertConfirmationDeadline = now + DISCARD_CONFIRM_WINDOW_MILLIS;
-            setStatus(R.string.ime_status_confirm_recoverable_insert, true);
-            return;
-        }
         // Recovery is deliberately insertion-only. InputConnection objects can be reused across
         // fields, so suffix-based deletion could erase unrelated text after a cursor move.
         EditorMutationResult result = guardedReplace(connection, 0, draft.text(), "");
         if (result == EditorMutationResult.APPLIED) {
-            recoverableInsertConfirmationDeadline = 0L;
             clearRecoverableDraft();
             clearTranscript();
             setStatus(R.string.ime_status_recoverable_draft_inserted, false);
@@ -4949,12 +4925,26 @@ public final class OpenTypelessImeService extends InputMethodService
     private void discardRecoverableDraft() {
         if (!recoverableDraft.hasDraft()) return;
         clearRecoverableDraft();
-        recoverableInsertConfirmationDeadline = 0L;
         clearTranscript();
         setStatus(R.string.ime_status_recoverable_draft_discarded, false);
     }
 
+    /**
+     * Starting a new recording is an explicit replacement action. Recovery remains available from
+     * the overflow menu until then, but it no longer blocks the keyboard or forces a resolve step
+     * into the primary voice flow.
+     */
+    private void replaceRecoverableVoiceForNewRecording() {
+        if (recoverableDraft.hasDraft()) clearRecoverableDraft();
+        if (pipeline.hasRecoverableAudio()) pipeline.discard();
+    }
+
     private void showRecoverableDraftOrClear() {
+        // Recovery is an overflow action, not the keyboard's primary content/status surface.
+        clearTranscript();
+    }
+
+    private void showRecoverableDraftPreview() {
         RecoverableDraftSlot.Draft draft = recoverableDraft.get();
         if (draft != null && !sensitiveField) {
             showTranscript(draft.text());
@@ -5128,7 +5118,7 @@ public final class OpenTypelessImeService extends InputMethodService
                     boolean saved = saveRecoverableDraftFromResult(
                             null, result.voiceResult().finalText(), result);
                     updateMicrophone(VoiceController.State.IDLE);
-                    showRecoverableDraftOrClear();
+                    showRecoverableDraftPreview();
                     setStatus(saved
                             ? R.string.ime_status_recoverable_audio_ready
                             : R.string.ime_status_recoverable_draft_conflict, !saved);
@@ -5150,12 +5140,6 @@ public final class OpenTypelessImeService extends InputMethodService
 
     private void discardSavedAudio() {
         if (!pipeline.hasRecoverableAudio()) return;
-        long now = System.currentTimeMillis();
-        if (now > discardConfirmationDeadline) {
-            discardConfirmationDeadline = now + DISCARD_CONFIRM_WINDOW_MILLIS;
-            setStatus(R.string.ime_status_confirm_discard_audio, true);
-            return;
-        }
         discardConfirmationDeadline = 0L;
         pipeline.discard();
         recoveringSavedAudio = false;

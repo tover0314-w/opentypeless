@@ -96,13 +96,13 @@ public final class CompositionConflictPolicyTest {
                 CompositionConflictPolicy.Decision.CANCEL_CURRENT,
                 cancel.voiceToKeyboardDecision(new CompositionState.VoicePartial(1L, 9L)));
         assertEquals(
-                CompositionConflictPolicy.Decision.CANCEL_CURRENT_AND_ROUTE_RESULT,
+                CompositionConflictPolicy.Decision.CANCEL_CURRENT,
                 commit.voiceToKeyboardDecision(new CompositionState.VoiceFinalizing(1L, 0L)));
         assertEquals(
-                CompositionConflictPolicy.Decision.COMMIT_CURRENT_AND_ROUTE_RESULT,
+                CompositionConflictPolicy.Decision.COMMIT_CURRENT,
                 commit.voiceToKeyboardDecision(new CompositionState.VoiceFinalizing(1L, 9L)));
         assertEquals(
-                CompositionConflictPolicy.Decision.CANCEL_CURRENT_AND_ROUTE_RESULT,
+                CompositionConflictPolicy.Decision.CANCEL_CURRENT,
                 cancel.voiceToKeyboardDecision(new CompositionState.VoiceFinalizing(1L, 9L)));
     }
 

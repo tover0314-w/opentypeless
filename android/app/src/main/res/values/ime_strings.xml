@@ -104,17 +104,12 @@
     <!-- Voice keyboard status and error messages. -->
     <string name="ime_status_cancelled">This voice input was discarded</string>
     <string name="ime_status_confirm_discard">Visible voice text will be lost. Open ⋮ and confirm discard within 10 seconds.</string>
-    <string name="ime_status_recoverable_draft_available">A voice draft could not be inserted in the previous field. Use ⋮ to insert it here.</string>
     <string name="ime_status_recoverable_draft_loading">Restoring the last protected voice draft…</string>
-    <string name="ime_status_recoverable_draft_resolve_first">Use ⋮ to insert or discard the preserved voice draft before starting another recording</string>
-    <string name="ime_status_recoverable_audio_available">A completed recording is protected on this device. Use ⋮ to recover or discard it.</string>
-    <string name="ime_status_recoverable_audio_resolve_first">Use ⋮ to recover or discard the protected recording before starting another one</string>
     <string name="ime_status_recovering_audio">Recovering the protected recording without opening the microphone…</string>
     <string name="ime_status_recoverable_audio_ready">The recovered text is protected and available from ⋮</string>
     <string name="ime_status_recoverable_audio_unavailable">No protected recording is available</string>
     <string name="ime_status_recoverable_audio_failed">Recovery failed: %1$s. The protected recording was kept.</string>
     <string name="ime_status_recoverable_audio_failed_local">Recovery could not start. The protected recording was kept.</string>
-    <string name="ime_status_confirm_discard_audio">The protected recording will be permanently deleted. Open ⋮ and choose Discard protected recording again within 10 seconds.</string>
     <string name="ime_status_recoverable_audio_discarded">Protected recording permanently discarded</string>
     <string name="ime_status_previous_voice_finalizing">The previous voice input is still finalizing</string>
     <string name="ime_status_recoverable_draft_inserted">Preserved voice draft inserted</string>
@@ -124,7 +119,6 @@
     <string name="ime_status_detached_selection_preserved">The editor changed; the original selection was preserved</string>
     <string name="ime_status_detached_final_recoverable">The editor changed; the completed voice result is retained and available from ⋮</string>
     <string name="ime_status_recoverable_draft_memory_only">The voice draft remains available now, but encrypted storage failed; insert or copy it before closing the keyboard</string>
-    <string name="ime_status_confirm_recoverable_insert">This draft may overlap text already kept by the previous editor. Open ⋮ and choose Insert preserved voice draft again to insert a separate copy.</string>
     <string name="ime_cd_space_voice_unavailable">Insert a space; voice input is temporarily unavailable</string>
     <string name="ime_status_detached_partial_recoverable">Voice processing failed; the last visible draft remains protected and available from ⋮</string>
     <string name="ime_status_sensitive_disabled">Voice input is disabled for sensitive fields</string>
@@ -170,7 +164,7 @@
     <string name="ime_status_operation_connection_failed">The text connection failed during %1$s; verify the field before continuing</string>
     <string name="ime_status_delete_rejected">The app rejected delete</string>
     <string name="ime_status_delete_connection_failed">The text connection failed during delete</string>
-    <string name="ime_status_key_rejected">The app rejected the key</string>
+    <string name="ime_status_key_rejected">The input state changed; try the key again</string>
     <string name="ime_status_typing_connection_failed">The text connection failed while typing</string>
     <string name="ime_status_editor_action_failed">The text connection failed during the editor action</string>
     <string name="ime_status_finish_before_mode_change">Finish or cancel the current recording before changing mode</string>

@@ -406,6 +406,13 @@ editor lifecycle 撤销旧 lease 后才释放。late partial 在 begin 后全部
 两阶段 edge 与生产调用次数，ETM framework writer inventory 仍为七条。设置持久化/UI、Rime/Action 抢占和
 switch-key 仍分别属于 CFG/UI 和后续 RIM/ACT 任务。
 
+**CMP-005 体验修复（2026-08-19）：** 键盘打断 Finalizing Voice 时不再把迟到 Final 转成强制处理的恢复项；
+已显示 partial 仍按冻结策略提交或取消，随后只执行一次键盘事件。加密恢复能力退到“⋮”菜单，不再占据主状态、
+禁用普通按键或阻止下一次录音；用户主动开始新录音时显式替换旧恢复项。插入/放弃菜单操作改为单次执行。
+Session、target/fingerprint、`UNCERTAIN` fail-closed 与唯一 ETM writer 均保持不变。
+最终 app/architecture JVM、Release lint、Debug/Release/AndroidTest assemble 均 PASS；API35 arm64 模拟器
+`VoiceEditorTransactionSessionInstrumentedTest` 4/4 PASS，最终 3 个产品 APK 与 2 个测试 APK 资源扫描 0 违规。
+
 **CMP-006 完成说明（2026-08-14，`DONE`）：** Service 的 start/finish input、finish view、window hidden、
 destroy 与动态 non-exported `ACTION_SCREEN_OFF` receiver 现在全部进入同一个 cancel-only 边界。边界先
 terminalize 并移除 active/detached target，再调用 exact `VoiceController.cancel()`；所有排队 route/state/

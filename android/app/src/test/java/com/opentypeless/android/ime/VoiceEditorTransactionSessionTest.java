@@ -204,7 +204,7 @@ public final class VoiceEditorTransactionSessionTest {
     }
 
     @Test
-    public void awaitingFinalRoutesTheLateResultAndClaimsTheFinalCallbackOnlyOnce() {
+    public void awaitingFinalCancelsTheLateResultAndClaimsTheFinalCallbackOnlyOnce() {
         CompositionCoordinator coordinator = new CompositionCoordinator();
         OpenTypelessImeService.VoiceTransactionSession session =
                 acquire(26L, snapshot(new TextRange(0, 0), ""), coordinator);
@@ -216,7 +216,7 @@ public final class VoiceEditorTransactionSessionTest {
         assertEquals(
                 CompositionCoordinator.ReleaseDirective.COMMIT_CURRENT,
                 preemption.directive());
-        assertTrue(preemption.routeLateResult());
+        assertFalse(preemption.routeLateResult());
         assertFalse(session.acceptsPartial(26L, Long.MAX_VALUE));
         assertTrue(session.finishKeyboardRelease(
                 preemption, CompositionCoordinator.ReleaseResolution.PROVEN_RELEASED));

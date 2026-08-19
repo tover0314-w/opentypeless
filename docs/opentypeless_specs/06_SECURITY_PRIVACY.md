@@ -365,8 +365,11 @@ ETM，Final/取消/错误只有在 typed transaction 结果证明物理 composit
 CMP-005 只把 Voice→具体键盘事件接到上述 two-phase bridge。policy decision 在 ticket 建立前冻结；可见
 partial 的提交/取消只经 Manager/ETM，完成后重新捕获 Session，键盘写仍需完整 authority/evidence proof。
 `KeyboardPreemption` 是不可公开构造、无正文、无 editor capability 的 session-bound handle；UI、Provider、
-Listener 与 adapter 不得持有 ticket 或铸造 `PROVEN_RELEASED`。late partial 在 begin 后立即失效，等待 Final 的
-结果只能进入结果面板/可恢复草稿，不能写回新键盘目标；正常与 detached Final 都有单次 claim。
+Listener 与 adapter 不得持有 ticket 或铸造 `PROVEN_RELEASED`。late partial 在 begin 后立即失效；按键是明确的
+用户取消动作，等待中的迟到 Final 被撤权丢弃，不能写回新键盘目标或生成阻塞主流程的恢复项。
+
+恢复草稿/音频继续使用既有加密存储并只在“⋮”中提供可选恢复。在用户没有开始新录音前不会后台删除；用户
+主动开始下一次录音则构成替换旧恢复项的明确操作。该交互不改变敏感字段禁存、Session/target 校验或 ETM authority。
 
 任何 release 或 capture 不确定都会保持 pending、拒绝当前键并显示本地失败状态；不得为“不丢键”而改写当前
 光标、重放两次、调用 legacy writer 或把 `UNCERTAIN` 升级成功。editor lifecycle 明确撤销旧 lease 后才可释放

@@ -47,7 +47,7 @@ public final class VoiceEditorTransactionSessionInstrumentedTest {
     }
 
     @Test
-    public void finalPendingRoutesLateResultOnceAndUncertainReleaseFailsClosed() {
+    public void finalPendingDropsLateResultAndUncertainReleaseFailsClosed() {
         CompositionCoordinator coordinator = new CompositionCoordinator();
         OpenTypelessImeService.VoiceTransactionSession session =
                 acquire(102L, coordinator);
@@ -57,7 +57,7 @@ public final class VoiceEditorTransactionSessionInstrumentedTest {
         OpenTypelessImeService.VoiceTransactionSession.KeyboardPreemption preemption =
                 session.beginKeyboardPreemption(CompositionConflictPolicy.defaults(), true);
         assertTrue(preemption != null);
-        assertTrue(preemption.routeLateResult());
+        assertFalse(preemption.routeLateResult());
         assertFalse(session.acceptsPartial(102L, Long.MAX_VALUE));
         assertFalse(session.finishKeyboardRelease(
                 preemption, CompositionCoordinator.ReleaseResolution.UNCERTAIN));

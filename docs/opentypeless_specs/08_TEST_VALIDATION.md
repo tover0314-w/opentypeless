@@ -892,7 +892,7 @@ CMP-003 `CompositionConflictPolicy` 专项验收（2026-08-13）：
   `CompositionCoordinatorTest` 17/17，纯 Composition 域为 **30/30 PASS**；app JVM 全量
   **644/644 PASS**（102 个 XML suite，0 skipped/failure/error）；
 - 默认矩阵精确为：Rime→Voice commit、Latin→Voice commit、Voice Preparing/Listening→Key cancel、
-  visible VoicePartial→Key commit、VoiceFinalizing→Key 处理按键并把 late Final 转结果面板、Action→Voice
+  visible VoicePartial→Key commit、VoiceFinalizing→Key 处理按键并撤销 late Final、Action→Voice
   cancel owner + preserve result panel、Latin/Rime→Action commit + fresh recapture。三个配置 enum 的全部
   2×2×2 组合均映射到四个闭合 `Decision`；错误 state/null 在产生意图前拒绝；
 - 反射测试锁定 record component 名称/顺序/type、全部 enum value、ReleaseDirective 映射、无 String/
@@ -970,6 +970,13 @@ CMP-005 键盘打断 Voice 专项验收（2026-08-14）：
 
 上述证据完成具体键盘事件对当前 transaction Voice 的安全打断与单次归属。设置持久化/UI、Rime/Action
 抢占和 switch-key 不在 CMP-005 内，分别保留给 CFG/UI 与后续 RIM/ACT 任务。
+
+2026-08-19 的 CMP-005 体验回归要求：Finalizing→Key 的 frozen decision 不再携带 late-result route；主界面
+不得因 recoverable draft/audio 禁用键盘或麦克风；新录音显式替换旧恢复项，恢复菜单的插入/放弃均单次执行。
+回归仍必须覆盖 visible partial 的 commit/cancel、键只写一次、`UNCERTAIN` 保持 pending 与 lifecycle revoke。
+最终验证：strict app/architecture JVM、Release lint、Debug/Release/AndroidTest assemble PASS；API35 arm64
+模拟器定向 `VoiceEditorTransactionSessionInstrumentedTest` **4/4 PASS**。最终产品 APK 3 个、测试 APK 2 个的
+KSP-012 扫描均为 real Xiaohè 0、forbidden resource 0、violations 0。
 
 CMP-006 输入框生命周期统一取消专项验收（2026-08-14）：
 

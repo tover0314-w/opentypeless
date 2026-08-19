@@ -176,6 +176,11 @@ implicitly version the other. Release entries must name an immutable tag and sou
 
 ### Fixed
 
+- `CMP-005` keeps the keyboard and next voice action ahead of encrypted recovery plumbing: a key
+  explicitly cancels a late Voice Final after resolving any visible partial, recoverable voice
+  items stay optional under More, and starting a new recording replaces the old recovery item
+  instead of forcing an insert/discard detour. Editor target proof and uncertain-release fail-closed
+  behavior are unchanged.
 - `BLD-011` adds the independently verified SHA-256 for the `kotlinx-coroutines-bom:1.6.4` POM that
   AndroidTest's UTP dependency configuration resolves in clean CI. Strict Gradle dependency
   verification remains enabled; no dependency version or runtime behavior changes.
