@@ -252,11 +252,11 @@ Sí. La aplicación es totalmente funcional con tus propias claves API (BYOK). L
 
 ## Historial de estrellas
 
-<a href="https://star-history.com/#tover0314-w/opentypeless&Date">
+<a href="https://star-history.dera.page/#tover0314-w/opentypeless&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date" />
-    <img alt="Gráfico de historial de estrellas" src="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=tover0314-w/opentypeless&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=tover0314-w/opentypeless&type=Date" />
+    <img alt="Gráfico de historial de estrellas" src="https://star-history.dera.page/svg?repos=tover0314-w/opentypeless&type=Date" />
   </picture>
 </a>
 
