@@ -139,6 +139,7 @@ flowchart LR
 | `BLD-008` | P0 | S | 建立架构契约测试包 | BLD-005 | 创建 `architecture` 测试入口和 package/module 依赖约束 | 能阻止 UI/Provider 直接依赖未来的 InputConnection 写接口 | DONE |
 | `BLD-009` | P1 | S | 增加代码规模与复杂度基线 | BLD-005 | 记录关键类行数、方法复杂度、APK 大小、测试数量 | CI 生成趋势；不把指标作为机械失败条件 | DONE |
 | `BLD-010` | P0 | M | 建立 IME 测试宿主 App 骨架 | BLD-005 | 独立 debug test-host，包含多类输入框和选区操作 | 可从 Instrumentation 自动切换字段并验证文本 | DONE |
+| `BLD-011` | P0 | XS | 修复 AndroidTest 严格依赖校验缺失的 Coroutines BOM POM | BLD-005 | 为 CI instrumentation 实际解析到的 `kotlinx-coroutines-bom:1.6.4` POM 补充独立核对的 SHA-256，保持 strict verification | clean CI 的 API 26/33/35/36 instrumentation 配置解析通过；不得使用 lenient/off 或替换依赖 | DONE |
 | `DOC-001` | P0 | S | 把规范包纳入仓库 docs | — | 提交本规范并建立索引 | 根中英文 README/AGENTS 可发现；16 文件索引与本地链接验证通过 | DONE |
 | `DOC-002` | P0 | S | 建立 ADR 目录和模板 | DOC-001 | `docs/adr/`、状态、背景、选择、后果、验证 | ADR 生命周期、模板、索引、4/4 负向门禁与根入口验证通过 | DONE |
 | `DOC-003` | P1 | S | 建立变更日志与兼容表 | DOC-001 | Android/desktop/config/protocol/schema 兼容矩阵 | 每个协议或数据版本变更可追踪 | DONE |
@@ -153,6 +154,15 @@ README 同步固定本地安装命令。Google 官方仓库 XML 实际包含 Pla
 标准 strict verify 和空白 `GRADLE_USER_HOME` verify 均为 187 tasks `BUILD SUCCESSFUL`。当前工作树未推送，
 因此该提交的远端 GitHub Actions run 为 **NOT RUN**；本任务只完成可审查的 CI wiring/package pinning，
 不冒充远端执行，也不夹带 BLD-003 Action 升级或 BLD-004 report 拆分。
+
+**BLD-011 完成说明（2026-08-19，`DONE`）：** PR 99 的 CI run `32151719766` 在 API 26/33/35/36
+instrumentation 阶段均因 `org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.6.4` 的 POM 未登记而被严格
+dependency verification 拒绝；本地 `:app:mergeDebugNativeLibs` 与已有缓存下的
+`:test-host:connectedDebugAndroidTest` 不能触发该缺失配置，后者实际完成 20 项（8 项跳过、0 失败）。
+从 Maven Central 读取的 POM SHA-256 为
+`ab2614855fba66aa8a42514dbe3d5a884315ffe1ed63f5932e710a8006245ce1`，与本地缓存字节一致；现已只补入
+`android/gradle/verification-metadata.xml`，未关闭校验、未改版本、未加依赖。远端修复后的 CI 尚未运行，
+因此 clean CI 通过仍记为 **NOT RUN**，不冒充 PASS。
 
 **BLD-003 完成说明（2026-08-14，`DONE`）：** 全部 13 个 workflow、51 个远程 `uses:` 已改为
 官方 tag 解析出的 40 位 immutable commit；21 个 action surface 由 fail-closed allowlist 维护。核心升级包括

@@ -173,6 +173,9 @@ implicitly version the other. Release entries must name an immutable tag and sou
 
 ### Fixed
 
+- `BLD-011` adds the independently verified SHA-256 for the `kotlinx-coroutines-bom:1.6.4` POM that
+  AndroidTest's UTP dependency configuration resolves in clean CI. Strict Gradle dependency
+  verification remains enabled; no dependency version or runtime behavior changes.
 - `REC-005` now completes all caller-controlled STT model, language and prompt validation before
   opening a network connection. Oversized prompts fail with zero requests; no provider route,
   permission, endpoint policy or persisted format changes.
