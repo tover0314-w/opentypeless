@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
@@ -17,20 +18,22 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public final class KeyboardInputModeLayoutInstrumentedTest {
     @Test
-    public void voiceStartsVisibleAndTabsSelectExactlyOnePage() {
+    public void voiceStartsVisibleAndCompactToggleSelectsExactlyOnePage() {
         onMain(() -> {
             Harness harness = new Harness();
 
             assertEquals(KeyboardInputModeLayout.Mode.VOICE, harness.layout.mode());
+            assertEquals(1, harness.layout.root().getChildCount());
             assertEquals(View.VISIBLE, harness.voicePage.getVisibility());
             assertEquals(View.GONE, harness.qwertyPage.getVisibility());
-            assertTrue(harness.voiceTab.isSelected());
+            assertEquals(Gravity.CENTER, harness.toggle.getGravity());
+            assertTrue(harness.toggle.getCompoundDrawables()[0] != null);
 
-            assertTrue(harness.qwertyTab.performClick());
+            assertTrue(harness.toggle.performClick());
             assertEquals(KeyboardInputModeLayout.Mode.QWERTY, harness.layout.mode());
             assertEquals(View.GONE, harness.voicePage.getVisibility());
             assertEquals(View.VISIBLE, harness.qwertyPage.getVisibility());
-            assertTrue(harness.qwertyTab.isSelected());
+            assertTrue(harness.toggle.getCompoundDrawables()[0] != null);
         });
     }
 
@@ -42,7 +45,7 @@ public final class KeyboardInputModeLayoutInstrumentedTest {
             harness.layout.setVoiceAvailable(false);
 
             assertFalse(harness.layout.voiceAvailable());
-            assertEquals(View.GONE, harness.voiceTab.getVisibility());
+            assertEquals(View.GONE, harness.toggle.getVisibility());
             assertEquals(KeyboardInputModeLayout.Mode.QWERTY, harness.layout.mode());
             assertEquals(View.VISIBLE, harness.qwertyPage.getVisibility());
             harness.layout.select(KeyboardInputModeLayout.Mode.VOICE);
@@ -51,18 +54,17 @@ public final class KeyboardInputModeLayoutInstrumentedTest {
     }
 
     @Test
-    public void activeVoiceSessionCanLockBothTabsWithoutChangingTheVisiblePage() {
+    public void activeVoiceSessionCanLockToggleWithoutChangingTheVisiblePage() {
         onMain(() -> {
             Harness harness = new Harness();
 
             harness.layout.setSwitchingEnabled(false);
 
             assertEquals(KeyboardInputModeLayout.Mode.VOICE, harness.layout.mode());
-            assertFalse(harness.voiceTab.isEnabled());
-            assertFalse(harness.qwertyTab.isEnabled());
+            assertFalse(harness.toggle.isEnabled());
 
             harness.layout.setSwitchingEnabled(true);
-            assertTrue(harness.qwertyTab.isEnabled());
+            assertTrue(harness.toggle.isEnabled());
         });
     }
 
@@ -71,22 +73,19 @@ public final class KeyboardInputModeLayoutInstrumentedTest {
     }
 
     private static final class Harness {
-        final Button voiceTab;
-        final Button qwertyTab;
+        final Button toggle;
         final TextView voicePage;
         final TextView qwertyPage;
         final KeyboardInputModeLayout layout;
 
         Harness() {
             Context context = ApplicationProvider.getApplicationContext();
-            voiceTab = button(context, "Voice");
-            qwertyTab = button(context, "Keyboard");
+            toggle = button(context, "Mode");
             voicePage = new TextView(context);
             qwertyPage = new TextView(context);
             layout = new KeyboardInputModeLayout(
                     context,
-                    voiceTab,
-                    qwertyTab,
+                    toggle,
                     voicePage,
                     qwertyPage,
                     KeyboardInputModeLayout.Mode.VOICE);

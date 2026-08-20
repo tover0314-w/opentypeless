@@ -6,6 +6,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import com.opentypeless.android.R;
 import java.util.Objects;
 
 /** Capability-free two-page switcher for the voice-first and QWERTY input surfaces. */
@@ -18,13 +19,12 @@ public final class KeyboardInputModeLayout {
     }
 
     public static final String ROOT_TAG = "opentypeless-input-mode-root";
-    public static final String TABS_TAG = "opentypeless-input-mode-tabs";
     public static final String VOICE_PAGE_TAG = "opentypeless-input-mode-voice-page";
     public static final String QWERTY_PAGE_TAG = "opentypeless-input-mode-qwerty-page";
 
+    private final Context context;
     private final LinearLayout root;
-    private final Button voiceTab;
-    private final Button qwertyTab;
+    private final Button toggleButton;
     private final View voicePage;
     private final View qwertyPage;
     private final Listener listener;
@@ -34,30 +34,27 @@ public final class KeyboardInputModeLayout {
 
     public KeyboardInputModeLayout(
             Context context,
-            Button voiceTab,
-            Button qwertyTab,
+            Button toggleButton,
             View voicePage,
             View qwertyPage,
             Mode initialMode) {
-        this(context, voiceTab, qwertyTab, voicePage, qwertyPage, initialMode, ignored -> {});
+        this(context, toggleButton, voicePage, qwertyPage, initialMode, ignored -> {});
     }
 
     public KeyboardInputModeLayout(
             Context context,
-            Button voiceTab,
-            Button qwertyTab,
+            Button toggleButton,
             View voicePage,
             View qwertyPage,
             Mode initialMode,
             Listener listener) {
-        Objects.requireNonNull(context, "context");
-        this.voiceTab = Objects.requireNonNull(voiceTab, "voiceTab");
-        this.qwertyTab = Objects.requireNonNull(qwertyTab, "qwertyTab");
+        this.context = Objects.requireNonNull(context, "context");
+        this.toggleButton = Objects.requireNonNull(toggleButton, "toggleButton");
         this.voicePage = Objects.requireNonNull(voicePage, "voicePage");
         this.qwertyPage = Objects.requireNonNull(qwertyPage, "qwertyPage");
         this.listener = Objects.requireNonNull(listener, "listener");
-        if (voicePage == qwertyPage || voiceTab == qwertyTab) {
-            throw new IllegalArgumentException("tabs and pages must be distinct");
+        if (voicePage == qwertyPage) {
+            throw new IllegalArgumentException("pages must be distinct");
         }
         voicePage.setTag(VOICE_PAGE_TAG);
         qwertyPage.setTag(QWERTY_PAGE_TAG);
@@ -66,17 +63,6 @@ public final class KeyboardInputModeLayout {
         root.setTag(ROOT_TAG);
         root.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout tabs = new LinearLayout(context);
-        tabs.setTag(TABS_TAG);
-        tabs.setOrientation(LinearLayout.HORIZONTAL);
-        tabs.setGravity(Gravity.CENTER);
-        tabs.setPadding(dp(context, 36), 0, dp(context, 36), dp(context, 4));
-        tabs.addView(voiceTab, tabParams(context));
-        tabs.addView(qwertyTab, tabParams(context));
-        root.addView(tabs, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-
         FrameLayout pages = new FrameLayout(context);
         pages.addView(voicePage, pageParams());
         pages.addView(qwertyPage, pageParams());
@@ -84,8 +70,8 @@ public final class KeyboardInputModeLayout {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        voiceTab.setOnClickListener(ignored -> select(Mode.VOICE));
-        qwertyTab.setOnClickListener(ignored -> select(Mode.QWERTY));
+        toggleButton.setOnClickListener(ignored -> select(
+                mode == Mode.VOICE ? Mode.QWERTY : Mode.VOICE));
         select(Objects.requireNonNull(initialMode, "initialMode"));
     }
 
@@ -97,52 +83,59 @@ public final class KeyboardInputModeLayout {
         return mode;
     }
 
-    public Button voiceTab() {
-        return voiceTab;
-    }
-
-    public Button qwertyTab() {
-        return qwertyTab;
+    public Button toggleButton() {
+        return toggleButton;
     }
 
     public void select(Mode requested) {
         Mode selected = Objects.requireNonNull(requested, "requested");
         if (selected == Mode.VOICE && !voiceAvailable) selected = Mode.QWERTY;
-        if (mode == selected) return;
+        if (mode == selected) {
+            refreshToggle();
+            return;
+        }
         mode = selected;
         boolean voice = selected == Mode.VOICE;
         voicePage.setVisibility(voice ? View.VISIBLE : View.GONE);
         qwertyPage.setVisibility(voice ? View.GONE : View.VISIBLE);
-        voiceTab.setSelected(voice);
-        qwertyTab.setSelected(!voice);
-        voiceTab.setActivated(voice);
-        qwertyTab.setActivated(!voice);
+        refreshToggle();
         listener.onModeChanged(selected);
     }
 
     public void setVoiceAvailable(boolean available) {
         voiceAvailable = available;
-        voiceTab.setVisibility(available ? View.VISIBLE : View.GONE);
-        voiceTab.setEnabled(available && switchingEnabled);
         if (!available && mode == Mode.VOICE) select(Mode.QWERTY);
+        refreshToggle();
     }
 
     public void setSwitchingEnabled(boolean enabled) {
         switchingEnabled = enabled;
-        voiceTab.setEnabled(enabled && voiceAvailable);
-        qwertyTab.setEnabled(enabled);
+        refreshToggle();
     }
 
     public boolean voiceAvailable() {
         return voiceAvailable;
     }
 
-    private static LinearLayout.LayoutParams tabParams(Context context) {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                0, dp(context, 48), 1f);
-        params.setMarginStart(dp(context, 3));
-        params.setMarginEnd(dp(context, 3));
-        return params;
+    private void refreshToggle() {
+        boolean voice = mode == Mode.VOICE;
+        toggleButton.setVisibility(voiceAvailable ? View.VISIBLE : View.GONE);
+        toggleButton.setEnabled(voiceAvailable && switchingEnabled);
+        toggleButton.setSelected(false);
+        toggleButton.setActivated(false);
+        toggleButton.setText("");
+        toggleButton.setForeground(null);
+        toggleButton.setCompoundDrawablePadding(0);
+        toggleButton.setCompoundDrawablesWithIntrinsicBounds(
+                voice ? R.drawable.ime_ic_keyboard_mode : R.drawable.ime_ic_microphone_toolbar,
+                0,
+                0,
+                0);
+        toggleButton.setGravity(Gravity.CENTER);
+        toggleButton.setPadding(0, 0, 0, 0);
+        toggleButton.setContentDescription(context.getString(voice
+                ? R.string.ime_cd_open_keyboard_tab
+                : R.string.ime_cd_open_voice_tab));
     }
 
     private static FrameLayout.LayoutParams pageParams() {
@@ -151,7 +144,4 @@ public final class KeyboardInputModeLayout {
                 FrameLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private static int dp(Context context, int value) {
-        return Math.round(value * context.getResources().getDisplayMetrics().density);
-    }
 }

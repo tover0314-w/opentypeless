@@ -9,6 +9,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import com.opentypeless.android.R;
 import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
 import com.opentypeless.android.keyboard.feedback.KeyboardFeedback;
@@ -277,6 +278,13 @@ public final class LatinKeyboardLayoutInstrumentedTest {
                     22f,
                     q.getTextSize() / root.getResources().getDisplayMetrics().scaledDensity,
                     0.01f);
+            assertEquals(
+                    16f,
+                    harness.layout.spaceButton().getTextSize()
+                            / root.getResources().getDisplayMetrics().scaledDensity,
+                    0.01f);
+            assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_NONE, q.getAutoSizeTextType());
+            assertFalse(q.getIncludeFontPadding());
             assertEquals(q.getHeight(), a.getHeight());
             assertTrue(q.getHeight() >= dp(root.getContext(), 48));
             assertTrue(a.getLeft() > q.getLeft());

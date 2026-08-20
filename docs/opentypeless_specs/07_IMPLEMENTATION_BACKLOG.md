@@ -985,6 +985,11 @@ compiled 2/2 和 strict 191-task graph 全 PASS。Xiaomi 10 Ultra 上短按 pick
 功能键权重，目标是接近用户小鹤音形键盘的紧凑几何和字符占比。此切片不宣称已经完成小米 15 横屏无截断验收；
 横屏压缩和全设备矩阵仍待后续验证。
 
+**KBD-009 UI 跟进（2026-08-20，小米 10 Ultra）：** Route-A 语音/QWERTY 双页改用工具栏内单一模式按钮，移除
+占高的双 Tab 和未启用扩展留白；麦克风、键盘切换、更多操作改为居中矢量图标，并统一面板、键帽、按压态的对比度
+与圆角。语音状态只在语音页展示，返回 QWERTY 时不再让旧的识别错误占据输入工具栏。该跟进不改变 Voice、Rime、
+EditorTransaction 或隐私策略，不宣称完成小米 15 横屏验收。
+
 **RIM-001 完成说明（2026-08-16，`DONE`）：** 新的纯 Java `RimeInputEngine` 与
 `RimeEngineSnapshot` 定义 activate/deactivate/process/snapshot/candidate page/selection 的闭合请求与结果；每项异步
 请求携带 editor generation 与 coordination revision，preedit/candidate/commit 有界且诊断脱敏。契约不依赖 Android、

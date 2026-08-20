@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ime_surface">#171719</color>
-    <color name="ime_surface_container">#242427</color>
-    <color name="ime_surface_high">#2B2B2F</color>
-    <color name="ime_surface_pressed">#36363C</color>
-    <color name="ime_on_surface">#F4F2EF</color>
-    <color name="ime_on_surface_variant">#B4B1BA</color>
-    <color name="ime_outline">#3A3A40</color>
-    <color name="ime_primary">#A7A3FF</color>
-    <color name="ime_primary_container">#3D397A</color>
+    <color name="ime_surface">#17181B</color>
+    <color name="ime_surface_container">#25262B</color>
+    <color name="ime_surface_high">#303137</color>
+    <color name="ime_surface_pressed">#3B3D45</color>
+    <color name="ime_on_surface">#F8F8FA</color>
+    <color name="ime_on_surface_variant">#BEC1C8</color>
+    <color name="ime_outline">#474A52</color>
+    <color name="ime_primary">#B7AEFF</color>
+    <color name="ime_primary_container">#4B457F</color>
     <color name="ime_on_primary_container">#E6E3FF</color>
     <color name="ime_voice_primary">#F4F2EF</color>
     <color name="ime_voice_primary_pressed">#D8D5D1</color>

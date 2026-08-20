@@ -52,7 +52,11 @@ implicitly version the other. Release entries must name an immutable tag and sou
   and system-selected real-touch checks with the user's local-only package.
 - `KBD-009` begins the portrait QWERTY sizing slice: 50dp key rows, tighter 1dp horizontal margins
   and 22sp letter labels preserve the existing Xiaohe-like row offsets and bottom-row proportions
-  while improving key-legibility. Landscape compression and Xiaomi 15 acceptance remain pending.
+  while improving key-legibility. The Xiaomi 10 Ultra UI follow-up replaces the oversized
+  Voice/Keyboard tab strip with one compact mode action, removes the unused extension gap, aligns
+  microphone/keyboard/overflow vector icons, separates voice status from the QWERTY surface and
+  tightens key contrast and corner radii. Landscape compression and Xiaomi 15 acceptance remain
+  pending.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform
   input type, selected/collapsed ranges, dynamic editor replacement, RTL and local WebView

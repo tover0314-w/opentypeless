@@ -1088,7 +1088,7 @@ public final class OpenTypelessImeService extends InputMethodService
                 () -> KeyboardShellFrame.legacyVoice(this));
         boolean routeACandidateBar = shellFrame.route() == KeyboardShellRoute.ROUTE_A;
         LinearLayout root = shellFrame.root();
-        root.setMinimumHeight(dp(landscape ? 190 : compactLayout ? 280 : 300));
+        root.setMinimumHeight(dp(landscape ? 190 : compactLayout ? 252 : 264));
         root.setPadding(dp(8), dp(8), dp(8), dp(10));
         root.setBackgroundResource(R.drawable.ime_panel_background);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -1108,7 +1108,7 @@ public final class OpenTypelessImeService extends InputMethodService
         keyboardToolbarLayout.attachStatusIndicator(voicePulse, 30);
 
         status = new TextView(this);
-        status.setText(R.string.status_ready);
+        status.setText("");
         status.setTextColor(getColor(R.color.ime_on_surface_variant));
         status.setTextSize(12);
         status.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
@@ -1117,6 +1117,7 @@ public final class OpenTypelessImeService extends InputMethodService
         status.setAutoSizeTextTypeUniformWithConfiguration(
                 9, 12, 1, TypedValue.COMPLEX_UNIT_SP);
         status.setPadding(dp(2), 0, dp(4), 0);
+        status.setVisibility(View.GONE);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         keyboardToolbarLayout.attachStatusText(status);
 
@@ -1126,11 +1127,8 @@ public final class OpenTypelessImeService extends InputMethodService
         microphone = key(getString(R.string.ime_key_long_dictation_compact),
                 getString(R.string.ime_cd_start_long_dictation), 2f,
                 ignored -> toggleRecording(DictationRequest.CaptureMode.CONTINUOUS));
-        moreButton = key(
-                R.string.ime_key_more,
-                R.string.ime_cd_more,
-                1f,
-                this::showMoreMenu);
+        moreButton = key("", getString(R.string.ime_cd_more), 1f, this::showMoreMenu);
+        setCenteredIcon(moreButton, R.drawable.ime_ic_more_vertical);
         keyboardToolbarLayout.attachOverflowAnchor("more", moreButton);
         applyKeyboardToolbarPrivacy();
         refreshModeButton();
@@ -1273,31 +1271,28 @@ public final class OpenTypelessImeService extends InputMethodService
         keyStage.setGravity(Gravity.CENTER);
         if (shellFrame.route() == KeyboardShellRoute.ROUTE_A) {
             LinearLayout voicePage = createVoiceInputPage();
-            Button voiceTab = key(
-                    R.string.ime_tab_voice,
-                    R.string.ime_cd_open_voice_tab,
-                    1f,
-                    ignored -> {});
-            Button qwertyTab = key(
-                    R.string.ime_tab_keyboard,
-                    R.string.ime_cd_open_keyboard_tab,
+            Button inputModeToggle = key(
+                    "",
+                    getString(R.string.ime_cd_open_keyboard_tab),
                     1f,
                     ignored -> {});
             keyboardInputModeLayout = new KeyboardInputModeLayout(
                     this,
-                    voiceTab,
-                    qwertyTab,
+                    inputModeToggle,
                     voicePage,
                     typing,
                     sensitiveField
                             ? KeyboardInputModeLayout.Mode.QWERTY
                             : KeyboardInputModeLayout.Mode.VOICE,
                     mode -> {
+                        refreshStatusVisibilityForInputMode(mode);
                         if (mode == KeyboardInputModeLayout.Mode.VOICE
                                 && latinKeyboardLayout != null) {
                             latinKeyboardLayout.cancelTransientGestures();
                         }
                     });
+            keyboardToolbarLayout.attachPrimaryAction(
+                    "input.mode", keyboardInputModeLayout.toggleButton(), 48);
             keyboardInputModeLayout.setVoiceAvailable(!sensitiveField);
             keyStage.addView(keyboardInputModeLayout.root(), matchWrap());
         } else {
@@ -1310,9 +1305,11 @@ public final class OpenTypelessImeService extends InputMethodService
         shellFrame.attachKeys(keyStage, matchWrap());
         View extensionReserve = new View(this);
         extensionReserve.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        // Keep the stable Route-A slot without charging today's keyboard for hypothetical future
+        // controls. Real extensions must opt in with their own bounded layout task.
         shellFrame.attachExtensions(extensionReserve, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(landscape ? 20 : compactLayout ? 52 : 64)));
+                0));
 
         refreshEnterKey();
         refreshPostCommitActions();
@@ -1326,21 +1323,19 @@ public final class OpenTypelessImeService extends InputMethodService
         page.setOrientation(LinearLayout.VERTICAL);
         page.setGravity(Gravity.CENTER);
         page.setMinimumHeight(dp(compactLayout ? 184 : 208));
-        page.setPadding(dp(8), dp(8), dp(8), dp(10));
+        page.setPadding(dp(8), dp(6), dp(8), dp(8));
 
-        microphone.setText("");
-        microphone.setCompoundDrawablesWithIntrinsicBounds(
-                0, R.drawable.ime_ic_microphone, 0, 0);
+        setCenteredIcon(microphone, R.drawable.ime_ic_microphone);
         microphone.setBackgroundResource(R.drawable.ime_voice_button_background);
         microphone.setBackgroundTintList(null);
         microphone.setTextColor(getColor(R.color.ime_on_voice_primary));
-        microphone.setMinWidth(dp(112));
-        microphone.setMinimumWidth(dp(112));
-        microphone.setMinHeight(dp(112));
-        microphone.setMinimumHeight(dp(112));
+        microphone.setMinWidth(dp(96));
+        microphone.setMinimumWidth(dp(96));
+        microphone.setMinHeight(dp(96));
+        microphone.setMinimumHeight(dp(96));
         microphone.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams microphoneParams = new LinearLayout.LayoutParams(
-                dp(112), dp(112));
+                dp(96), dp(96));
         microphoneParams.gravity = Gravity.CENTER_HORIZONTAL;
         page.addView(microphone, microphoneParams);
 
@@ -4305,12 +4300,10 @@ public final class OpenTypelessImeService extends InputMethodService
         KeyboardToolbarLayout toolbar = keyboardToolbarLayout;
         boolean voiceVisible = keyboardToolbarPrivacy.voiceVisible();
         if (toolbar != null) toolbar.setActionVisible("voice.mode", voiceVisible);
-        if (voicePulse != null) {
-            voicePulse.setVisibility(voiceVisible ? View.VISIBLE : View.GONE);
-        }
         if (keyboardInputModeLayout != null) {
             keyboardInputModeLayout.setVoiceAvailable(voiceVisible);
         }
+        refreshVoicePulseVisibility();
     }
 
     private void rejectUnboundCandidateEvent() {
@@ -4351,9 +4344,8 @@ public final class OpenTypelessImeService extends InputMethodService
                     : localizedPipelineStatus(state), false);
         } else {
             clearTranscript();
-            // The adjacent mode chip already names the active mode; repeating it here made the
-            // compact toolbar noisy and squeezed the long-dictation action.
-            setStatus(R.string.status_ready, false);
+            // Idle is the default, not a message. Keep the toolbar quiet until state changes.
+            setStatus("", false);
         }
     }
 
@@ -4390,6 +4382,7 @@ public final class OpenTypelessImeService extends InputMethodService
                     : processing || externalFinalizing
                     ? VoicePulseView.Phase.PROCESSING
                     : VoicePulseView.Phase.IDLE);
+            refreshVoicePulseVisibility();
         }
 
         setEditingKeysEnabled(editorKeysAllowed, startAllowed);
@@ -4414,12 +4407,11 @@ public final class OpenTypelessImeService extends InputMethodService
         // This control lives in a compact status toolbar; its accessible description carries the
         // full wording while the visual label stays short at every screen width.
         if (keyboardInputModeLayout == null) {
+            microphone.setForeground(null);
             microphone.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0);
             microphone.setText(longCompactLabel);
         } else {
-            microphone.setText("");
-            microphone.setCompoundDrawablesWithIntrinsicBounds(
-                    0, R.drawable.ime_ic_microphone, 0, 0);
+            setCenteredIcon(microphone, R.drawable.ime_ic_microphone);
         }
         microphone.setEnabled(startAllowed || longRecording);
         microphone.setContentDescription(getString(longRecording
@@ -5202,9 +5194,41 @@ public final class OpenTypelessImeService extends InputMethodService
 
     private void setStatus(String message, boolean error) {
         if (status == null) return;
-        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        status.setText(safeMessage(message));
+        String safe = safeMessage(message);
+        status.setText(safe);
         status.setTextColor(getColor(error ? R.color.ime_error : R.color.ime_on_surface_variant));
+        refreshStatusVisibilityForInputMode(keyboardInputModeLayout == null
+                ? null
+                : keyboardInputModeLayout.mode());
+    }
+
+    private void refreshStatusVisibilityForInputMode(KeyboardInputModeLayout.Mode mode) {
+        if (status == null) return;
+        CharSequence message = status.getText();
+        boolean hasMessage = message != null && !message.toString().isBlank();
+        // Voice pipeline details belong to the voice surface. Keeping a stale recognition
+        // failure beside ordinary typing controls makes the QWERTY page look broken and steals
+        // the toolbar's visual hierarchy, while the same message remains available on return.
+        boolean visible = hasMessage && mode != KeyboardInputModeLayout.Mode.QWERTY;
+        status.setAccessibilityLiveRegion(visible
+                ? View.ACCESSIBILITY_LIVE_REGION_POLITE
+                : View.ACCESSIBILITY_LIVE_REGION_NONE);
+        status.setVisibility(visible ? View.VISIBLE : View.GONE);
+        refreshVoicePulseVisibility();
+    }
+
+    private void refreshVoicePulseVisibility() {
+        if (voicePulse == null) return;
+        boolean activeVoice = preparingVoiceInput
+                || finishingVoiceInput
+                || activeTarget != null
+                || (voiceController != null && voiceController.state() != VoiceController.State.IDLE);
+        boolean statusVisible = status != null && status.getVisibility() == View.VISIBLE;
+        voicePulse.setVisibility(keyboardToolbarPrivacy.voiceVisible()
+                && activeVoice
+                && statusVisible
+                ? View.VISIBLE
+                : View.GONE);
     }
 
     private void setStatus(int messageResource, boolean error) {
@@ -5587,6 +5611,9 @@ public final class OpenTypelessImeService extends InputMethodService
         button.setAllCaps(false);
         button.setSingleLine(true);
         button.setGravity(Gravity.CENTER);
+        button.setIncludeFontPadding(false);
+        button.setTypeface(android.graphics.Typeface.create(
+                "sans-serif-medium", android.graphics.Typeface.NORMAL));
         button.setTextSize(13);
         button.setAutoSizeTextTypeUniformWithConfiguration(
                 9, 13, 1, TypedValue.COMPLEX_UNIT_SP);
@@ -5607,6 +5634,16 @@ public final class OpenTypelessImeService extends InputMethodService
         params.setMarginEnd(dp(2));
         button.setLayoutParams(params);
         return button;
+    }
+
+    private void setCenteredIcon(Button button, int drawableResource) {
+        if (button == null) return;
+        button.setText("");
+        button.setForeground(null);
+        button.setCompoundDrawablePadding(0);
+        button.setCompoundDrawablesWithIntrinsicBounds(drawableResource, 0, 0, 0);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(0, 0, 0, 0);
     }
 
     private void setPrimaryKeyStyle(Button button, boolean primary) {

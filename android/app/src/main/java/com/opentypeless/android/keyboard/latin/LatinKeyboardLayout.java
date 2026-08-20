@@ -2,6 +2,7 @@ package com.opentypeless.android.keyboard.latin;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Typeface;
 import android.os.SystemClock;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -9,6 +10,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import com.opentypeless.android.R;
 import com.opentypeless.android.keyboard.feedback.KeyboardFeedback;
 import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
@@ -30,6 +32,7 @@ public final class LatinKeyboardLayout {
     private static final int KEY_SIDE_MARGIN_DP = 1;
     private static final int KEY_VERTICAL_MARGIN_DP = 2;
     private static final float LETTER_KEY_TEXT_SIZE_SP = 22f;
+    private static final float FUNCTION_KEY_TEXT_SIZE_SP = 16f;
 
     @FunctionalInterface
     public interface KeyFactory {
@@ -528,11 +531,16 @@ public final class LatinKeyboardLayout {
             feedback.onPress(button);
             action.run();
         });
+        button.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE);
+        button.setIncludeFontPadding(false);
+        button.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         if (letter) {
             button.setMinWidth(0);
             button.setMinimumWidth(0);
             button.setPadding(0, 0, 0, 0);
             button.setTextSize(TypedValue.COMPLEX_UNIT_SP, LETTER_KEY_TEXT_SIZE_SP);
+        } else {
+            button.setTextSize(TypedValue.COMPLEX_UNIT_SP, FUNCTION_KEY_TEXT_SIZE_SP);
         }
         return button;
     }
