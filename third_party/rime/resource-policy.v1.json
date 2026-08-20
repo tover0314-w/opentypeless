@@ -757,6 +757,34 @@
         "rime-arm64-adapter", "rime-arm64-engine",
         "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk"
       ]
+    },
+    {
+      "sha256": "f13fb5396ace1ee5d4073614da7a17c72912f30033bd30429b10c1232e2ddf6d",
+      "profiles": ["product"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": [
+        "rime-arm64-adapter", "rime-arm64-engine",
+        "rime-x86_64-adapter", "rime-x86_64-engine",
+        "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk",
+        "sherpa-x86_64-onnx-apk", "sherpa-x86_64-jni-apk"
+      ]
+    },
+    {
+      "sha256": "fdc6b01d9b344804cb9286c243c6f83e1a1292774e6563f25847221c4cc1f682",
+      "profiles": ["product"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": [
+        "rime-arm64-adapter", "rime-arm64-engine",
+        "rime-x86_64-adapter", "rime-x86_64-engine",
+        "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk",
+        "sherpa-x86_64-onnx-apk", "sherpa-x86_64-jni-apk"
+      ]
+    },
+    {
+      "sha256": "a203b8c1f4290020d8f5d96010b80f32e2fd8cab5924ff1974d19a5e1d20457a",
+      "profiles": ["test"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": []
     }
   ],
   "opaque_binary_baseline": [

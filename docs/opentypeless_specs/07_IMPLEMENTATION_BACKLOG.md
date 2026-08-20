@@ -990,6 +990,13 @@ compiled 2/2 和 strict 191-task graph 全 PASS。Xiaomi 10 Ultra 上短按 pick
 与圆角。语音状态只在语音页展示，返回 QWERTY 时不再让旧的识别错误占据输入工具栏。该跟进不改变 Voice、Rime、
 EditorTransaction 或隐私策略，不宣称完成小米 15 横屏验收。
 
+**KBD-009 UI 跟进（2026-08-21，小米 10 Ultra）：** 图标按钮改为由按钮背景 Drawable 统一绘制底色与图标，按实际
+触控矩形计算图标中心，避开 MIUI 对空文字 Button compound drawable 的偏位/漏绘；AndroidTest 对 96x48px 模式按钮
+的语音/键盘两态中心坐标做确定性断言。深色与浅色面板采用 XIME 官方截图启发的紫灰层级，语音页采用 Typeless 官方
+Android 截图启发的“点击说话”提示与 148x56dp 横向麦克风胶囊；仅借鉴视觉层级，不复制第三方代码或图片资源。最终
+Debug APK 已覆盖安装到小米 10 Ultra，语音页与 QWERTY 页真机截图确认麦克风、模式切换和更多图标均显示且居中。
+该跟进不改变 Voice、Rime、EditorTransaction、权限、网络、持久格式或隐私策略；小米 15 横屏验收仍未完成。
+
 **RIM-001 完成说明（2026-08-16，`DONE`）：** 新的纯 Java `RimeInputEngine` 与
 `RimeEngineSnapshot` 定义 activate/deactivate/process/snapshot/candidate page/selection 的闭合请求与结果；每项异步
 请求携带 editor generation 与 coordination revision，preedit/candidate/commit 有界且诊断脱敏。契约不依赖 Android、

@@ -55,7 +55,10 @@ implicitly version the other. Release entries must name an immutable tag and sou
   while improving key-legibility. The Xiaomi 10 Ultra UI follow-up replaces the oversized
   Voice/Keyboard tab strip with one compact mode action, removes the unused extension gap, aligns
   microphone/keyboard/overflow vector icons, separates voice status from the QWERTY surface and
-  tightens key contrast and corner radii. Landscape compression and Xiaomi 15 acceptance remain
+  tightens key contrast and corner radii. A second Xiaomi follow-up moves all icon-only controls to
+  deterministic geometric centring, adopts an XIME-inspired purple/grey palette and reshapes the
+  voice page around a Typeless-inspired `Tap to speak` label plus 148x56dp microphone capsule. No
+  third-party code or image asset is copied. Landscape compression and Xiaomi 15 acceptance remain
   pending.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform

@@ -94,18 +94,19 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "compactToolbar = compactLayout || landscape;",
         "new KeyboardToolbarLayout(this, toolbar)",
         'attachPrimaryAction("voice.mode", modeButton, 64)',
+        'attachPrimaryAction(\n                    "input.mode", keyboardInputModeLayout.toggleButton(), 48)',
         'attachOverflowAnchor("more", moreButton)',
         "new KeyboardInputModeLayout(",
         "createVoiceInputPage()",
-        "microphone.setMinimumWidth(dp(112))",
-        "microphone.setMinimumHeight(dp(112))",
+        "microphone.setMinimumWidth(dp(148))",
+        "microphone.setMinimumHeight(dp(56))",
         "MENU_UNDO",
         "KBD-006 keeps Undo in the existing overflow menu",
     )
     if (
         any(token not in service for token in service_tokens)
         or service.count("new KeyboardToolbarLayout(this, toolbar)") != 1
-        or service.count("attachPrimaryAction(") != 1
+        or service.count("attachPrimaryAction(") != 2
         or service.count("attachOverflowAnchor(") != 1
         or "undoButton" in service
         or "addWeighted(toolbar" in service
@@ -114,7 +115,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     ):
         violations.append(Violation(
             "KBD006_SERVICE_WIRING",
-            "service must keep one toolbar mode action, one overflow anchor, one bounded Voice page and no transient Undo button",
+            "service must keep two bounded toolbar actions, one overflow anchor, one bounded Voice page and no transient Undo button",
         ))
 
     test_tokens = (

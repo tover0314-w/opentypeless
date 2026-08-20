@@ -33,7 +33,7 @@
     <string name="ime_tab_keyboard">Keyboard</string>
     <string name="ime_cd_open_voice_tab">Open voice input</string>
     <string name="ime_cd_open_keyboard_tab">Open the QWERTY keyboard</string>
-    <string name="ime_voice_tap_hint">Tap the microphone, then speak</string>
+    <string name="ime_voice_tap_hint">Tap to speak</string>
     <string name="ime_key_release_to_finish">Release to insert</string>
     <string name="ime_key_listening">Listening…</string>
     <string name="ime_key_listening_compact">Live</string>

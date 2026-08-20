@@ -59,8 +59,8 @@ class KeyboardToolbarContractTest(unittest.TestCase):
     def test_rejects_undo_promoted_back_to_primary_toolbar(self) -> None:
         self.mutate(
             SERVICE,
-            "private Button moreButton;",
-            "private Button moreButton; private Button undoButton;",
+            "private CenteredIconButton moreButton;",
+            "private CenteredIconButton moreButton; private Button undoButton;",
         )
         self.assertIn("KBD006_SERVICE_WIRING", self.rules())
 

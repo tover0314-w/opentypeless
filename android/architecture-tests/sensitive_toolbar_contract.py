@@ -112,8 +112,9 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "PrivacyPolicyEngine.hardSafety(privacy.sensitive(),privacy.learningAllowed())",
         "keyboardToolbarPrivacy=restrictedToolbarPrivacy()",
         'toolbar.setActionVisible("voice.mode",voiceVisible)',
-        "voicePulse.setVisibility(voiceVisible?View.VISIBLE:View.GONE)",
         "keyboardInputModeLayout.setVoiceAvailable(voiceVisible)",
+        "refreshVoicePulseVisibility()",
+        "voicePulse.setVisibility(keyboardToolbarPrivacy.voiceVisible()&&activeVoice&&statusVisible?View.VISIBLE:View.GONE)",
         "keyboardToolbarPrivacy.teachVisible()&&TeachCorrectionResolver.isEligible",
     )
     if any(token not in service_compact for token in service_tokens):

@@ -71,6 +71,7 @@ import com.opentypeless.android.keyboard.switching.KeyboardEngineSelection;
 import com.opentypeless.android.keyboard.switching.KeyboardSystemImeSwitcher;
 import com.opentypeless.android.keyboard.toolbar.KeyboardToolbarLayout;
 import com.opentypeless.android.keyboard.toolbar.KeyboardToolbarPrivacyPolicy;
+import com.opentypeless.android.keyboard.ui.CenteredIconButton;
 import com.opentypeless.android.data.HistoryEntry;
 import com.opentypeless.android.data.PersonalizationSnapshot;
 import com.opentypeless.android.offline.LocalOfflineRecognizer;
@@ -912,9 +913,9 @@ public final class OpenTypelessImeService extends InputMethodService
     private TextView status;
     private TextView transcript;
     private VoicePulseView voicePulse;
-    private Button microphone;
+    private CenteredIconButton microphone;
     private Button modeButton;
-    private Button moreButton;
+    private CenteredIconButton moreButton;
     private Button holdToTalkButton;
     private Button switchKeyboardButton;
     private Button punctuationButton;
@@ -1271,7 +1272,7 @@ public final class OpenTypelessImeService extends InputMethodService
         keyStage.setGravity(Gravity.CENTER);
         if (shellFrame.route() == KeyboardShellRoute.ROUTE_A) {
             LinearLayout voicePage = createVoiceInputPage();
-            Button inputModeToggle = key(
+            CenteredIconButton inputModeToggle = key(
                     "",
                     getString(R.string.ime_cd_open_keyboard_tab),
                     1f,
@@ -1322,32 +1323,32 @@ public final class OpenTypelessImeService extends InputMethodService
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setGravity(Gravity.CENTER);
-        page.setMinimumHeight(dp(compactLayout ? 184 : 208));
-        page.setPadding(dp(8), dp(6), dp(8), dp(8));
-
-        setCenteredIcon(microphone, R.drawable.ime_ic_microphone);
-        microphone.setBackgroundResource(R.drawable.ime_voice_button_background);
-        microphone.setBackgroundTintList(null);
-        microphone.setTextColor(getColor(R.color.ime_on_voice_primary));
-        microphone.setMinWidth(dp(96));
-        microphone.setMinimumWidth(dp(96));
-        microphone.setMinHeight(dp(96));
-        microphone.setMinimumHeight(dp(96));
-        microphone.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams microphoneParams = new LinearLayout.LayoutParams(
-                dp(96), dp(96));
-        microphoneParams.gravity = Gravity.CENTER_HORIZONTAL;
-        page.addView(microphone, microphoneParams);
+        page.setMinimumHeight(dp(compactLayout ? 164 : 184));
+        page.setPadding(dp(8), dp(4), dp(8), dp(8));
 
         TextView hint = new TextView(this);
         hint.setText(R.string.ime_voice_tap_hint);
         hint.setTextColor(getColor(R.color.ime_on_surface_variant));
-        hint.setTextSize(14);
+        hint.setTextSize(13);
         hint.setGravity(Gravity.CENTER);
-        hint.setPadding(0, dp(8), 0, 0);
+        hint.setPadding(0, 0, 0, dp(10));
         page.addView(hint, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        microphone.setBackgroundResource(R.drawable.ime_voice_button_background);
+        setCenteredIcon(microphone, R.drawable.ime_ic_microphone);
+        microphone.setBackgroundTintList(null);
+        microphone.setTextColor(getColor(R.color.ime_on_voice_primary));
+        microphone.setMinWidth(dp(148));
+        microphone.setMinimumWidth(dp(148));
+        microphone.setMinHeight(dp(56));
+        microphone.setMinimumHeight(dp(56));
+        microphone.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams microphoneParams = new LinearLayout.LayoutParams(
+                dp(148), dp(56));
+        microphoneParams.gravity = Gravity.CENTER_HORIZONTAL;
+        page.addView(microphone, microphoneParams);
         return page;
     }
 
@@ -5600,12 +5601,12 @@ public final class OpenTypelessImeService extends InputMethodService
                 LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private Button key(
+    private CenteredIconButton key(
             String label,
             String contentDescription,
             float weight,
             View.OnClickListener listener) {
-        Button button = new Button(this);
+        CenteredIconButton button = new CenteredIconButton(this);
         button.setText(label);
         button.setContentDescription(contentDescription);
         button.setAllCaps(false);
@@ -5636,12 +5637,9 @@ public final class OpenTypelessImeService extends InputMethodService
         return button;
     }
 
-    private void setCenteredIcon(Button button, int drawableResource) {
+    private void setCenteredIcon(CenteredIconButton button, int drawableResource) {
         if (button == null) return;
-        button.setText("");
-        button.setForeground(null);
-        button.setCompoundDrawablePadding(0);
-        button.setCompoundDrawablesWithIntrinsicBounds(drawableResource, 0, 0, 0);
+        button.setCenteredIconResource(drawableResource);
         button.setGravity(Gravity.CENTER);
         button.setPadding(0, 0, 0, 0);
     }
@@ -5660,7 +5658,7 @@ public final class OpenTypelessImeService extends InputMethodService
         return compactLayout ? compactResource : regularResource;
     }
 
-    private Button key(
+    private CenteredIconButton key(
             int labelResource,
             int contentDescriptionResource,
             float weight,

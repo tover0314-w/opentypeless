@@ -7,6 +7,7 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import com.opentypeless.android.R;
+import com.opentypeless.android.keyboard.ui.CenteredIconButton;
 import java.util.Objects;
 
 /** Capability-free two-page switcher for the voice-first and QWERTY input surfaces. */
@@ -24,7 +25,7 @@ public final class KeyboardInputModeLayout {
 
     private final Context context;
     private final LinearLayout root;
-    private final Button toggleButton;
+    private final CenteredIconButton toggleButton;
     private final View voicePage;
     private final View qwertyPage;
     private final Listener listener;
@@ -34,7 +35,7 @@ public final class KeyboardInputModeLayout {
 
     public KeyboardInputModeLayout(
             Context context,
-            Button toggleButton,
+            CenteredIconButton toggleButton,
             View voicePage,
             View qwertyPage,
             Mode initialMode) {
@@ -43,7 +44,7 @@ public final class KeyboardInputModeLayout {
 
     public KeyboardInputModeLayout(
             Context context,
-            Button toggleButton,
+            CenteredIconButton toggleButton,
             View voicePage,
             View qwertyPage,
             Mode initialMode,
@@ -123,14 +124,8 @@ public final class KeyboardInputModeLayout {
         toggleButton.setEnabled(voiceAvailable && switchingEnabled);
         toggleButton.setSelected(false);
         toggleButton.setActivated(false);
-        toggleButton.setText("");
-        toggleButton.setForeground(null);
-        toggleButton.setCompoundDrawablePadding(0);
-        toggleButton.setCompoundDrawablesWithIntrinsicBounds(
-                voice ? R.drawable.ime_ic_keyboard_mode : R.drawable.ime_ic_microphone_toolbar,
-                0,
-                0,
-                0);
+        toggleButton.setCenteredIconResource(
+                voice ? R.drawable.ime_ic_keyboard_mode : R.drawable.ime_ic_microphone_toolbar);
         toggleButton.setGravity(Gravity.CENTER);
         toggleButton.setPadding(0, 0, 0, 0);
         toggleButton.setContentDescription(context.getString(voice

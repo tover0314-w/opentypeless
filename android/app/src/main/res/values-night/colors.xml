@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ime_surface">#17181B</color>
-    <color name="ime_surface_container">#25262B</color>
-    <color name="ime_surface_high">#303137</color>
-    <color name="ime_surface_pressed">#3B3D45</color>
-    <color name="ime_on_surface">#F8F8FA</color>
-    <color name="ime_on_surface_variant">#BEC1C8</color>
-    <color name="ime_outline">#474A52</color>
-    <color name="ime_primary">#B7AEFF</color>
-    <color name="ime_primary_container">#4B457F</color>
-    <color name="ime_on_primary_container">#E6E3FF</color>
-    <color name="ime_voice_primary">#F4F2EF</color>
-    <color name="ime_voice_primary_pressed">#D8D5D1</color>
-    <color name="ime_on_voice_primary">#1B1A1D</color>
+    <color name="ime_surface">#1D1737</color>
+    <color name="ime_surface_container">#292241</color>
+    <color name="ime_surface_high">#7C7787</color>
+    <color name="ime_surface_pressed">#918B9B</color>
+    <color name="ime_on_surface">#FAF8FC</color>
+    <color name="ime_on_surface_variant">#D2CDDA</color>
+    <color name="ime_outline">#544D6A</color>
+    <color name="ime_primary">#7657BA</color>
+    <color name="ime_primary_container">#4E377E</color>
+    <color name="ime_on_primary_container">#FFFFFF</color>
+    <color name="ime_voice_primary">#6F50B5</color>
+    <color name="ime_voice_primary_pressed">#5D4199</color>
+    <color name="ime_on_voice_primary">#FFFFFF</color>
     <color name="ime_success">#91D879</color>
     <color name="ime_error">#FFB4AB</color>
     <color name="ime_warning">#E9C349</color>
-    <color name="ime_disabled">#61F4F2EF</color>
+    <color name="ime_disabled">#61FAF8FC</color>
 </resources>
