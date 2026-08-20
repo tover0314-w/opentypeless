@@ -981,8 +981,9 @@ compiled 2/2 和 strict 191-task graph 全 PASS。Xiaomi 10 Ultra 上短按 pick
 长按 picker 均实测 PASS；结束时小米恢复 PangIME，模拟器保持 LatinIME。Rime 注册仍由 RIM-001..005 负责。
 
 **KBD-009 进行中说明（2026-08-19，个人竖屏尺寸切片）：** QWERTY 字母行主键统一为 50dp 高，横向按键
-间距收紧为 1dp，保留第二行缩进、第三行 Shift/Delete 比例和底部功能键权重，目标是接近用户小鹤音形键盘的
-紧凑几何。此切片不宣称已经完成小米 15 横屏无截断验收；横屏压缩和全设备矩阵仍待后续验证。
+间距收紧为 1dp，字母键帽由 18sp 调整为设计规范下限 22sp；保留第二行缩进、第三行 Shift/Delete 比例和底部
+功能键权重，目标是接近用户小鹤音形键盘的紧凑几何和字符占比。此切片不宣称已经完成小米 15 横屏无截断验收；
+横屏压缩和全设备矩阵仍待后续验证。
 
 **RIM-001 完成说明（2026-08-16，`DONE`）：** 新的纯 Java `RimeInputEngine` 与
 `RimeEngineSnapshot` 定义 activate/deactivate/process/snapshot/candidate page/selection 的闭合请求与结果；每项异步

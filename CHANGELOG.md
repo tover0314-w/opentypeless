@@ -50,9 +50,9 @@ implicitly version the other. Release entries must name an immutable tag and sou
   all pass without weakening stale-event rejection. A follow-up fixes fixed-length Rime auto-commit
   delivery and makes Space select the exact first displayed candidate; both paths pass actual-librime
   and system-selected real-touch checks with the user's local-only package.
-- `KBD-009` begins the portrait QWERTY sizing slice: 50dp key rows and tighter 1dp horizontal
-  margins preserve the existing Xiaohe-like row offsets and bottom-row proportions. Landscape
-  compression and Xiaomi 15 acceptance remain pending.
+- `KBD-009` begins the portrait QWERTY sizing slice: 50dp key rows, tighter 1dp horizontal margins
+  and 22sp letter labels preserve the existing Xiaohe-like row offsets and bottom-row proportions
+  while improving key-legibility. Landscape compression and Xiaomi 15 acceptance remain pending.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform
   input type, selected/collapsed ranges, dynamic editor replacement, RTL and local WebView

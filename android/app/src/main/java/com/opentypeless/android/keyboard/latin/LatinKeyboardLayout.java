@@ -29,6 +29,7 @@ public final class LatinKeyboardLayout {
     private static final int KEY_HEIGHT_DP = 50;
     private static final int KEY_SIDE_MARGIN_DP = 1;
     private static final int KEY_VERTICAL_MARGIN_DP = 2;
+    private static final float LETTER_KEY_TEXT_SIZE_SP = 22f;
 
     @FunctionalInterface
     public interface KeyFactory {
@@ -531,7 +532,7 @@ public final class LatinKeyboardLayout {
             button.setMinWidth(0);
             button.setMinimumWidth(0);
             button.setPadding(0, 0, 0, 0);
-            button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f);
+            button.setTextSize(TypedValue.COMPLEX_UNIT_SP, LETTER_KEY_TEXT_SIZE_SP);
         }
         return button;
     }

@@ -273,6 +273,10 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertEquals(11, secondRow.getChildCount()); // two indent spacers + 9 letters
             assertEquals(9, thirdRow.getChildCount()); // shift + 7 letters + delete
             assertEquals(dp(root.getContext(), 50), q.getLayoutParams().height);
+            assertEquals(
+                    22f,
+                    q.getTextSize() / root.getResources().getDisplayMetrics().scaledDensity,
+                    0.01f);
             assertEquals(q.getHeight(), a.getHeight());
             assertTrue(q.getHeight() >= dp(root.getContext(), 48));
             assertTrue(a.getLeft() > q.getLeft());
