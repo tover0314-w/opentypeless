@@ -21,7 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-/** Capability-free four-row QWERTY and paged-symbol view for KBD-002/KBD-003. */
+/** Capability-free four-row QWERTY and paged-symbol view for KBD-002/KBD-003/KBD-009. */
 public final class LatinKeyboardLayout {
     public static final String ROOT_TAG = "opentypeless-latin-qwerty";
     public static final String SHIFT_TAG = "opentypeless-latin-shift";
@@ -95,6 +95,8 @@ public final class LatinKeyboardLayout {
     private final Button enterButton;
     private final Button switchKeyboardButton;
     private final Button engineSwitchButton;
+    private final Button commaButton;
+    private final Button periodButton;
     private final BoundedDeleteRepeater deleteRepeater;
     private final List<Button> profileShortcutButtons = new ArrayList<>();
     private KeyboardFieldProfile fieldProfile = KeyboardFieldProfile.GENERAL;
@@ -193,15 +195,30 @@ public final class LatinKeyboardLayout {
                 1.2f,
                 listener::switchInputEngine,
                 false);
+        engineSwitchButton.setOnLongClickListener(ignored -> consumeKeyboardPickerLongPress());
         engineSwitchButton.setVisibility(View.GONE);
         addWeighted(bottomRow, engineSwitchButton, 1.2f);
+        commaButton = createKey(
+                ",",
+                context.getString(R.string.ime_cd_comma),
+                .8f,
+                () -> listener.insertText(","),
+                false);
+        addWeighted(bottomRow, commaButton, .8f);
         spaceButton = createKey(
                 context.getString(R.string.ime_key_space),
                 context.getString(R.string.ime_cd_space),
-                4f,
+                3.6f,
                 () -> listener.insertText(" "),
                 false);
-        addWeighted(bottomRow, spaceButton, 4f);
+        addWeighted(bottomRow, spaceButton, 3.6f);
+        periodButton = createKey(
+                ".",
+                context.getString(R.string.ime_cd_period),
+                .8f,
+                () -> listener.insertText("."),
+                false);
+        addWeighted(bottomRow, periodButton, .8f);
         enterButton = createKey(
                 context.getString(R.string.ime_key_enter),
                 context.getString(R.string.ime_cd_enter),
@@ -255,6 +272,14 @@ public final class LatinKeyboardLayout {
         return engineSwitchButton;
     }
 
+    public Button commaButton() {
+        return commaButton;
+    }
+
+    public Button periodButton() {
+        return periodButton;
+    }
+
     public Button symbolButton(String symbol) {
         Button button = symbols.get(symbol);
         if (button == null) throw new IllegalArgumentException("unknown or hidden symbol");
@@ -299,6 +324,8 @@ public final class LatinKeyboardLayout {
         enterButton.setEnabled(enabled);
         switchKeyboardButton.setEnabled(enabled);
         engineSwitchButton.setEnabled(enabled);
+        commaButton.setEnabled(enabled);
+        periodButton.setEnabled(enabled);
         for (Button button : letters.values()) button.setEnabled(enabled);
         for (Button button : symbols.values()) button.setEnabled(enabled);
         for (Button button : profileShortcutButtons) button.setEnabled(enabled);
@@ -313,6 +340,10 @@ public final class LatinKeyboardLayout {
     public void setEngineSelection(KeyboardEngineSelection selection) {
         KeyboardEngineSelection safe = Objects.requireNonNull(selection, "selection");
         state.resetToLetters();
+        // Keep one stable language slot: a real local Rime engine gets the short press; otherwise
+        // the slot switches to the next installed IME (for example the user's Xiaohe keyboard).
+        // This never presents the local Rime button before a verified runtime is available.
+        switchKeyboardButton.setVisibility(safe.hasAlternative() ? View.GONE : View.VISIBLE);
         engineSwitchButton.setVisibility(safe.hasAlternative() ? View.VISIBLE : View.GONE);
         boolean latin = safe.active() == KeyboardEngineSelection.Engine.LATIN;
         engineSwitchButton.setText(latin
@@ -360,7 +391,10 @@ public final class LatinKeyboardLayout {
     }
 
     private boolean consumeKeyboardPickerLongPress() {
-        feedback.onLongPress(switchKeyboardButton);
+        View source = engineSwitchButton.getVisibility() == View.VISIBLE
+                ? engineSwitchButton
+                : switchKeyboardButton;
+        feedback.onLongPress(source);
         listener.showKeyboardPicker();
         return true;
     }
@@ -412,6 +446,8 @@ public final class LatinKeyboardLayout {
             symbolPageButton.setVisibility(View.GONE);
             configureProfileShortcuts(new String[0]);
             spaceButton.setVisibility(View.GONE);
+            commaButton.setVisibility(View.GONE);
+            periodButton.setVisibility(View.GONE);
         } else if (state.layer() == LatinKeyboardState.Layer.LETTERS) {
             populateLetterRow(firstRow, LETTER_ROWS[0], LONG_PRESS_ROWS[0], 0f);
             populateLetterRow(secondRow, LETTER_ROWS[1], LONG_PRESS_ROWS[1], 0.5f);
@@ -426,6 +462,8 @@ public final class LatinKeyboardLayout {
             refreshLabels();
             configureProfileShortcuts(shortcutsFor(fieldProfile));
             spaceButton.setVisibility(View.VISIBLE);
+            commaButton.setVisibility(View.VISIBLE);
+            periodButton.setVisibility(View.VISIBLE);
         } else {
             String[][] rows = state.layer() == LatinKeyboardState.Layer.SYMBOLS_PRIMARY
                     ? SYMBOL_ROWS_PRIMARY
@@ -448,6 +486,8 @@ public final class LatinKeyboardLayout {
                     context.getString(R.string.ime_cd_return_to_letters));
             configureProfileShortcuts(new String[0]);
             spaceButton.setVisibility(View.VISIBLE);
+            commaButton.setVisibility(View.VISIBLE);
+            periodButton.setVisibility(View.VISIBLE);
         }
         root.setContentDescription(context.getString(profileDescription(fieldProfile)));
         setInputEnabled(inputEnabled);
@@ -470,8 +510,8 @@ public final class LatinKeyboardLayout {
 
     private static String[] shortcutsFor(KeyboardFieldProfile profile) {
         return switch (profile) {
-            case EMAIL -> new String[] {"@", "."};
-            case URI -> new String[] {"/", ".", ":"};
+            case EMAIL -> new String[] {"@"};
+            case URI -> new String[] {"/", ":"};
             default -> new String[0];
         };
     }
@@ -540,6 +580,11 @@ public final class LatinKeyboardLayout {
             button.setPadding(0, 0, 0, 0);
             button.setTextSize(TypedValue.COMPLEX_UNIT_SP, LETTER_KEY_TEXT_SIZE_SP);
         } else {
+            // Android Button carries large theme padding by default. Compact bottom-row labels
+            // such as "中/英" must use the full key cap while the 50dp touch target stays intact.
+            button.setMinWidth(0);
+            button.setMinimumWidth(0);
+            button.setPadding(0, 0, 0, 0);
             button.setTextSize(TypedValue.COMPLEX_UNIT_SP, FUNCTION_KEY_TEXT_SIZE_SP);
         }
         return button;

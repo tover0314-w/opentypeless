@@ -47,7 +47,9 @@
     <string name="ime_cd_space_sensitive">插入空格；当前敏感字段不可使用语音输入</string>
     <string name="ime_status_hold_too_short">请按住空格，等开始聆听后再松手</string>
     <string name="ime_cd_enter">换行或执行编辑器操作</string>
-    <string name="ime_cd_switch_keyboard">切换到下一个输入法；长按选择输入法</string>
+    <string name="ime_cd_switch_keyboard">切换到下一个中英文输入法；长按选择输入法</string>
+    <string name="ime_cd_comma">输入逗号</string>
+    <string name="ime_cd_period">输入句号</string>
     <string name="ime_key_engine_rime">中</string>
     <string name="ime_cd_engine_latin">当前为拉丁输入；切换到中文输入</string>
     <string name="ime_cd_engine_rime">当前为中文输入；切换到拉丁输入</string>

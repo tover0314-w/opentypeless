@@ -2974,6 +2974,18 @@ public final class OpenTypelessImeService extends InputMethodService
             insertKeyboardText(text);
             return;
         }
+        if (",".equals(text) || ".".equals(text)) {
+            if (activeRimeLease != null) {
+                // Do not implicitly choose or discard a visible shape-code candidate. The user
+                // can select it first; after commit the direct punctuation key remains one tap.
+                setStatus(R.string.ime_status_key_rejected, true);
+                return;
+            }
+            RimeRuntimeConfig config = availableRimeConfig;
+            boolean ascii = config == null || config.asciiPunctuation();
+            insertKeyboardText(ascii ? text : ",".equals(text) ? "，" : "。");
+            return;
+        }
         if (" ".equals(text)) {
             routeRimeSpace();
             return;

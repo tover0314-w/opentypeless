@@ -83,8 +83,10 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         'PHONE_ROWS={{"1","2","3"},{"4","5","6"},{"7","8","9","+","0","*","#"}}',
         'NUMBER_ROWS={{"1","2","3"},{"4","5","6"},{"7","8","9","-","0","."}}',
         'DATE_ROWS={{"1","2","3"},{"4","5","6"},{"7","8","9","/","0","-","."}}',
-        'caseEMAIL->newString[]{"@","."}',
-        'caseURI->newString[]{"/",".",":"}',
+        'caseEMAIL->newString[]{"@"}',
+        'caseURI->newString[]{"/",":"}',
+        '()->listener.insertText(",")',
+        '()->listener.insertText(".")',
         "fieldProfile.usesNumericPanel()",
         "state.resetToLetters()",
         "listener.insertText(shortcuts[index])",
@@ -94,6 +96,8 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     if (
         any(token not in compact for token in layout_tokens)
         or layout.count("listener.insertText(shortcuts[index])") != 1
+        or layout.count('() -> listener.insertText(",")') != 1
+        or layout.count('() -> listener.insertText(".")') != 1
         or "catch (" in layout
     ):
         violations.append(Violation(

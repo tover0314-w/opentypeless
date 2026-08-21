@@ -57,17 +57,28 @@ public final class LatinKeyboardLayoutInstrumentedTest {
     }
 
     @Test
-    public void spaceDeleteEnterAndSwitchUseOnlyTheirBoundedCallbacks() {
+    public void bottomRowShortcutsUseOnlyTheirBoundedCallbacks() {
         onMain(() -> {
             Harness harness = new Harness();
 
+            assertEquals(
+                    List.of(
+                            "123",
+                            "中/英",
+                            ",",
+                            harness.layout.root().getContext().getString(R.string.ime_key_space),
+                            ".",
+                            "↵"),
+                    visibleLabels(row(harness.layout, 3)));
+            assertTrue(harness.layout.commaButton().performClick());
             assertTrue(harness.layout.spaceButton().performClick());
+            assertTrue(harness.layout.periodButton().performClick());
             assertTrue(harness.layout.deleteButton().performClick());
             assertTrue(harness.layout.enterButton().performClick());
             assertTrue(harness.layout.switchKeyboardButton().performClick());
             assertTrue(harness.layout.switchKeyboardButton().performLongClick());
 
-            assertEquals(List.of(" "), harness.inserted);
+            assertEquals(List.of(",", " ", "."), harness.inserted);
             assertEquals(1, harness.deleted.get());
             assertEquals(1, harness.entered.get());
             assertEquals(1, harness.switched.get());
@@ -112,9 +123,12 @@ public final class LatinKeyboardLayoutInstrumentedTest {
                     2L));
 
             assertEquals(View.VISIBLE, harness.layout.engineSwitchButton().getVisibility());
+            assertEquals(View.GONE, harness.layout.switchKeyboardButton().getVisibility());
             assertEquals("EN", harness.layout.engineSwitchButton().getText().toString());
             assertTrue(harness.layout.engineSwitchButton().performClick());
+            assertTrue(harness.layout.engineSwitchButton().performLongClick());
             assertEquals(1, harness.engineSwitched.get());
+            assertEquals(1, harness.pickerShown.get());
 
             harness.layout.setEngineSelection(KeyboardEngineSelection.of(
                     KeyboardEngineSelection.Engine.RIME,
@@ -142,6 +156,8 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertFalse(harness.layout.enterButton().isEnabled());
             assertFalse(harness.layout.switchKeyboardButton().isEnabled());
             assertFalse(harness.layout.engineSwitchButton().isEnabled());
+            assertFalse(harness.layout.commaButton().isEnabled());
+            assertFalse(harness.layout.periodButton().isEnabled());
             assertFalse(harness.layout.symbolsToggleButton().isEnabled());
             assertFalse(harness.layout.symbolPageButton().isEnabled());
         });
@@ -290,6 +306,9 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertTrue(a.getLeft() > q.getLeft());
             assertTrue(z.getLeft() > q.getLeft());
             assertTrue(harness.layout.spaceButton().getWidth() > q.getWidth() * 3);
+            Button language = harness.layout.switchKeyboardButton();
+            assertTrue(language.getPaint().measureText(language.getText().toString())
+                    <= language.getWidth() - language.getPaddingLeft() - language.getPaddingRight());
             assertTrue(bottomRow.getMeasuredHeight() > 0);
         });
     }
@@ -307,17 +326,16 @@ public final class LatinKeyboardLayoutInstrumentedTest {
                             R.string.ime_cd_keyboard_profile_email),
                     layout.root().getContentDescription().toString());
             assertEquals("@", layout.profileShortcutButton(0).getText().toString());
-            assertEquals(".", layout.profileShortcutButton(1).getText().toString());
-            assertEquals(View.GONE, layout.profileShortcutButton(2).getVisibility());
+            assertEquals(View.GONE, layout.profileShortcutButton(1).getVisibility());
             assertTrue(layout.profileShortcutButton(0).performClick());
-            assertTrue(layout.profileShortcutButton(1).performClick());
+            assertTrue(layout.periodButton().performClick());
 
             layout.setFieldProfile(KeyboardFieldProfile.URI);
             assertEquals("/", layout.profileShortcutButton(0).getText().toString());
-            assertEquals(".", layout.profileShortcutButton(1).getText().toString());
-            assertEquals(":", layout.profileShortcutButton(2).getText().toString());
+            assertEquals(":", layout.profileShortcutButton(1).getText().toString());
+            assertEquals(View.GONE, layout.profileShortcutButton(2).getVisibility());
             assertTrue(layout.profileShortcutButton(0).performClick());
-            assertTrue(layout.profileShortcutButton(2).performClick());
+            assertTrue(layout.profileShortcutButton(1).performClick());
             assertEquals(List.of("@", ".", "/", ":"), harness.inserted);
         });
     }
@@ -333,6 +351,8 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertEquals(List.of("7", "8", "9", "+", "0", "*", "#", "⌫"),
                     labels(row(layout, 2)));
             assertEquals(View.GONE, layout.spaceButton().getVisibility());
+            assertEquals(View.GONE, layout.commaButton().getVisibility());
+            assertEquals(View.GONE, layout.periodButton().getVisibility());
             assertTrue(layout.symbolButton("+").performClick());
 
             layout.setFieldProfile(KeyboardFieldProfile.NUMBER);
@@ -387,6 +407,17 @@ public final class LatinKeyboardLayoutInstrumentedTest {
         for (int index = 0; index < row.getChildCount(); index++) {
             View child = row.getChildAt(index);
             if (child instanceof Button button) labels.add(button.getText().toString());
+        }
+        return labels;
+    }
+
+    private static List<String> visibleLabels(LinearLayout row) {
+        List<String> labels = new ArrayList<>();
+        for (int index = 0; index < row.getChildCount(); index++) {
+            View child = row.getChildAt(index);
+            if (child.getVisibility() == View.VISIBLE && child instanceof Button button) {
+                labels.add(button.getText().toString());
+            }
         }
         return labels;
     }

@@ -997,6 +997,12 @@ Android 截图启发的“点击说话”提示与 148x56dp 横向麦克风胶�
 Debug APK 已覆盖安装到小米 10 Ultra，语音页与 QWERTY 页真机截图确认麦克风、模式切换和更多图标均显示且居中。
 该跟进不改变 Voice、Rime、EditorTransaction、权限、网络、持久格式或隐私策略；小米 15 横屏验收仍未完成。
 
+**KBD-009 UI 跟进（2026-08-21，小鹤优先底行）：** 参考公开 Rime 四码/形码皮肤的高频键位，并落实既有 8.1/8.2
+原型，Route-A QWERTY 底行固定为 `123 / 中英切换 / 逗号 / 空格 / 句号 / Enter`。未导入本地 Rime 时，中英键明确
+请求平台 next IME（长按选择器），方便直接切到用户已安装的小鹤音形；仅在验证到本地 Rime 运行包后，同一视觉槽才
+切换为内部 `EN/中` 引擎键，避免伪装本地中文引擎可用。数字字段隐藏重复标点，邮箱/URL 快捷键去除与常驻句号的重复。
+所有文字输出继续走既有单一 keyboard callback 与 ETM；未复制第三方主题代码、资源或方案数据。
+
 **RIM-001 完成说明（2026-08-16，`DONE`）：** 新的纯 Java `RimeInputEngine` 与
 `RimeEngineSnapshot` 定义 activate/deactivate/process/snapshot/candidate page/selection 的闭合请求与结果；每项异步
 请求携带 editor generation 与 coordination revision，preedit/candidate/commit 有界且诊断脱敏。契约不依赖 Android、

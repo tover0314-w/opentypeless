@@ -88,12 +88,18 @@ class KeyboardSwitchingContractTest(unittest.TestCase):
         self.mutate(
             LAYOUT,
             "private boolean consumeKeyboardPickerLongPress() {\n"
-            "        feedback.onLongPress(switchKeyboardButton);\n"
+            "        View source = engineSwitchButton.getVisibility() == View.VISIBLE\n"
+            "                ? engineSwitchButton\n"
+            "                : switchKeyboardButton;\n"
+            "        feedback.onLongPress(source);\n"
             "        listener.showKeyboardPicker();\n"
             "        return true;\n"
             "    }",
             "private boolean consumeKeyboardPickerLongPress() {\n"
-            "        feedback.onLongPress(switchKeyboardButton);\n"
+            "        View source = engineSwitchButton.getVisibility() == View.VISIBLE\n"
+            "                ? engineSwitchButton\n"
+            "                : switchKeyboardButton;\n"
+            "        feedback.onLongPress(source);\n"
             "        listener.showKeyboardPicker();\n"
             "        return false;\n"
             "    }",

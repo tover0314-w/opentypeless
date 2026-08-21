@@ -143,9 +143,11 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "voidshowKeyboardPicker();",
         "voidswitchInputEngine();",
         "switchKeyboardButton.setOnLongClickListener(ignored->consumeKeyboardPickerLongPress())",
-        "privatebooleanconsumeKeyboardPickerLongPress(){feedback.onLongPress(switchKeyboardButton);listener.showKeyboardPicker();returntrue;}",
+        "engineSwitchButton.setOnLongClickListener(ignored->consumeKeyboardPickerLongPress())",
+        "privatebooleanconsumeKeyboardPickerLongPress(){Viewsource=engineSwitchButton.getVisibility()==View.VISIBLE?engineSwitchButton:switchKeyboardButton;feedback.onLongPress(source);listener.showKeyboardPicker();returntrue;}",
         "engineSwitchButton.setVisibility(View.GONE)",
         "publicvoidsetEngineSelection(KeyboardEngineSelectionselection)",
+        "switchKeyboardButton.setVisibility(safe.hasAlternative()?View.GONE:View.VISIBLE)",
         "engineSwitchButton.setVisibility(safe.hasAlternative()?View.VISIBLE:View.GONE)",
         "state.resetToLetters()",
         "engineSwitchButton.setEnabled(enabled)",
@@ -214,6 +216,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     view_test_tokens = (
         "engineControlIsHiddenUntilTwoEnginesAreRegistered",
         "switchKeyboardButton().performLongClick()",
+        "engineSwitchButton().performLongClick()",
     )
     if any(token not in engine_test for token in engine_test_tokens):
         violations.append(Violation("KBD008_ENGINE_TEST", "engine-state matrix drifted"))

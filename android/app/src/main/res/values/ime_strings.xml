@@ -5,7 +5,7 @@
     <string name="ime_key_delete" translatable="false">⌫</string>
     <string name="ime_key_space">Space</string>
     <string name="ime_key_enter" translatable="false">↵</string>
-    <string name="ime_key_switch_keyboard" translatable="false">⌨</string>
+    <string name="ime_key_switch_keyboard" translatable="false">中/英</string>
     <string name="ime_key_engine_latin" translatable="false">EN</string>
     <string name="ime_key_engine_rime">中</string>
     <string name="ime_key_shift" translatable="false">⇧</string>
@@ -64,7 +64,9 @@
     <string name="ime_cd_space_sensitive">Insert space; voice input is unavailable in this sensitive field</string>
     <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
     <string name="ime_cd_enter">Enter or perform the editor action</string>
-    <string name="ime_cd_switch_keyboard">Switch to the next keyboard; touch and hold to choose a keyboard</string>
+    <string name="ime_cd_switch_keyboard">Switch to the next Chinese or English keyboard; touch and hold to choose a keyboard</string>
+    <string name="ime_cd_comma">Insert a comma</string>
+    <string name="ime_cd_period">Insert a period</string>
     <string name="ime_cd_engine_latin">Latin input active; switch to Chinese input</string>
     <string name="ime_cd_engine_rime">Chinese input active; switch to Latin input</string>
     <string name="ime_cd_shift">Shift once; double tap for Caps Lock</string>
