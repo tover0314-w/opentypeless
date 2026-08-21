@@ -813,6 +813,28 @@
       "profiles": ["test"],
       "required_synthetic_fixture_ids": [],
       "required_native_engine_ids": []
+    },
+    {
+      "sha256": "175aba4ce403703addf84bea6548f7fa3f87740e654a67c44891170e690c9f97",
+      "profiles": ["product"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": [
+        "rime-arm64-adapter", "rime-arm64-engine",
+        "rime-x86_64-adapter", "rime-x86_64-engine",
+        "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk",
+        "sherpa-x86_64-onnx-apk", "sherpa-x86_64-jni-apk"
+      ]
+    },
+    {
+      "sha256": "5cefee2c6b8f3844d0bf3459b0118387377bd41b05fc567948e8e11bd8b1e9ad",
+      "profiles": ["product"],
+      "required_synthetic_fixture_ids": [],
+      "required_native_engine_ids": [
+        "rime-arm64-adapter", "rime-arm64-engine",
+        "rime-x86_64-adapter", "rime-x86_64-engine",
+        "sherpa-arm64-onnx-apk", "sherpa-arm64-jni-apk",
+        "sherpa-x86_64-onnx-apk", "sherpa-x86_64-jni-apk"
+      ]
     }
   ],
   "opaque_binary_baseline": [

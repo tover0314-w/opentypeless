@@ -106,6 +106,22 @@ class KeyboardSwitchingContractTest(unittest.TestCase):
         )
         self.assertIn("KBD008_VIEW_CONTRACT", self.rules())
 
+    def test_rejects_previous_ime_fallback_removal(self) -> None:
+        self.mutate(
+            SYSTEM,
+            "if (platform.switchToPreviousInputMethod())",
+            "if (false && platform.switchToPreviousInputMethod())",
+        )
+        self.assertIn("KBD008_SYSTEM_CONTRACT", self.rules())
+
+    def test_rejects_single_alternative_route_removal(self) -> None:
+        self.mutate(
+            SYSTEM,
+            "if (platform.switchToSingleEnabledAlternative())",
+            "if (false && platform.switchToSingleEnabledAlternative())",
+        )
+        self.assertIn("KBD008_SYSTEM_CONTRACT", self.rules())
+
     def test_rejects_missing_chinese_accessibility_text(self) -> None:
         self.mutate(ZH_STRINGS, "ime_cd_engine_rime", "ime_cd_engine_removed")
         self.assertIn("KBD008_LOCALIZATION", self.rules())

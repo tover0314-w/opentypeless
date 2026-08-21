@@ -980,6 +980,12 @@ preedit/candidate/选择提交仍由 RIM-001/004/005 和后续 Latin 任务负�
 compiled 2/2 和 strict 191-task graph 全 PASS。Xiaomi 10 Ultra 上短按 picker fallback、选择 PangIME 后系统默认值变化、
 长按 picker 均实测 PASS；结束时小米恢复 PangIME，模拟器保持 LatinIME。Rime 注册仍由 RIM-001..005 负责。
 
+**KBD-008 个人回归修复（2026-08-21，小米 10 Ultra）：** 用户本地 Rime 包缺失时，底栏中英键不再只依赖
+MIUI 的 next-IME 顺序；系统只有一个用户已启用的外部输入法时直接请求该精确 ID，否则依次尝试返回上一个输入法、
+next IME 与系统选择器。该设备仅启用 OpenTypeless 与 PangIME，因此优先路径明确返回用户的小鹤音形；长按仍直接
+打开选择器。此修复不硬编码包名，不内置或恢复任何小鹤资源，OpenTypeless 内部中文模式仍只在显式 SAF 本地导入
+并验证成功后出现。
+
 **KBD-009 进行中说明（2026-08-19，个人竖屏尺寸切片）：** QWERTY 字母行主键统一为 50dp 高，横向按键
 间距收紧为 1dp，字母键帽由 18sp 调整为设计规范下限 22sp；保留第二行缩进、第三行 Shift/Delete 比例和底部
 功能键权重，目标是接近用户小鹤音形键盘的紧凑几何和字符占比。此切片不宣称已经完成小米 15 横屏无截断验收；

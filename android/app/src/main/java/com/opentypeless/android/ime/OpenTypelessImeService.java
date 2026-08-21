@@ -26,6 +26,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -4031,7 +4032,7 @@ public final class OpenTypelessImeService extends InputMethodService
     }
 
     private void switchKeyboard() {
-        handleSystemImeSwitch(KeyboardSystemImeSwitcher.requestNext(systemImePlatform()));
+        handleSystemImeSwitch(KeyboardSystemImeSwitcher.requestAlternative(systemImePlatform()));
     }
 
     private void showKeyboardPicker() {
@@ -4040,6 +4041,27 @@ public final class OpenTypelessImeService extends InputMethodService
 
     private KeyboardSystemImeSwitcher.Platform systemImePlatform() {
         return new KeyboardSystemImeSwitcher.Platform() {
+            @Override
+            public boolean switchToSingleEnabledAlternative() {
+                InputMethodManager manager = getSystemService(InputMethodManager.class);
+                if (manager == null) return false;
+                String alternativeId = null;
+                for (InputMethodInfo info : manager.getEnabledInputMethodList()) {
+                    if (getPackageName().equals(info.getPackageName())) continue;
+                    if (alternativeId != null) return false;
+                    alternativeId = info.getId();
+                }
+                if (alternativeId == null) return false;
+                OpenTypelessImeService.this.switchInputMethod(alternativeId);
+                return true;
+            }
+
+            @Override
+            public boolean switchToPreviousInputMethod() {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false;
+                return OpenTypelessImeService.this.switchToPreviousInputMethod();
+            }
+
             @Override
             public boolean switchToNextInputMethod() {
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false;
@@ -4057,7 +4079,11 @@ public final class OpenTypelessImeService extends InputMethodService
     }
 
     private void handleSystemImeSwitch(KeyboardSystemImeSwitcher.Outcome outcome) {
-        if (outcome == KeyboardSystemImeSwitcher.Outcome.NEXT_INPUT_METHOD_REQUESTED) return;
+        if (outcome == KeyboardSystemImeSwitcher.Outcome.SINGLE_ALTERNATIVE_REQUESTED
+                || outcome == KeyboardSystemImeSwitcher.Outcome.PREVIOUS_INPUT_METHOD_REQUESTED
+                || outcome == KeyboardSystemImeSwitcher.Outcome.NEXT_INPUT_METHOD_REQUESTED) {
+            return;
+        }
         setStatus(outcome == KeyboardSystemImeSwitcher.Outcome.FAILED
                 ? R.string.ime_status_keyboard_switch_failed
                 : R.string.ime_status_keyboard_picker_opened, outcome == KeyboardSystemImeSwitcher.Outcome.FAILED);

@@ -120,12 +120,17 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
 
     system_compact = _compact(system)
     system_tokens = (
+        "SINGLE_ALTERNATIVE_REQUESTED",
+        "PREVIOUS_INPUT_METHOD_REQUESTED",
         "NEXT_INPUT_METHOD_REQUESTED",
         "PICKER_SHOWN_NO_NEXT",
         "PICKER_SHOWN_AFTER_PLATFORM_FAILURE",
         "FAILED",
+        "if(platform.switchToSingleEnabledAlternative())",
+        "if(platform.switchToPreviousInputMethod())",
         "if(platform.switchToNextInputMethod())",
         "if(platform.showInputMethodPicker())",
+        "publicstaticOutcomerequestAlternative(Platformplatform)",
         "publicstaticOutcomerequestPicker(Platformplatform)",
     )
     if any(token not in system_compact for token in system_tokens):
@@ -133,9 +138,9 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
             "KBD008_SYSTEM_CONTRACT",
             "next-IME request must use a stable picker fallback and explicit outcomes",
         ))
-    if system.count("catch (RuntimeException unavailable)") != 3:
+    if system.count("catch (RuntimeException unavailable)") != 5:
         violations.append(Violation(
-            "KBD008_SYSTEM_CONTRACT", "platform failures need exactly three content-free boundaries"
+            "KBD008_SYSTEM_CONTRACT", "platform failures need exactly five content-free boundaries"
         ))
 
     layout_compact = _compact(layout)
@@ -160,9 +165,13 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
 
     service_tokens = (
         "KeyboardEngineSelection.latinOnly()",
-        "KeyboardSystemImeSwitcher.requestNext(systemImePlatform())",
+        "KeyboardSystemImeSwitcher.requestAlternative(systemImePlatform())",
         "KeyboardSystemImeSwitcher.requestPicker(systemImePlatform())",
+        "manager.getEnabledInputMethodList()",
+        "if (getPackageName().equals(info.getPackageName())) continue",
+        "switchInputMethod(alternativeId)",
         "if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false",
+        "switchToPreviousInputMethod()",
         "switchToNextInputMethod(false)",
         "manager.showInputMethodPicker()",
         "latinKeyboardLayout.setEngineSelection(keyboardEngineSelection)",
@@ -176,6 +185,9 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     )
     if (
         any(token not in service for token in service_tokens)
+        or service.count("manager.getEnabledInputMethodList()") != 1
+        or service.count("switchInputMethod(alternativeId)") != 1
+        or service.count("OpenTypelessImeService.this.switchToPreviousInputMethod()") != 1
         or service.count("switchToNextInputMethod(false)") != 1
         or service.count("manager.showInputMethodPicker()") != 1
         or "ACTION_INPUT_METHOD_SETTINGS" in service
@@ -207,9 +219,12 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "invalidEmptyMissingActiveAndExhaustedStatesFailClosed",
     )
     system_test_tokens = (
-        "successfulNextImeDoesNotOpenPicker",
+        "successfulSingleAlternativeDoesNotRequestHistoryNextOrPicker",
+        "noSingleAlternativeUsesPreviousWithoutRequestingNextOrPicker",
+        "noPreviousImeUsesNextWithoutOpeningPicker",
         "noNextImeFallsBackToPicker",
-        "platformFailureUsesPickerWithoutLeakingExceptionText",
+        "directSingleFailureStillUsesSuccessfulPreviousIme",
+        "directPlatformFailuresUsePickerWithoutLeakingExceptionText",
         "pickerFailureIsStableAndDoesNotRetry",
         "explicitPickerNeverAttemptsNextIme",
     )
