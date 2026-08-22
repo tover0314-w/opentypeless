@@ -6,6 +6,7 @@
     <string name="ime_key_space">Space</string>
     <string name="ime_key_enter" translatable="false">↵</string>
     <string name="ime_key_switch_keyboard" translatable="false">中/英</string>
+    <string name="ime_key_import_rime">Import</string>
     <string name="ime_key_engine_latin" translatable="false">EN</string>
     <string name="ime_key_engine_rime">中</string>
     <string name="ime_key_shift" translatable="false">⇧</string>
@@ -65,6 +66,7 @@
     <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
     <string name="ime_cd_enter">Enter or perform the editor action</string>
     <string name="ime_cd_switch_keyboard">Return to the previously used Chinese or English keyboard; touch and hold to choose a keyboard</string>
+    <string name="ime_cd_import_rime">Import local Chinese Rime resources; touch and hold to choose an input method</string>
     <string name="ime_cd_comma">Insert a comma</string>
     <string name="ime_cd_period">Insert a period</string>
     <string name="ime_cd_engine_latin">Latin input active; switch to Chinese input</string>
@@ -208,6 +210,7 @@
     <string name="ime_status_candidate_engine_unavailable">Candidate source is not active</string>
     <string name="ime_status_keyboard_picker_opened">Choose an input method</string>
     <string name="ime_status_keyboard_switch_failed">Android could not switch input methods</string>
+    <string name="ime_status_rime_resources_open_failed">Unable to open local Rime resource settings</string>
     <string name="ime_status_finish_before_engine_change">Finish the current voice input before switching input engines</string>
     <string name="ime_status_second_engine_unavailable">The Chinese input engine is not installed yet</string>
     <string name="ime_status_engine_latin">Latin input active</string>

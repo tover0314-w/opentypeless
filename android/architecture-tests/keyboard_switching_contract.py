@@ -145,12 +145,16 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
 
     layout_compact = _compact(layout)
     layout_tokens = (
+        "voidimportRimeResources();",
         "voidshowKeyboardPicker();",
         "voidswitchInputEngine();",
         "switchKeyboardButton.setOnLongClickListener(ignored->consumeKeyboardPickerLongPress())",
         "engineSwitchButton.setOnLongClickListener(ignored->consumeKeyboardPickerLongPress())",
         "privatebooleanconsumeKeyboardPickerLongPress(){Viewsource=engineSwitchButton.getVisibility()==View.VISIBLE?engineSwitchButton:switchKeyboardButton;feedback.onLongPress(source);listener.showKeyboardPicker();returntrue;}",
         "engineSwitchButton.setVisibility(View.GONE)",
+        "context.getString(R.string.ime_key_import_rime)",
+        "context.getString(R.string.ime_cd_import_rime)",
+        "listener::importRimeResources",
         "publicvoidsetEngineSelection(KeyboardEngineSelectionselection)",
         "switchKeyboardButton.setVisibility(safe.hasAlternative()?View.GONE:View.VISIBLE)",
         "engineSwitchButton.setVisibility(safe.hasAlternative()?View.VISIBLE:View.GONE)",
@@ -165,6 +169,11 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
 
     service_tokens = (
         "KeyboardEngineSelection.latinOnly()",
+        "OpenTypelessImeService.this.openRimeResourceImport()",
+        "new Intent(this, RimeResourceActivity.class)",
+        "intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)",
+        "setStatus(R.string.ime_status_rime_resources_open_failed, true)",
+        "ignored -> switchSystemKeyboard()",
         "KeyboardSystemImeSwitcher.requestAlternative(systemImePlatform())",
         "KeyboardSystemImeSwitcher.requestPicker(systemImePlatform())",
         "manager.getEnabledInputMethodList()",
@@ -203,9 +212,10 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
             "KBD008_METHOD_XML", "IME metadata must advertise next-input-method support"
         ))
     required_strings = (
-        "ime_cd_switch_keyboard", "ime_cd_engine_latin", "ime_cd_engine_rime",
+        "ime_key_import_rime", "ime_cd_import_rime", "ime_cd_switch_keyboard",
+        "ime_cd_engine_latin", "ime_cd_engine_rime",
         "ime_status_keyboard_picker_opened", "ime_status_keyboard_switch_failed",
-        "ime_status_second_engine_unavailable",
+        "ime_status_rime_resources_open_failed", "ime_status_second_engine_unavailable",
     )
     if any(token not in english or token not in chinese for token in required_strings):
         violations.append(Violation(
@@ -229,6 +239,8 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "explicitPickerNeverAttemptsNextIme",
     )
     view_test_tokens = (
+        "importRequested",
+        "ime_cd_import_rime",
         "engineControlIsHiddenUntilTwoEnginesAreRegistered",
         "switchKeyboardButton().performLongClick()",
         "engineSwitchButton().performLongClick()",

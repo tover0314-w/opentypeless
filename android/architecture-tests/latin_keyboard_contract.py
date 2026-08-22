@@ -142,7 +142,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "routeTypingText(text);",
         "routeDeleteBackward();",
         "routeKeyboardEnter();",
-        "OpenTypelessImeService.this.switchKeyboard();",
+        "OpenTypelessImeService.this.openRimeResourceImport();",
         "typing = latinKeyboardLayout.root();",
         "latinKeyboardLayout.setInputEnabled(editorEnabled)",
         "shellFrame.attachKeys(keyStage, matchWrap());",
@@ -153,7 +153,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         or route_body.count("routeTypingText(text);") != 1
         or route_body.count("routeDeleteBackward();") != 1
         or route_body.count("routeKeyboardEnter();") != 1
-        or route_body.count("OpenTypelessImeService.this.switchKeyboard();") != 1
+        or route_body.count("OpenTypelessImeService.this.openRimeResourceImport();") != 1
         or service.count("insertKeyboardText(text);") != 1
         or service.count("deleteKeyboardBackward();") != 1
         or service.count("performKeyboardEnter();") != 1

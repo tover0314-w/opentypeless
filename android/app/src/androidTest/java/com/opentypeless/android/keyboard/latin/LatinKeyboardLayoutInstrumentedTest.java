@@ -64,7 +64,8 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertEquals(
                     List.of(
                             "123",
-                            "中/英",
+                            harness.layout.root().getContext().getString(
+                                    R.string.ime_key_import_rime),
                             ",",
                             harness.layout.root().getContext().getString(R.string.ime_key_space),
                             ".",
@@ -81,8 +82,11 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertEquals(List.of(",", " ", "."), harness.inserted);
             assertEquals(1, harness.deleted.get());
             assertEquals(1, harness.entered.get());
-            assertEquals(1, harness.switched.get());
+            assertEquals(1, harness.importRequested.get());
             assertEquals(1, harness.pickerShown.get());
+            assertEquals(
+                    harness.layout.root().getContext().getString(R.string.ime_cd_import_rime),
+                    harness.layout.switchKeyboardButton().getContentDescription().toString());
         });
     }
 
@@ -434,7 +438,7 @@ public final class LatinKeyboardLayoutInstrumentedTest {
         final List<String> inserted = new ArrayList<>();
         final AtomicInteger deleted = new AtomicInteger();
         final AtomicInteger entered = new AtomicInteger();
-        final AtomicInteger switched = new AtomicInteger();
+        final AtomicInteger importRequested = new AtomicInteger();
         final AtomicInteger pickerShown = new AtomicInteger();
         final AtomicInteger engineSwitched = new AtomicInteger();
         final RecordingFeedback feedback = new RecordingFeedback();
@@ -476,8 +480,8 @@ public final class LatinKeyboardLayoutInstrumentedTest {
         }
 
         @Override
-        public void switchKeyboard() {
-            switched.incrementAndGet();
+        public void importRimeResources() {
+            importRequested.incrementAndGet();
         }
 
         @Override

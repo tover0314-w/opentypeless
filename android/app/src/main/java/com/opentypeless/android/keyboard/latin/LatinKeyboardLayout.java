@@ -46,7 +46,7 @@ public final class LatinKeyboardLayout {
 
         void performEnter();
 
-        void switchKeyboard();
+        void importRimeResources();
 
         void showKeyboardPicker();
 
@@ -182,10 +182,10 @@ public final class LatinKeyboardLayout {
             addWeighted(bottomRow, shortcut, .9f);
         }
         switchKeyboardButton = createKey(
-                context.getString(R.string.ime_key_switch_keyboard),
-                context.getString(R.string.ime_cd_switch_keyboard),
+                context.getString(R.string.ime_key_import_rime),
+                context.getString(R.string.ime_cd_import_rime),
                 1.2f,
-                listener::switchKeyboard,
+                listener::importRimeResources,
                 false);
         switchKeyboardButton.setOnLongClickListener(ignored -> consumeKeyboardPickerLongPress());
         addWeighted(bottomRow, switchKeyboardButton, 1.2f);
@@ -340,9 +340,10 @@ public final class LatinKeyboardLayout {
     public void setEngineSelection(KeyboardEngineSelection selection) {
         KeyboardEngineSelection safe = Objects.requireNonNull(selection, "selection");
         state.resetToLetters();
-        // Keep one stable language slot: a real local Rime engine gets the short press; otherwise
-        // the slot switches to the next installed IME (for example the user's Xiaohe keyboard).
-        // This never presents the local Rime button before a verified runtime is available.
+        // Keep one stable language slot: a verified local Rime engine gets the short press;
+        // otherwise the slot opens the explicit local-import flow. System IME selection remains
+        // available only through the long press, so the control never pretends external Xiaohe is
+        // the built-in engine.
         switchKeyboardButton.setVisibility(safe.hasAlternative() ? View.GONE : View.VISIBLE);
         engineSwitchButton.setVisibility(safe.hasAlternative() ? View.VISIBLE : View.GONE);
         boolean latin = safe.active() == KeyboardEngineSelection.Engine.LATIN;

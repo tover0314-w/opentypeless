@@ -48,9 +48,11 @@
     <string name="ime_status_hold_too_short">请按住空格，等开始聆听后再松手</string>
     <string name="ime_cd_enter">换行或执行编辑器操作</string>
     <string name="ime_cd_switch_keyboard">返回上一个使用的中英文输入法；长按选择输入法</string>
+    <string name="ime_cd_import_rime">导入本地中文 Rime 资源；长按选择输入法</string>
     <string name="ime_cd_comma">输入逗号</string>
     <string name="ime_cd_period">输入句号</string>
     <string name="ime_key_engine_rime">中</string>
+    <string name="ime_key_import_rime">导入中文</string>
     <string name="ime_cd_engine_latin">当前为拉丁输入；切换到中文输入</string>
     <string name="ime_cd_engine_rime">当前为中文输入；切换到拉丁输入</string>
     <string name="ime_cd_shift">单次大写；双击锁定大写</string>
@@ -192,6 +194,7 @@
     <string name="ime_status_candidate_engine_unavailable">候选来源尚未启用</string>
     <string name="ime_status_keyboard_picker_opened">请选择输入法</string>
     <string name="ime_status_keyboard_switch_failed">Android 无法切换输入法</string>
+    <string name="ime_status_rime_resources_open_failed">无法打开本地 Rime 资源设置</string>
     <string name="ime_status_finish_before_engine_change">请先完成当前语音输入，再切换输入引擎</string>
     <string name="ime_status_second_engine_unavailable">中文输入引擎尚未安装</string>
     <string name="ime_status_engine_latin">已切换到拉丁输入</string>

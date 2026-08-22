@@ -37,6 +37,7 @@ import com.opentypeless.android.HistoryActivity;
 import com.opentypeless.android.AppProfileActivity;
 import com.opentypeless.android.DictionaryActivity;
 import com.opentypeless.android.R;
+import com.opentypeless.android.RimeResourceActivity;
 import com.opentypeless.android.SettingsHomeActivity;
 import com.opentypeless.android.VoiceLabActivity;
 import com.opentypeless.android.context.FieldKind;
@@ -1210,8 +1211,8 @@ public final class OpenTypelessImeService extends InputMethodService
                         }
 
                         @Override
-                        public void switchKeyboard() {
-                            OpenTypelessImeService.this.switchKeyboard();
+                        public void importRimeResources() {
+                            OpenTypelessImeService.this.openRimeResourceImport();
                         }
 
                         @Override
@@ -1239,7 +1240,7 @@ public final class OpenTypelessImeService extends InputMethodService
                     R.string.ime_key_switch_keyboard,
                     R.string.ime_cd_switch_keyboard,
                     1f,
-                    ignored -> switchKeyboard());
+                    ignored -> switchSystemKeyboard());
             addFixed(legacyTyping, switchKeyboardButton, 48);
             punctuationButton = key(
                     R.string.ime_key_punctuation,
@@ -4031,8 +4032,22 @@ public final class OpenTypelessImeService extends InputMethodService
         setStatus(failedResource, true);
     }
 
-    private void switchKeyboard() {
+    private void switchSystemKeyboard() {
         handleSystemImeSwitch(KeyboardSystemImeSwitcher.requestAlternative(systemImePlatform()));
+    }
+
+    private void openRimeResourceImport() {
+        if (activeTarget != null || voiceController.state() != VoiceController.State.IDLE) {
+            setStatus(R.string.ime_status_finish_before_engine_change, true);
+            return;
+        }
+        Intent intent = new Intent(this, RimeResourceActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent);
+        } catch (RuntimeException unavailable) {
+            setStatus(R.string.ime_status_rime_resources_open_failed, true);
+        }
     }
 
     private void showKeyboardPicker() {

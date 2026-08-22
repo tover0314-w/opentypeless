@@ -126,6 +126,22 @@ class KeyboardSwitchingContractTest(unittest.TestCase):
         self.mutate(ZH_STRINGS, "ime_cd_engine_rime", "ime_cd_engine_removed")
         self.assertIn("KBD008_LOCALIZATION", self.rules())
 
+    def test_rejects_local_import_short_press_replaced_with_external_switch(self) -> None:
+        self.mutate(
+            LAYOUT,
+            "listener::importRimeResources",
+            "listener::showKeyboardPicker",
+        )
+        self.assertIn("KBD008_VIEW_CONTRACT", self.rules())
+
+    def test_rejects_rime_import_activity_wiring_removal(self) -> None:
+        self.mutate(
+            SERVICE,
+            "new Intent(this, RimeResourceActivity.class)",
+            "new Intent(this, SettingsHomeActivity.class)",
+        )
+        self.assertIn("KBD008_SERVICE_WIRING", self.rules())
+
     def test_rejects_picker_fallback_test_removal(self) -> None:
         self.mutate(SYSTEM_TEST, "noNextImeFallsBackToPicker", "noNextImeWasIgnored")
         self.assertIn("KBD008_SYSTEM_TEST", self.rules())
