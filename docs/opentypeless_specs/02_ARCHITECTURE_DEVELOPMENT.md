@@ -3130,6 +3130,18 @@ fail closed。进入或退出符号态会清除 Shift/Caps，避免返回字母�
 
 ---
 
+## 31A. KBD-015 字母下滑快捷符号
+
+字母键在主字母上方显示 KBD-003 的同一固定替代字符；向下滑动超过 `max(12dp, touchSlop)` 且纵向位移
+大于横向位移时，恰好提交一次该字符。短距离移动继续交给普通点击，横向、向上、取消和多指手势只消费
+当前手势而不输入。长按与下滑共用互斥状态机，不能同时提交，也不引入新的 editor writer。
+
+Latin 模式继续经 `insertKeyboardText` 和唯一 ETM。Rime 空闲时同样直接提交符号；Rime 正在组合时，符号
+最多暂存 8 个 Unicode scalar，先选择当前精确候选页的第一项，再把候选与符号作为同一次组合终态提交。
+候选身份、revision、editor epoch 或 selection 任一失配均 fail closed，不允许改写当前光标。
+
+---
+
 ## 32. KBD-004 字段专用布局
 
 `KeyboardFieldProfile` 只读取当前 `EditorInfo.inputType` 与既有 `FieldKind`，并映射为闭合的

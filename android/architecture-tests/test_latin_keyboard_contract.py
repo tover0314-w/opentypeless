@@ -87,6 +87,25 @@ class LatinKeyboardContractTest(unittest.TestCase):
         )
         self.assertIn("KBD002_LATIN_SOURCE_SET", self.rules())
 
+    def test_rejects_flick_without_downward_dominance(self) -> None:
+        path = self.root / LATIN_ROOT / "DownFlickGesture.java"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "vertical >= threshold && vertical > horizontal",
+                "Math.abs(vertical) >= threshold",
+            ),
+            encoding="utf-8",
+        )
+        self.assertIn("KBD015_FLICK_STATE", self.rules())
+
+    def test_rejects_flick_callback_without_cancellation(self) -> None:
+        path = self.root / LATIN_ROOT / "LatinKeyboardLayout.java"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("gesture.cancel();", "gesture.up();", 1),
+            encoding="utf-8",
+        )
+        self.assertIn("KBD015_FLICK_LAYOUT", self.rules())
+
     def test_rejects_full_screen_weighted_key_stage(self) -> None:
         path = self.root / SERVICE
         path.write_text(

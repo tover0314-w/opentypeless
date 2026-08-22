@@ -16,6 +16,7 @@ SNAPSHOT = RIME_ROOT / "RimeEngineSnapshot.java"
 NATIVE = RIME_ROOT / "NativeRimeInputEngine.java"
 CONTROLLER = RIME_ROOT / "RimeInputController.java"
 CONFIG = RIME_ROOT / "RimeRuntimeConfig.java"
+PENDING_SYMBOLS = RIME_ROOT / "PendingRimeSymbols.java"
 TEST = Path(
     "app/src/test/java/com/opentypeless/android/keyboard/rime/"
     "RimeInputEngineContractTest.java"
@@ -72,7 +73,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     expected_files = {
         "RimeInputEngine.java", "RimeEngineSnapshot.java",
         "NativeRimeInputEngine.java", "RimeInputController.java",
-        "RimeRuntimeConfig.java",
+        "RimeRuntimeConfig.java", "PendingRimeSymbols.java",
     }
     source_dir = root / RIME_ROOT
     actual_files = (
@@ -91,6 +92,9 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     native = _read(root, NATIVE, "RIM004_NATIVE_SOURCE", violations)
     controller = _read(root, CONTROLLER, "RIM004_CONTROLLER_SOURCE", violations)
     config = _read(root, CONFIG, "RIM006_CONFIG_SOURCE", violations)
+    pending_symbols = _read(
+        root, PENDING_SYMBOLS, "KBD015_RIME_SYMBOL_SOURCE", violations
+    )
     test = _read(root, TEST, "RIM001_CONTRACT_TEST", violations)
     native_test = _read(root, NATIVE_TEST, "RIM004_NATIVE_TEST", violations)
     controller_test = _read(root, CONTROLLER_TEST, "RIM004_CONTROLLER_TEST", violations)
@@ -106,7 +110,12 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "dalvik.system", "sun.misc.Unsafe", "java.net.", "okhttp", "File(",
         "Path.of", "SharedPreferences", "android.database", "SQLite",
     )
-    for name, source in (("engine", engine), ("snapshot", snapshot), ("config", config)):
+    for name, source in (
+        ("engine", engine),
+        ("snapshot", snapshot),
+        ("config", config),
+        ("pending_symbols", pending_symbols),
+    ):
         android_reference = re.search(
             r"(?m)^\s*import\s+android\.|(?<!opentypeless\.)android\.", source
         )
@@ -119,7 +128,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
                 "RIM001_CAPABILITY_BOUNDARY",
                 f"{name} must not own Android/editor/JNI/network/storage authority",
             ))
-        if "catch (" in source or "catch(" in source:
+        if name != "pending_symbols" and ("catch (" in source or "catch(" in source):
             violations.append(Violation(
                 "RIM001_FAILURE_BOUNDARY",
                 f"{name} must expose stable failures instead of swallowing exceptions",
@@ -223,6 +232,22 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
             "snapshot must remain bounded, identity-bound, inactive-safe and redacted",
         ))
 
+    pending_symbols_compact = _compact(pending_symbols)
+    pending_symbol_tokens = (
+        "MAXIMUM_SYMBOLS=8;",
+        "if(!isSingleSafeSymbol(symbol)||count()>=MAXIMUM_SYMBOLS)returnfalse",
+        "RimeInputEngine.Key.printable(codePoint)",
+        'case","->"，"',
+        'case"."->"。"',
+        "PendingRimeSymbols{count=",
+        "<redacted>",
+    )
+    if any(token not in pending_symbols_compact for token in pending_symbol_tokens):
+        violations.append(Violation(
+            "KBD015_RIME_SYMBOL_BOUNDARY",
+            "Rime symbol suffix must be scalar-bounded, punctuation-aware and redacted",
+        ))
+
     test_tokens = (
         "interfaceExposesOnlyTheBoundedAdapterLifecycle",
         "deterministicFakeExercisesActivateProcessSnapshotCandidateAndDeactivate",
@@ -277,6 +302,16 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     ):
         if token not in service_compact:
             violations.append(Violation("RIM005_RUNTIME_WIRING", token))
+
+    for token in (
+        "finalPendingRimeSymbolspendingSymbols=newPendingRimeSymbols()",
+        "!lease.pendingSymbols.offer(normalized)",
+        "continuePendingRimeSymbols(lease)",
+        "StringeditorText=lease.pendingSymbols.appendTo(commit.text())",
+        "editorSessionManager.setRimeComposition(this,lease.editorSnapshot,editorText,commit.revision())",
+    ):
+        if token not in service_compact:
+            violations.append(Violation("KBD015_RIME_SYMBOL_WIRING", token))
     if service_compact.count("suppressRimeCandidatePage()") != 3:
         violations.append(Violation(
             "RIM005_RUNTIME_WIRING",

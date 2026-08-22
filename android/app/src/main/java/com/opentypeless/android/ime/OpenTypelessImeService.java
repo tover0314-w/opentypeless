@@ -60,6 +60,7 @@ import com.opentypeless.android.keyboard.latin.LatinKeyboardLayout;
 import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
 import com.opentypeless.android.keyboard.feedback.AndroidKeyboardFeedback;
 import com.opentypeless.android.keyboard.rime.NativeRimeInputEngine;
+import com.opentypeless.android.keyboard.rime.PendingRimeSymbols;
 import com.opentypeless.android.keyboard.rime.RimeEngineSnapshot;
 import com.opentypeless.android.keyboard.rime.RimeInputController;
 import com.opentypeless.android.keyboard.rime.RimeInputEngine;
@@ -1002,6 +1003,7 @@ public final class OpenTypelessImeService extends InputMethodService
         CandidatePage candidatePage;
         CandidatePage.Selection pendingSelection;
         CandidatePage.PageRequest pendingPageRequest;
+        final PendingRimeSymbols pendingSymbols = new PendingRimeSymbols();
 
         RimeCompositionLease(
                 long editorEpoch,
@@ -1038,7 +1040,8 @@ public final class OpenTypelessImeService extends InputMethodService
             return !hasComposition()
                     && pendingKeyCommands == 0
                     && pendingSelection == null
-                    && pendingPageRequest == null;
+                    && pendingPageRequest == null
+                    && pendingSymbols.isEmpty();
         }
     }
 
@@ -2991,28 +2994,49 @@ public final class OpenTypelessImeService extends InputMethodService
             insertKeyboardText(text);
             return;
         }
-        if (",".equals(text) || ".".equals(text)) {
-            if (activeRimeLease != null && !activeRimeLease.isIdle()) {
-                // Do not implicitly choose or discard an active shape-code composition.
-                setStatus(R.string.ime_status_key_rejected, true);
-                return;
-            }
-            closeIdleRimeSession();
-            RimeRuntimeConfig config = availableRimeConfig;
-            boolean ascii = config == null || config.asciiPunctuation();
-            insertKeyboardText(ascii ? text : ",".equals(text) ? "，" : "。");
-            return;
-        }
         if (" ".equals(text)) {
             routeRimeSpace();
             return;
         }
-        if (text == null || text.length() != 1
-                || text.charAt(0) < 'a' || text.charAt(0) > 'z') {
+        if (text != null && text.length() == 1
+                && text.charAt(0) >= 'a' && text.charAt(0) <= 'z') {
+            processRimeKey(RimeInputEngine.Key.printable(text.charAt(0)));
+            return;
+        }
+        if (!PendingRimeSymbols.isSingleSafeSymbol(text)) {
             setStatus(R.string.ime_status_key_rejected, true);
             return;
         }
-        processRimeKey(RimeInputEngine.Key.printable(text.charAt(0)));
+        routeRimeSymbol(text);
+    }
+
+    private void routeRimeSymbol(String symbol) {
+        RimeRuntimeConfig config = availableRimeConfig;
+        String normalized;
+        try {
+            normalized = PendingRimeSymbols.normalize(
+                    symbol, config == null || config.asciiPunctuation());
+        } catch (RuntimeException invalid) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease == null || lease.isIdle()) {
+            closeIdleRimeSession();
+            insertKeyboardText(normalized);
+            return;
+        }
+        if (lease.controller == null
+                || lease.pendingPageRequest != null
+                || !lease.pendingSymbols.offer(normalized)) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        // A punctuation flick explicitly terminates the current shape-code word. If native key
+        // work is still queued, the exact symbol waits for that result; if a candidate selection
+        // is already in flight, it joins the same bounded post-candidate suffix.
+        if (lease.pendingKeyCommands != 0 || lease.pendingSelection != null) return;
+        continuePendingRimeSymbols(lease);
     }
 
     private void routeRimeSpace() {
@@ -3077,7 +3101,9 @@ public final class OpenTypelessImeService extends InputMethodService
             lease = acquireRimeCompositionLease();
             if (lease == null) return;
         }
-        if (lease.pendingSelection != null || lease.pendingPageRequest != null) {
+        if (lease.pendingSelection != null
+                || lease.pendingPageRequest != null
+                || !lease.pendingSymbols.isEmpty()) {
             setStatus(R.string.ime_status_key_rejected, true);
             return;
         }
@@ -3326,7 +3352,28 @@ public final class OpenTypelessImeService extends InputMethodService
         lease.preedit = snapshot.preedit();
         lease.candidatePage = snapshot.candidatePage().orElse(null);
         suppressRimeCandidatePage();
+        if (!lease.pendingSymbols.isEmpty()) {
+            continuePendingRimeSymbols(lease);
+            return;
+        }
         if (snapshot.preedit().isEmpty()) finishEmptyRimeComposition(lease);
+    }
+
+    private void continuePendingRimeSymbols(RimeCompositionLease lease) {
+        if (activeRimeLease != lease
+                || lease.pendingSymbols.isEmpty()
+                || lease.pendingKeyCommands != 0
+                || lease.pendingSelection != null
+                || lease.pendingPageRequest != null) {
+            return;
+        }
+        CandidatePage page = lease.candidatePage;
+        if (!lease.hasComposition() || page == null || page.items().isEmpty()) {
+            lease.pendingSymbols.clear();
+            setStatus(R.string.ime_status_key_rejected, true);
+            return;
+        }
+        routeRimeCandidateSelection(page.selection(0));
     }
 
     private void applyRimeCandidatePage(
@@ -3394,8 +3441,9 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_status_key_rejected, true);
             return;
         }
+        String editorText = lease.pendingSymbols.appendTo(commit.text());
         recordRimeRevision(commit.revision());
-        long caret = (long) lease.baseSelectionStart + commit.text().length();
+        long caret = (long) lease.baseSelectionStart + editorText.length();
         if (caret > Integer.MAX_VALUE) {
             closeRimeComposition(false);
             setStatus(R.string.ime_status_key_rejected, true);
@@ -3405,7 +3453,7 @@ public final class OpenTypelessImeService extends InputMethodService
         EditorTransactionResult applied;
         try {
             applied = editorSessionManager.setRimeComposition(
-                    this, lease.editorSnapshot, commit.text(), commit.revision());
+                    this, lease.editorSnapshot, editorText, commit.revision());
         } catch (RuntimeException unavailable) {
             disableEditorSessionShadow();
             closeRimeComposition(false);

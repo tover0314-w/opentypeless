@@ -14,6 +14,7 @@ LATIN_ROOT = Path("app/src/main/java/com/opentypeless/android/keyboard/latin")
 SERVICE = Path("app/src/main/java/com/opentypeless/android/ime/OpenTypelessImeService.java")
 EXPECTED_LATIN_FILES = {
     "BoundedDeleteRepeater.java",
+    "DownFlickGesture.java",
     "LatinKeyboardState.java",
     "LatinKeyboardLayout.java",
 }
@@ -132,6 +133,39 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         violations.append(Violation(
             "KBD002_DELETE_REPEAT",
             "delete repeat must remain immediate, bounded and generation-cancellable",
+        ))
+
+    flick = sources.get("DownFlickGesture.java", "")
+    flick_tokens = (
+        "if (!(threshold > 0f) || !Float.isFinite(threshold))",
+        "if (vertical >= threshold && vertical > horizontal)",
+        "if (movedBeyondThreshold || alternateArmed || longPressCommitted) return false",
+        "alternateArmed && !longPressCommitted",
+        "? ReleaseAction.COMMIT_ALTERNATE",
+        ": ReleaseAction.DELEGATE_TAP",
+    )
+    if any(token not in flick for token in flick_tokens) or "catch (" in flick:
+        violations.append(Violation(
+            "KBD015_FLICK_STATE",
+            "down-flick must be bounded, downward-dominant and exclusive with tap/long-press",
+        ))
+
+    flick_layout_tokens = (
+        "new DownFlickGesture(Math.max(",
+        "dp(12), ViewConfiguration.get(context).getScaledTouchSlop())",
+        "configureLetterFlick(button, longPressSymbol, flickGesture)",
+        "action == DownFlickGesture.ReleaseAction.COMMIT_ALTERNATE",
+        "listener.insertText(alternate)",
+        "gesture.cancel()",
+    )
+    if (
+        any(token not in layout for token in flick_layout_tokens)
+        or layout.count("gesture.cancel();") != 2
+        or layout.count("listener.insertText(alternate);") != 1
+    ):
+        violations.append(Violation(
+            "KBD015_FLICK_LAYOUT",
+            "letter flick must use the reviewed threshold, cancellation and single callback",
         ))
 
     route_start = service.find("if (shellFrame.route() == KeyboardShellRoute.ROUTE_A)")

@@ -4,10 +4,15 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.os.SystemClock;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -86,6 +91,7 @@ public final class LatinKeyboardLayout {
     private final LinearLayout thirdRow;
     private final LinearLayout bottomRow;
     private final Map<Character, Button> letters = new LinkedHashMap<>();
+    private final Map<Character, DownFlickGesture> letterFlickGestures = new LinkedHashMap<>();
     private final Map<String, Button> symbols = new LinkedHashMap<>();
     private final Button shiftButton;
     private final Button symbolsToggleButton;
@@ -335,6 +341,14 @@ public final class LatinKeyboardLayout {
     public void cancelTransientGestures() {
         deleteRepeater.stop();
         deleteButton.setPressed(false);
+        for (Map.Entry<Character, DownFlickGesture> entry : letterFlickGestures.entrySet()) {
+            entry.getValue().cancel();
+            Button button = letters.get(entry.getKey());
+            if (button != null) {
+                button.cancelLongPress();
+                button.setPressed(false);
+            }
+        }
     }
 
     public void setEngineSelection(KeyboardEngineSelection selection) {
@@ -382,13 +396,73 @@ public final class LatinKeyboardLayout {
                 },
                 true);
         button.setTag("opentypeless-latin-letter-" + letter);
+        button.setSingleLine(false);
+        button.setMaxLines(2);
+        button.setIncludeFontPadding(false);
+        button.setLineSpacing(-dp(4), 1f);
+        button.setGravity(Gravity.CENTER);
+        setLetterDisplay(button, Character.toString(letter), longPressSymbol);
+        DownFlickGesture flickGesture = new DownFlickGesture(Math.max(
+                dp(12), ViewConfiguration.get(context).getScaledTouchSlop()));
+        configureLetterFlick(button, longPressSymbol, flickGesture);
         button.setOnLongClickListener(ignored -> {
+            if (!flickGesture.commitLongPress()) return true;
             feedback.onLongPress(button);
             listener.insertText(longPressSymbol);
             return true;
         });
         letters.put(letter, button);
+        letterFlickGestures.put(letter, flickGesture);
         addWeighted(row, button, 1f);
+    }
+
+    @SuppressLint("ClickableViewAccessibility") // Tap delegates to Button.performClick.
+    private void configureLetterFlick(
+            Button button, String alternate, DownFlickGesture gesture) {
+        button.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN -> {
+                    if (!inputEnabled) return true;
+                    gesture.down(event.getX(), event.getY());
+                    return false;
+                }
+                case MotionEvent.ACTION_MOVE -> {
+                    boolean consume = gesture.move(event.getX(), event.getY());
+                    if (consume) {
+                        button.cancelLongPress();
+                        button.setPressed(false);
+                    }
+                    return consume;
+                }
+                case MotionEvent.ACTION_UP -> {
+                    DownFlickGesture.ReleaseAction action = gesture.up();
+                    if (action == DownFlickGesture.ReleaseAction.DELEGATE_TAP) return false;
+                    button.cancelLongPress();
+                    button.setPressed(false);
+                    if (action == DownFlickGesture.ReleaseAction.COMMIT_ALTERNATE
+                            && inputEnabled) {
+                        feedback.onPress(button);
+                        listener.insertText(alternate);
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_OUTSIDE -> {
+                    gesture.cancel();
+                    button.cancelLongPress();
+                    button.setPressed(false);
+                    return false;
+                }
+                case MotionEvent.ACTION_POINTER_DOWN -> {
+                    gesture.cancel();
+                    button.cancelLongPress();
+                    button.setPressed(false);
+                    return true;
+                }
+                default -> {
+                    return false;
+                }
+            }
+        });
     }
 
     private boolean consumeKeyboardPickerLongPress() {
@@ -431,6 +505,7 @@ public final class LatinKeyboardLayout {
         secondRow.removeAllViews();
         thirdRow.removeAllViews();
         letters.clear();
+        letterFlickGestures.clear();
         symbols.clear();
         if (fieldProfile.usesNumericPanel()) {
             String[][] rows = switch (fieldProfile) {
@@ -537,11 +612,13 @@ public final class LatinKeyboardLayout {
     private void refreshLabels() {
         for (Map.Entry<Character, Button> entry : letters.entrySet()) {
             String label = state.displayLetter(entry.getKey());
-            entry.getValue().setText(label);
-            entry.getValue().setContentDescription(context.getString(
+            Button button = entry.getValue();
+            String alternate = longPressSymbolFor(entry.getKey());
+            setLetterDisplay(button, label, alternate);
+            button.setContentDescription(context.getString(
                     R.string.ime_cd_letter_with_long_press,
                     label,
-                    longPressSymbolFor(entry.getKey())));
+                    alternate));
         }
         boolean caps = state.shiftMode() == LatinKeyboardState.ShiftMode.CAPS_LOCKED;
         shiftButton.setText(context.getString(
@@ -549,6 +626,21 @@ public final class LatinKeyboardLayout {
         shiftButton.setSelected(state.uppercase());
         shiftButton.setContentDescription(context.getString(
                 caps ? R.string.ime_cd_caps_lock : R.string.ime_cd_shift));
+    }
+
+    private void setLetterDisplay(Button button, String letter, String alternate) {
+        SpannableString display = new SpannableString(alternate + "\n" + letter);
+        display.setSpan(
+                new RelativeSizeSpan(0.46f),
+                0,
+                alternate.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        display.setSpan(
+                new ForegroundColorSpan(context.getColor(R.color.ime_on_surface_variant)),
+                0,
+                alternate.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        button.setText(display);
     }
 
     private static String longPressSymbolFor(char letter) {

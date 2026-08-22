@@ -60,6 +60,10 @@ implicitly version the other. Release entries must name an immutable tag and sou
   voice page around a Typeless-inspired `Tap to speak` label plus 148x56dp microphone capsule. No
   third-party code or image asset is copied. Landscape compression and Xiaomi 15 acceptance remain
   pending.
+- `KBD-015` adds visible alternate-symbol hints and deterministic downward flicks to every QWERTY
+  letter key. Tap, long-press and flick remain mutually exclusive; Latin output keeps the existing
+  editor path, while an active Rime composition commits its exact first candidate and a bounded
+  symbol suffix through the same transaction authority.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform
   input type, selected/collapsed ranges, dynamic editor replacement, RTL and local WebView

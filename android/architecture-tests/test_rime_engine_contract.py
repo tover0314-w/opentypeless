@@ -15,6 +15,7 @@ from rime_engine_contract import (
     NATIVE,
     NATIVE_TEST,
     PREFERENCES,
+    PENDING_SYMBOLS,
     RIME_ROOT,
     SERVICE,
     SNAPSHOT,
@@ -29,7 +30,7 @@ class RimeEngineContractTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         android = Path(__file__).resolve().parents[1]
         for relative in (
-            ENGINE, SNAPSHOT, NATIVE, CONTROLLER, CONFIG,
+            ENGINE, SNAPSHOT, NATIVE, CONTROLLER, CONFIG, PENDING_SYMBOLS,
             TEST, NATIVE_TEST, CONTROLLER_TEST, CONFIG_TEST,
             SERVICE, PREFERENCES, ACTIVITY,
         ):
@@ -70,6 +71,19 @@ class RimeEngineContractTest(unittest.TestCase):
         path = self.root / SNAPSHOT
         path.write_text(
             path.read_text(encoding="utf-8") + '\nSystem.loadLibrary("rime");\n',
+            encoding="utf-8",
+        )
+        self.assertIn("RIM001_CAPABILITY_BOUNDARY", self.rules())
+
+    def test_rejects_unbounded_pending_symbol_suffix(self) -> None:
+        self.mutate(PENDING_SYMBOLS, "MAXIMUM_SYMBOLS = 8", "MAXIMUM_SYMBOLS = 800")
+        self.assertIn("KBD015_RIME_SYMBOL_BOUNDARY", self.rules())
+
+    def test_rejects_pending_symbol_editor_capability(self) -> None:
+        path = self.root / PENDING_SYMBOLS
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + "\nandroid.view.inputmethod.InputConnection connection;\n",
             encoding="utf-8",
         )
         self.assertIn("RIM001_CAPABILITY_BOUNDARY", self.rules())
@@ -126,6 +140,14 @@ class RimeEngineContractTest(unittest.TestCase):
             "commit.text().isEmpty()",
         )
         self.assertIn("RIM005_RUNTIME_WIRING", self.rules())
+
+    def test_rejects_rime_commit_that_drops_pending_symbols(self) -> None:
+        self.mutate(
+            SERVICE,
+            "lease.pendingSymbols.appendTo(commit.text())",
+            "commit.text()",
+        )
+        self.assertIn("KBD015_RIME_SYMBOL_WIRING", self.rules())
 
     def test_rejects_personal_candidate_suppression_removal(self) -> None:
         self.mutate(

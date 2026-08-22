@@ -33,13 +33,13 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             LatinKeyboardLayout layout = harness.layout;
 
             assertEquals(4, layout.root().getChildCount());
-            assertEquals("q", layout.letterButton('q').getText().toString());
+            assertEquals("1\nq", layout.letterButton('q').getText().toString());
             assertTrue(layout.letterButton('q').performClick());
             assertEquals(List.of("q"), harness.inserted);
 
             assertTrue(layout.shiftButton().performClick());
             assertEquals(LatinKeyboardState.ShiftMode.SHIFTED, layout.shiftMode());
-            assertEquals("W", layout.letterButton('w').getText().toString());
+            assertEquals("2\nW", layout.letterButton('w').getText().toString());
             assertTrue(layout.letterButton('w').performClick());
             assertEquals(List.of("q", "W"), harness.inserted);
             assertEquals(LatinKeyboardState.ShiftMode.LOWER, layout.shiftMode());
@@ -189,7 +189,7 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertTrue(layout.symbolsToggleButton().performClick());
             assertEquals(LatinKeyboardState.Layer.LETTERS, layout.layer());
             assertEquals(View.GONE, layout.symbolPageButton().getVisibility());
-            assertEquals("a", layout.letterButton('a').getText().toString());
+            assertEquals("@\na", layout.letterButton('a').getText().toString());
             assertEquals(List.of("1", "@", "?", "[", "…", "€"), harness.inserted);
         });
     }
@@ -208,6 +208,46 @@ public final class LatinKeyboardLayoutInstrumentedTest {
             assertEquals(3, harness.feedback.longPresses.get());
             assertTrue(harness.layout.letterButton('q')
                     .getContentDescription().toString().contains("1"));
+        });
+    }
+
+    @Test
+    public void downwardFlickEmitsVisibleAlternateWithoutOrdinaryLetterCallback() {
+        onMain(() -> {
+            Harness harness = new Harness();
+            Button q = harness.layout.letterButton('q');
+            Button a = harness.layout.letterButton('a');
+            int distance = dp(q.getContext(), 24);
+
+            flickDown(q, distance);
+            flickDown(a, distance);
+
+            assertEquals(List.of("1", "@"), harness.inserted);
+            assertEquals(2, harness.feedback.presses.get());
+            assertEquals(0, harness.feedback.longPresses.get());
+            assertEquals("1\nq", q.getText().toString());
+            assertEquals("@\na", a.getText().toString());
+        });
+    }
+
+    @Test
+    public void horizontalDragAndCancelledFlickDoNotTypeLetterOrSymbol() {
+        onMain(() -> {
+            Harness harness = new Harness();
+            Button q = harness.layout.letterButton('q');
+            int distance = dp(q.getContext(), 24);
+
+            dispatch(q, MotionEvent.ACTION_DOWN, 2f, 2f, 0L);
+            dispatch(q, MotionEvent.ACTION_MOVE, 2f + distance, 4f, 16L);
+            dispatch(q, MotionEvent.ACTION_UP, 2f + distance, 4f, 32L);
+
+            dispatch(q, MotionEvent.ACTION_DOWN, 2f, 2f, 48L);
+            dispatch(q, MotionEvent.ACTION_MOVE, 2f, 2f + distance, 64L);
+            dispatch(q, MotionEvent.ACTION_CANCEL, 2f, 2f + distance, 80L);
+
+            assertTrue(harness.inserted.isEmpty());
+            assertEquals(0, harness.feedback.presses.get());
+            assertEquals(0, harness.feedback.longPresses.get());
         });
     }
 
@@ -399,6 +439,22 @@ public final class LatinKeyboardLayoutInstrumentedTest {
 
     private static void dispatch(Button button, int action) {
         MotionEvent event = MotionEvent.obtain(0L, 0L, action, 1f, 1f, 0);
+        try {
+            assertTrue(button.dispatchTouchEvent(event));
+        } finally {
+            event.recycle();
+        }
+    }
+
+    private static void flickDown(Button button, int distance) {
+        dispatch(button, MotionEvent.ACTION_DOWN, 2f, 2f, 0L);
+        dispatch(button, MotionEvent.ACTION_MOVE, 2f, 2f + distance, 16L);
+        dispatch(button, MotionEvent.ACTION_UP, 2f, 2f + distance, 32L);
+    }
+
+    private static void dispatch(
+            Button button, int action, float x, float y, long eventTime) {
+        MotionEvent event = MotionEvent.obtain(0L, eventTime, action, x, y, 0);
         try {
             assertTrue(button.dispatchTouchEvent(event));
         } finally {

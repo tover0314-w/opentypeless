@@ -38,7 +38,11 @@ class SymbolKeyboardContractTest(unittest.TestCase):
     def test_rejects_long_press_that_does_not_consume_the_gesture(self) -> None:
         path = self.root / LAYOUT
         path.write_text(
-            path.read_text(encoding="utf-8").replace("return true;", "return false;", 1),
+            path.read_text(encoding="utf-8").replace(
+                "if (!flickGesture.commitLongPress()) return true;",
+                "if (!flickGesture.commitLongPress()) return false;",
+                1,
+            ),
             encoding="utf-8",
         )
         self.assertIn("KBD003_SYMBOL_LAYOUT", self.rules())

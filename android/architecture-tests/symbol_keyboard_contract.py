@@ -94,7 +94,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         'SYMBOL_ROWS_SECONDARY={{"~","`","|","•","√","π","÷","×","§","∆"},'
         '{"€","£","¥","₩","¢","^","°","=","{","}"},'
         '{"\\\\","_","[","]","<",">","…","¿","¡"}}',
-        "button.setOnLongClickListener(ignored->{feedback.onLongPress(button);listener.insertText(longPressSymbol);returntrue;})",
+        "button.setOnLongClickListener(ignored->{if(!flickGesture.commitLongPress())returntrue;feedback.onLongPress(button);listener.insertText(longPressSymbol);returntrue;})",
         "listener.insertText(symbol)",
         "state.pressSymbolsToggle()",
         "state.pressSymbolPage()",

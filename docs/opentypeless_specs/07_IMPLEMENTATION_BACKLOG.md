@@ -846,6 +846,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `KBD-012` | P2 | L | 单手/紧凑模式 | KBD-002 | 左右/居中、尺寸 | 触控与横屏测试 | TODO |
 | `KBD-013` | P2 | L | 光标手势 | KBD-002 | 空格滑动、删除滑动可配置 | 不与按住说话冲突 | TODO |
 | `KBD-014` | P2 | XL | 滑行输入评估与接入 | KBD-002, KSP-010 | 复用底座或单独引擎 | 无词典时不承诺；性能/隐私通过 | TODO |
+| `KBD-015` | P0 | M | 字母下滑快捷符号 | KBD-003, RIM-005 | 可见替代符号、向下滑动、Rime 组合接续 | 点击/长按/下滑互斥；所有提交经唯一 ETM | DONE |
 | `RIM-001` | P0 | S | 定义 RimeInputEngine Adapter | KSP-010, CMP-002 | activate/deactivate/process/snapshot/candidate 接口 | 领域层不依赖 JNI 具体类 | DONE |
 | `RIM-002` | P0 | M | Rime 运行时固定与校验 | RIM-001 | 版本、ABI、哈希、NOTICE | 干净构建和 native load 测试 | DONE |
 | `RIM-003` | P0 | M | Schema staging/deploy | RIM-002 | 导入、大小/路径校验、原子部署 | 坏 Schema 不破坏当前可用方案 | DONE |
@@ -953,6 +954,14 @@ Debug/Test APK 在 API35 ARM64 emulator 与 Xiaomi 10 Ultra 各 **4/4 PASS**。�
 app JVM 961/961、architecture gate 113/113、Debug/Release compiled 2/2、strict assemble/lint 115 tasks PASS。
 最终系统选中 IME 对真实 Test Host 字段写入精确 `1@?[1`：末尾 `1` 仅由长按 `q` 产生；后恢复
 LatinIME，小米默认仍为 PangIME。字段自动布局与 toolbar 仍属于 KBD-004/006。
+
+**KBD-015 完成说明（2026-08-22，`DONE`）：** 字母键新增可见的双行替代符号提示和确定性向下滑动状态机；
+短移动保留点击，长按、下滑、横移、上移和取消互斥。Latin 输出仍走原有 keyboard callback；Rime 组合态
+只暂存最多 8 个安全单字符，精确选择当前第一候选后在同一 ETM 组合终态追加符号，失配时不回退当前光标。
+
+JVM 状态机/边界测试与 API35 ARM64 emulator 的 16 项字母布局仪器测试 PASS；系统选中 OpenTypeless 后，
+真实 Test Host 对 `q` 向下滑动精确输入 `1`，键帽截图确认三行字母的替代符号均可见。小米 10 Ultra
+本次未连接，因此不宣称真机安装或验收。
 
 **KBD-004 完成说明（2026-08-16，`DONE`）：** 新增闭合 field profile，邮箱/URL 提供直达符号，电话、
 数字、日期使用专用数字面板，密码分类优先且不会启用 Voice。`onStartInput` 只把 metadata 映射为 View 状态；
