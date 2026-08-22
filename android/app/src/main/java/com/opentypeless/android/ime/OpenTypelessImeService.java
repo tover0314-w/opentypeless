@@ -29,6 +29,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
@@ -56,6 +57,9 @@ import com.opentypeless.android.editor.TextRange;
 import com.opentypeless.android.editor.host.EditorSessionManager;
 import com.opentypeless.android.keyboard.candidate.CandidatePage;
 import com.opentypeless.android.keyboard.candidate.KeyboardCandidateBar;
+import com.opentypeless.android.keyboard.clipboard.ClipboardPanelSnapshot;
+import com.opentypeless.android.keyboard.clipboard.KeyboardClipboardPanel;
+import com.opentypeless.android.keyboard.clipboard.SystemClipboardReader;
 import com.opentypeless.android.keyboard.latin.LatinKeyboardLayout;
 import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
 import com.opentypeless.android.keyboard.feedback.AndroidKeyboardFeedback;
@@ -139,6 +143,7 @@ public final class OpenTypelessImeService extends InputMethodService
     private static final int MENU_DISCARD_AUDIO = 209;
     private static final int MENU_UNDO = 210;
     private static final int MENU_VOICE_DIAGNOSTICS = 211;
+    private static final int MENU_CLIPBOARD = 212;
     private static final int MENU_PUNCTUATION_BASE = 300;
     private static final long DISCARD_CONFIRM_WINDOW_MILLIS = 10_000L;
     private static final long DETACHED_STATE_REFRESH_MILLIS = 500L;
@@ -932,6 +937,8 @@ public final class OpenTypelessImeService extends InputMethodService
     private KeyboardInputModeLayout keyboardInputModeLayout;
     private AndroidKeyboardFeedback keyboardFeedback;
     private KeyboardCandidateBar keyboardCandidateBar;
+    private KeyboardClipboardPanel keyboardClipboardPanel;
+    private View keyboardTypingSurface;
     private KeyboardToolbarLayout keyboardToolbarLayout;
     private KeyboardToolbarPrivacyPolicy.State keyboardToolbarPrivacy =
             restrictedToolbarPrivacy();
@@ -1306,6 +1313,7 @@ public final class OpenTypelessImeService extends InputMethodService
                             ? KeyboardInputModeLayout.Mode.QWERTY
                             : KeyboardInputModeLayout.Mode.VOICE,
                     mode -> {
+                        hideClipboardPanel();
                         refreshStatusVisibilityForInputMode(mode);
                         if (mode == KeyboardInputModeLayout.Mode.VOICE
                                 && latinKeyboardLayout != null) {
@@ -1315,11 +1323,34 @@ public final class OpenTypelessImeService extends InputMethodService
             keyboardToolbarLayout.attachPrimaryAction(
                     "input.mode", keyboardInputModeLayout.toggleButton(), 48);
             keyboardInputModeLayout.setVoiceAvailable(!sensitiveField);
-            keyStage.addView(keyboardInputModeLayout.root(), matchWrap());
+            keyboardTypingSurface = keyboardInputModeLayout.root();
         } else {
             keyboardInputModeLayout = null;
-            keyStage.addView(typing, matchWrap());
+            keyboardTypingSurface = typing;
         }
+        keyboardClipboardPanel = new KeyboardClipboardPanel(
+                this,
+                new KeyboardClipboardPanel.Listener() {
+                    @Override
+                    public void onPaste(String text) {
+                        pasteClipboardText(text);
+                    }
+
+                    @Override
+                    public void onRefresh() {
+                        refreshClipboardPanel();
+                    }
+
+                    @Override
+                    public void onClose() {
+                        hideClipboardPanel();
+                    }
+                });
+        keyboardClipboardPanel.root().setVisibility(View.GONE);
+        FrameLayout typingPages = new FrameLayout(this);
+        typingPages.addView(keyboardTypingSurface, frameMatchWrap());
+        typingPages.addView(keyboardClipboardPanel.root(), frameMatchWrap());
+        keyStage.addView(typingPages, matchWrap());
         // The key stage must size to its rows. Giving a WRAP_CONTENT IME window a weighted
         // zero-height child makes the platform expand it to the full display, which separates
         // the QWERTY rows by large empty areas and obscures the host editor.
@@ -1446,6 +1477,7 @@ public final class OpenTypelessImeService extends InputMethodService
             return;
         }
         activeTarget = target;
+        hideClipboardPanel();
         preparingVoiceInput = true;
         finishingVoiceInput = false;
         activeCaptureMode = captureMode;
@@ -4386,25 +4418,32 @@ public final class OpenTypelessImeService extends InputMethodService
                         2,
                         R.string.ime_key_teach);
             }
+            if (keyboardToolbarPrivacy.clipboardVisible() && currentEditor != null) {
+                popup.getMenu().add(
+                        Menu.NONE,
+                        MENU_CLIPBOARD,
+                        3,
+                        R.string.ime_clipboard_title);
+            }
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_DICTIONARY,
-                    3,
+                    4,
                     R.string.ime_key_dictionary);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_APP_PROFILE,
-                    4,
+                    5,
                     R.string.ime_key_app_profile);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_SETTINGS,
-                    5,
+                    6,
                     R.string.ime_key_settings);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_VOICE_DIAGNOSTICS,
-                    6,
+                    7,
                     R.string.ime_menu_voice_diagnostics);
         }
         popup.setOnMenuItemClickListener(item -> {
@@ -4421,6 +4460,7 @@ public final class OpenTypelessImeService extends InputMethodService
                 case MENU_RECOVER_AUDIO -> recoverSavedAudio();
                 case MENU_DISCARD_AUDIO -> discardSavedAudio();
                 case MENU_UNDO -> undoLastVoiceCommit();
+                case MENU_CLIPBOARD -> showClipboardPanel();
                 default -> {
                     return false;
                 }
@@ -4466,7 +4506,79 @@ public final class OpenTypelessImeService extends InputMethodService
         if (keyboardInputModeLayout != null) {
             keyboardInputModeLayout.setVoiceAvailable(voiceVisible);
         }
+        if (!keyboardToolbarPrivacy.clipboardVisible()) hideClipboardPanel();
         refreshVoicePulseVisibility();
+    }
+
+    private void showClipboardPanel() {
+        if (currentEditor == null) {
+            setStatus(R.string.ime_status_no_active_field, true);
+            return;
+        }
+        if (sensitiveField || !keyboardToolbarPrivacy.clipboardVisible()) {
+            hideClipboardPanel();
+            setStatus(R.string.ime_status_clipboard_sensitive, true);
+            return;
+        }
+        KeyboardClipboardPanel panel = keyboardClipboardPanel;
+        View typingSurface = keyboardTypingSurface;
+        if (panel == null || typingSurface == null) {
+            setStatus(R.string.ime_clipboard_unavailable, true);
+            return;
+        }
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        panel.render(SystemClipboardReader.readCurrentText(this));
+        typingSurface.setVisibility(View.GONE);
+        panel.root().setVisibility(View.VISIBLE);
+    }
+
+    private void refreshClipboardPanel() {
+        KeyboardClipboardPanel panel = keyboardClipboardPanel;
+        if (panel == null || panel.root().getVisibility() != View.VISIBLE) return;
+        if (currentEditor == null
+                || sensitiveField
+                || !keyboardToolbarPrivacy.clipboardVisible()) {
+            hideClipboardPanel();
+            setStatus(R.string.ime_status_clipboard_sensitive, true);
+            return;
+        }
+        panel.render(SystemClipboardReader.readCurrentText(this));
+    }
+
+    private void pasteClipboardText(String text) {
+        ClipboardPanelSnapshot snapshot = ClipboardPanelSnapshot.fromPrimaryText(text);
+        if (!snapshot.hasText()) {
+            if (keyboardClipboardPanel != null) keyboardClipboardPanel.render(snapshot);
+            return;
+        }
+        if (currentEditor == null
+                || sensitiveField
+                || !keyboardToolbarPrivacy.clipboardVisible()) {
+            hideClipboardPanel();
+            setStatus(R.string.ime_status_clipboard_sensitive, true);
+            return;
+        }
+        if (activeTarget != null || voiceController.state() != VoiceController.State.IDLE) {
+            setStatus(R.string.ime_status_finish_before_clipboard_paste, true);
+            return;
+        }
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease != null && !lease.isIdle()) {
+            setStatus(R.string.ime_status_finish_rime_before_clipboard_paste, true);
+            return;
+        }
+        hideClipboardPanel();
+        closeIdleRimeSession();
+        insertKeyboardText(snapshot.text());
+    }
+
+    private void hideClipboardPanel() {
+        KeyboardClipboardPanel panel = keyboardClipboardPanel;
+        if (panel != null) {
+            panel.clear();
+            panel.root().setVisibility(View.GONE);
+        }
+        if (keyboardTypingSurface != null) keyboardTypingSurface.setVisibility(View.VISIBLE);
     }
 
     private void rejectUnboundCandidateEvent() {
@@ -5504,6 +5616,7 @@ public final class OpenTypelessImeService extends InputMethodService
 
     @Override
     public void onStartInput(EditorInfo attribute, boolean restarting) {
+        hideClipboardPanel();
         closeRimeComposition(false);
         rimeAvailabilityRequest++;
         cancelVoiceForLifecycle();
@@ -5631,6 +5744,7 @@ public final class OpenTypelessImeService extends InputMethodService
     @Override
     public void onFinishInput() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        hideClipboardPanel();
         closeRimeComposition(true);
         rimeAvailabilityRequest++;
         cancelVoiceForLifecycle();
@@ -5654,6 +5768,7 @@ public final class OpenTypelessImeService extends InputMethodService
     @Override
     public void onFinishInputView(boolean finishingInput) {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        hideClipboardPanel();
         closeRimeComposition(false);
         cancelVoiceForLifecycle();
         super.onFinishInputView(finishingInput);
@@ -5662,6 +5777,7 @@ public final class OpenTypelessImeService extends InputMethodService
     @Override
     public void onWindowHidden() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        hideClipboardPanel();
         closeRimeComposition(false);
         cancelVoiceForLifecycle();
         super.onWindowHidden();
@@ -5704,6 +5820,7 @@ public final class OpenTypelessImeService extends InputMethodService
     @Override
     public void onDestroy() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        hideClipboardPanel();
         closeRimeComposition(true);
         cancelVoiceForLifecycle();
         unregisterScreenOffReceiver();
@@ -5761,6 +5878,12 @@ public final class OpenTypelessImeService extends InputMethodService
         return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private static FrameLayout.LayoutParams frameMatchWrap() {
+        return new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
     }
 
     private CenteredIconButton key(

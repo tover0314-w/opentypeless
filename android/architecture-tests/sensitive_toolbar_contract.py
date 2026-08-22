@@ -113,6 +113,8 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "keyboardToolbarPrivacy=restrictedToolbarPrivacy()",
         'toolbar.setActionVisible("voice.mode",voiceVisible)',
         "keyboardInputModeLayout.setVoiceAvailable(voiceVisible)",
+        "if(!keyboardToolbarPrivacy.clipboardVisible())hideClipboardPanel()",
+        "keyboardToolbarPrivacy.clipboardVisible()&&currentEditor!=null",
         "refreshVoicePulseVisibility()",
         "voicePulse.setVisibility(keyboardToolbarPrivacy.voiceVisible()&&activeVoice&&statusVisible?View.VISIBLE:View.GONE)",
         "keyboardToolbarPrivacy.teachVisible()&&TeachCorrectionResolver.isEligible",
@@ -120,7 +122,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     if any(token not in service_compact for token in service_tokens):
         violations.append(Violation(
             "SEC005_SERVICE_WIRING",
-            "service must apply one metadata policy and gate Voice/Teach with reversible visibility",
+            "service must apply one metadata policy and gate Voice/Teach/clipboard reversibly",
         ))
     if service.count("applyKeyboardToolbarPrivacy();") < 3:
         violations.append(Violation(

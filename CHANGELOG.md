@@ -64,6 +64,11 @@ implicitly version the other. Release entries must name an immutable tag and sou
   letter key. Tap, long-press and flick remain mutually exclusive; Latin output keeps the existing
   editor path, while an active Rime composition commits its exact first candidate and a bounded
   symbol suffix through the same transaction authority.
+- `KBD-011` adds an explicit current-clipboard panel in the existing More menu. It reads only the
+  first already-materialized plain-text item when opened or refreshed, clears that body on every
+  panel/editor/IME lifecycle exit, hides destructively in sensitive fields, and pastes through the
+  existing ETM typing facade. It adds no listener, history, persistence, sync, export, network path
+  or permission.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform
   input type, selected/collapsed ranges, dynamic editor replacement, RTL and local WebView

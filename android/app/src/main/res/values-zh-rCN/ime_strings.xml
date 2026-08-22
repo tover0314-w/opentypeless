@@ -10,6 +10,13 @@
     <string name="ime_key_dictionary">个人词典</string>
     <string name="ime_key_settings">设置</string>
     <string name="ime_menu_voice_diagnostics">上次语音诊断</string>
+    <string name="ime_clipboard_title">剪贴板</string>
+    <string name="ime_clipboard_refresh">刷新</string>
+    <string name="ime_clipboard_close">关闭</string>
+    <string name="ime_clipboard_empty">剪贴板为空</string>
+    <string name="ime_clipboard_text_only">只能粘贴已复制的纯文本</string>
+    <string name="ime_clipboard_too_large">复制的文字过长，无法安全粘贴</string>
+    <string name="ime_clipboard_unavailable">无法读取剪贴板</string>
     <string name="ime_key_long_dictation_compact">长文</string>
     <string name="ime_key_finish_dictation_compact">上屏</string>
     <string name="ime_key_processing">处理中…</string>
@@ -79,6 +86,9 @@
     <string name="ime_cd_action_next">下一项</string>
     <string name="ime_cd_more">更多语音键盘操作</string>
     <string name="ime_cd_punctuation">插入标点符号</string>
+    <string name="ime_cd_clipboard_refresh">重新读取当前剪贴板</string>
+    <string name="ime_cd_clipboard_close">关闭剪贴板面板</string>
+    <string name="ime_cd_clipboard_paste">粘贴面板中显示的剪贴板文字</string>
 
     <!-- 麦克风控件的 TalkBack 状态描述。 -->
     <string name="ime_state_idle">空闲</string>
@@ -154,6 +164,9 @@
     <string name="ime_status_delete_connection_failed">删除期间文本连接失败</string>
     <string name="ime_status_key_rejected">输入状态刚刚变化，请再按一次</string>
     <string name="ime_status_typing_connection_failed">输入时文本连接失败</string>
+    <string name="ime_status_clipboard_sensitive">当前敏感字段不可使用剪贴板</string>
+    <string name="ime_status_finish_before_clipboard_paste">请先完成当前语音输入，再粘贴</string>
+    <string name="ime_status_finish_rime_before_clipboard_paste">请先完成当前中文组词，再粘贴</string>
     <string name="ime_status_editor_action_failed">执行编辑器操作时文本连接失败</string>
     <string name="ime_status_finish_before_mode_change">请先结束或取消当前录音，再更改模式</string>
     <string name="ime_status_mode_selected">已选择%1$s模式</string>

@@ -3215,8 +3215,26 @@ service 只把已计算状态应用到 KBD-006 的固定 ID。敏感字段的模
 no-learning 只移除 Teach；普通字段切回时恢复这两个 Voice View。More anchor 继续承载允许的设置/本地命令，不能因为
 隐藏一个 child action 而移除整个导航入口。未知 ID fail closed。
 
-Action 与 clipboard toolbar 尚未实现；它们的后续任务必须消费同一状态，不能因 UI 默认值、Feature Flag 或字段切换
-重新开启上层已拒绝的能力。
+Action toolbar 尚未实现；KBD-011 clipboard 面板只消费这里的 `clipboardVisible`，不能因 UI 默认值、Feature Flag
+或字段切换重新开启上层已拒绝的能力。
+
+---
+
+## 36A. KBD-011 当前剪贴板面板
+
+`ClipboardPanelSnapshot` 是纯 Java、最多 40,000 Unicode code points 的一次性当前剪贴板快照。它拒绝畸形 UTF-16、
+不可提交控制字符和超长输入，预览按 code point 截断，diagnostic 只含状态与长度。`SystemClipboardReader` 仅在用户
+打开面板或点击刷新时调用一次 `getPrimaryClip()`，只读取第一项已经物化的 `getText()`；URI、Intent 和富文本不做
+coerce/resolver 访问。产品不注册 clipboard listener，不建立历史、持久化、同步、导出或网络路径。
+
+`KeyboardClipboardPanel` 只持有 View、一个有界 snapshot 和 Paste/Refresh/Close callback，不持有 ClipboardManager、
+InputConnection、editor、网络或存储能力。入口位于既有 More menu，并且只在 SEC-005 的 `clipboardVisible` 与活动普通
+字段同时成立时生成。敏感字段切入、字段结束、InputView 结束、窗口隐藏、service 销毁和用户关闭都会清空 retained
+body；恢复普通字段不会恢复旧 snapshot。
+
+Paste 重新校验 snapshot，Voice 活动或 Rime composition/pending work 时明确拒绝；Rime idle session 可关闭后继续。
+实际写入仍调用既有 `insertKeyboardText` façade，经 fresh generation/selection/fingerprint 与唯一 ETM 完成，不新增
+InputConnection writer 或当前光标 fallback。
 
 ---
 

@@ -110,6 +110,8 @@ run_preflight() {
     --android-root "$ANDROID_DIR"
   python3 "$ANDROID_DIR/architecture-tests/sensitive_toolbar_contract.py" \
     --android-root "$ANDROID_DIR"
+  python3 "$ANDROID_DIR/architecture-tests/clipboard_panel_contract.py" \
+    --android-root "$ANDROID_DIR"
   python3 "$ANDROID_DIR/architecture-tests/privacy_policy_contract.py" \
     --android-root "$ANDROID_DIR"
   python3 "$ANDROID_DIR/scripts/verify_keyboard_shell_manifest.py" \

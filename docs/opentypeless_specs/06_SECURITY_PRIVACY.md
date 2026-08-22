@@ -1758,8 +1758,12 @@ Test Host 的 OTP、支付、身份和 no-learning 字段是非敏感合成 fixt
 下一次 `onStartInput` 再应用新字段的闭合结果。
 
 敏感控件必须使用 `GONE`，不能仅 disabled 后继续暴露入口或正文相关状态。Teach 还必须通过 Learning closure；未来
-Action/clipboard UI 即使尚未存在，也必须接入同一 hard-safety projection。More anchor 可保留不接触正文的本地导航，
+Action UI 与 KBD-011 clipboard 面板都必须接入同一 hard-safety projection。More anchor 可保留不接触正文的本地导航，
 但其菜单逐项按策略生成。诊断只允许布尔状态，不记录字段 metadata、正文或 App 身份。
+
+KBD-011 只允许用户显式打开/刷新时读取当前第一项已物化纯文本；禁止 listener、后台轮询、URI/Intent coercion、历史、
+持久化、同步、导出、网络与正文日志。面板关闭或任一 editor/IME 生命周期边界必须清空内存 snapshot；敏感字段既不
+生成入口，也会破坏性关闭已打开面板。Android/OEM 拒绝读取时显示 unavailable，不允许用权限或旁路组件扩大能力。
 
 ---
 

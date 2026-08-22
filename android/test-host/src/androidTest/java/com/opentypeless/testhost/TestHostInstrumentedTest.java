@@ -1,6 +1,7 @@
 package com.opentypeless.testhost;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -12,6 +13,8 @@ import android.app.Application;
 import android.app.UiAutomation;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
@@ -484,6 +487,51 @@ public final class TestHostInstrumentedTest {
     }
 
     @Test
+    public void selectedImeClipboardPastesCurrentTextAndHidesInSensitiveFieldWhenRequested()
+            throws Exception {
+        String expectedPackage = InstrumentationRegistry.getArguments()
+                .getString("imeClipboardPackage");
+        Assume.assumeTrue("candidate-specific KBD-011 check was not requested",
+                expectedPackage != null && !expectedPackage.isBlank());
+        awaitHostWindowFocus();
+
+        ClipboardManager clipboard =
+                (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        assertNotNull("test host clipboard service is unavailable", clipboard);
+        instrumentation.runOnMainSync(() -> clipboard.setPrimaryClip(
+                ClipData.newPlainText("KBD-011 fixture", "clipboard fixture")));
+        try {
+            focusField(R.id.host_plain_text);
+            UiAutomation automation = instrumentation.getUiAutomation();
+            AccessibilityServiceInfo serviceInfo = automation.getServiceInfo();
+            serviceInfo.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                    | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+            automation.setServiceInfo(serviceInfo);
+            focusField(R.id.host_plain_text);
+
+            activateImeNode(automation, expectedPackage, Set.of(
+                    "More voice keyboard actions", "更多语音键盘操作"), false);
+            awaitPackageLabel(automation, expectedPackage, Set.of("Clipboard", "剪贴板"));
+            activatePackageNode(
+                    automation, expectedPackage, Set.of("Clipboard", "剪贴板"), true);
+            awaitImeLabel(automation, expectedPackage, Set.of("clipboard fixture"));
+            activateImeNode(
+                    automation, expectedPackage, Set.of("clipboard fixture"), true);
+            assertPlainTextEventually("clipboard fixture", automation, expectedPackage);
+
+            focusField(R.id.host_otp);
+            activateImeNode(automation, expectedPackage, Set.of(
+                    "More voice keyboard actions", "更多语音键盘操作"), false);
+            awaitPackageLabel(automation, expectedPackage, Set.of("Settings", "设置"));
+            Set<String> sensitiveMenu = packageLabels(automation, expectedPackage);
+            assertFalse("sensitive More menu exposed clipboard: " + sensitiveMenu,
+                    sensitiveMenu.contains("Clipboard") || sensitiveMenu.contains("剪贴板"));
+        } finally {
+            instrumentation.runOnMainSync(clipboard::clearPrimaryClip);
+        }
+    }
+
+    @Test
     public void selectedImeRimePreeditUsesRealKeyboardRouteWhenRequested() throws Exception {
         String expectedPackage = InstrumentationRegistry.getArguments()
                 .getString("imeRimePackage");
@@ -700,6 +748,86 @@ public final class TestHostInstrumentedTest {
             SystemClock.sleep(100L);
         } while (SystemClock.uptimeMillis() < deadline);
         assertTrue("input method node not found: " + labels, false);
+    }
+
+    private void activatePackageNode(
+            UiAutomation automation,
+            String expectedPackage,
+            Set<String> labels,
+            boolean matchText) throws Exception {
+        long deadline = SystemClock.uptimeMillis() + 8_000L;
+        do {
+            for (AccessibilityWindowInfo window : automation.getWindows()) {
+                AccessibilityNodeInfo root = window.getRoot();
+                if (root == null) continue;
+                Deque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+                pending.add(root);
+                while (!pending.isEmpty()) {
+                    AccessibilityNodeInfo node = pending.removeFirst();
+                    String value = String.valueOf(
+                            matchText ? node.getText() : node.getContentDescription());
+                    if (expectedPackage.equals(String.valueOf(node.getPackageName()))
+                            && labels.contains(value)
+                            && node.isVisibleToUser()) {
+                        Rect bounds = new Rect();
+                        node.getBoundsInScreen(bounds);
+                        assertTrue("package node has empty bounds: " + value, !bounds.isEmpty());
+                        ParcelFileDescriptor tap = automation.executeShellCommand(
+                                "input tap " + bounds.centerX() + " " + bounds.centerY());
+                        try (ParcelFileDescriptor.AutoCloseInputStream input =
+                                     new ParcelFileDescriptor.AutoCloseInputStream(tap)) {
+                            input.readAllBytes();
+                        }
+                        automation.waitForIdle(100L, 2_000L);
+                        return;
+                    }
+                    for (int index = 0; index < node.getChildCount(); index++) {
+                        AccessibilityNodeInfo child = node.getChild(index);
+                        if (child != null) pending.addLast(child);
+                    }
+                }
+            }
+            SystemClock.sleep(100L);
+        } while (SystemClock.uptimeMillis() < deadline);
+        assertTrue("package node not found: " + labels, false);
+    }
+
+    private void awaitPackageLabel(
+            UiAutomation automation, String expectedPackage, Set<String> labels) {
+        long deadline = SystemClock.uptimeMillis() + 8_000L;
+        Set<String> observed = Set.of();
+        do {
+            observed = packageLabels(automation, expectedPackage);
+            if (observed.stream().anyMatch(labels::contains)) return;
+            SystemClock.sleep(100L);
+        } while (SystemClock.uptimeMillis() < deadline);
+        assertTrue("package label not found: " + labels + "; observed=" + observed, false);
+    }
+
+    private Set<String> packageLabels(UiAutomation automation, String expectedPackage) {
+        Set<String> labels = new TreeSet<>();
+        for (AccessibilityWindowInfo window : automation.getWindows()) {
+            AccessibilityNodeInfo root = window.getRoot();
+            if (root == null) continue;
+            Deque<AccessibilityNodeInfo> pending = new ArrayDeque<>();
+            pending.add(root);
+            while (!pending.isEmpty()) {
+                AccessibilityNodeInfo node = pending.removeFirst();
+                if (expectedPackage.equals(String.valueOf(node.getPackageName()))) {
+                    String text = String.valueOf(node.getText());
+                    String description = String.valueOf(node.getContentDescription());
+                    if (!"null".equals(text) && !text.isBlank()) labels.add(text);
+                    if (!"null".equals(description) && !description.isBlank()) {
+                        labels.add(description);
+                    }
+                }
+                for (int index = 0; index < node.getChildCount(); index++) {
+                    AccessibilityNodeInfo child = node.getChild(index);
+                    if (child != null) pending.addLast(child);
+                }
+            }
+        }
+        return labels;
     }
 
     private void focusField(int fieldId) {

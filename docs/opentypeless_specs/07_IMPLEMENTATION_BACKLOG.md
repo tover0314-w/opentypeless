@@ -842,7 +842,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `KBD-008` | P1 | M | 输入法切换和语言切换 | KBD-002 | next IME、subtype/engine 切换 | OEM/HyperOS 可用 | DONE |
 | `KBD-009` | P1 | M | 横屏和尺寸配置 | KBD-002 | 高度、边距、横屏压缩 | 小米15横竖屏无截断 | IN_PROGRESS |
 | `KBD-010` | P1 | L | Emoji 面板 | KBD-001 | 分类、最近使用、敏感字段策略 | 不阻塞 IME 热路径 | TODO |
-| `KBD-011` | P1 | L | 剪贴板面板 | KBD-001, SEC-005 | 权限/Android 版本、保留、敏感字段隐藏 | 默认不静默上传/记录 | TODO |
+| `KBD-011` | P1 | L | 剪贴板面板 | KBD-001, SEC-005 | 权限/Android 版本、保留、敏感字段隐藏 | 默认不静默上传/记录 | DONE |
 | `KBD-012` | P2 | L | 单手/紧凑模式 | KBD-002 | 左右/居中、尺寸 | 触控与横屏测试 | TODO |
 | `KBD-013` | P2 | L | 光标手势 | KBD-002 | 空格滑动、删除滑动可配置 | 不与按住说话冲突 | TODO |
 | `KBD-014` | P2 | XL | 滑行输入评估与接入 | KBD-002, KSP-010 | 复用底座或单独引擎 | 无词典时不承诺；性能/隐私通过 | TODO |
@@ -962,6 +962,15 @@ LatinIME，小米默认仍为 PangIME。字段自动布局与 toolbar 仍属于 
 JVM 状态机/边界测试与 API35 ARM64 emulator 的 16 项字母布局仪器测试 PASS；系统选中 OpenTypeless 后，
 真实 Test Host 对 `q` 向下滑动精确输入 `1`，键帽截图确认三行字母的替代符号均可见。小米 10 Ultra
 本次未连接，因此不宣称真机安装或验收。
+
+**KBD-011 完成说明（2026-08-23，`DONE`）：** More 菜单新增当前剪贴板面板，只在用户打开或刷新时读取一次
+第一项已物化纯文本；URI/Intent 不解析，文本按 ETM 上限校验。面板无 ClipboardManager/editor capability，关闭、
+字段切换、InputView/窗口隐藏和 service 销毁都会清空正文。敏感字段不生成入口并破坏性关闭旧面板，所有 Paste
+仍经 `insertKeyboardText` 与唯一 ETM；不新增权限、listener、历史、持久化、同步、导出或网络。
+
+6/6 hostile source、4/4 snapshot JVM、4/4 adapter/View 仪器测试 PASS；最终 clean strict graph 191 tasks、
+Debug/Release/Test APK 精确资源扫描均 PASS。API35 ARM64 emulator 选中真实 OpenTypeless 后，当前剪贴板精确粘贴
+和 OTP 敏感字段隐藏 1/1 PASS，并恢复 LatinIME。小米 10 Ultra 本次未连接，因此不宣称真机安装或验收。
 
 **KBD-004 完成说明（2026-08-16，`DONE`）：** 新增闭合 field profile，邮箱/URL 提供直达符号，电话、
 数字、日期使用专用数字面板，密码分类优先且不会启用 Voice。`onStartInput` 只把 metadata 映射为 View 状态；

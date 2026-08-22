@@ -2768,6 +2768,17 @@ final: "我们今天需要先拆分输入法架构。"
 - 1000 字连续输入；
 - IME 隐显 100 次。
 
+### 12.1 KBD-011 当前剪贴板
+
+- null/empty/plain text/emoji/换行/畸形 UTF-16/禁止控制字符/40,000 code-point 边界；
+- URI 与 Intent item 不调用 coercion 或 resolver；
+- 只在用户打开/刷新时读取一次，不注册 listener 或后台轮询；
+- 普通字段的 More 入口可达，敏感字段不生成入口并关闭已打开面板；
+- Close、字段结束、InputView 结束、窗口隐藏和 service 销毁后 View 不保留正文；
+- preview 截断不改变实际 Paste，诊断不含正文；
+- Paste 只走 `insertKeyboardText`/ETM，Voice 或非 idle Rime composition 明确拒绝；
+- Android/OEM 拒绝读取时显示 unavailable，不申请额外权限或回退 URI/Intent。
+
 ---
 
 ## 13. Action Protocol 测试

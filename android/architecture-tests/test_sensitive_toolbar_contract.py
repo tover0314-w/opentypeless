@@ -89,6 +89,14 @@ class SensitiveToolbarContractTest(unittest.TestCase):
         )
         self.assertIn("SEC005_SERVICE_WIRING", self.rules())
 
+    def test_rejects_clipboard_without_toolbar_policy(self) -> None:
+        self.mutate(
+            SERVICE,
+            "if (!keyboardToolbarPrivacy.clipboardVisible()) hideClipboardPanel();",
+            "if (false) hideClipboardPanel();",
+        )
+        self.assertIn("SEC005_SERVICE_WIRING", self.rules())
+
     def test_rejects_missing_view_restore(self) -> None:
         self.mutate(
             VIEW_TEST,

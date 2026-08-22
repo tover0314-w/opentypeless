@@ -22,6 +22,13 @@
     <string name="ime_key_dictionary">Personal dictionary</string>
     <string name="ime_key_settings">Settings</string>
     <string name="ime_menu_voice_diagnostics">Last voice diagnostics</string>
+    <string name="ime_clipboard_title">Clipboard</string>
+    <string name="ime_clipboard_refresh">Refresh</string>
+    <string name="ime_clipboard_close">Close</string>
+    <string name="ime_clipboard_empty">Clipboard is empty</string>
+    <string name="ime_clipboard_text_only">Only copied plain text can be pasted</string>
+    <string name="ime_clipboard_too_large">Copied text is too large to paste safely</string>
+    <string name="ime_clipboard_unavailable">Clipboard is unavailable</string>
     <string name="ime_key_long_dictation_compact">Long</string>
     <string name="ime_key_finish_dictation_compact">Done</string>
     <string name="ime_key_processing">Processing…</string>
@@ -95,6 +102,9 @@
     <string name="ime_cd_action_next">Next</string>
     <string name="ime_cd_more">More voice keyboard actions</string>
     <string name="ime_cd_punctuation">Insert punctuation</string>
+    <string name="ime_cd_clipboard_refresh">Read the current clipboard again</string>
+    <string name="ime_cd_clipboard_close">Close the clipboard panel</string>
+    <string name="ime_cd_clipboard_paste">Paste the displayed clipboard text</string>
 
     <!-- TalkBack state descriptions for the microphone control. -->
     <string name="ime_state_idle">Idle</string>
@@ -170,6 +180,9 @@
     <string name="ime_status_delete_connection_failed">The text connection failed during delete</string>
     <string name="ime_status_key_rejected">The input state changed; try the key again</string>
     <string name="ime_status_typing_connection_failed">The text connection failed while typing</string>
+    <string name="ime_status_clipboard_sensitive">Clipboard is unavailable in this sensitive field</string>
+    <string name="ime_status_finish_before_clipboard_paste">Finish the current voice input before pasting</string>
+    <string name="ime_status_finish_rime_before_clipboard_paste">Finish the current Chinese composition before pasting</string>
     <string name="ime_status_editor_action_failed">The text connection failed during the editor action</string>
     <string name="ime_status_finish_before_mode_change">Finish or cancel the current recording before changing mode</string>
     <string name="ime_status_mode_selected">%1$s mode selected</string>
