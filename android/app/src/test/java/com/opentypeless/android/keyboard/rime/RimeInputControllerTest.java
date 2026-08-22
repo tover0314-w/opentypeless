@@ -55,6 +55,42 @@ public final class RimeInputControllerTest {
     }
 
     @Test
+    public void warmUpActivatesOnceBeforeFirstKeyWithoutPublishingState() throws Exception {
+        CountDownLatch activated = new CountDownLatch(1);
+        CountDownLatch delivered = new CountDownLatch(1);
+        AtomicInteger factories = new AtomicInteger();
+        AtomicInteger activations = new AtomicInteger();
+        AtomicInteger callbacks = new AtomicInteger();
+        RimeInputController controller = new RimeInputController(
+                7L, 11L, () -> {
+                    factories.incrementAndGet();
+                    return new RecordingEngine() {
+                        @Override public LifecycleResult activate(Activation request) {
+                            activations.incrementAndGet();
+                            LifecycleResult result = super.activate(request);
+                            activated.countDown();
+                            return result;
+                        }
+                    };
+                }, Runnable::run,
+                (editor, coordination, result) -> {
+                    callbacks.incrementAndGet();
+                    delivered.countDown();
+                });
+
+        assertEquals(RimeInputController.EnqueueResult.QUEUED, controller.warmUp());
+        assertTrue(activated.await(5, TimeUnit.SECONDS));
+        assertEquals(0, callbacks.get());
+        assertEquals(RimeInputController.EnqueueResult.QUEUED,
+                controller.process(RimeInputEngine.Key.printable('n')));
+        assertTrue(delivered.await(5, TimeUnit.SECONDS));
+        assertEquals(1, factories.get());
+        assertEquals(1, activations.get());
+        assertEquals(1, callbacks.get());
+        controller.close();
+    }
+
+    @Test
     public void boundedQueueRejectsFloodAndCloseSuppressesLateCallback() throws Exception {
         CountDownLatch workerEntered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

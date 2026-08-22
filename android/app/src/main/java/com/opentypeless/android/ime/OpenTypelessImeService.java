@@ -156,6 +156,10 @@ public final class OpenTypelessImeService extends InputMethodService
     private static final AtomicLong VOICE_TRANSACTION_GENERATION = new AtomicLong();
     private static final AtomicReference<String> PROCESS_RECOVERABLE_AUDIO_ID =
             new AtomicReference<>("");
+    /** Content-free process preference; unavailable/sensitive fields still force Latin. */
+    private static final AtomicReference<KeyboardEngineSelection.Engine>
+            PROCESS_PREFERRED_KEYBOARD_ENGINE =
+            new AtomicReference<>(KeyboardEngineSelection.Engine.LATIN);
     private static boolean processDraftStorageLoaded;
 
     enum EditorMutationResult {
@@ -1024,6 +1028,17 @@ public final class OpenTypelessImeService extends InputMethodService
             if (start != expectedCaret || end != expectedCaret) return false;
             return (candidatesStart == -1 && candidatesEnd == -1)
                     || (candidatesStart == baseSelectionStart && candidatesEnd == expectedCaret);
+        }
+
+        boolean hasComposition() {
+            return !preedit.isEmpty();
+        }
+
+        boolean isIdle() {
+            return !hasComposition()
+                    && pendingKeyCommands == 0
+                    && pendingSelection == null
+                    && pendingPageRequest == null;
         }
     }
 
@@ -2977,12 +2992,12 @@ public final class OpenTypelessImeService extends InputMethodService
             return;
         }
         if (",".equals(text) || ".".equals(text)) {
-            if (activeRimeLease != null) {
-                // Do not implicitly choose or discard a visible shape-code candidate. The user
-                // can select it first; after commit the direct punctuation key remains one tap.
+            if (activeRimeLease != null && !activeRimeLease.isIdle()) {
+                // Do not implicitly choose or discard an active shape-code composition.
                 setStatus(R.string.ime_status_key_rejected, true);
                 return;
             }
+            closeIdleRimeSession();
             RimeRuntimeConfig config = availableRimeConfig;
             boolean ascii = config == null || config.asciiPunctuation();
             insertKeyboardText(ascii ? text : ",".equals(text) ? "，" : "。");
@@ -3002,8 +3017,13 @@ public final class OpenTypelessImeService extends InputMethodService
 
     private void routeRimeSpace() {
         RimeCompositionLease lease = activeRimeLease;
-        if (lease == null) {
+        if (lease == null || lease.isIdle()) {
+            closeIdleRimeSession();
             insertKeyboardText(" ");
+            return;
+        }
+        if (!lease.hasComposition()) {
+            setStatus(R.string.ime_status_key_rejected, true);
             return;
         }
         CandidatePage page = lease.candidatePage;
@@ -3015,20 +3035,34 @@ public final class OpenTypelessImeService extends InputMethodService
     }
 
     private void routeDeleteBackward() {
-        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME
-                && activeRimeLease != null) {
-            processRimeKey(RimeInputEngine.Key.backspace());
-            return;
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME) {
+            RimeCompositionLease lease = activeRimeLease;
+            if (lease != null && lease.hasComposition()) {
+                processRimeKey(RimeInputEngine.Key.backspace());
+                return;
+            }
+            if (lease != null && !lease.isIdle()) {
+                setStatus(R.string.ime_status_key_rejected, true);
+                return;
+            }
         }
+        closeIdleRimeSession();
         deleteKeyboardBackward();
     }
 
     private void routeKeyboardEnter() {
-        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME
-                && activeRimeLease != null) {
-            processRimeKey(RimeInputEngine.Key.enter());
-            return;
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME) {
+            RimeCompositionLease lease = activeRimeLease;
+            if (lease != null && lease.hasComposition()) {
+                processRimeKey(RimeInputEngine.Key.enter());
+                return;
+            }
+            if (lease != null && !lease.isIdle()) {
+                setStatus(R.string.ime_status_key_rejected, true);
+                return;
+            }
         }
+        closeIdleRimeSession();
         performKeyboardEnter();
     }
 
@@ -3040,46 +3074,8 @@ public final class OpenTypelessImeService extends InputMethodService
         }
         RimeCompositionLease lease = activeRimeLease;
         if (lease == null) {
-            EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
-            if (snapshot == null) return;
-            long initialRevision = reserveNextRimeRevision();
-            if (initialRevision == 0L) {
-                setStatus(R.string.ime_status_key_rejected, true);
-                return;
-            }
-            CompositionCoordinator.Observation before = compositionCoordinator.observe();
-            CompositionCoordinator.Transition acquired = compositionCoordinator.acquire(
-                    before, new CompositionCoordinator.Acquisition.Rime(initialRevision));
-            if (acquired.disposition() != CompositionCoordinator.Disposition.APPLIED
-                    || !(acquired.after().state() instanceof CompositionState.RimeComposing rime)) {
-                setStatus(R.string.ime_status_session_active, true);
-                return;
-            }
-            lease = new RimeCompositionLease(
-                    editorEpoch,
-                    snapshot,
-                    rime.coordinationGeneration(),
-                    acquired.after(),
-                    initialRevision);
-            RimeResourceStore.RuntimePackage runtime = availableRimePackage;
-            RimeRuntimeConfig config = availableRimeConfig;
-            if (config == null || !runtime.selectedSchemas().contains(config.schemaId())) {
-                closeRimeComposition(false);
-                setStatus(R.string.ime_status_key_rejected, true);
-                return;
-            }
-            RimeCompositionLease created = lease;
-            lease.controller = new RimeInputController(
-                    lease.editorEpoch,
-                    lease.coordinationGeneration,
-                    initialRevision,
-                    () -> new NativeRimeInputEngine(
-                            runtime.root(), config, rimeUserDataStore,
-                            runtime.deploymentId()),
-                    this::postUi,
-                    (callbackEditor, callbackCoordination, result) ->
-                            onRimeResult(created, callbackEditor, callbackCoordination, result));
-            activeRimeLease = lease;
+            lease = acquireRimeCompositionLease();
+            if (lease == null) return;
         }
         if (lease.pendingSelection != null || lease.pendingPageRequest != null) {
             setStatus(R.string.ime_status_key_rejected, true);
@@ -3093,6 +3089,72 @@ public final class OpenTypelessImeService extends InputMethodService
             closeRimeComposition(false);
             setStatus(R.string.ime_status_key_rejected, true);
         }
+    }
+
+    private RimeCompositionLease acquireRimeCompositionLease() {
+        RimeResourceStore.RuntimePackage runtime = availableRimePackage;
+        RimeRuntimeConfig config = availableRimeConfig;
+        if (runtime == null
+                || config == null
+                || !runtime.selectedSchemas().contains(config.schemaId())) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+        EditorSessionSnapshot snapshot = captureKeyboardSnapshot();
+        if (snapshot == null) return null;
+        long initialRevision = reserveNextRimeRevision();
+        if (initialRevision == 0L) {
+            setStatus(R.string.ime_status_key_rejected, true);
+            return null;
+        }
+        CompositionCoordinator.Observation before = compositionCoordinator.observe();
+        CompositionCoordinator.Transition acquired = compositionCoordinator.acquire(
+                before, new CompositionCoordinator.Acquisition.Rime(initialRevision));
+        if (acquired.disposition() != CompositionCoordinator.Disposition.APPLIED
+                || !(acquired.after().state() instanceof CompositionState.RimeComposing rime)) {
+            setStatus(R.string.ime_status_session_active, true);
+            return null;
+        }
+        RimeCompositionLease lease = new RimeCompositionLease(
+                editorEpoch,
+                snapshot,
+                rime.coordinationGeneration(),
+                acquired.after(),
+                initialRevision);
+        lease.controller = new RimeInputController(
+                lease.editorEpoch,
+                lease.coordinationGeneration,
+                initialRevision,
+                () -> new NativeRimeInputEngine(
+                        runtime.root(), config, rimeUserDataStore,
+                        runtime.deploymentId()),
+                this::postUi,
+                (callbackEditor, callbackCoordination, result) ->
+                        onRimeResult(lease, callbackEditor, callbackCoordination, result));
+        activeRimeLease = lease;
+        return lease;
+    }
+
+    private void prepareRimeSession() {
+        if (activeRimeLease != null
+                || keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME
+                || sensitiveField
+                || !currentLearningAllowed
+                || currentEditor == null
+                || availableRimePackage == null
+                || availableRimeConfig == null) {
+            return;
+        }
+        RimeCompositionLease lease = acquireRimeCompositionLease();
+        if (lease == null) return;
+        if (lease.controller.warmUp() != RimeInputController.EnqueueResult.QUEUED) {
+            closeRimeComposition(false);
+        }
+    }
+
+    private void closeIdleRimeSession() {
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease != null && lease.isIdle()) closeRimeComposition(false);
     }
 
     private void routeRimeCandidateSelection(CandidatePage.Selection selection) {
@@ -3263,7 +3325,7 @@ public final class OpenTypelessImeService extends InputMethodService
         lease.revision = snapshot.revision();
         lease.preedit = snapshot.preedit();
         lease.candidatePage = snapshot.candidatePage().orElse(null);
-        renderRimeCandidatePage(lease);
+        suppressRimeCandidatePage();
         if (snapshot.preedit().isEmpty()) finishEmptyRimeComposition(lease);
     }
 
@@ -3300,7 +3362,7 @@ public final class OpenTypelessImeService extends InputMethodService
         lease.revision = snapshot.revision();
         lease.candidatePage = after;
         lease.pendingPageRequest = null;
-        renderRimeCandidatePage(lease);
+        suppressRimeCandidatePage();
     }
 
     private void applyRimeCommit(
@@ -3416,21 +3478,11 @@ public final class OpenTypelessImeService extends InputMethodService
         closeRimeControllerOnly(lease);
         activeRimeLease = null;
         if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+        prepareRimeSession();
     }
 
-    private void renderRimeCandidatePage(RimeCompositionLease lease) {
-        KeyboardCandidateBar bar = keyboardCandidateBar;
-        if (bar == null) return;
-        CandidatePage page = lease.candidatePage;
-        if (page == null) {
-            bar.clear();
-            return;
-        }
-        bar.setInteractionEnabled(
-                lease.pendingKeyCommands == 0
-                        && lease.pendingSelection == null
-                        && lease.pendingPageRequest == null);
-        bar.showPage(page);
+    private void suppressRimeCandidatePage() {
+        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
     }
 
     private void finishEmptyRimeComposition(RimeCompositionLease lease) {
@@ -3449,6 +3501,7 @@ public final class OpenTypelessImeService extends InputMethodService
             if (committed.disposition() == CompositionCoordinator.Disposition.APPLIED) {
                 closeRimeControllerOnly(lease);
                 activeRimeLease = null;
+                prepareRimeSession();
                 return;
             }
         }
@@ -3459,7 +3512,7 @@ public final class OpenTypelessImeService extends InputMethodService
     private boolean finishRimeCompositionForEngineSwitch() {
         RimeCompositionLease lease = activeRimeLease;
         if (lease == null) return true;
-        if (lease.revision <= 1L) {
+        if (!lease.hasComposition()) {
             closeRimeComposition(false);
             return true;
         }
@@ -3529,7 +3582,7 @@ public final class OpenTypelessImeService extends InputMethodService
     private RimeReleaseProof releaseRimeForVoice(
             RimeCompositionLease lease,
             CompositionCoordinator.ReleaseDirective directive) {
-        if (lease.preedit.isEmpty() && lease.revision <= 1L) {
+        if (!lease.hasComposition()) {
             return RimeReleaseProof.RELEASED;
         }
         try {
@@ -3640,12 +3693,16 @@ public final class OpenTypelessImeService extends InputMethodService
                 : EnumSet.of(
                         KeyboardEngineSelection.Engine.LATIN,
                         KeyboardEngineSelection.Engine.RIME);
-        keyboardEngineSelection = keyboardEngineSelection.withAvailability(available);
+        keyboardEngineSelection = keyboardEngineSelection.withAvailabilityAndPreference(
+                available, PROCESS_PREFERRED_KEYBOARD_ENGINE.get());
         if ((runtime == null || config == null) && activeRimeLease != null) {
             closeRimeComposition(false);
         }
         if (latinKeyboardLayout != null) {
             latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
+        }
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME) {
+            prepareRimeSession();
         }
     }
 
@@ -4121,6 +4178,7 @@ public final class OpenTypelessImeService extends InputMethodService
             return;
         }
         keyboardEngineSelection = result.state();
+        PROCESS_PREFERRED_KEYBOARD_ENGINE.set(keyboardEngineSelection.active());
         if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
         if (latinKeyboardLayout != null) {
             latinKeyboardLayout.setEngineSelection(keyboardEngineSelection);
@@ -4128,6 +4186,9 @@ public final class OpenTypelessImeService extends InputMethodService
         setStatus(keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.LATIN
                 ? R.string.ime_status_engine_latin
                 : R.string.ime_status_engine_rime, false);
+        if (keyboardEngineSelection.active() == KeyboardEngineSelection.Engine.RIME) {
+            prepareRimeSession();
+        }
     }
 
     private void openSettings() {

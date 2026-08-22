@@ -107,6 +107,8 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "keyboardenginerevisionexhausted",
         "newUnavailable(this)",
         "newChanged(newKeyboardEngineSelection(next,available,nextRevision()))",
+        "withAvailabilityAndPreference(Set<Engine>nextAvailable,Enginepreferred)",
+        "bounded.contains(preferred)?preferred",
     )
     if any(token not in engine_compact for token in engine_tokens):
         violations.append(Violation(
@@ -189,7 +191,9 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "refreshRimeAvailability(editorEpoch, privacy)",
         "RimeResourceStore.RuntimePackage runtime = null",
         "rimeResourceStore.runtimePackage()",
-        "keyboardEngineSelection = keyboardEngineSelection.withAvailability(available)",
+        "PROCESS_PREFERRED_KEYBOARD_ENGINE",
+        "keyboardEngineSelection = keyboardEngineSelection.withAvailabilityAndPreference(",
+        "PROCESS_PREFERRED_KEYBOARD_ENGINE.set(keyboardEngineSelection.active())",
         "KeyboardEngineSelection.Engine.RIME",
     )
     if (
@@ -226,6 +230,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "latinOnlyIsSafeAndCannotPretendRimeExists",
         "exactlyTwoRegisteredEnginesCycleWithMonotonicRevision",
         "availabilityRemovalFallsBackOnlyToLatin",
+        "availableProcessPreferenceRestoresRimeWithoutPretendingItExists",
         "invalidEmptyMissingActiveAndExhaustedStatesFailClosed",
     )
     system_test_tokens = (

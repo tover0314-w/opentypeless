@@ -57,6 +57,21 @@ public final class KeyboardEngineSelectionTest {
     }
 
     @Test
+    public void availableProcessPreferenceRestoresRimeWithoutPretendingItExists() {
+        KeyboardEngineSelection latinOnly = KeyboardEngineSelection.latinOnly();
+        KeyboardEngineSelection stillLatin = latinOnly.withAvailabilityAndPreference(
+                EnumSet.of(KeyboardEngineSelection.Engine.LATIN),
+                KeyboardEngineSelection.Engine.RIME);
+        assertEquals(KeyboardEngineSelection.Engine.LATIN, stillLatin.active());
+
+        KeyboardEngineSelection restored = stillLatin.withAvailabilityAndPreference(
+                EnumSet.allOf(KeyboardEngineSelection.Engine.class),
+                KeyboardEngineSelection.Engine.RIME);
+        assertEquals(KeyboardEngineSelection.Engine.RIME, restored.active());
+        assertTrue(restored.revision() > stillLatin.revision());
+    }
+
+    @Test
     public void invalidEmptyMissingActiveAndExhaustedStatesFailClosed() {
         assertThrows(IllegalArgumentException.class, () -> KeyboardEngineSelection.of(
                 KeyboardEngineSelection.Engine.RIME,

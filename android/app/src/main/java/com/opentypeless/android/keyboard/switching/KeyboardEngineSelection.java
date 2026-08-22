@@ -74,7 +74,13 @@ public final class KeyboardEngineSelection {
     }
 
     public KeyboardEngineSelection withAvailability(Set<Engine> nextAvailable) {
+        return withAvailabilityAndPreference(nextAvailable, active);
+    }
+
+    public KeyboardEngineSelection withAvailabilityAndPreference(
+            Set<Engine> nextAvailable, Engine preferred) {
         Objects.requireNonNull(nextAvailable, "nextAvailable");
+        Objects.requireNonNull(preferred, "preferred");
         if (nextAvailable.isEmpty()) {
             throw new IllegalArgumentException("at least one engine must remain available");
         }
@@ -82,7 +88,9 @@ public final class KeyboardEngineSelection {
         if (!bounded.contains(Engine.LATIN)) {
             throw new IllegalArgumentException("Latin must remain as the safe fallback engine");
         }
-        Engine nextActive = bounded.contains(active) ? active : Engine.LATIN;
+        Engine nextActive = bounded.contains(preferred)
+                ? preferred
+                : bounded.contains(active) ? active : Engine.LATIN;
         if (bounded.equals(available) && nextActive == active) return this;
         return new KeyboardEngineSelection(nextActive, bounded, nextRevision());
     }

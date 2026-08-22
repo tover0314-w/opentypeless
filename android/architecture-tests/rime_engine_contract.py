@@ -270,12 +270,18 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "lease.pendingPageRequest=request",
         "commit.text().equals(selection.expectedText())",
         "lease.candidatePage.selection(selection.candidateIndex()).equals(selection)",
-        "lease.pendingKeyCommands==0",
-        "bar.setInteractionEnabled(",
-        "bar.showPage(page)",
+        "lease.pendingKeyCommands!=0",
+        "suppressRimeCandidatePage()",
+        "if(keyboardCandidateBar!=null)keyboardCandidateBar.clear()",
+        "lease.controller.warmUp()",
     ):
         if token not in service_compact:
             violations.append(Violation("RIM005_RUNTIME_WIRING", token))
+    if service_compact.count("suppressRimeCandidatePage()") != 3:
+        violations.append(Violation(
+            "RIM005_RUNTIME_WIRING",
+            "personal Rime candidate presentation must stay suppressed at both update sites",
+        ))
     expected_caret = service.find("lease.expectedCaret = (int) caret;")
     composition_write = service.find("editorSessionManager.setRimeComposition(")
     if expected_caret < 0 or composition_write < 0 or expected_caret > composition_write:
@@ -296,6 +302,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     for token in (
         "workerPreservesOrderAndDeliversExactIdentity",
         "boundedQueueRejectsFloodAndCloseSuppressesLateCallback",
+        "warmUpActivatesOnceBeforeFirstKeyWithoutPublishingState",
         "candidatePagingAndSelectionUseSameOrderedWorkerAndExactIdentity",
     ):
         if token not in controller_test:

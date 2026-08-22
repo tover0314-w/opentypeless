@@ -127,11 +127,11 @@ class RimeEngineContractTest(unittest.TestCase):
         )
         self.assertIn("RIM005_RUNTIME_WIRING", self.rules())
 
-    def test_rejects_candidate_page_without_interaction_lock(self) -> None:
+    def test_rejects_personal_candidate_suppression_removal(self) -> None:
         self.mutate(
             SERVICE,
-            "bar.setInteractionEnabled(",
-            "bar.setActivated(",
+            "suppressRimeCandidatePage();",
+            "renderRimeCandidatePage();",
         )
         self.assertIn("RIM005_RUNTIME_WIRING", self.rules())
 

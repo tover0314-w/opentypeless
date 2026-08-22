@@ -858,6 +858,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `RIM-010` | P1 | M | Rime 诊断页 | RIM-003..007, DIA-001 | 版本、Schema、部署、UserDB、错误 | 不暴露用户词内容到诊断包 | TODO |
 | `RIM-011` | P1 | M | Rime 导入导出 | RIM-007 | Schema 与用户数据分离 | 预览、容量、回滚 | TODO |
 | `RIM-012` | P1 | M | 物理键盘支持 | RIM-004 | KeyEvent、快捷键、候选序号 | 软键盘/物理键盘状态一致 | TODO |
+| `RIM-013` | P0 | S | 个人小鹤输入热路径与状态连续性 | RIM-004..009, KBD-008 | 进程内中英偏好、下一会话预热、隐藏候选展示 | 字段切换后保留中英状态；首键不再承担 native 激活；候选词不显示 | DONE |
 
 **RIM-003 完成说明（2026-08-16，`DONE`）：** 设置页现提供显式 SAF 本地导入、bounded closed-world manifest/ZIP/YAML
 校验、no-backup copy-once staging、librime 1.17.0 dry deploy、同目录原子 current/rollback 与清除。未验证包固定
@@ -910,6 +911,14 @@ Rime composition，显式 cancel 分支先清空同一 revision，再结束同�
 均不启动 Voice、不重捕获当前光标。最终 clean graph 186 tasks PASS，Debug/Release JVM 各 1049/1049，preflight
 120 script + 244 architecture tests PASS；同一最终 Debug/Test 在 Xiaomi 10 Ultra/API33 与 API35 arm64 emulator 各通过
 Rime commit/cancel、唯一 Voice hand-off 及既有 editor/Voice 回归 **32/32**。默认输入法保持 PangIME/LatinIME。
+
+**RIM-013 完成说明（2026-08-22，`DONE`）：** 针对用户真机上输入单码后显示 `1 个 / 2 管`、中文首键体感延迟及
+字段切换后回到英文的问题，Route-A 不再渲染 Rime 候选页；候选快照只在当前有界 lease 内保留，以便 Space 仍能按
+exact identity 选择首候选，不产生新的历史或诊断正文。每次 commit 仍严格完成 native close、UserDB checkpoint 与
+EditorTransaction delivery，随后才在有界 worker 预激活下一会话，把 native 启动移出下一次首键路径。用户选择的 `EN` /
+`中` 只以 content-free 进程状态保留；Rime 不可用或敏感字段仍强制 Latin，重新进入普通字段且本地包有效时恢复偏好。
+本次不新增持久格式，不承诺进程被系统杀死或重启手机后继续记忆；真实小鹤资源仍只在用户设备 app-private no-backup
+目录，Git 与 APK 保持 zero-bundle。
 
 **KBD-001 完成说明（2026-08-16，`DONE`）：** 产品 `OpenTypelessImeService` 现只在 `onCreate` 读取一次
 `keyboard_shell_route_a`，并通过闭合 `KeyboardShellSelector` 创建 Route-A 或 legacy voice 二者之一；selected factory

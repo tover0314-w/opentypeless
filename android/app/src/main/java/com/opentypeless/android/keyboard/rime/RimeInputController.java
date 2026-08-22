@@ -38,6 +38,7 @@ public final class RimeInputController implements AutoCloseable {
 
     private RimeInputEngine engine;
     private boolean activated;
+    private RimeInputEngine.Rejected activationFailure;
 
     public RimeInputController(
             long editorGeneration,
@@ -85,6 +86,11 @@ public final class RimeInputController implements AutoCloseable {
     public EnqueueResult process(RimeInputEngine.Key key) {
         Objects.requireNonNull(key, "key");
         return enqueue(() -> processOnWorker(key));
+    }
+
+    /** Opens the native session on the bounded worker before the user's next printable key. */
+    public EnqueueResult warmUp() {
+        return enqueue(this::activateOnWorker);
     }
 
     public EnqueueResult selectCandidate(CandidatePage.Selection selection) {
@@ -152,20 +158,10 @@ public final class RimeInputController implements AutoCloseable {
         if (closed.get()) return;
         RimeInputEngine.ProcessResult result;
         try {
-            if (!activated) {
-                engine = Objects.requireNonNull(engineFactory.get(), "Rime engine");
-                RimeInputEngine.LifecycleResult activation = engine.activate(
-                        new RimeInputEngine.Activation(
-                                editorGeneration,
-                                coordinationGeneration,
-                                initialRevision,
-                                RimeInputEngine.LearningMode.ENABLED));
-                if (activation instanceof RimeInputEngine.Rejected rejected) {
-                    result = rejected;
-                    dispatch(result);
-                    return;
-                }
-                activated = true;
+            RimeInputEngine.Rejected rejected = activateOnWorker();
+            if (rejected != null) {
+                dispatch(rejected);
+                return;
             }
             result = engine.process(new RimeInputEngine.ProcessRequest(
                     editorGeneration, coordinationGeneration, key));
@@ -173,6 +169,30 @@ public final class RimeInputController implements AutoCloseable {
             result = new RimeInputEngine.Rejected(RimeInputEngine.FailureKind.ENGINE_FAILURE);
         }
         dispatch(result);
+    }
+
+    private RimeInputEngine.Rejected activateOnWorker() {
+        if (closed.get() || activated) return null;
+        if (activationFailure != null) return activationFailure;
+        try {
+            engine = Objects.requireNonNull(engineFactory.get(), "Rime engine");
+            RimeInputEngine.LifecycleResult activation = engine.activate(
+                    new RimeInputEngine.Activation(
+                            editorGeneration,
+                            coordinationGeneration,
+                            initialRevision,
+                            RimeInputEngine.LearningMode.ENABLED));
+            if (activation instanceof RimeInputEngine.Rejected rejected) {
+                activationFailure = rejected;
+                return rejected;
+            }
+            activated = true;
+            return null;
+        } catch (RuntimeException failure) {
+            activationFailure = new RimeInputEngine.Rejected(
+                    RimeInputEngine.FailureKind.ENGINE_FAILURE);
+            return activationFailure;
+        }
     }
 
     private void dispatch(RimeInputEngine.ProcessResult result) {
@@ -203,6 +223,7 @@ public final class RimeInputController implements AutoCloseable {
             // The controller is already closed and cannot publish another callback.
         } finally {
             activated = false;
+            activationFailure = null;
             owned.close();
         }
     }

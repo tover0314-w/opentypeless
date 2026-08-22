@@ -3873,6 +3873,11 @@ public final class CompiledArchitectureGate {
                             + transition
                             + "@processRimeKey(Lcom/opentypeless/android/keyboard/rime/"
                             + "RimeInputEngine$Key;)V",
+                    "observe()" + observation
+                            + "@acquireRimeCompositionLease()" + lease,
+                    "acquire(" + observation + "L" + COMPOSITION_ACQUISITION + ";)"
+                            + transition
+                            + "@acquireRimeCompositionLease()" + lease,
                     "update(" + observation + "J)" + transition
                             + "@onRimeResult(" + lease
                             + "JJLcom/opentypeless/android/keyboard/rime/"

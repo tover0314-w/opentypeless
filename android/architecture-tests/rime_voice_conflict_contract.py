@@ -95,7 +95,7 @@ def inspect_sources(app_src: Path) -> list[str]:
             violations.append(f"RIME_VOICE_SERVICE_PREEMPT:{token}")
 
     for token in (
-        "lease.preedit.isEmpty()",
+        "!lease.hasComposition()",
         "finishRimeComposition(",
         'setRimeComposition(\n                    this, lease.editorSnapshot, "", cancellationRevision)',
         "captureCurrentTransactionSnapshot()",
