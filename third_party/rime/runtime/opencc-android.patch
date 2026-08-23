@@ -1,0 +1,49 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1d8c8e6f..f0469d03 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -18,2 +18,6 @@
+-
++
++# Modified by OpenTypeless contributors on 2026-08-16 for the pinned Android
++# cross-build: consume the audited external marisa archive and omit host-only
++# data generation. See the KSP-007 provenance record.
++
+ ######## Project settings
+@@ -213,4 +217,9 @@ else()
+   find_library(LIBMARISA NAMES marisa)
+-  if (LIBMARISA)
++  find_path(MARISA_INCLUDE_DIR NAMES marisa.h)
++  if (LIBMARISA AND MARISA_INCLUDE_DIR)
+     message(STATUS "libmarisa found: ${LIBMARISA}")
++    add_library(marisa STATIC IMPORTED)
++    set_target_properties(marisa PROPERTIES
++      IMPORTED_LOCATION "${LIBMARISA}"
++      INTERFACE_INCLUDE_DIRECTORIES "${MARISA_INCLUDE_DIR}")
+   else()
+@@ -224,3 +233,5 @@ add_subdirectory(src)
+ add_subdirectory(doc)
+-add_subdirectory(data)
++if(NOT CMAKE_CROSSCOMPILING)
++  add_subdirectory(data)
++endif()
+ add_subdirectory(test)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 7768c89d..6e84a2ce 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -5,2 +5,5 @@ include_directories("${PROJECT_SOURCE_DIR}/src")
+-
++
++# Modified by OpenTypeless contributors on 2026-08-16 for the pinned Android
++# cross-build: host-only conversion tools are not part of the runtime build.
++
+ if(NOT USE_SYSTEM_MARISA)
+@@ -207,2 +210,4 @@ endif()
+-
+-add_subdirectory(tools)
++
++if(NOT CMAKE_CROSSCOMPILING)
++  add_subdirectory(tools)
++endif()
+

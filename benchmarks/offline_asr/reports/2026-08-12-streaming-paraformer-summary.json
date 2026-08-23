@@ -1,0 +1,59 @@
+{
+  "status": "candidate_evidence_not_default_switch_authority",
+  "date": "2026-08-12",
+  "model": {
+    "id": "streaming-paraformer-bilingual-zh-en-int8-2023-08-14",
+    "revision": "8e40c43232a1c5c66c82111efc5820d3accca11b",
+    "files": {
+      "encoder.int8.onnx": {
+        "bytes": 165462184,
+        "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a"
+      },
+      "decoder.int8.onnx": {
+        "bytes": 71664561,
+        "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f"
+      },
+      "tokens.txt": {
+        "bytes": 75756,
+        "sha256": "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6"
+      }
+    }
+  },
+  "runtime": {
+    "sherpa_onnx": "1.13.4",
+    "threads": 2,
+    "chunk_ms": 40,
+    "endpoint_detection": false,
+    "platform": "macOS-14.8.2-arm64-arm-64bit"
+  },
+  "corpus": {
+    "cases": 200,
+    "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+    "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c",
+    "composition": "100 speaker/language-balanced ASCEND test + 50 Mandarin FLEURS dev audio + 50 US-English FLEURS dev audio"
+  },
+  "result": {
+    "overall_micro_error_rate": 0.22686808740221204,
+    "zh_cer": 0.12475822050290135,
+    "en_wer": 0.4018302828618968,
+    "mixed_mer": 0.2288329519450801,
+    "partial_coverage": 0.955,
+    "first_partial_audio_seconds_p50": 0.64,
+    "first_partial_audio_seconds_p95": 3.04,
+    "processing_rtf_p50": 0.042484093321858304,
+    "processing_rtf_p95": 0.05648117817084607,
+    "partial_revision_count": 1682,
+    "earlier_text_revision_count": 0,
+    "utterances_with_earlier_text_revision": 0
+  },
+  "provenance": {
+    "runner_sha256": "d6ac2b80630759ef048060a56a8dd648cedd556da63231e85d1f73cf3095aa7e",
+    "metrics_sha256": "251fe56062ddcab15d3252c16429738247c70d36143a126190fef094dde606bf",
+    "external_results_sha256": "3c67c0d591552e426b524568662417086b9ea7198a871ab5d667d8afa03f322b"
+  },
+  "decision": {
+    "keep_as_live_preview_candidate": true,
+    "sufficient_for_baidu_style_earlier_word_revision": false,
+    "reason": "The fixed public run produced 1682 changed partial hypotheses but no earlier-text rewrite. It is an append-oriented preview model; Speech Core v2 must not fabricate a capability the engine did not demonstrate."
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "decision": {
+    "quality_candidate": "sense_voice",
+    "lightweight_candidate": "paraformer",
+    "android_status": "opt_in_download_integrated_not_default_bundle",
+    "screened_rejected": ["paraformer_large", "whisper_small_q5_1"]
+  },
+  "runtime": {
+    "name": "sherpa-onnx",
+    "version": "1.13.4",
+    "threads": 4,
+    "host": "macOS-14.8.2-arm64-arm-64bit"
+  },
+  "android_gate": {
+    "platform": "API 36 arm64 emulator",
+    "device_ram_bytes": 2592632832,
+    "sherpa_onnx_aar_sha256": "35af2790bfcb39a1bfe6d0d495193b7fadc367c5c6f07e5e95996ba210cb9196",
+    "sherpa_onnx_aar_bytes": 19539693,
+    "runtime_reproducible_build_verified": true,
+    "runtime_abis": ["arm64-v8a", "x86_64"],
+    "runtime_tts_enabled": false,
+    "runtime_speaker_diarization_enabled": false,
+    "fresh_download_verify_and_transcribe_seconds": 25.537,
+    "cold_transcribe_seconds": 1.054,
+    "mandarin_language_lock_e2e_verified": true,
+    "mandarin_language_lock_cold_transcribe_seconds": 1.082,
+    "mandarin_language_lock_vm_high_water_kib": 467212,
+    "vm_rss_after_release_kib": 219112,
+    "vm_high_water_kib": 468608,
+    "real_speech_reference_exact": true,
+    "quality_tier_low_ram_devices_blocked": true,
+    "universal_debug_apk_bytes": 55093123,
+    "unsigned_release_apk_bytes": 54219813
+  },
+  "inputs": {
+    "public_200": {
+      "cases": 200,
+      "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+      "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c"
+    },
+    "synthetic_142": {
+      "cases": 142,
+      "manifest_sha256": "28f3d9e6ef199c8fd3b6cdfa86c172da1ed0f6af5110dd0459ae9d80fc35efed",
+      "audio_set_sha256": "47c748c21e47feeed5e73ec395dcf028e369259b1ca4dbf4aa48ff3ca526ae5a"
+    },
+    "ascend_full": {
+      "cases": 1315,
+      "manifest_sha256": "71a695d71e283c598be55d1131f47c8960e560f54d09bdb48d097fdc73fcab63",
+      "audio_set_sha256": "20688ea10accde8dcf4b3bdda878cf259e5566d8efb74ba543f8e38829547734"
+    }
+  },
+  "models": {
+    "sense_voice": {
+      "model_bytes": 239233841,
+      "tokens_bytes": 315894,
+      "model_sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+      "tokens_sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc",
+      "public_200": {"zh_cer": 0.10589941972920697, "en_wer": 0.08735440931780367, "mixed_mer": 0.2036613272311213},
+      "synthetic_142": {"zh_cer": 0.04157782515991471, "en_wer": 0.1, "mixed_mer": 0.4796747967479675, "entity_hits": 16, "entity_total": 60},
+      "ascend_full": {"zh_cer": 0.11379238610359892, "en_wer": 0.258887171561051, "mixed_mer": 0.1330316742081448, "overall_micro_error_rate": 0.13908480990882505, "rtf_p50": 0.01950241245427414, "rtf_p95": 0.04059753032589259},
+      "host_max_rss_bytes": 580943872,
+      "language_policy": {
+        "explicit_zh_or_cmn": "zh",
+        "english_and_unmeasured_languages": "auto",
+        "public_zh_cer_auto": 0.10589941972920697,
+        "public_zh_cer_locked": 0.10009671179883946,
+        "public_mixed_mer_auto": 0.2036613272311213,
+        "public_mixed_mer_locked": 0.18306636155606407,
+        "synthetic_entity_hits_auto": 16,
+        "synthetic_entity_hits_locked": 19
+      }
+    },
+    "paraformer": {
+      "model_bytes": 81828675,
+      "tokens_bytes": 75352,
+      "model_sha256": "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec",
+      "tokens_sha256": "4b2d964e18b9cf139b473003b6698fb2ed9a2a5ec55b93daa677b28f578897aa",
+      "public_200": {"zh_cer": 0.13297872340425532, "en_wer": 0.2737104825291181, "mixed_mer": 0.1945080091533181},
+      "synthetic_142": {"zh_cer": 0.04157782515991471, "en_wer": 0.27647058823529413, "mixed_mer": 0.3902439024390244, "entity_hits": 11, "entity_total": 60},
+      "ascend_full": {"zh_cer": 0.09548574994799251, "en_wer": 0.3415765069551777, "mixed_mer": 0.16343891402714933, "overall_micro_error_rate": 0.15516944778943748, "rtf_p50": 0.008772916393354535, "rtf_p95": 0.01803925060502519},
+      "host_max_rss_bytes": 275169280
+    },
+    "paraformer_large": {
+      "source_revision": "50d6551c76b95eea5419e0f0c307648800b4014b",
+      "model_bytes": 227318678,
+      "tokens_bytes": 75354,
+      "model_sha256": "16843a29d12d3780ccaf9ed3514450cce0d96d8003ab5e08925f3fa6a1fd5d80",
+      "tokens_sha256": "6c0e3b35cece259829e6cb5b8d90d13db88f61ea3a2953d11898e4b2bfd7a2e2",
+      "public_200": {"overall_micro_error_rate": 0.15969786889668194, "zh_cer": 0.09961315280464217, "en_wer": 0.2579034941763727, "mixed_mer": 0.17391304347826086, "rtf_p50": 0.011662693265005769, "rtf_p95": 0.022448254380170098},
+      "synthetic_142": {"overall_micro_error_rate": 0.1446280991735537, "zh_cer": 0.04051172707889126, "en_wer": 0.22745098039215686, "mixed_mer": 0.3699186991869919, "entity_hits": 12, "entity_total": 60, "false_hotword_insertions": 0, "false_correction_insertions": 0},
+      "ascend_full": {"zh_cer": 0.092989390472228, "en_wer": 0.3176197836166924, "mixed_mer": 0.14570135746606336, "overall_micro_error_rate": 0.14304145879924307, "rtf_p50": 0.014986171153113358, "rtf_p95": 0.029461473025741116},
+      "host_max_rss_bytes": 661929984,
+      "decision": "reject_as_default_english_and_names_weaker_than_sense_voice",
+      "result_sha256": {"public_200": "810554ecc61a5822fff8452101468c3fb5d3d7b84bbc61aa3f303bcf625ef6f4", "synthetic_142": "8ada4257da41752f6addd0f28a17f452381393cfca70cd005da1bf3681707058", "ascend_full": "f637d172ca16aacacfddcc539a727cab52b5318220d2d7a0dfeea2d0610d223c"}
+    },
+    "whisper_small_q5_1": {
+      "runtime": "whisper.cpp",
+      "runtime_commit": "306c88f4d1286aec1bf96e544632897886af5501",
+      "model_revision": "c521a4b02f422512d734391fdf08bb08c0862f68",
+      "model_bytes": 190085487,
+      "model_sha256": "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+      "server_binary_sha256": "722d994d869e52e3d67cc804bfc00ece2f141c50300f4c8ae08f0fe58689f47f",
+      "decode": {"cpu_only": true, "language": "auto", "beam_size": 5, "best_of": 5, "threads": 4},
+      "public_200": {"overall_micro_error_rate": 0.2392770434313461, "zh_cer": 0.2911025145067698, "en_wer": 0.08402662229617304, "mixed_mer": 0.42105263157894735, "rtf_p50": 0.4176971868454401, "rtf_p95": 2.6622840120175204},
+      "public_ascend_100_overall_micro_error_rate": 0.39855072463768115,
+      "public_fleurs_100_overall_micro_error_rate": 0.19346995484543245,
+      "host_max_rss_bytes": 574849024,
+      "decision": "reject_for_bilingual_mobile_default_chinese_mixed_and_latency_fail",
+      "result_sha256": "eca0565f0784b6b72e5b52b36de22eaa9fc7b140ee08926d2069aaa63f80846d"
+    }
+  },
+  "runner_sha256": "df0ad9ddf97cd14c89f2d3866e3cacec26395c119d975e87147612b7810df140",
+  "whisper_runner_sha256": "3127f8578d51535b1604cf341b14a48f1f980c707a238584e979f36daae80e81",
+  "comparison_runner_sha256": "9fd518a09e1543487bc1437b32c890ba810192d659939991e9b62b04bf45879e",
+  "metrics_sha256": "251fe56062ddcab15d3252c16429738247c70d36143a126190fef094dde606bf"
+}

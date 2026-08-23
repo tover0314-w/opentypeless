@@ -3,16 +3,16 @@
 # that modify matching paths.
 
 # Default owner for everything
-* @tover0314-w
+* @dengxuezhao
 
 # Rust backend
-/src-tauri/ @tover0314-w
+/src-tauri/ @dengxuezhao
 
 # Frontend
-/src/ @tover0314-w
+/src/ @dengxuezhao
 
 # CI/CD
-/.github/ @tover0314-w
+/.github/ @dengxuezhao
 
 # Documentation
-/*.md @tover0314-w
+/*.md @dengxuezhao

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "route_id": "route-a",
+  "upstream": {
+    "remote": "https://github.com/florisboard/florisboard.git",
+    "display_tag": "v0.5.2",
+    "commit": "2e82060251897226c0739b9f52d1d051b02305fb",
+    "git_tree": "f1da19f9887f353ada940787387674aad7ab80cd",
+    "archive_url": "https://codeload.github.com/florisboard/florisboard/tar.gz/2e82060251897226c0739b9f52d1d051b02305fb",
+    "archive_bytes": 20748703,
+    "archive_sha256": "ba279c66ad4800b8b6242758e734a2f5852d6c1775cb54a538a497b595215594",
+    "archive_root": "florisboard-2e82060251897226c0739b9f52d1d051b02305fb",
+    "materialized_tree": "5a911de0dc2242f146b3cfcc47c2b8b1dc90f7e5",
+    "file_count": 896,
+    "gitlinks": [],
+    "license": {
+      "path": "LICENSE",
+      "spdx": "Apache-2.0",
+      "sha256": "b7eb0e4356678f0fa7fb53a35c864ec0b3dca6c6602a26c3cb972c13e2041fcf"
+    }
+  },
+  "components": [
+    {
+      "name": "jetpref",
+      "role": "managed-build-source",
+      "remote": "https://github.com/patrickgold/jetpref.git",
+      "commit": "d6e12dda6517345dacc3682aa476a8448a71c34b",
+      "tree": "5f9386dd371923bc37c037ade430e785d2aaf522",
+      "archive_sha256": "f14abe3d2730369b6fc7d5868182722d057eb574bf0c349035f094e7f4a93f6b",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "librime",
+      "role": "native-source",
+      "remote": "https://github.com/rime/librime.git",
+      "commit": "33e78140250125871856cdc5b42ddc6a5fcd3cd4",
+      "tree": "5758d9896d7dd5c2d5316e595a91612f72a0432e",
+      "archive_sha256": "afdafcd9322dd184123f7b985030183eadcc1a8a01b60e362a4fc22dd7be45be",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "glog",
+      "role": "librime-gitlink",
+      "remote": "https://github.com/google/glog.git",
+      "commit": "7b134a5c82c0c0b5698bb6bf7a835b230c5638e4",
+      "tree": null,
+      "archive_sha256": null,
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "googletest",
+      "role": "librime-gitlink",
+      "remote": "https://github.com/google/googletest.git",
+      "commit": "f8d7d77c06936315286eb55f8de22cd23c188571",
+      "tree": null,
+      "archive_sha256": null,
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "leveldb",
+      "role": "native-source",
+      "remote": "https://github.com/google/leveldb.git",
+      "commit": "99b3c03b3284f5886f9ef9a4ef703d57373e61be",
+      "tree": null,
+      "archive_sha256": "1ab29b567293da2be4c24f09e9fc7028af48e854fce70b90bcb9768f3fb67fa9",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "leveldb-benchmark",
+      "role": "recursive-gitlink-build-only",
+      "remote": "https://github.com/google/benchmark.git",
+      "commit": "bf585a2789e30585b4e3ce6baf11ef2750b54677",
+      "tree": null,
+      "archive_sha256": null,
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "leveldb-googletest",
+      "role": "recursive-gitlink-build-only",
+      "remote": "https://github.com/google/googletest.git",
+      "commit": "c27acebba3b3c7d94209e0467b0a801db4af73ed",
+      "tree": null,
+      "archive_sha256": null,
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "marisa-trie",
+      "role": "native-source",
+      "remote": "https://github.com/s-yata/marisa-trie.git",
+      "commit": "3e87d53b78e15f2f43783d5e376561a8c9722051",
+      "tree": null,
+      "archive_sha256": "7173829621ae9685f9fd83c16ac9a70e31531f93dddf31916797eb563b087944",
+      "license": "BSD-2-Clause"
+    },
+    {
+      "name": "opencc",
+      "role": "native-source",
+      "remote": "https://github.com/BYVoid/OpenCC.git",
+      "commit": "556ed22496d650bd0b13b6c163be9814637970ae",
+      "tree": null,
+      "archive_sha256": "6ae5e77fd9091fb55643f5bb8dba4e0e623adbdd6ee96b9d589baa13fc8ae10a",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "yaml-cpp",
+      "role": "native-source",
+      "remote": "https://github.com/jbeder/yaml-cpp.git",
+      "commit": "2f86d13775d119edbb69af52e5f566fd65c6953b",
+      "tree": null,
+      "archive_sha256": "062ee35711b24bc4ff6d6d36b61a9ba189dd03202c4687fcd614763e9b65fd1e",
+      "license": "MIT"
+    },
+    {
+      "name": "boost",
+      "role": "native-build-source",
+      "remote": "https://archives.boost.io/release/1.89.0/source/boost-1.89.0-cmake.tar.xz",
+      "commit": null,
+      "tree": null,
+      "archive_sha256": "67acec02d0d118b5de9eb441f5fb707b3a1cdd884be00ca24b9a73c995511f74",
+      "license": "BSL-1.0"
+    }
+  ]
+}

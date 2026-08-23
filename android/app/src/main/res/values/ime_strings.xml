@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ime_status_offline_model_missing">Download the OpenTypeless offline model in Settings before recording</string>
+    <!-- Voice keyboard keys and spoken accessibility labels. -->
+    <string name="ime_key_delete" translatable="false">⌫</string>
+    <string name="ime_key_space">Space</string>
+    <string name="ime_key_enter" translatable="false">↵</string>
+    <string name="ime_key_switch_keyboard" translatable="false">中/英</string>
+    <string name="ime_key_import_rime">Import</string>
+    <string name="ime_key_engine_latin" translatable="false">EN</string>
+    <string name="ime_key_engine_rime">中</string>
+    <string name="ime_key_shift" translatable="false">⇧</string>
+    <string name="ime_key_caps_lock" translatable="false">⇪</string>
+    <string name="ime_key_symbols" translatable="false">123</string>
+    <string name="ime_key_letters" translatable="false">ABC</string>
+    <string name="ime_key_symbols_next_page" translatable="false">2/2</string>
+    <string name="ime_key_symbols_previous_page" translatable="false">1/2</string>
+    <string name="ime_key_undo">Undo</string>
+    <string name="ime_key_raw">Raw</string>
+    <string name="ime_key_teach">Teach</string>
+    <string name="ime_key_app_profile">App profile</string>
+    <string name="ime_key_dictionary">Personal dictionary</string>
+    <string name="ime_key_settings">Settings</string>
+    <string name="ime_menu_voice_diagnostics">Last voice diagnostics</string>
+    <string name="ime_clipboard_title">Clipboard</string>
+    <string name="ime_clipboard_refresh">Refresh</string>
+    <string name="ime_clipboard_close">Close</string>
+    <string name="ime_clipboard_empty">Clipboard is empty</string>
+    <string name="ime_clipboard_text_only">Only copied plain text can be pasted</string>
+    <string name="ime_clipboard_too_large">Copied text is too large to paste safely</string>
+    <string name="ime_clipboard_unavailable">Clipboard is unavailable</string>
+    <string name="ime_emoji_title">Emoji</string>
+    <string name="ime_emoji_close">Close</string>
+    <string name="ime_emoji_recent_empty">No recently used Emoji</string>
+    <string name="ime_emoji_category_recent">Recently used Emoji</string>
+    <string name="ime_emoji_category_smileys">Smileys and emotion</string>
+    <string name="ime_emoji_category_people">People and body</string>
+    <string name="ime_emoji_category_animals">Animals and nature</string>
+    <string name="ime_emoji_category_food">Food and drink</string>
+    <string name="ime_emoji_category_activities">Activities</string>
+    <string name="ime_emoji_category_travel">Travel and places</string>
+    <string name="ime_emoji_category_objects">Objects</string>
+    <string name="ime_emoji_category_symbols">Symbols</string>
+    <string name="ime_key_long_dictation_compact">Long</string>
+    <string name="ime_key_finish_dictation_compact">Done</string>
+    <string name="ime_key_processing">Processing…</string>
+    <string name="ime_key_processing_compact">Finish…</string>
+    <string name="ime_key_preparing">Preparing…</string>
+    <string name="ime_key_preparing_compact">Wait…</string>
+    <string name="ime_key_hold_to_talk">Space · hold to talk</string>
+    <string name="ime_key_hold_to_talk_compact">Hold</string>
+    <string name="ime_tab_voice">Voice</string>
+    <string name="ime_tab_keyboard">Keyboard</string>
+    <string name="ime_cd_open_voice_tab">Open voice input</string>
+    <string name="ime_cd_open_keyboard_tab">Open the QWERTY keyboard</string>
+    <string name="ime_voice_tap_hint">Tap to speak</string>
+    <string name="ime_key_release_to_finish">Release to insert</string>
+    <string name="ime_key_listening">Listening…</string>
+    <string name="ime_key_listening_compact">Live</string>
+    <string name="ime_key_more" translatable="false">⋮</string>
+    <string name="ime_key_punctuation" translatable="false">，。</string>
+    <string name="ime_key_action_send" translatable="false">➤</string>
+    <string name="ime_key_action_search" translatable="false">⌕</string>
+    <string name="ime_key_action_done" translatable="false">✓</string>
+    <string name="ime_key_action_next" translatable="false">→</string>
+    <string name="ime_mode_button">%1$s ▾</string>
+    <string name="ime_mode_auto_compact">Auto</string>
+    <string name="ime_mode_verbatim_compact">Exact</string>
+    <string name="ime_mode_smart_compact">Smart</string>
+    <string name="ime_mode_translate_compact">Trans.</string>
+    <string name="ime_menu_discard_current">Discard this voice input</string>
+    <string name="ime_menu_confirm_discard_current">Confirm: discard visible voice text</string>
+    <string name="ime_menu_insert_recoverable_draft">Insert preserved voice draft</string>
+    <string name="ime_menu_discard_recoverable_draft">Discard preserved voice draft</string>
+    <string name="ime_menu_recover_saved_audio">Recover protected recording</string>
+    <string name="ime_menu_discard_saved_audio">Discard protected recording</string>
+    <string name="ime_transcript_hint">Live transcript</string>
+    <string name="ime_transcript_preparing">Preparing microphone…</string>
+    <string name="ime_transcript_listening">Listening…</string>
+
+    <string name="ime_cd_delete">Delete</string>
+    <string name="ime_cd_space">Insert a space</string>
+    <string name="ime_cd_space_hold_to_talk">Insert space; touch and hold for voice input</string>
+    <string name="ime_cd_space_sensitive">Insert space; voice input is unavailable in this sensitive field</string>
+    <string name="ime_status_hold_too_short">Hold Space until listening starts</string>
+    <string name="ime_cd_enter">Enter or perform the editor action</string>
+    <string name="ime_cd_switch_keyboard">Return to the previously used Chinese or English keyboard; touch and hold to choose a keyboard</string>
+    <string name="ime_cd_import_rime">Import local Chinese Rime resources; touch and hold to choose an input method</string>
+    <string name="ime_cd_comma">Insert a comma</string>
+    <string name="ime_cd_period">Insert a period</string>
+    <string name="ime_cd_engine_latin">Latin input active; switch to Chinese input</string>
+    <string name="ime_cd_engine_rime">Chinese input active; switch to Latin input</string>
+    <string name="ime_cd_shift">Shift once; double tap for Caps Lock</string>
+    <string name="ime_cd_caps_lock">Caps Lock on; tap to turn off</string>
+    <string name="ime_cd_open_symbols">Open numbers and symbols</string>
+    <string name="ime_cd_return_to_letters">Return to letters</string>
+    <string name="ime_cd_symbols_next_page">Open the second symbol page</string>
+    <string name="ime_cd_symbols_previous_page">Return to the first symbol page</string>
+    <string name="ime_cd_letter_with_long_press">%1$s; touch and hold for %2$s</string>
+    <string name="ime_cd_undo">Undo the last voice insertion</string>
+    <string name="ime_cd_choose_mode">Choose the voice processing mode</string>
+    <string name="ime_cd_choose_mode_current">Voice processing mode: %1$s. Double tap to choose another mode</string>
+    <string name="ime_cd_start_long_dictation">Start continuous long-text dictation</string>
+    <string name="ime_cd_long_dictation_unavailable">Long dictation is temporarily unavailable</string>
+    <string name="ime_cd_finish_long_dictation">Finish dictation and insert the text</string>
+    <string name="ime_cd_long_dictation_disabled_during_hold">Long dictation is unavailable while hold-to-talk is active</string>
+    <string name="ime_cd_hold_disabled_during_long_dictation">Hold-to-talk is unavailable during long dictation</string>
+    <string name="ime_cd_release_to_insert">Release to finish voice input and insert the text</string>
+    <string name="ime_cd_processing">Voice text is being finalized</string>
+    <string name="ime_cd_preparing">Voice input is preparing</string>
+    <string name="ime_cd_action_send">Send</string>
+    <string name="ime_cd_action_search">Search</string>
+    <string name="ime_cd_action_done">Done</string>
+    <string name="ime_cd_action_next">Next</string>
+    <string name="ime_cd_more">More voice keyboard actions</string>
+    <string name="ime_cd_punctuation">Insert punctuation</string>
+    <string name="ime_cd_clipboard_refresh">Read the current clipboard again</string>
+    <string name="ime_cd_clipboard_close">Close the clipboard panel</string>
+    <string name="ime_cd_clipboard_paste">Paste the displayed clipboard text</string>
+    <string name="ime_cd_emoji_close">Close the Emoji panel</string>
+    <string name="ime_cd_insert_emoji">Insert Emoji %1$s</string>
+
+    <!-- TalkBack state descriptions for the microphone control. -->
+    <string name="ime_state_idle">Idle</string>
+    <string name="ime_state_recording">Recording</string>
+    <string name="ime_state_transcribing">Transcribing</string>
+    <string name="ime_state_polishing">Polishing</string>
+    <string name="ime_state_preparing">Preparing voice input</string>
+    <string name="ime_state_finishing">Finishing voice input</string>
+    <string name="ime_state_unavailable">Voice input unavailable</string>
+
+    <!-- Voice keyboard status and error messages. -->
+    <string name="ime_status_cancelled">This voice input was discarded</string>
+    <string name="ime_status_confirm_discard">Visible voice text will be lost. Open ⋮ and confirm discard within 10 seconds.</string>
+    <string name="ime_status_recoverable_draft_loading">Restoring the last protected voice draft…</string>
+    <string name="ime_status_recovering_audio">Recovering the protected recording without opening the microphone…</string>
+    <string name="ime_status_recoverable_audio_ready">The recovered text is protected and available from ⋮</string>
+    <string name="ime_status_recoverable_audio_unavailable">No protected recording is available</string>
+    <string name="ime_status_recoverable_audio_failed">Recovery failed: %1$s. The protected recording was kept.</string>
+    <string name="ime_status_recoverable_audio_failed_local">Recovery could not start. The protected recording was kept.</string>
+    <string name="ime_status_recoverable_audio_discarded">Protected recording permanently discarded</string>
+    <string name="ime_status_previous_voice_finalizing">The previous voice input is still finalizing</string>
+    <string name="ime_status_recoverable_draft_inserted">Preserved voice draft inserted</string>
+    <string name="ime_status_recoverable_draft_kept">The app rejected the draft; it remains available from ⋮</string>
+    <string name="ime_status_recoverable_draft_discarded">Preserved voice draft discarded</string>
+    <string name="ime_status_recoverable_draft_conflict">A different preserved draft is still waiting; no draft was overwritten</string>
+    <string name="ime_status_detached_selection_preserved">The editor changed; the original selection was preserved</string>
+    <string name="ime_status_detached_final_recoverable">The editor changed; the completed voice result is retained and available from ⋮</string>
+    <string name="ime_status_recoverable_draft_memory_only">The voice draft remains available now, but encrypted storage failed; insert or copy it before closing the keyboard</string>
+    <string name="ime_cd_space_voice_unavailable">Insert a space; voice input is temporarily unavailable</string>
+    <string name="ime_status_detached_partial_recoverable">Voice processing failed; the last visible draft remains protected and available from ⋮</string>
+    <string name="ime_status_sensitive_disabled">Voice input is disabled for sensitive fields</string>
+    <string name="ime_status_sensitive_field">Voice input disabled in this sensitive field</string>
+    <string name="ime_status_finishing_recording">Finishing recording…</string>
+    <string name="ime_status_processing_cancel_hint">Voice input is still processing; use ⋮ › Discard this voice input to abandon it</string>
+    <string name="ime_status_preparing_cancel_hint">Voice input is being prepared; use ⋮ › Discard this voice input to abandon it</string>
+    <string name="ime_status_microphone_permission">Grant microphone permission in OpenTypeless settings</string>
+    <string name="ime_status_system_microphone_blocked">Android speech service could not use the microphone. In Settings, choose OpenTypeless offline and download the model.</string>
+    <string name="ime_status_preparing_local_data">Preparing local settings and vocabulary…</string>
+    <string name="ime_status_preparing_microphone">Preparing microphone…</string>
+    <string name="ime_status_configure_backend">Configure the selected speech backend first</string>
+    <string name="ime_status_target_changed_cancelled">Input target changed; voice input was cancelled for safety</string>
+    <string name="ime_status_session_active">Another voice session is already active</string>
+    <string name="ime_status_lifecycle_guard_unavailable">Voice input is unavailable because screen-lock monitoring could not start</string>
+    <string name="ime_status_live_composition_fallback">This field cannot show live text; the current draft is preserved and will be inserted when you finish</string>
+    <string name="ime_status_composition_cleanup_failed">The app stopped voice input but could not confirm removal of the live draft; check the field before continuing</string>
+    <string name="ime_status_composition_preserve_uncertain">Voice input stopped, but the app could not confirm that the visible draft was finalized; check the field</string>
+    <string name="ime_status_field_unavailable">The current text field is no longer available</string>
+    <string name="ime_status_no_active_field">No active text field</string>
+    <string name="ime_status_selection_too_long">The selected text is too long; select at most 4,000 characters</string>
+    <string name="ime_status_selection_unavailable">The app did not expose the selected text; voice editing was not started</string>
+    <string name="ime_status_selection_unknown">The app did not expose a safe cursor or selection state; voice input was not started</string>
+    <string name="ime_status_target_changed_preserved">Input target changed; stopped listening and kept the visible draft</string>
+    <string name="ime_status_empty_final_partial_preserved">The final result was empty; kept the last visible draft</string>
+    <string name="ime_status_result_connection_failed">The text connection failed; verify whether the result was inserted</string>
+    <string name="ime_status_result_rejected">The app rejected the voice result</string>
+    <string name="ime_status_result_recoverable">The app rejected the final update; the completed result is protected and available from ⋮</string>
+    <string name="ime_status_nothing_to_undo">Nothing safe to undo in this field</string>
+    <string name="ime_status_undo_target_changed">Text or cursor changed; undo was not applied</string>
+    <string name="ime_status_insertion_removed">Voice insertion removed</string>
+    <string name="ime_status_selection_restored">Original selection restored</string>
+    <string name="ime_status_raw_unavailable">Raw restore is not available for this result</string>
+    <string name="ime_status_raw_already_matches">The inserted text already matches the raw transcript</string>
+    <string name="ime_status_raw_target_changed">Text or cursor changed; raw restore was not applied</string>
+    <string name="ime_status_raw_restored">Raw transcript restored</string>
+    <string name="ime_status_teach_requires_insertion">Make a voice insertion before teaching a correction</string>
+    <string name="ime_status_learning_disallowed">This field does not allow personalized learning</string>
+    <string name="ime_operation_undo">undo</string>
+    <string name="ime_operation_raw_restore">raw restore</string>
+    <string name="ime_status_operation_rejected_unchanged">The app rejected %1$s; text was left unchanged</string>
+    <string name="ime_status_operation_rejected_restored">The app rejected %1$s; voice text was restored</string>
+    <string name="ime_status_operation_connection_failed">The text connection failed during %1$s; verify the field before continuing</string>
+    <string name="ime_status_delete_rejected">The app rejected delete</string>
+    <string name="ime_status_delete_connection_failed">The text connection failed during delete</string>
+    <string name="ime_status_key_rejected">The input state changed; try the key again</string>
+    <string name="ime_status_typing_connection_failed">The text connection failed while typing</string>
+    <string name="ime_status_clipboard_sensitive">Clipboard is unavailable in this sensitive field</string>
+    <string name="ime_status_finish_before_clipboard_paste">Finish the current voice input before pasting</string>
+    <string name="ime_status_finish_rime_before_clipboard_paste">Finish the current Chinese composition before pasting</string>
+    <string name="ime_status_finish_before_emoji">Finish the current voice input before opening Emoji</string>
+    <string name="ime_status_finish_rime_before_emoji">Finish the current Chinese composition before opening Emoji</string>
+    <string name="ime_status_editor_action_failed">The text connection failed during the editor action</string>
+    <string name="ime_status_finish_before_mode_change">Finish or cancel the current recording before changing mode</string>
+    <string name="ime_status_mode_selected">%1$s mode selected</string>
+    <string name="ime_status_ready_mode">Ready · %1$s mode</string>
+    <string name="ime_status_cursor_moved_preserved">Cursor moved; stopped listening and kept the visible draft</string>
+    <string name="ime_status_voice_input_failed">Voice input failed</string>
+    <string name="ime_status_listening">Listening…</string>
+    <string name="ime_status_waiting_for_live_text">Listening · waiting for live text…</string>
+    <string name="ime_status_system_no_live_text_yet">The Android speech service has not supplied live text yet; release to get its final transcript</string>
+    <string name="ime_status_backend_final_only">This backend transcribes after recording; release to show the result</string>
+    <string name="ime_status_transcribing">Finalizing text…</string>
+    <string name="ime_status_polishing">Checking and polishing without changing facts…</string>
+    <string name="ime_status_inserted">Inserted</string>
+    <string name="ime_status_inserted_recording_limit">Inserted · recording time limit reached</string>
+    <string name="ime_status_inserted_after_silence">Inserted · stopped after silence</string>
+    <string name="ime_status_inserted_recovered_partial">Kept the last live transcript · final result was unavailable</string>
+    <string name="ime_status_personalization_applied">Inserted · applied: %1$s · Undo or open Personal dictionary to disable</string>
+    <string name="ime_status_voice_command_inserted">Voice command inserted</string>
+    <string name="ime_status_exact_ai_not_configured">Inserted exact transcript · AI polish is not configured</string>
+    <string name="ime_status_selection_updated">Selected text updated · Undo available</string>
+    <string name="ime_status_translated">Translated · Undo available</string>
+    <string name="ime_status_smart_edited">Smart edit inserted · Undo available</string>
+    <string name="ime_status_ai_blocked_exact">AI edit blocked to protect facts · exact transcript inserted</string>
+    <string name="ime_status_exact_ai_failed">Inserted exact transcript because AI polish failed</string>
+    <string name="ime_cd_keyboard_profile_general">Standard keyboard</string>
+    <string name="ime_cd_keyboard_profile_email">Email keyboard</string>
+    <string name="ime_cd_keyboard_profile_uri">Web address keyboard</string>
+    <string name="ime_cd_keyboard_profile_phone">Phone keyboard</string>
+    <string name="ime_cd_keyboard_profile_number">Number keyboard</string>
+    <string name="ime_cd_keyboard_profile_date">Date keyboard</string>
+    <string name="ime_cd_keyboard_profile_password">Password keyboard</string>
+    <string name="ime_candidate_previous">‹</string>
+    <string name="ime_candidate_next">›</string>
+    <string name="ime_candidate_numbered">%1$d %2$s</string>
+    <string name="ime_cd_candidate_previous">Previous candidate page</string>
+    <string name="ime_cd_candidate_next">Next candidate page</string>
+    <string name="ime_cd_candidate_numbered">Candidate %1$d: %2$s</string>
+    <string name="ime_status_candidate_engine_unavailable">Candidate source is not active</string>
+    <string name="ime_status_keyboard_picker_opened">Choose an input method</string>
+    <string name="ime_status_keyboard_switch_failed">Android could not switch input methods</string>
+    <string name="ime_status_rime_resources_open_failed">Unable to open local Rime resource settings</string>
+    <string name="ime_status_finish_before_engine_change">Finish the current voice input before switching input engines</string>
+    <string name="ime_status_second_engine_unavailable">The Chinese input engine is not installed yet</string>
+    <string name="ime_status_engine_latin">Latin input active</string>
+    <string name="ime_status_engine_rime">Chinese input active</string>
+</resources>

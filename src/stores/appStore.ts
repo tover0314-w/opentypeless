@@ -24,7 +24,6 @@ export type SttProvider =
   | 'siliconflow'
   | 'apple-speech'
   | 'custom-whisper'
-  | 'cloud'
 
 export type AliyunQwenRegion = 'china-mainland' | 'international'
 export type LlmProvider =
@@ -40,7 +39,6 @@ export type LlmProvider =
   | 'claude'
   | 'ollama'
   | 'openrouter'
-  | 'cloud'
 export type OutputMode = 'keyboard' | 'clipboard'
 export type PasteShortcut = 'ctrlV' | 'ctrlShiftV' | 'shiftInsert'
 export type WindowsSendInputNewlineMode = 'enter' | 'shiftEnter' | 'crlf'
@@ -55,7 +53,7 @@ export type HotkeyMode = 'hold' | 'toggle'
 export type Theme = 'light' | 'dark' | 'system'
 export type PolishChineseScript = 'preserve' | 'simplified' | 'traditional'
 export type PolishStyle = 'minimal' | 'clean' | 'structured' | 'professional'
-export type SceneSource = 'custom' | 'builtin' | 'cloud'
+export type SceneSource = 'custom' | 'builtin'
 export type ContextFamily =
   | 'email'
   | 'work_chat'
@@ -104,6 +102,7 @@ export interface HistoryEntry {
   context_icon_key: string
   context_family: ContextFamily
   browser_access_status: BrowserAccessStatus
+  // `managed_cloud` is read-only compatibility for history created by upstream builds.
   provider_kind: 'managed_cloud' | 'byok' | 'local'
   raw_text: string
   polished_text: string
@@ -233,7 +232,6 @@ export interface AppConfig {
   recording_limit_mode: 'auto' | 'custom'
   custom_recording_limit_seconds: number
   max_recording_seconds: number
-  managed_stt_capability_state?: unknown
   history_enabled: boolean
   history_retention_days: number
   history_max_entries: number
@@ -300,8 +298,6 @@ interface AppState {
   setOnboardingCompleted: (done: boolean) => void
   onboardingStep: number
   setOnboardingStep: (step: number) => void
-  onboardingMode: 'cloud' | 'byok' | null
-  setOnboardingMode: (mode: 'cloud' | 'byok' | null) => void
 
   // Capsule
   capsuleExpanded: boolean
@@ -837,8 +833,6 @@ export const useAppStore = create<AppState>((set) => ({
   setOnboardingCompleted: (onboardingCompleted) => set({ onboardingCompleted }),
   onboardingStep: 0,
   setOnboardingStep: (onboardingStep) => set({ onboardingStep }),
-  onboardingMode: null,
-  setOnboardingMode: (onboardingMode) => set({ onboardingMode }),
 
   capsuleExpanded: false,
   setCapsuleExpanded: (capsuleExpanded) => set({ capsuleExpanded }),

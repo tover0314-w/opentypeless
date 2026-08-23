@@ -6,6 +6,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+__pycache__/
+*.py[cod]
 
 # Dependencies
 node_modules
@@ -43,6 +45,13 @@ jelly-reference*.png
 .playwright-cli/
 .codex-target-clippy/
 /output/
+
+# Android
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
 
 # Local release artifacts
 .release-assets/

@@ -30,23 +30,6 @@ use tracing_subscriber::EnvFilter;
 
 use std::sync::{Arc, Mutex};
 
-/// Default cloud API base URL. Override with the `API_BASE_URL` environment variable.
-pub const DEFAULT_API_BASE_URL: &str = "https://www.opentypeless.com";
-pub const CLIENT_VERSION_HEADER: &str = "X-OpenTypeless-Version";
-
-/// Read the cloud API base URL from the environment, falling back to the compiled default.
-pub fn api_base_url() -> String {
-    std::env::var("API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string())
-}
-
-pub fn desktop_client_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
-}
-
-pub fn with_desktop_client_version(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    request.header(CLIENT_VERSION_HEADER, desktop_client_version())
-}
-
 /// Cached hotkey mode to avoid loading config from disk on every keypress.
 /// Updated whenever config is saved.
 pub struct HotkeyModeCache(pub Arc<Mutex<String>>);
@@ -62,10 +45,6 @@ pub struct CloseToTrayCache(pub Arc<Mutex<bool>>);
 
 /// Last global-hotkey registration error, if startup or settings registration failed.
 pub struct HotkeyRegistrationError(pub Arc<Mutex<Option<String>>>);
-
-/// Session token for cloud providers. Set by the frontend after Better Auth login.
-/// The Rust pipeline reads this when creating cloud STT/LLM providers.
-pub struct SessionTokenStore(pub Arc<Mutex<String>>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AutoStartSyncOutcome {
@@ -237,10 +216,9 @@ async fn show_ask_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, commands::ask::AskDictationState>,
     config_state: tauri::State<'_, storage::ConfigManager>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<(), String> {
-    commands::ask::start_ask_flow(app, state, config_state, token_store, client).await
+    commands::ask::start_ask_flow(app, state, config_state, client).await
 }
 
 #[cfg(test)]
@@ -263,12 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn desktop_client_version_header_matches_frontend_contract() {
-        assert_eq!(crate::CLIENT_VERSION_HEADER, "X-OpenTypeless-Version");
-        assert_eq!(crate::desktop_client_version(), env!("CARGO_PKG_VERSION"));
-    }
-
-    #[test]
     fn cli_action_parser_supports_first_and_later_instance_arguments() {
         let toggle = vec!["/usr/bin/opentypeless".to_string(), "toggle".to_string()];
         let ask = vec!["OpenTypeless.exe".to_string(), "ask".to_string()];
@@ -281,7 +253,7 @@ mod tests {
     fn cli_action_parser_does_not_hijack_deep_links_or_ambiguous_commands() {
         let deep_link = vec![
             "opentypeless".to_string(),
-            "opentypeless://auth/callback?mode=toggle".to_string(),
+            "opentypeless://action/toggle".to_string(),
         ];
         let ambiguous = vec![
             "opentypeless".to_string(),
@@ -762,13 +734,11 @@ fn dispatch_cli_action(app: &tauri::AppHandle, action: CliAction) {
                 }
                 let ask_state = app_handle.state::<commands::ask::AskDictationState>();
                 let config_state = app_handle.state::<storage::ConfigManager>();
-                let token_store = app_handle.state::<SessionTokenStore>();
                 let client = app_handle.state::<reqwest::Client>();
                 if let Err(error) = commands::ask::start_ask_flow(
                     app_handle.clone(),
                     ask_state,
                     config_state,
-                    token_store,
                     client,
                 )
                 .await
@@ -819,20 +789,14 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(action) = parse_cli_action(&args) {
                 dispatch_cli_action(app, action);
                 return;
             }
-            // Deep-link URL forwarding is handled automatically by the
-            // "deep-link" feature of single-instance plugin.
-            // Just focus the main window so the user sees the result.
             restore_main_window(app);
         }))
-        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             // Open devtools only when the "devtools" feature is explicitly enabled
             #[cfg(feature = "devtools")]
@@ -913,8 +877,6 @@ pub fn run() {
             app.manage(CloseToTrayCache(Arc::new(Mutex::new(
                 initial_config.close_to_tray,
             ))));
-            app.manage(SessionTokenStore(Arc::new(Mutex::new(String::new()))));
-
             // Register global shortcut from config
             let handler = hotkey::build_shortcut_handler(app_handle.clone());
             app.handle().plugin(
@@ -1009,14 +971,6 @@ pub fn run() {
                     "history" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.emit("tray:history", ());
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            refresh_tray(app);
-                        }
-                    }
-                    "account" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("navigate", "#/account");
                             let _ = window.show();
                             let _ = window.set_focus();
                             refresh_tray(app);
@@ -1172,6 +1126,7 @@ pub fn run() {
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
             commands::misc::request_browser_access,
+            commands::misc::open_legal_document,
             commands::config::get_config,
             commands::config::update_config,
             commands::credentials::get_credential_status,
@@ -1181,8 +1136,6 @@ pub fn run() {
             commands::credentials::migrate_legacy_credentials,
             commands::stt::get_stt_provider_diagnostics,
             commands::stt::get_stt_recording_capability,
-            commands::stt::cache_managed_stt_capability,
-            commands::stt::clear_managed_stt_capability,
             commands::stt::test_stt_connection,
             commands::llm::test_llm_connection,
             commands::llm::bench_llm_connection,
@@ -1216,7 +1169,6 @@ pub fn run() {
             commands::misc::get_system_diagnostics,
             commands::config::set_auto_start,
             commands::config::set_capsule_auto_hide,
-            commands::config::set_session_token,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

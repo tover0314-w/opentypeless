@@ -16,7 +16,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('AppContextMeta', () => {
-  it('renders a fixed 16px app logo, safe label, time, and provider', () => {
+  it('renders a generic family icon, safe label, time, and provider', () => {
     const { container } = render(
       <AppContextMeta
         iconKey="gmail"
@@ -27,16 +27,14 @@ describe('AppContextMeta', () => {
       />,
     )
 
-    const logo = container.querySelector('img')
-    expect(logo).not.toBeNull()
-    expect(logo).toHaveAttribute('width', '16')
-    expect(logo).toHaveAttribute('height', '16')
+    expect(container.querySelector('svg')).not.toBeNull()
+    expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText('Gmail')).toHaveClass('truncate')
     expect(screen.getByText('09:42')).toBeInTheDocument()
     expect(screen.getByText('Cloud')).toHaveClass('max-[419px]:hidden')
   })
 
-  it('uses an existing family icon when no reviewed bitmap exists', () => {
+  it('uses an existing family icon for an extended app', () => {
     const { container } = render(
       <AppContextMeta
         iconKey="extended-app"

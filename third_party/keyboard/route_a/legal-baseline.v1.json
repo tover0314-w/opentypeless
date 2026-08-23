@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "route_id": "route-a",
+  "protected_upstream_files": [
+    {
+      "path": "LICENSE",
+      "sha256": "b7eb0e4356678f0fa7fb53a35c864ec0b3dca6c6602a26c3cb972c13e2041fcf",
+      "spdx": "Apache-2.0"
+    }
+  ],
+  "new_source_license_roots": [
+    {
+      "prefix": "opentypeless-editor-host/",
+      "license_path": "opentypeless-editor-host/LICENSE",
+      "sha256": "244b7cf218fcf3164c912775c6b97e2b70be0cf8b62233a1ade2b5fab0aa7084",
+      "spdx": "MIT"
+    },
+    {
+      "prefix": "route-a-safety-eval/",
+      "license_path": "route-a-safety-eval/LICENSES/MIT.txt",
+      "sha256": "244b7cf218fcf3164c912775c6b97e2b70be0cf8b62233a1ade2b5fab0aa7084",
+      "spdx": "Apache-2.0-with-MIT-adapter-and-synthetic-rime-fixtures"
+    }
+  ],
+  "required_provenance": [
+    {
+      "path": "route-a-safety-eval/src/main/java/com/opentypeless/ksp004/RimeAdapter.java",
+      "token": "SPDX-License-Identifier: MIT"
+    },
+    {
+      "path": "route-a-safety-eval/src/main/assets/rime/default.yaml",
+      "token": "OpenTypeless"
+    },
+    {
+      "path": "route-a-safety-eval/src/main/assets/rime/ksp004.dict.yaml",
+      "token": "OpenTypeless"
+    },
+    {
+      "path": "route-a-safety-eval/src/main/assets/rime/ksp004.schema.yaml",
+      "token": "OpenTypeless"
+    }
+  ],
+  "historical_evidence_only_patch": {
+    "sha256": "13a0073967cc8fe9e61fe31ffc46b3110ef9e60cb629faa5ba172d33d79a38b0",
+    "bytes": 10501449,
+    "committed_queue_input": false,
+    "reason": "Contains generated native binaries, unselected whole-App changes, and deleted unverified-resource preimages."
+  }
+}

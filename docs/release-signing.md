@@ -1,11 +1,10 @@
 # Release Signing Setup
 
-OpenTypeless releases are built in `toverwu-qaq/opentypeless` and published to
-`tover0314-w/opentypeless`.
+OpenTypeless releases are built and published from `dengxuezhao/opentypeless`.
 
 ## Required GitHub Secrets
 
-Set these secrets on `toverwu-qaq/opentypeless`, because that repository runs
+Set these secrets on `dengxuezhao/opentypeless`, because that repository runs
 the GitHub Actions workflow.
 
 macOS:
@@ -17,14 +16,98 @@ macOS:
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
 
-Tauri updater:
-
-- `TAURI_SIGNING_PRIVATE_KEY`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-
 Cross-repository publishing:
 
 - `RELEASE_TOKEN`
+
+Desktop auto-update artifacts are intentionally disabled by
+`bundle.createUpdaterArtifacts: false`. No `TAURI_SIGNING_PRIVATE_KEY` secret is required, and the
+release workflows must not emit updater `.sig` files or `latest.json`. The delayed macOS stapling
+workflow accepts the notarization submission ID for the already-published DMG and replaces only
+that stapled DMG.
+
+Android:
+
+- `ANDROID_KEYSTORE_BASE64`: base64-encoded maintainer-controlled JKS/PKCS12 keystore
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+The release workflow refuses to publish Android without all four signing secrets. It verifies the
+APK and AAB signatures, reads the release version and APK filename from Gradle's output metadata,
+and publishes `OpenTypeless-Android-<version>` APK/AAB assets plus a SHA-256 checksum file. Local
+builds remain unsigned unless the corresponding `ANDROID_KEYSTORE_*` environment variables are
+supplied.
+
+## Third-Party License Material
+
+Desktop releases must include these four files at the top level of the Tauri resource directory:
+
+- `LICENSE`
+- `THIRD_PARTY_NOTICES.md`
+- `THIRD_PARTY_INVENTORY.md`
+- `THIRD_PARTY_LICENSES.txt`
+
+The inventory separates npm browser-runtime packages, Cargo runtime-linked crates, and Cargo
+build-only/proc-macro-host crates. Cargo dev dependencies and npm root dev dependencies are
+excluded. The full license file deliberately includes build-only license text as a conservative
+superset without claiming those crates are linked into the installed executable.
+
+Regenerate and verify the committed material with the pinned extractor:
+
+```bash
+cargo install cargo-about --version 0.9.1 --locked --features cli
+cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+npm ci
+python3 scripts/generate_third_party_inventory.py
+python3 scripts/generate_third_party_inventory.py --check
+```
+
+The generator runs cargo-about in frozen/offline mode after the explicit fetch. This makes the
+result depend on the lock files and fetched package sources instead of live license-service output.
+Both CI and the release workflow reject stale generated material.
+
+After a macOS bundle build, verify the actual app rather than only the Tauri configuration:
+
+```bash
+RESOURCE_DIR="src-tauri/target/release/bundle/macos/OpenTypeless.app/Contents/Resources"
+test -f "$RESOURCE_DIR/LICENSE"
+test -f "$RESOURCE_DIR/THIRD_PARTY_NOTICES.md"
+test -f "$RESOURCE_DIR/THIRD_PARTY_INVENTORY.md"
+test -f "$RESOURCE_DIR/THIRD_PARTY_LICENSES.txt"
+cmp LICENSE "$RESOURCE_DIR/LICENSE"
+cmp THIRD_PARTY_NOTICES.md "$RESOURCE_DIR/THIRD_PARTY_NOTICES.md"
+cmp THIRD_PARTY_INVENTORY.md "$RESOURCE_DIR/THIRD_PARTY_INVENTORY.md"
+cmp THIRD_PARTY_LICENSES.txt "$RESOURCE_DIR/THIRD_PARTY_LICENSES.txt"
+```
+
+For a universal build, use
+`src-tauri/target/universal-apple-darwin/release/bundle/macos/OpenTypeless.app/Contents/Resources`.
+The About screen opens these bundled files through a fixed document identifier, so they remain
+available offline and arbitrary filesystem paths are not accepted from the webview.
+
+The lock-file generator covers npm and Cargo package sources only. Before publishing each target,
+also inspect the finished artifact for material introduced by the packager rather than those lock
+files. In particular:
+
+- keep `src/assets/app-icons/reference` absent unless every proposed brand image has a recorded
+  provenance and redistribution basis; the current UI deliberately uses licensed generic family
+  glyphs instead of third-party logo artwork;
+- inspect Linux AppImage/RPM contents for bundled system libraries and include any notices their
+  licenses require;
+- confirm whether fonts, media, installer assets, model files, or service SDK data added outside
+  npm/Cargo need separate notices; and
+- keep Android's dependency and asset notice process separate from this desktop inventory.
+
+Treat an unverified third-party asset or package-injected binary as a release blocker. The
+generated files are a reproducible compliance aid, not legal advice or proof that every
+non-package asset is cleared for distribution.
+
+The release workflow extracts each AppImage, compares all four legal documents byte-for-byte with
+the committed files, and publishes a signed-checksum-covered
+`APPIMAGE-CONTENTS-linux-<architecture>.txt` manifest. Review newly introduced bundled libraries
+in that manifest before promoting the prerelease; inventory generation alone does not determine
+their license obligations.
 
 Linux:
 
@@ -58,9 +141,9 @@ Windows SignPath:
 - `SIGNPATH_SIGNING_POLICY_SLUG`: SignPath signing policy slug
 
 The SignPath project and GitHub trusted build system must point to
-`toverwu-qaq/opentypeless`, because that repository runs the GitHub Actions
-workflow and owns the GitHub artifact submitted to SignPath. Signed Windows
-artifacts are still published to `tover0314-w/opentypeless`.
+`dengxuezhao/opentypeless`, because that repository runs the GitHub Actions
+workflow and owns the GitHub artifact submitted to SignPath. Signed artifacts
+are published to the same repository.
 
 The Windows SignPath workflow uses the project's default artifact
 configuration. This default artifact configuration must have a `<zip-file>`

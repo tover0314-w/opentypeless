@@ -6,7 +6,7 @@ const mockConfig = {
   hotkey: 'Fn',
   output_mode: 'keyboard',
   insertion_strategy: 'auto',
-  stt_provider: 'cloud',
+  stt_provider: 'openai-whisper',
   hotkeys: {
     dictation: { primary: 'Fn', modifiers: [] },
   },
@@ -53,7 +53,7 @@ beforeEach(() => {
     hotkey: 'Fn',
     output_mode: 'keyboard',
     insertion_strategy: 'auto',
-    stt_provider: 'cloud',
+    stt_provider: 'openai-whisper',
     hotkeys: {
       dictation: { primary: 'Fn', modifiers: [] },
     },

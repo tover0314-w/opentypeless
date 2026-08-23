@@ -119,13 +119,8 @@ export async function updateConfig(config: AppConfig): Promise<void> {
 }
 
 export type RecordingLimitMode = 'auto' | 'custom'
-export type SttTransport = 'fileUpload' | 'streaming' | 'localBuffered' | 'managedUpload'
-export type RecordingLimitSource =
-  | 'provider'
-  | 'managedProduct'
-  | 'clientBuffer'
-  | 'productSafety'
-  | 'unknownUpstream'
+export type SttTransport = 'fileUpload' | 'streaming' | 'localBuffered'
+export type RecordingLimitSource = 'provider' | 'clientBuffer' | 'productSafety' | 'unknownUpstream'
 
 export interface SttRecordingCapability {
   registryVersion: number
@@ -296,7 +291,7 @@ export interface SttProviderDiagnosticIssue {
 
 export interface SttProviderDiagnostics {
   provider: string
-  kind: 'localCompatible' | 'builtinLocal' | 'byokRemote' | 'cloudManaged' | 'unknown'
+  kind: 'localCompatible' | 'builtinLocal' | 'byokRemote' | 'unknown'
   endpoint: string | null
   model: string | null
   requiresApiKey: boolean

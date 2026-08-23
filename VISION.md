@@ -2,7 +2,7 @@
 
 ## What is OpenTypeless?
 
-OpenTypeless is an open-source, cross-platform desktop application that converts speech to polished text using AI. It combines real-time speech-to-text with LLM-powered refinement, letting users speak naturally and get well-structured written output.
+OpenTypeless is an open-source, cross-platform voice-input system for Android, Windows, macOS, and Linux. It combines speech-to-text, deterministic personal vocabulary, and optional LLM refinement; exact dictation does not require generative AI.
 
 ## Origin
 
@@ -11,7 +11,7 @@ OpenTypeless was built in a single day with the help of Claude Code — demonstr
 ## Core Principles
 
 - **Privacy first**: BYOK (Bring Your Own Key) model. Your API keys stay on your machine. No mandatory cloud accounts, no telemetry.
-- **Cross-platform**: Windows, macOS, and Linux via Tauri.
+- **Cross-platform**: Android native voice entry points plus Windows, macOS, and Linux via Tauri.
 - **Open source**: MIT licensed. Transparent development, community-driven roadmap.
 - **Provider agnostic**: Support multiple STT and LLM providers. No vendor lock-in.
 
@@ -22,13 +22,13 @@ OpenTypeless was built in a single day with the help of Claude Code — demonstr
 3. Broader STT provider support (Deepgram, AssemblyAI, Whisper variants, etc.)
 4. Broader LLM provider support (OpenAI, DeepSeek, Anthropic, etc.)
 5. Internationalization
+6. Reproducible recognition-quality, latency, battery, and noun-correction evaluations
 
 ## Future Directions
 
 - Plugin / extension system for custom workflows
 - Voice commands and shortcuts
-- Mobile companion app
-- Offline STT support
+- Bundled opt-in offline model backends where size, licensing, and device capability permit
 - Team / collaboration features
 
 ## What We Won't Merge

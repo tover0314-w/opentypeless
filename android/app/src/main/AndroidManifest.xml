@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".SettingsHomeActivity"
+            android:exported="false"
+            android:label="@string/settings_title_short" />
+
+        <activity
+            android:name=".KeyboardFeedbackActivity"
+            android:exported="false"
+            android:label="@string/keyboard_feedback_title" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
+
+        <activity
+            android:name=".DictionaryActivity"
+            android:exported="false"
+            android:label="@string/dictionary_title" />
+
+        <activity
+            android:name=".RimeResourceActivity"
+            android:exported="false"
+            android:label="@string/rime_resources_title" />
+
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="@string/history_title" />
+
+        <activity
+            android:name=".AppProfileActivity"
+            android:exported="false"
+            android:label="@string/app_profiles_title" />
+
+        <activity
+            android:name=".VoiceLabActivity"
+            android:exported="false"
+            android:label="@string/voice_lab_title" />
+
+        <activity
+            android:name=".recognition.OpenTypelessRecognizerActivity"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- RecognitionService must be externally discoverable. The framework verifies the
+             caller's RECORD_AUDIO attribution before dispatching recognition callbacks. -->
+        <service
+            android:name=".recognition.OpenTypelessRecognitionService"
+            android:exported="true"
+            android:foregroundServiceType="microphone"
+            tools:ignore="ExportedService">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <!-- Streaming and quality weights use separate private processes. This permits a warm,
+             low-latency streaming model while a bounded SenseVoice segment pass runs in parallel,
+             without either native heap entering the IME process. -->
+        <service
+            android:name=".offline.LocalStreamingRecognitionService"
+            android:exported="false"
+            android:process=":local_stream"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".offline.LocalOfflineRecognitionService"
+            android:exported="false"
+            android:process=":local_quality"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".offline.LocalPunctuationRecognitionService"
+            android:exported="false"
+            android:process=":local_punctuation"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".ime.OpenTypelessImeService"
+            android:exported="true"
+            android:foregroundServiceType="microphone"
+            android:label="@string/ime_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+    </application>
+</manifest>

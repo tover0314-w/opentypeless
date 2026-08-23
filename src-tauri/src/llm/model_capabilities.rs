@@ -89,12 +89,18 @@ mod tests {
     use super::*;
     use crate::llm::prompt::CONTEXT_PROMPT_VERSION;
 
-    const MANAGED_BASE: &str = "https://www.opentypeless.com/api/proxy";
+    const CERTIFIED_BASE: &str = "https://openrouter.ai/api/v1";
+    const CERTIFIED_MODEL: &str = "google/gemini-2.5-flash";
 
     #[test]
     fn model_capabilities_requires_exact_certified_tuple() {
         assert_eq!(
-            model_capability("cloud", MANAGED_BASE, "default", CONTEXT_PROMPT_VERSION),
+            model_capability(
+                "openrouter",
+                CERTIFIED_BASE,
+                CERTIFIED_MODEL,
+                CONTEXT_PROMPT_VERSION
+            ),
             ModelCapability::Certified
         );
     }
@@ -103,15 +109,15 @@ mod tests {
     fn model_capabilities_marks_same_provider_surface_as_best_effort() {
         assert_eq!(
             model_capability(
-                "cloud",
-                MANAGED_BASE,
+                "openrouter",
+                CERTIFIED_BASE,
                 "another-model",
                 CONTEXT_PROMPT_VERSION
             ),
             ModelCapability::BestEffort
         );
         assert_eq!(
-            model_capability("cloud", MANAGED_BASE, "default", "context-v2"),
+            model_capability("openrouter", CERTIFIED_BASE, CERTIFIED_MODEL, "context-v2"),
             ModelCapability::BestEffort
         );
     }
@@ -120,21 +126,21 @@ mod tests {
     fn model_capabilities_treats_custom_blank_and_unlisted_as_unknown() {
         assert_eq!(
             model_capability(
-                "cloud",
-                "https://custom.example/api/proxy",
-                "default",
+                "openrouter",
+                "https://custom.example/v1",
+                CERTIFIED_MODEL,
                 CONTEXT_PROMPT_VERSION,
             ),
             ModelCapability::Unknown
         );
         assert_eq!(
-            model_capability("cloud", MANAGED_BASE, "", CONTEXT_PROMPT_VERSION),
+            model_capability("openrouter", CERTIFIED_BASE, "", CONTEXT_PROMPT_VERSION),
             ModelCapability::Unknown
         );
         assert_eq!(
             model_capability(
-                "openrouter",
-                "https://openrouter.ai/api/v1",
+                "openai",
+                "https://api.openai.com/v1",
                 "unlisted/model",
                 CONTEXT_PROMPT_VERSION,
             ),

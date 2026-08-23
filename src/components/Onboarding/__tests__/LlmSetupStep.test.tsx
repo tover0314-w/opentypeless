@@ -67,7 +67,7 @@ describe('LlmSetupStep', () => {
     mockStore.config = {
       llm_provider: 'cloud',
       llm_api_key: '',
-      llm_base_url: 'https://www.opentypeless.com/api/proxy',
+      llm_base_url: 'https://legacy.invalid/api/proxy',
       llm_model: 'default',
     }
 

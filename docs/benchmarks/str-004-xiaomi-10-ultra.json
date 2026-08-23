@@ -1,0 +1,156 @@
+{
+  "accuracy_screening": {
+    "cases": 200,
+    "earlier_text_revision_count": 0,
+    "english_wer": 0.4018302828618968,
+    "first_partial_audio_seconds_p50": 0.64,
+    "first_partial_audio_seconds_p95": 3.04,
+    "mandarin_cer": 0.12475822050290135,
+    "mixed_mer": 0.2288329519450801,
+    "partial_coverage": 0.955,
+    "platform": "macOS-14.8.2-arm64-arm-64bit",
+    "processing_rtf_p50": 0.042484093321858304,
+    "processing_rtf_p95": 0.05648117817084607,
+    "report_sha256": "1e3071c739fafb597ff63fc07da3153f61b4dbf28a8cbb3fd2a2ee533bf00ed6"
+  },
+  "artifacts": {
+    "app_android_test": {
+      "bytes": 1052271,
+      "sha256": "7368d3d48d7766b9b193458dd57ac236814bf5a98f89780f1bf0b0492a2f9377"
+    },
+    "app_debug": {
+      "bytes": 56414377,
+      "sha256": "e90d39cea6559745dddb279bb2b0518bbfb563f9a48adc0e0a078bb48fe2ea88"
+    },
+    "candidate": {
+      "files": {
+        "decoder.int8.onnx": {
+          "bytes": 71664561,
+          "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f"
+        },
+        "encoder.int8.onnx": {
+          "bytes": 165462184,
+          "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a"
+        },
+        "tokens.txt": {
+          "bytes": 75756,
+          "sha256": "59aba8873a2ed1e122c25fee421e25f283b63290efbde85c1f01a853d83cb6e6"
+        }
+      },
+      "id": "streaming-paraformer-bilingual-zh-en-int8-2023-08-14",
+      "model_bytes": 237202501,
+      "revision": "8e40c43232a1c5c66c82111efc5820d3accca11b",
+      "was_preexisting": true
+    },
+    "public_device_wave": {
+      "bytes": 321744,
+      "sha256": "7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b",
+      "source": "revision-pinned upstream model test_wavs/0.wav"
+    }
+  },
+  "battery": {
+    "after": {
+      "level": 100,
+      "status": 5,
+      "temperature": 395
+    },
+    "before": {
+      "level": 100,
+      "status": 5,
+      "temperature": 393
+    }
+  },
+  "collected_at_epoch_ms": 1786772664821,
+  "decision": {
+    "authoritative_final": false,
+    "limitations": [
+      "English WER remains materially weaker than Mandarin CER",
+      "the model produced no earlier-visible-text rewrite in the 200-case run",
+      "device performance uses one public upstream WAV and is not a phone-microphone accuracy test",
+      "battery delta from this short run is observational, not a release endurance result"
+    ],
+    "reasons": [
+      "exact Android model has pinned public Mandarin/English/mixed accuracy evidence",
+      "exact arm64 runtime produced live partials and finals with measured device PSS",
+      "the prior bilingual Zipformer baseline was rejected as the bundled default"
+    ],
+    "role": "on-device replaceable first-pass streaming candidate",
+    "selected_for_str005": "streaming-paraformer-bilingual-zh-en-int8-2023-08-14",
+    "supports_earlier_text_revision": false
+  },
+  "device": {
+    "abi": "arm64-v8a",
+    "device": "cas",
+    "incremental": "V816.0.4.0.TJJCNXM",
+    "manufacturer": "Xiaomi",
+    "model": "M2007J1SC",
+    "release": "13",
+    "sdk": "33"
+  },
+  "head": "80d20496c4eb59e4f27281becfa8a32021212e53",
+  "privacy": {
+    "changes_default_ime": false,
+    "contains_adb_serial": false,
+    "contains_transcript": false,
+    "contains_user_audio": false,
+    "records_microphone": false
+  },
+  "rejected_baseline": {
+    "candidate": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
+    "decision": "reject_as_bundled_default",
+    "public_real_speech": {
+      "ascend_test_subset": {
+        "cases": 100,
+        "en_wer": 0.408284,
+        "mixed_mer": 0.244851,
+        "zh_cer": 0.108108
+      },
+      "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c",
+      "cases": 200,
+      "duration_seconds": 1259.793125,
+      "english_excluding_rms_below_0_002_wer": 0.3207,
+      "fleurs_validation_subset": {
+        "cases": 100,
+        "en_wer": 0.626331,
+        "zh_cer": 0.127844
+      },
+      "low_rms_english": {
+        "cases": 26,
+        "partial_results": 4,
+        "wer": 0.96124
+      },
+      "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+      "mode": "beam_baseline",
+      "observed_maximum_resident_set_bytes": 495861760,
+      "partial_result_coverage": 0.825,
+      "streaming_processing_rtf_p50": 0.084,
+      "streaming_processing_rtf_p95": 0.115
+    },
+    "report_sha256": "4adc683ff31120322ae804d0a1be941bad31c68129bcad929f38614d89ef0f4e"
+  },
+  "schema": 1,
+  "serial_redacted": "632b0245195e",
+  "task_id": "STR-004",
+  "xiaomi_device_performance": {
+    "str004_audio_duration_ms": 10053,
+    "str004_audio_sha256": "7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b",
+    "str004_candidate_id": "streaming-paraformer-bilingual-zh-en-int8-2023-08-14",
+    "str004_contains_audio": "false",
+    "str004_contains_transcript": "false",
+    "str004_final_code_points_min": 55,
+    "str004_fresh_first_partial_ms": 2803,
+    "str004_fresh_partial_count": 12,
+    "str004_fresh_peak_pss_kib": 343013,
+    "str004_fresh_stop_to_final_ms": 106,
+    "str004_fresh_total_ms": 10492,
+    "str004_model_bytes": 237202501,
+    "str004_warm_first_partial_ms_p50": 1327,
+    "str004_warm_first_partial_ms_p95": 1333,
+    "str004_warm_partial_count_min": 12,
+    "str004_warm_peak_pss_kib_max": 334024,
+    "str004_warm_stop_to_final_ms_p50": 102,
+    "str004_warm_stop_to_final_ms_p95": 266,
+    "str004_warm_total_ms_p50": 10316,
+    "str004_warm_total_ms_p95": 10478
+  }
+}

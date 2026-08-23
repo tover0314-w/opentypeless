@@ -1,0 +1,69 @@
+{
+  "candidate": {
+    "archive": "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2",
+    "archive_sha256": "27ffbd9ee24ad186d99acc2f6354d7992b27bcab490812510665fa8f9389c5f8",
+    "license": "Apache-2.0",
+    "selected_model_bytes": 199068769,
+    "sherpa_onnx": "1.13.4"
+  },
+  "decision": "reject_as_bundled_default",
+  "environment": {
+    "platform": "macOS 14.8.2 arm64",
+    "threads": 4,
+    "chunk_ms": 100
+  },
+  "public_real_speech": {
+    "cases": 200,
+    "duration_seconds": 1259.793125,
+    "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+    "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c",
+    "mode": "beam_baseline",
+    "ascend_test_subset": {
+      "cases": 100,
+      "zh_cer": 0.108108,
+      "en_wer": 0.408284,
+      "mixed_mer": 0.244851
+    },
+    "fleurs_validation_subset": {
+      "cases": 100,
+      "zh_cer": 0.127844,
+      "en_wer": 0.626331
+    },
+    "english_excluding_rms_below_0_002_wer": 0.3207,
+    "low_rms_english": {
+      "cases": 26,
+      "wer": 0.96124,
+      "partial_results": 4
+    },
+    "partial_result_coverage": 0.825,
+    "streaming_processing_rtf_p50": 0.084,
+    "streaming_processing_rtf_p95": 0.115,
+    "observed_maximum_resident_set_bytes": 495861760
+  },
+  "synthetic_personalization_smoke": {
+    "cases": 142,
+    "manifest_sha256": "28f3d9e6ef199c8fd3b6cdfa86c172da1ed0f6af5110dd0459ae9d80fc35efed",
+    "audio_set_sha256": "47c748c21e47feeed5e73ec395dcf028e369259b1ca4dbf4aa48ff3ca526ae5a",
+    "beam_baseline": {
+      "zh_cer": 0.041,
+      "en_wer": 0.333,
+      "mixed_mer": 0.427,
+      "entity_recall": 0.183
+    },
+    "hotword_score_1_5": {
+      "zh_cer": 0.038,
+      "en_wer": 0.314,
+      "mixed_mer": 0.394,
+      "entity_recall": 0.35,
+      "false_hotword_insertions": 0,
+      "false_correction_insertions": 0,
+      "control_cases": 32
+    },
+    "hotword_score_3": {
+      "mixed_mer": 0.451,
+      "entity_recall": 0.417
+    }
+  },
+  "runner_script_sha256": "918fd012b4c83468b642bcb53f5076cb5ec1deb854fa0703ed8734f3840b73d8",
+  "metrics_script_sha256": "251fe56062ddcab15d3252c16429738247c70d36143a126190fef094dde606bf"
+}

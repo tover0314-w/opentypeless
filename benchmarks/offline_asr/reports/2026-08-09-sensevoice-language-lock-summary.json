@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "decision": {
+    "explicit_zh_or_cmn": "sense_voice_zh",
+    "english_and_unmeasured_languages": "sense_voice_auto",
+    "reason": "zh lock improved Mandarin, mixed speech, and synthetic entities; en lock regressed public English"
+  },
+  "model": {
+    "model_sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+    "tokens_sha256": "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc"
+  },
+  "inputs": {
+    "public_200": {
+      "manifest_sha256": "7c7acf0c11057071c7e6ff4f5e46f641abc982b23dee8c8e5f7a91e98b98bad4",
+      "audio_set_sha256": "9e956237c16c74c263d66bcc930058daeda7c34810acf5de87612269a49ff07c",
+      "baseline_results_sha256": "9a279a40e6dabca4841228bed10d5f01f75c04049a24ec95de9203ffc43cfd6a",
+      "experiment_results_sha256": "a72ed733b14b1c6d95f4cbd70b2eb65d5837bb0c47fc001f456098685e2caeda"
+    },
+    "synthetic_142": {
+      "manifest_sha256": "28f3d9e6ef199c8fd3b6cdfa86c172da1ed0f6af5110dd0459ae9d80fc35efed",
+      "audio_set_sha256": "47c748c21e47feeed5e73ec395dcf028e369259b1ca4dbf4aa48ff3ca526ae5a",
+      "baseline_results_sha256": "64434ac8df2e2248d9a2f328756a501235b64d7f4e0b9fcf2eb39295786ca0f7",
+      "experiment_results_sha256": "42c92e6d0452fdc3f4363d41c8765a4ea76ec7e2635bc82701b4f70361e3d335"
+    }
+  },
+  "public_200": {
+    "auto": {"overall": 0.11141084434852981, "zh_cer": 0.10589941972920697, "en_wer": 0.08735440931780367, "mixed_mer": 0.2036613272311213},
+    "zh": {"overall": 0.11087132452117615, "zh_cer": 0.10009671179883946, "en_wer": 0.10316139767054909, "mixed_mer": 0.18306636155606407, "improved": 16, "worsened": 21, "tied": 163},
+    "en": {"overall": 0.1904504990558403, "zh_cer": 0.20454545454545456, "en_wer": 0.09151414309484193, "mixed_mer": 0.39588100686498856, "improved": 10, "worsened": 63, "tied": 127}
+  },
+  "synthetic_142": {
+    "auto": {"overall": 0.12278630460448642, "zh_cer": 0.04157782515991471, "en_wer": 0.1, "mixed_mer": 0.4796747967479675, "entity_hits": 16, "entity_total": 60},
+    "zh": {"overall": 0.1115702479338843, "zh_cer": 0.04051172707889126, "en_wer": 0.09607843137254903, "mixed_mer": 0.4146341463414634, "entity_hits": 19, "entity_total": 60, "false_hotword_insertions": 0, "false_correction_insertions": 0, "improved": 13, "worsened": 3, "tied": 126}
+  },
+  "android_gate": {
+    "platform": "API 36 arm64 emulator",
+    "configured_language": "zh-CN",
+    "fresh_download_and_exact_transcript": true,
+    "cold_transcribe_ms": 1082,
+    "vm_hwm_kib": 467212
+  },
+  "baseline_runner_sha256": "df0ad9ddf97cd14c89f2d3866e3cacec26395c119d975e87147612b7810df140",
+  "experiment_script_sha256": "8212537ee6df243b000923e208999d8967631d00c4295ce5de17b836e3b61f60"
+}

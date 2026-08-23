@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "engine": {
+    "engineId": "android-system-default",
+    "displayName": "Android system speech recognizer",
+    "modelRevision": "device-component-build",
+    "processingLocation": "ANDROID_SYSTEM_SERVICE",
+    "capabilities": ["LIVE_REVISIONS", "SEGMENT_FINALS"]
+  },
+  "sessionId": "fixture-system",
+  "events": [
+    {"type":"prepare","engineId":"android-system-default","eventSequence":1,"sessionId":"fixture-system"},
+    {"type":"ready","engineId":"android-system-default","eventSequence":2,"sessionId":"fixture-system"},
+    {"type":"openSegment","engineId":"android-system-default","eventSequence":3,"sessionId":"fixture-system","segmentId":1,"joinBefore":"NONE"},
+    {"type":"transcript","engineId":"android-system-default","eventSequence":4,"revision":{"sessionId":"fixture-system","segmentId":1,"revisionId":1,"stage":"LIVE","fullText":"Open Type","audioStartMs":-1,"audioEndMs":-1,"origin":"STREAM_ASR","providerFinal":false,"tokenEvidence":[]}},
+    {"type":"transcript","engineId":"android-system-default","eventSequence":5,"revision":{"sessionId":"fixture-system","segmentId":1,"revisionId":2,"stage":"LIVE","fullText":"OpenTypeless","audioStartMs":-1,"audioEndMs":-1,"origin":"STREAM_ASR","providerFinal":true,"tokenEvidence":[]}},
+    {"type":"hardBoundary","engineId":"android-system-default","eventSequence":6,"sessionId":"fixture-system","segmentId":1},
+    {"type":"sealSegment","engineId":"android-system-default","eventSequence":7,"sessionId":"fixture-system","segmentId":1},
+    {"type":"stopRequested","engineId":"android-system-default","eventSequence":8,"sessionId":"fixture-system"},
+    {"type":"captureEnded","engineId":"android-system-default","eventSequence":9,"sessionId":"fixture-system","reason":"END_OF_AUDIO"}
+  ]
+}

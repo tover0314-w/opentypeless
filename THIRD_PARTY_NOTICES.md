@@ -1,6 +1,16 @@
 # Third-Party Notices
 
-OpenTypeless includes the following components for managed-cloud Ogg/Opus audio. The Opus codec is built statically into the desktop application; end users do not need to install a system codec. Building the desktop application requires Rust 1.82 or newer and CMake 3.16 or newer.
+OpenTypeless includes the following components for Ogg/Opus audio encoding used by compatible STT providers. The Opus codec is built statically into the desktop application; end users do not need to install a system codec. Building the desktop application requires Rust 1.82 or newer and CMake 3.16 or newer.
+
+The reproducible dependency categories and release-target coverage are generated in [THIRD_PARTY_INVENTORY.md](THIRD_PARTY_INVENTORY.md). Extracted package license files, copyright notices, vendored native-code licenses, and cargo-about fallback texts are generated in [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt). `LICENSE` and all three third-party files are bundled with desktop distributions and can be opened offline from the About screen.
+
+This hand-maintained notice highlights native code that has binary-redistribution and patent-notice considerations. It supplements, rather than replaces, the complete generated license material.
+
+## Brand assets and trademarks
+
+Third-party product names shown by OpenTypeless are used only to identify applications or services selected by the user. They remain the property of their respective owners; their appearance does not imply affiliation, sponsorship, or endorsement. The open-source licenses collected for software dependencies do not grant trademark rights.
+
+The desktop UI uses generic family glyphs supplied by the licensed `lucide-react` dependency instead of third-party logo artwork. No third-party brand-image reference directory is shipped in this source tree or imported into the desktop bundle.
 
 ## opusic-c 1.6.1
 

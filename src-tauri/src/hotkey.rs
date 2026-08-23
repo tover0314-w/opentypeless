@@ -5,7 +5,6 @@ use crate::storage;
 use crate::AskHotkeyCache;
 use crate::HotkeyModeCache;
 use crate::HotkeyRoleCache;
-use crate::SessionTokenStore;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::Emitter;
@@ -780,18 +779,9 @@ async fn stop_ask_shortcut(handle: tauri::AppHandle) {
 
     let ask_state = handle.state::<commands::ask::AskDictationState>();
     let config_state = handle.state::<storage::ConfigManager>();
-    let token_store = handle.state::<SessionTokenStore>();
     let client = handle.state::<reqwest::Client>();
 
-    match commands::ask::stop_ask_dictation(
-        handle.clone(),
-        ask_state,
-        config_state,
-        token_store,
-        client,
-    )
-    .await
-    {
+    match commands::ask::stop_ask_dictation(handle.clone(), ask_state, config_state, client).await {
         Ok(result) if result.should_show_window() => show_ask_result_window(&handle, &result),
         Ok(_) => {}
         Err(message) if message == "Ask dictation is not recording" => {}
@@ -811,14 +801,12 @@ fn start_ask_shortcut(handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let ask_state = handle.state::<commands::ask::AskDictationState>();
         let config_state = handle.state::<storage::ConfigManager>();
-        let token_store = handle.state::<SessionTokenStore>();
         let client = handle.state::<reqwest::Client>();
 
         if let Err(message) = commands::ask::start_reserved_ask_dictation(
             handle.clone(),
             ask_state,
             config_state,
-            token_store,
             client,
             true,
         )

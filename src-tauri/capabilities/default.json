@@ -27,9 +27,6 @@
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
     "autostart:default",
-    "process:default",
-    "updater:default",
-    "opener:default",
-    "deep-link:default"
+    "opener:default"
   ]
 }

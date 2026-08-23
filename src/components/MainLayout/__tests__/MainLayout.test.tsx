@@ -43,16 +43,9 @@ vi.mock('react-i18next', () => ({
         'nav.ask': 'Ask',
         'nav.settings': 'Settings',
         'nav.history': 'History',
-        'nav.upgrade': 'Upgrade',
-        'nav.account': 'Account',
         'nav.mainNavigation': 'Main navigation',
       })[key] ?? key,
   }),
-}))
-
-vi.mock('../../../stores/authStore', () => ({
-  hasManagedCloudAccess: () => false,
-  useAuthStore: (selector: any) => (typeof selector === 'function' ? selector({}) : {}),
 }))
 
 afterEach(() => {

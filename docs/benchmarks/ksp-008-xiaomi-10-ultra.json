@@ -1,0 +1,170 @@
+{
+  "artifacts": {
+    "A": {
+      "apks": [
+        {
+          "bytes": 33949144,
+          "name": "floris-ksp003-main.apk",
+          "sha256": "0e98f7458ab2aa0237afbdb3ab56c56e380fa21db397f0a72ba5bee2e436f648"
+        },
+        {
+          "bytes": 33349121,
+          "name": "app-debug.apk",
+          "sha256": "81e44ab5565953be838188311813f5c208d41bcd763a6c21b478095175089277"
+        }
+      ],
+      "distribution_proxy_total_bytes": 67298265
+    },
+    "B": {
+      "apks": [
+        {
+          "bytes": 59762479,
+          "name": "org.fcitx.fcitx5.android-0.1.3-0-g048f581-arm64-v8a-debug.apk",
+          "sha256": "1471ad9e4a82502ea1bde4dbbc0f5bcd18148d712394c2f45991b5960ee5cbec"
+        },
+        {
+          "bytes": 8942660,
+          "name": "org.fcitx.fcitx5.android.plugin.rime-0.1.3-0-g048f581-arm64-v8a-debug.apk",
+          "sha256": "fc4a1f426934dae7c2de9ca2ea4413f8b693b7202285a6d252379a220d91c5a2"
+        }
+      ],
+      "distribution_proxy_total_bytes": 68705139
+    }
+  },
+  "battery_after": {
+    "level_percent": 100,
+    "temperature_tenths_c": 384
+  },
+  "battery_before": {
+    "level_percent": 100,
+    "temperature_tenths_c": 384
+  },
+  "cold_start": {
+    "A": {
+      "activity_initial_display_ms": {
+        "max": 437,
+        "min": 369,
+        "p50": 431,
+        "p95": 437,
+        "samples": [369, 394, 386, 437, 431, 432, 412, 435, 431, 436]
+      },
+      "cold_command_wait_ms": {
+        "max": 444,
+        "min": 372,
+        "p50": 434,
+        "p95": 444,
+        "samples": [372, 397, 389, 440, 434, 440, 416, 444, 434, 440]
+      },
+      "iterations": 10,
+      "post_launch_total_pss_kb": 78573
+    },
+    "B": {
+      "activity_initial_display_ms": {
+        "max": 1128,
+        "min": 968,
+        "p50": 1039,
+        "p95": 1128,
+        "samples": [968, 1019, 1039, 1128, 1006, 1118, 1041, 1117, 1013, 1106]
+      },
+      "cold_command_wait_ms": {
+        "max": 1144,
+        "min": 979,
+        "p50": 1050,
+        "p95": 1144,
+        "samples": [979, 1030, 1051, 1144, 1018, 1130, 1050, 1130, 1022, 1115]
+      },
+      "iterations": 10,
+      "post_launch_total_pss_kb": 139111
+    }
+  },
+  "comparison_limits": {
+    "decision": "KSP-008 records performance only and does not choose a keyboard base",
+    "route_a_memory_and_apk": "Floris shell and KSP-004 adapter are separate spike packages, so totals are a distribution proxy rather than an integrated-process measurement",
+    "route_a_rime": "isolated KSP-004 adapter with a synthetic two-entry schema; it measures adapter/JNI plumbing, not full-dictionary language complexity",
+    "route_b_rime": "official fcitx5-android Rime plugin with its actual test schema/data"
+  },
+  "device": {
+    "abi": "arm64-v8a",
+    "adb_target": "explicit_serial_redacted",
+    "android_release": "13",
+    "api": "33",
+    "build_fingerprint": "Xiaomi/cas/cas:13/TKQ1.221114.001/V816.0.4.0.TJJCNXM:user/release-keys",
+    "default_ime": "com.flypy.input/PangIME.Android.InputService",
+    "device": "cas",
+    "manufacturer": "Xiaomi",
+    "model": "M2007J1SC",
+    "screen_off_timeout_ms": 600000,
+    "security_patch": "2024-03-01",
+    "stay_on_while_plugged_in": 0
+  },
+  "first_install_observation": {
+    "A": {
+      "qwerty_p95_us": 5552,
+      "rime_candidate_p95_us": 427,
+      "rime_cold_init_us": 16045
+    },
+    "B": {
+      "qwerty_p95_us": 5620,
+      "rime_candidate_p95_us": 4319,
+      "rime_cold_init_us": 9726915
+    },
+    "note": "One successful instrumentation pass immediately after the candidate benchmark APKs were installed. This is retained as first-install evidence; the repeatable final table below uses existing candidate storage and does not clear app data."
+  },
+  "instrumentation": {
+    "A": [
+      {
+        "benchmark_process_package": "dev.patrickgold.florisboard.debug.test",
+        "iterations": 250,
+        "max_us": 15327,
+        "metric": "qwerty_transaction",
+        "p50_us": 4726,
+        "p95_us": 5649,
+        "process_pss_kb": 58209,
+        "route": "A"
+      },
+      {
+        "benchmark_process_package": "com.opentypeless.ksp004.test",
+        "cold_init_us": 23378,
+        "iterations": 200,
+        "max_us": 552,
+        "metric": "rime_candidate_ni",
+        "p50_us": 279,
+        "p95_us": 392,
+        "process_pss_kb": 32242,
+        "route": "A"
+      }
+    ],
+    "B": [
+      {
+        "benchmark_process_package": "org.fcitx.fcitx5.android.debug.test",
+        "iterations": 250,
+        "max_us": 13784,
+        "metric": "qwerty_transaction",
+        "p50_us": 4659,
+        "p95_us": 5708,
+        "process_pss_kb": 100537,
+        "route": "B"
+      },
+      {
+        "benchmark_process_package": "org.fcitx.fcitx5.android.debug.test",
+        "cold_init_us": 752371,
+        "iterations": 120,
+        "max_us": 7639,
+        "metric": "rime_candidate_ni",
+        "p50_us": 5254,
+        "p95_us": 6150,
+        "process_pss_kb": 101129,
+        "route": "B"
+      }
+    ]
+  },
+  "measurement_semantics": {
+    "activity_initial_display_ms": "ActivityManager am start -W TotalTime: cold process start through initial display",
+    "cold_command_wait_ms": "ActivityManager am start -W WaitTime",
+    "instrumentation_pss_kb": "process PSS sampled inside each isolated benchmark process",
+    "post_launch_total_pss_kb": "dumpsys meminfo TOTAL PSS after launcher activity start",
+    "rime_cold_init_us": "first engine initialization in a new instrumentation process using existing app data; the script does not clear candidate storage"
+  },
+  "schema_version": 1,
+  "task": "KSP-008"
+}

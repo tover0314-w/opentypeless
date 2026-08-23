@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="home_route_value" type="id" />
+    <item name="settings_home_route_card" type="id" />
+    <item name="settings_home_voice_row" type="id" />
+    <item name="settings_home_privacy_row" type="id" />
+    <item name="settings_home_rime_row" type="id" />
+    <item name="settings_home_feedback_row" type="id" />
+    <item name="keyboard_haptic_system" type="id" />
+    <item name="keyboard_haptic_on" type="id" />
+    <item name="keyboard_haptic_off" type="id" />
+    <item name="keyboard_haptic_strength" type="id" />
+    <item name="keyboard_sound_enabled" type="id" />
+    <item name="keyboard_sound_volume" type="id" />
+    <item name="keyboard_feedback_preview" type="id" />
+    <item name="rime_resource_status" type="id" />
+    <item name="rime_resource_import" type="id" />
+    <item name="rime_resource_clear" type="id" />
+    <item name="voice_lab_v2_shadow" type="id" />
+    <item name="app_profile_selected_app" type="id" />
+    <item name="app_profile_choose_app" type="id" />
+    <item name="app_profile_advanced_package" type="id" />
+    <item name="app_profile_package_input" type="id" />
+    <item name="app_picker_search" type="id" />
+    <item name="app_picker_status" type="id" />
+    <item name="app_picker_list" type="id" />
+</resources>

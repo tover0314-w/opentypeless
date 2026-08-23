@@ -13,77 +13,9 @@ export const UI_LANGUAGES = [
 ] as const
 
 export const APP_NAME = 'OpenTypeless'
-export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'v0.1.42'
-export const CLIENT_VERSION_HEADER = 'X-OpenTypeless-Version'
-export const APP_VERSION_HEADER_VALUE = APP_VERSION.replace(/^v/i, '')
-export const APP_REPO_URL = 'https://github.com/tover0314-w/opentypeless'
-export const APP_LICENSE_URL = 'https://github.com/tover0314-w/opentypeless/blob/main/LICENSE'
-// Cloud API base URL — defaults to www.opentypeless.com but can be overridden via VITE_API_BASE_URL env var.
-// All core features (BYOK mode) work without any cloud connection.
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://www.opentypeless.com'
-
-export const FREE_PLAN = {
-  sttMinutes: 15,
-  llmTokens: 100_000,
-} as const
-
-export type CheckoutProduct = 'pro_monthly' | 'lifetime_starter'
-
-const CLOUD_PLAN_BENEFITS = [
-  { labelKey: 'upgrade.benefits.cloudWords' },
-  { labelKey: 'upgrade.benefits.noApiKey' },
-  { labelKey: 'upgrade.benefits.backupScenes' },
-] as const
-
-type CloudPlanBenefit = (typeof CLOUD_PLAN_BENEFITS)[number]
-
-export type CheckoutPlan = {
-  product: CheckoutProduct
-  nameKey: string
-  descriptionKey: string
-  badgeKey?: string
-  sublineKey?: string
-  price: string
-  upgradePrice?: string
-  upgradeSublineKey?: string
-  periodKey: string
-  ctaKey: string
-  benefits: readonly CloudPlanBenefit[]
-}
-
-export const PRO_PLAN = {
-  product: 'pro_monthly',
-  nameKey: 'upgrade.pro',
-  descriptionKey: 'upgrade.planDescriptions.pro',
-  price: '$4.99',
-  periodKey: 'upgrade.month',
-  ctaKey: 'upgrade.subscribeToPro',
-  benefits: CLOUD_PLAN_BENEFITS,
-} satisfies CheckoutPlan
-
-export const LIFETIME_PLAN = {
-  product: 'lifetime_starter',
-  nameKey: 'upgrade.lifetime',
-  descriptionKey: 'upgrade.planDescriptions.lifetime',
-  badgeKey: 'upgrade.lifetimeBadge',
-  sublineKey: 'upgrade.lifetimeSave',
-  price: '$89.99',
-  upgradePrice: '$84.99',
-  upgradeSublineKey: 'upgrade.lifetimeUpgradeSave',
-  periodKey: 'upgrade.oneTime',
-  ctaKey: 'upgrade.buyLifetime',
-  benefits: CLOUD_PLAN_BENEFITS,
-} satisfies CheckoutPlan
-
-export const CHECKOUT_PLANS: CheckoutPlan[] = [PRO_PLAN, LIFETIME_PLAN]
-
-export const DEFAULT_CHECKOUT_PRODUCT: CheckoutProduct = 'pro_monthly'
-
-export const ACTIVE_CLOUD_PLANS = ['pro', 'lifetime_starter'] as const
-
-export function isActiveCloudPlan(plan: string): plan is (typeof ACTIVE_CLOUD_PLANS)[number] {
-  return ACTIVE_CLOUD_PLANS.includes(plan as (typeof ACTIVE_CLOUD_PLANS)[number])
-}
+export const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? 'v1.2.0'
+export const APP_REPO_URL = 'https://github.com/dengxuezhao/opentypeless'
+export const APP_LICENSE_URL = 'https://github.com/dengxuezhao/opentypeless/blob/main/LICENSE'
 
 export const CUSTOM_WHISPER_PROVIDER = 'custom-whisper' as const
 export const APPLE_SPEECH_PROVIDER = 'apple-speech' as const
@@ -118,7 +50,6 @@ export const STT_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'siliconflow', labelKey: 'providers.stt.siliconflow' },
   { value: APPLE_SPEECH_PROVIDER, labelKey: 'providers.stt.appleSpeech' },
   { value: CUSTOM_WHISPER_PROVIDER, labelKey: 'providers.stt.customWhisper' },
-  { value: 'cloud', labelKey: 'providers.stt.cloud' },
 ] as const
 
 export const VOLCENGINE_STT_RESOURCES = [
@@ -134,9 +65,7 @@ export const VOLCENGINE_STT_RESOURCES = [
 
 export const ONBOARDING_STT_PROVIDERS = STT_PROVIDERS.filter(
   (provider) =>
-    provider.value !== CUSTOM_WHISPER_PROVIDER &&
-    provider.value !== APPLE_SPEECH_PROVIDER &&
-    provider.value !== 'cloud',
+    provider.value !== CUSTOM_WHISPER_PROVIDER && provider.value !== APPLE_SPEECH_PROVIDER,
 )
 
 export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
@@ -152,12 +81,9 @@ export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'claude', labelKey: 'providers.llm.claude' },
   { value: 'ollama', labelKey: 'providers.llm.ollama' },
   { value: 'openrouter', labelKey: 'providers.llm.openrouter' },
-  { value: 'cloud', labelKey: 'providers.llm.cloud' },
 ] as const
 
-export const ONBOARDING_LLM_PROVIDERS = LLM_PROVIDERS.filter(
-  (provider) => provider.value !== 'cloud',
-)
+export const ONBOARDING_LLM_PROVIDERS = LLM_PROVIDERS
 
 export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string }> = {
   zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
@@ -178,7 +104,6 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   claude: { baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4' },
   ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
-  cloud: { baseUrl: `${API_BASE_URL}/api/proxy`, model: 'default' },
 }
 
 export function llmProviderRequiresApiKey(provider: string): boolean {

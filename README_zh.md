@@ -1,360 +1,130 @@
-<p align="center">
-  <a href="README.md">English</a> | <strong>中文</strong> | <a href="README_ja.md">日本語</a> | <a href="README_ko.md">한국어</a> | <a href="README_es.md">Español</a> | <a href="README_fr.md">Français</a> | <a href="README_de.md">Deutsch</a> | <a href="README_pt.md">Português</a> | <a href="README_ru.md">Русский</a> | <a href="README_ar.md">العربية</a> | <a href="README_hi.md">हिन्दी</a> | <a href="README_it.md">Italiano</a> | <a href="README_tr.md">Türkçe</a> | <a href="README_vi.md">Tiếng Việt</a> | <a href="README_th.md">ภาษาไทย</a> | <a href="README_id.md">Bahasa Indonesia</a> | <a href="README_pl.md">Polski</a> | <a href="README_nl.md">Nederlands</a>
-</p>
+# OpenTypeless BYOK + Android Voice Studio
 
-<p align="center">
-  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="OpenTypeless Logo" />
-</p>
+[English](README.md)
 
-<h1 align="center">OpenTypeless</h1>
+这是一个独立维护的 MIT fork：已去掉 OpenTypeless 的账户、订阅、结账、额度、捐助入口和托管云运行链路，保留桌面端 BYOK 能力，并新增 OpenTypeless Android 0.3。它不是把“ASR + LLM”强行用于所有输入，而是一套本地优先、可验证、可撤回的系统级语音输入层。
 
-<p align="center">
-  开源版 Wispr Flow / Superwhisper：面向 macOS、Windows 和 Linux 的 AI 语音输入、改写和语音问答工具。
-</p>
+- Fork：[dengxuezhao/opentypeless](https://github.com/dengxuezhao/opentypeless)
+- 上游项目：[tover0314-w/opentypeless](https://github.com/tover0314-w/opentypeless)
+- 架构与开发规范：[文档索引](docs/opentypeless_specs/00_README.md)
+- 架构决策记录：[ADR 索引与生命周期](docs/adr/README.md)
+- 发布与变更历史：[变更日志](CHANGELOG.md)
+- 运行时、配置、协议与 Schema 兼容性：[兼容矩阵](docs/COMPATIBILITY.md)
 
-<p align="center">
-  无论你在写邮件、写代码、聊天还是做笔记 — 只需按下热键，<br/>
-  说出你的想法，OpenTypeless 会用 AI 转录并润色你的语音，<br/>
-  然后直接输入到你正在使用的任何应用中。
-</p>
+## Android 0.3 核心能力
 
-<p align="center">
-  如果 OpenTypeless 对你的工作流有帮助，欢迎点一个 GitHub Star，让更多人发现这个项目。
-</p>
+- **三个原生入口：**独立语音 IME、标准 `RecognitionService`、`RecognizerIntent` Activity。兼容的完整键盘可以继续提供字母、滑行输入、Emoji 和剪贴板，只把语音识别交给 OpenTypeless。
+- **本地优先：**首次安装时，只有系统确认设备端识别真正可用，才默认选择 Android 设备端；否则依次选择系统语音服务或用户明确配置的 BYOK/自建 OpenAI 兼容端点。系统语音服务是否联网由其提供方决定，界面不会把它冒充为离线。
+- **经过实测的可选离线双遍模型：**非低内存设备可主动下载固定版本的 228.45 MiB SenseVoice Small INT8 质量模型、226.21 MiB Streaming Paraformer 中英 INT8 实时模型，以及独立的 72.02 MiB CT-Transformer 中英 INT8 标点模型，均保存在不备份的 App 私有目录。每个文件会在原子安装前及首次使用前核对大小与 SHA-256，APK 不内置权重。Speech Core v2 要求两组 ASR 模型齐全；标点能力可以单独补装或修复，旧安装不会静默掉回仅终稿实现。
+- **在输入框内实时出字：**Android partial 会作为可替换的 IME composing text 写入当前编辑框。词语和标点修订会原位替换，不会重复追加，也不再只显示在状态栏；输入法自身造成的光标变化与用户换目标会被分别处理，取消只移除本次语音草稿。
+- **真流式识别：**离线 Streaming Paraformer 通过匿名管道在私有 ASR 进程消费有界的 40 ms PCM 帧；可选百炼路径通过白名单 WSS 发送同样有界的帧。两者都返回可替换 partial。OpenAI 兼容 WAV 上传仍明确标为批处理，绝不静默切换服务商。
+- **AI 可选：**精确模式和结构化字段不需要 LLM。智能整理、翻译和选中文字编辑，只有用户开启 OpenAI 兼容 LLM 后才运行。
+- **专名真正进入识别链：**用户确认的标准写法、读音、常见错词、纠正规则和 App 作用域，会在后端支持时进入 ASR prompt、Android biasing strings，并在识别后执行一次性、非级联的确定性纠正。
+- **词汇可迁移：**Android 既能导入早期 Android 个性化备份，也能导入桌面端 `opentypeless_dictionary` v1；Android 导出的兼容超集可由桌面端读取，同时为 Android 间往返保留别名、App 作用域和启用状态。
+- **只显式学习：**不会偷偷学习用户全部键盘输入。只有用户在词典页添加，或点击 **Teach** 并确认最小的“错词 → 正词”片段后，才会保存规则。
+- **事实保护与可逆 AI：**AI 输出会复核数字、金额、日期、网址、邮箱、代码形态 token、否定词和个人词。风险输出会被拦截并回退精确转写；插入后可安全 Undo，AI 听写还可一键恢复 Raw 原始转写。
+- **结果严格绑定输入目标：**每次录音都绑定 editor epoch、App、field、`InputConnection`、选区及光标前后文本指纹。切 App、切输入框、进入密码框、移动光标或改变选区后，旧结果不会写入新位置；安全的未完成文字会进入可恢复草稿。
+- **本地隐私：**API Key 与可选历史正文分别使用 Android Keystore 不可导出的 AES-GCM 密钥；历史默认关闭，支持逐条删除/全部清空，有本地数量上限，也不会进入词典导出文件。
+- **按 App 配置：**可显式设置每个 App 的 Auto/Exact/Smart/Translate 模式、翻译目标、写作偏好，以及是否允许发送有限的光标前上下文。
+- **语音体验：**轻触空格仍输入空格，按住空格即可说话、松手上屏；独立的“长文”操作用于持续听写。Speech Core v2 会把流式首遍作为可替换 composition 直接写入宿主输入框，在软停顿处加入可撤回标点，并允许隔离的 SenseVoice 质量遍在句段关闭后原位修订。OpenAI 兼容 WAV 仍明确标为“仅终稿”。最终结果会再走个人规则和事实安全门。
+- **Speech Core v2 已成为本地主管线：**连续录音、软/硬分段、不可变 `VoiceDraft` 修订、加密多段恢复和严格绑定目标的 `EditorProjection` 已接入普通离线键盘会话。Streaming Paraformer 常驻于 `:local_stream`，SenseVoice 按需运行在 `:local_quality`，语义标点运行在只接收文本的 `:local_punctuation`；语音实验室显示实际路径、修订和三个工作进程的合计 PSS。v1 只保留为显式紧急回滚，不再按模型状态静默启用。
 
-<p align="center">
-  <strong>任意应用听写</strong> · <strong>改写选中文本</strong> · <strong>语音 Ask 一次性问答</strong> · <strong>自备密钥或使用托管 cloud words</strong>
-</p>
+APK 不内置任何语音或语言模型。许可证说明见 [Android 第三方声明](android/THIRD_PARTY_NOTICES.md)。首个 189.85 MiB Zipformer 已被否决；第二轮在完整 1,315 条 ASCEND test 上测试了 SenseVoice 与 Paraformer。SenseVoice 达到普通话 CER 11.4%、英文 WER 25.9%、中英混说 MER 13.3%，并通过 API 36 arm64 的真实下载与原生识别烟测。现在使用经校验的 ASR-only 双 ABI 运行时，干净构建的通用 debug APK 已从上游全功能包的约 120 MiB 降到 52.54 MiB；但约 457 MiB 瞬时峰值仍使它不适合直接称为全设备默认。同体积档的 Paraformer Large 与 Whisper Small Q5_1 也已实测并被否决为中英默认。用户明确设置 `zh-*` 或 `cmn-*` 时，现在会启用 SenseVoice 普通话锁定；固定 A/B 将公开集普通话 CER 从 10.59% 降至 10.01%、混说 MER 从 20.37% 降至 18.31%。英文保持自动检测，因为强制 `en` 反而退化。详见
+[第二轮离线模型评测](docs/2026-08-09-offline-asr-candidate-round-2.md)和
+[可复现测试工具](benchmarks/offline_asr/README.md)。
 
-<p align="center">
-  <a href="https://github.com/tover0314-w/opentypeless/actions/workflows/ci.yml"><img src="https://github.com/tover0314-w/opentypeless/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/tover0314-w/opentypeless/releases"><img src="https://img.shields.io/github/v/release/tover0314-w/opentypeless?color=2ABBA7" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/tover0314-w/opentypeless" alt="License" /></a>
-  <a href="https://github.com/tover0314-w/opentypeless/stargazers"><img src="https://img.shields.io/github/stars/tover0314-w/opentypeless?style=social" alt="Stars" /></a>
-  <a href="https://discord.gg/V6rRpJ4RGD"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
-</p>
+Android 当前实际使用的 226.21 MiB 流式模型也已单独跑过固定 200 条 ASCEND/FLEURS 公开集：普通话 CER 12.5%、英文 WER 40.2%、中英混说 MER 22.9%，95.5% 样本能看到 partial，首个 partial 的音频位置 p50/p95 为 0.64/3.04 秒。但 1,682 次变化的 hypothesis 中，改写前面已显示文字的次数为 0。因此它单独使用时不能冒充百度式“边说边回头纠词”。Speech Core v2 现在把它作为低延迟首遍，再通过软停顿临时标点和 SenseVoice 分段质量复核实现前文修订。独立 CT-Transformer 会在停顿及质量终稿后给出标点候选；只有候选未改变大小写敏感的正文、段落、数字、网址、邮箱和代码形态文本时才会被接受。三组模型位于独立私有进程，内存/热策略可选择并发、顺序或仅流式。详见 [v2 架构](docs/2026-08-11-speech-core-v2-architecture.md)和[固定流式模型结果](benchmarks/offline_asr/reports/2026-08-12-streaming-paraformer-summary.json)。
 
-<p align="center">
-  <img src="docs/images/v1.1.49-app-context-showcase.jpg" width="820" alt="OpenTypeless 在 Gmail、Slack、Google Docs、Cursor、Zendesk 和 LinkedIn 中的应用感知语音输入" />
-</p>
+## 场景策略
 
-<p align="center">
-  <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless 演示" />
-</p>
+| 场景 | Auto 行为 | 生成式 AI |
+| --- | --- | --- |
+| 密码/敏感字段 | 禁用语音 | 永不调用 |
+| URL、邮箱、数字、人名、搜索 | 精确转写 + 已确认本地规则 | 跳过 |
+| 消息、长文本、普通正文 | 开启后进行保守智能整理；失败回退精确转写 | 可选 |
+| 选中文字 | 语音明确编辑，并在写入前复核选区 | 必需；失败保留原文 |
+| 翻译 | 忠实翻译到配置目标 | 必需；失败不会插入语音指令 |
 
-## v1.1.49 新功能
+遇到 `IME_FLAG_NO_PERSONALIZED_LEARNING` 时，OpenTypeless 不采集上下文、不写历史、不增加使用学习计数；已有且用户确认过的词典仍可辅助当前识别，但不会被修改。
 
-- **应用感知写作**会在本地识别当前应用，并针对邮件、聊天、文档、Issue 跟踪、开发工具等场景调整结构和语气。
-- **语音意图路由**可区分普通听写、选中文本编辑、翻译、Ask Anything 和受支持的语音操作，并支持简体中文、繁体中文和英文。
-- **每个工作流支持多个快捷键**，可为听写、Ask Anything 和翻译分别添加和排序多个按键组合。
-- **可切换翻译目标语言**，无需始终固定为同一种输出语言。
-- **更完整的本地词典**支持纠错规则以及词典导入导出。
-- **按应用设置写作风格**，可覆盖内置应用分类，为特定应用指定其他写作场景。
+## 隐私与网络边界
 
-应用识别、映射、词典和纠错规则都保存在本地。应用感知润色只会向配置的 LLM 发送内部应用分类和经过审核的风格元数据；原始窗口标题和文档内容不会作为应用上下文发送，也不会写入历史记录。
+- “Android 设备端”只通过 `SpeechRecognizer.createOnDeviceSpeechRecognizer` 使用；是否可用取决于设备和已安装语言模型。
+- “Android 系统服务”可能本地也可能云端，OpenTypeless 会单独标识，不宣称它一定离线。
+- 可选 OpenTypeless 离线路径的识别音频不会离开设备；只有下载固定模型时联网，并且下载请求不携带服务商凭证。
+- BYOK 音频只直连用户配置的 `/audio/transcriptions`；开启 Smart、Translate 或选区编辑时，所需文本才直连 `/chat/completions`。
+- Paraformer 音频只会发往用户配置且通过校验的百炼官方 WSS inference 主机；其 API Key 使用独立 Android Keystore 加密项。
+- 禁止 HTTP 重定向；不向界面回显服务端错误正文；响应大小有上限；凭证和 header 控制字符会在联网前校验。
+- 公网地址必须 HTTPS。只有用户明确填写 localhost、链路本地或私有 LAN 自建服务时才允许 HTTP；除本机回环地址外，Bearer/API 密钥必须使用 HTTPS，明文 LAN 服务需将密钥留空。
+- 密码字段不能开始录音；Android 备份与设备迁移已禁用；设置、历史和管理页使用 `FLAG_SECURE`。
 
-| 应用感知 AI 润色 | 本地词典与纠错规则 |
-| --- | --- |
-| <img src="docs/images/v1.1.49-app-aware-polish.jpg" width="420" alt="OpenTypeless v1.1.49 应用感知 AI 润色" /> | <img src="docs/images/v1.1.49-dictionary.jpg" width="420" alt="OpenTypeless v1.1.49 本地词典与纠错规则" /> |
+## 安装与使用
 
-<details>
-<summary>更多截图</summary>
+1. 安装 `android/app/build/outputs/apk/debug/app-debug.apk`，或安装经过正确签名的 release APK。
+2. 打开 **OpenTypeless Voice Studio**，授予麦克风权限，并确认识别路径。只有平台报告可用时，才会默认选择设备端。
+3. 可选下载质量优先离线模型，或配置批处理 BYOK STT、百炼 Paraformer 真流式识别和 LLM。AI、历史、光标前上下文默认全部关闭。
+4. 启用 OpenTypeless IME。若要使用任一 Android 标准语音入口，先配置可用的 BYOK STT，显式开启“Android 标准语音入口”，并把调用方的准确包名加入白名单；之后再把 OpenTypeless 选为语音识别服务，或由该白名单 App 启动其 `RecognizerIntent` Activity。部分闭源键盘会硬编码自家语音服务，此时使用独立 IME 或系统键盘切换。
+5. 选择 Auto、Exact、Smart 或 Translate 后，可按住空格说短句、松手上屏；长文本使用独立的“长文”操作并明确结束。支持 partial 的路线会把实时文字作为可修订的 composing text，最终识别原位替换它；final-only 路线不会伪装成实时。编辑选中文字时，结果返回前必须仍是同一个选区。
 
-<p align="center">
-  <img src="docs/images/app-main-light.png" width="720" alt="OpenTypeless 主窗口" />
-</p>
+两个导出的标准语音入口都只使用用户明确配置的 BYOK/流式 STT，并且默认关闭；包名白名单与请求限流可以阻止任意拥有麦克风权限的 App 消耗用户的 provider 配额。注册为系统语音服务后若再次调用系统 recognizer，可能解析回自己。独立 IME 支持 OpenTypeless 离线、设备端、系统服务、批处理 BYOK 和 Paraformer 真流式五种后端。
 
-| 设置 | 历史记录 |
-|---|---|
-| <img src="docs/images/app-settings.png" width="360" /> | <img src="docs/images/app-history.png" width="360" /> |
+## 构建与验收
 
-</details>
-
----
-
-## Ask Anything
-
-Ask Anything 不是聊天页，也不是另一个输入框。它是一个快捷键优先的语音问答流程：按下 Ask 热键，说出问题，停止录音后，OpenTypeless 会先转写问题，再调用 LLM，最后只把答案显示在一个小便签里。
-
-它适合临时问一句、快速查一句、让 AI 根据当前选中文本解释/总结/改写一句。默认没有聊天历史、没有输入框、没有额外发送按钮，结果可以直接复制。
-
-默认热键对齐 Typeless 风格：
-
-| 平台 | 听写 | Ask Anything | 翻译选中文本 |
-|---|---|---|---|
-| macOS | `Fn` | `Fn+Space` | `Fn+LeftShift` |
-| Windows | `Right Alt` | `Right Alt+Space` | `Right Alt+LeftShift` |
-| Linux | `Ctrl+/` | `Ctrl+.` | 可配置 |
-
-Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面环境，尤其是 Wayland 下，全局 `Right Alt` 监听不如 Windows 稳定。
-
-## 为什么选择 OpenTypeless？
-
-| | OpenTypeless | macOS 听写 | Windows 语音输入 | Whisper Desktop |
-|---|---|---|---|---|
-| AI 文本润色 | ✅ 多种 LLM | ❌ | ❌ | ❌ |
-| Ask Anything 语音问答 | ✅ | ❌ | ❌ | ❌ |
-| STT 服务商选择 | ✅ Cloud、Deepgram、AssemblyAI、Whisper 兼容、Doubao 等 | ❌ 仅 Apple | ❌ 仅 Microsoft | ❌ 仅 Whisper |
-| 适用于任意应用 | ✅ | ✅ | ✅ | ❌ 需复制粘贴 |
-| 翻译模式 | ✅ | ❌ | ❌ | ❌ |
-| 选中文本改写 | ✅ | ❌ | ❌ | ❌ |
-| 开源 | ✅ MIT | ❌ | ❌ | ✅ |
-| 跨平台 | ✅ Win/Mac/Linux | ❌ 仅 Mac | ❌ 仅 Windows | ✅ |
-| 自定义词典 | ✅ | ❌ | ❌ | ❌ |
-| 可自托管 | ✅ BYOK | ❌ | ❌ | ✅ |
-
-## 功能特性
-
-- 🎙️ 默认对齐 Typeless 风格热键：macOS `Fn`，Windows `Right Alt`，Linux `Ctrl+/`
-- ❓ 独立 Ask Anything 热键：macOS `Fn+Space`，Windows `Right Alt+Space`，Linux `Ctrl+.`
-- 💊 浮动胶囊显示准备、录音、转写、润色、Ask thinking 等状态，空闲时可自动隐藏
-- 🗣️ 接入 6+ 语音识别服务商，并支持 macOS Apple Speech 与自托管 Whisper 兼容端点
-- 🤖 多种大模型润色文本：OpenAI、DeepSeek、Claude、Gemini、Ollama 等
-- ✨ 润色风格：轻改、清爽、结构化、专业
-- ⚡ 流式输出，边生成边打字
-- ⌨️ 支持键盘模拟、剪贴板粘贴/仅复制、Windows SendInput 和输出失败诊断
-- 📝 Ask/润色可读取选中文本，用来提问、总结、改写或翻译
-- 🌐 翻译模式：说中文，输出英文（或其他 20+ 语言）
-- 📖 自定义词典和本地纠错规则，提升专业术语与常见错词处理
-- 🧩 内置场景、本地自定义场景、导入导出和激活状态
-- 🔐 BYOK 密钥优先存入系统密钥库，尽量避免明文保存在配置里
-- 🔍 自动识别当前应用，适配不同场景
-- 📜 本地历史记录，支持全文搜索
-- 🌗 深色 / 浅色 / 跟随系统主题
-- 🚀 开机自启
-
-> 界面本地化目前以英文和中文最完整；其他语言包已覆盖 key，但部分新功能和高级设置仍可能回退显示英文。
-
-> [!TIP]
-> **推荐配置（开箱即用最佳体验）**
->
-> | | 服务商 | 模型 |
-> |---|---|---|
-> | 🗣️ 语音识别 | Groq | `whisper-large-v3-turbo` |
-> | 🤖 AI 润色 | Google | `gemini-2.5-flash` |
->
-> 这套组合转录速度快、准确率高，文本润色质量出色，而且两者都提供慷慨的免费额度。
-
-## 下载安装
-
-下载适用于你平台的最新版本：
-
-**[前往 Releases 下载](https://github.com/tover0314-w/opentypeless/releases)**
-
-| 平台 | 文件 |
-|------|------|
-| Windows | `.msi` 安装包或 `.exe` 安装程序 |
-| macOS | Apple Silicon 和 Intel 通用 `.dmg` |
-| Linux | `.AppImage` / `.deb` / `.rpm` |
-
-## 安装说明
-
-各平台签名和分发方式还在持续完善。请始终从官方 [GitHub Releases](https://github.com/tover0314-w/opentypeless/releases) 下载。
-
-### Windows
-
-如果 Windows SmartScreen 提示“Windows 已保护你的电脑”：
-
-1. 点击 **更多信息**
-2. 点击 **仍要运行**
-
-如果安装包出现发布者验证提示：
-
-1. 右键 `.msi` 文件，选择 **属性**
-2. 勾选底部的 **解除锁定**，点击 **应用**
-3. 重新运行安装包
-
-### macOS
-
-macOS 构建使用 Developer ID 签名。如果首次启动仍被 Gatekeeper 拦截，可以执行：
+需要 JDK 17、Android SDK Platform 35、Build Tools 35.0.0。运行验收脚本前，先安装与 CI
+一致的 SDK package path：
 
 ```bash
-xattr -cr /Applications/OpenTypeless.app
+sdkmanager --install \
+  "platform-tools" \
+  "platforms;android-35" \
+  "build-tools;35.0.0"
 ```
 
-然后正常打开应用。
-
-### Linux
-
-**Ubuntu/Debian** 安装 `.deb`：
-
 ```bash
-sudo apt install ./OpenTypeless_x.x.x_amd64.deb
+export JAVA_HOME=/path/to/jdk-17
+export ANDROID_HOME=/path/to/android-sdk
+scripts/verify_android.sh
+cd android && ./gradlew connectedDebugAndroidTest  # 连接 API 35+ 模拟器或设备
 ```
 
-**AppImage** 直接运行：
+`scripts/verify_android.sh` 是本地与 CI 共用的非交互入口：它会校验固定的 SDK 声明和 ASR
+runtime，强制 Gradle 严格依赖校验，从 `clean` 开始执行 JVM 测试、Release Lint、Debug/Release
+构建和 AndroidTest 构建。CI 还会在启动模拟器前，按 API 26/33/35/36 矩阵显式安装对应的
+`google_apis/x86_64` system image 坐标。
+
+仓库内的原生运行时支持 64 位 ARM 真机与 x86_64 模拟器。若要从固定源码重新构建该 AAR，
+还需要 Android NDK r27d；审计构建命令和输入来源见
+`scripts/build_sherpa_asr_runtime.py --help`。
+
+自动化测试覆盖：转写修订、编辑框 composing/取消竞态、Paraformer 协议与传输事件、确定性个性化、NFKC span 映射、prompt 信任边界、事实完整性、VAD、取消状态、编辑目标身份、HTTP 重定向/错误/header、RecognitionService 契约、真实 SQLite 导入事务、Android Keystore 历史加密与旧明文迁移。显式大模型门槛还覆盖固定版本真实下载、精确哈希、arm64 原生加载/识别和内存测量。常规 CI 不使用真实 API Key，也不会重复下载 229 MiB 模型，会执行 JVM、Lint、APK 构建和 API 26/33/35/36 模拟器矩阵。
+Speech Core v2 另外覆盖确定性 trace replay、句段事件乱序/重复属性测试、连续边界组装、加密多段恢复、质量任务 generation 隔离、Unicode 安全编辑器投影、整次语音撤销、生产路径诊断和显式紧急回滚边界。
+
+当前本地构建、产物哈希、小米 10 Ultra 失败证据和发布阻断项见
+[2026-08-14 Android 最新基线验收报告](docs/2026-08-14-android-baseline-acceptance.md)；
+非阻断的代码规模、方法复杂度、APK 大小和测试数量趋势见
+[2026-08-14 工程指标基线](docs/2026-08-14-engineering-metrics-baseline.md)；
+[Android 0.3 审查与验收报告](docs/2026-08-09-android-0.3-review-acceptance.md)保留为历史基线；
+[小米 15 Voice Core P0 真机矩阵](docs/2026-08-11-xiaomi15-p0-acceptance.md)是当前物理验收依据；
+[0.2 验收报告](docs/2026-08-09-byok-android-acceptance.md)保留为历史基线。
+
+本地生成的 release APK 默认未签名；没有完成签名和校验和发布前，不应把它当成可信正式包分发。正式发布工作流从 Gradle 元数据读取版本，并生成 `OpenTypeless-Android-<version>` APK、AAB 与校验和，避免误发写死的旧版本文件名。
+
+## 桌面端
+
+桌面端保留全局听写、选区操作、翻译、Ask、词典、历史、场景和 App 感知工作流，全部走本地或用户配置的 provider；本 fork 不包含商业账户运行链路。
 
 ```bash
-chmod +x OpenTypeless_x.x.x_amd64.AppImage
-./OpenTypeless_x.x.x_amd64.AppImage
-```
-
-**NVIDIA + Wayland 用户：**应用会自动识别并应用兼容处理。如果仍然启动崩溃，可以尝试：
-
-```bash
-WEBKIT_DISABLE_DMABUF_RENDERER=1 ./OpenTypeless
-```
-
-**Wayland 用户：**全局热键和自动粘贴会受到桌面环境限制。OpenTypeless 会在设置中提示，并可退回到托盘/应用内控制或仅复制输出。
-
-## 前置要求
-
-- [Node.js](https://nodejs.org/) 20+
-- [Rust](https://rustup.rs/)（stable 工具链）
-- Tauri 平台依赖：参见 [Tauri 前置要求](https://v2.tauri.app/start/prerequisites/)
-
-## 快速开始
-
-```bash
-# 安装依赖
-npm install
-
-# 开发模式运行
-npm run tauri dev
-
-# 构建生产版本
+npm ci
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
-构建产物位于 `src-tauri/target/release/bundle/`。
+## 诚实边界
 
-## 配置
-
-所有设置均可在应用内的设置面板中访问：
-
-- **语音识别** — 选择 STT 服务商并输入 API 密钥
-- **AI 润色** — 选择 LLM 服务商、模型、API 密钥、润色风格、自定义提示词、翻译和选中文本上下文
-- **通用** — 听写热键、Ask 热键、输出模式、开机自启和胶囊空闲隐藏
-- **词典** — 添加自定义术语和本地纠错规则
-- **场景** — 内置/本地提示词模板，支持导入导出
-- **账户 / Upgrade** — 登录、查看 cloud words、管理 Pro 或 Lifetime Starter 权益
-
-API 密钥会优先存入系统密钥库，不支持时使用本地 fallback。BYOK 密钥不会发送到 OpenTypeless 服务器 — 所有 STT/LLM 请求直接发送到你配置的服务商。
-
-### Cloud 选项
-
-OpenTypeless 还提供可选的托管云端能力，这样你不需要自己配置 STT/LLM API key。Pro 和 Lifetime Starter 包含共享的 cloud words，可用于语音识别、AI 润色和 Ask Anything。BYOK 仍然完整支持。
-
-[了解更多关于 Pro 的信息](https://www.opentypeless.com)
-
-### BYOK（自备密钥）vs Cloud
-
-| | BYOK 模式 | Cloud 模式 |
-|---|---|---|
-| STT | 自己的 API 密钥或本地端点 | 托管 cloud words |
-| LLM | 自己的 API 密钥或本地端点 | 托管 cloud words |
-| 云依赖 | 无 — 所有请求直接发送到你的服务商 | 需要连接 www.opentypeless.com |
-| 费用 | 直接向服务商付费 | 可选 Pro 或 Lifetime Starter |
-
-所有核心功能 — 录音、转录、AI 润色、键盘/剪贴板输出、词典、历史记录 — 在 BYOK 模式下完全不依赖 OpenTypeless 服务器。
-
-### 自托管 / 无云依赖
-
-无需任何云依赖即可运行 OpenTypeless：
-
-1. 在设置中选择任意非 Cloud 的 STT 和 LLM 服务商
-2. 输入你自己的 API 密钥
-3. 完成 — 无需账户或连接 www.opentypeless.com
-
-如果你想将可选的云功能指向自己的后端，在构建前设置以下环境变量：
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `VITE_API_BASE_URL` | `https://www.opentypeless.com` | 前端云 API 基础 URL |
-| `API_BASE_URL` | `https://www.opentypeless.com` | Rust 后端云 API 基础 URL |
-
-```bash
-# 示例：使用自定义后端构建
-VITE_API_BASE_URL=https://my-server.example.com API_BASE_URL=https://my-server.example.com npm run tauri build
-```
-
-## 架构
-
-**桌面端 Pipeline：**
-
-```mermaid
-flowchart TB
-  UI["React + TypeScript UI"] --> Tauri["Tauri commands"]
-  Hotkeys["全局热键"] --> Tauri
-  Tauri --> Audio["Rust 音频采集"]
-  Audio --> Providers["STT 服务商"]
-  Providers --> Pipeline["Pipeline 编排"]
-  Pipeline --> LLMs["LLM 服务商"]
-  Pipeline --> Storage["SQLite 历史记录 + 词典"]
-  Pipeline --> Output["键盘 / 剪贴板输出"]
-  Account["账户 + 更新 + 云端额度"] --> UI
-  Account --> Tauri
-```
-
-```
-src/                  # React 前端（TypeScript）
-├── components/       # UI 组件（Settings、History、Capsule 等）
-├── hooks/            # React hooks（录音、主题、Tauri 事件）
-├── lib/              # 工具库（API 客户端、路由、常量）
-└── stores/           # Zustand 状态管理
-
-src-tauri/src/        # Rust 后端
-├── audio/            # 音频采集（cpal）
-├── stt/              # STT 服务商（Deepgram、AssemblyAI、Whisper 兼容、Cloud）
-├── llm/              # LLM 服务商（OpenAI 兼容、Cloud）
-├── output/           # 文本输出（键盘模拟、剪贴板粘贴）
-├── storage/          # 配置（tauri-plugin-store）+ 历史/词典（SQLite）
-├── app_detector/     # 检测当前活动应用
-├── pipeline.rs       # 录音 → STT → LLM → 输出 编排
-└── lib.rs            # Tauri 应用设置、命令、热键处理
-```
-
-## 路线图
-
-- [ ] 用量统计 UI：汇总音频时长和字数消耗
-- [ ] 更细的服务商配置诊断
-- [ ] 更清晰的 Linux 桌面环境兼容说明
-- [ ] 更多工作流预设：写作、代码、客服回复等
-- [ ] 插件式服务商扩展
-
-## 常见问题
-
-**我的音频会上传到云端吗？**
-在 BYOK 模式下，音频直接发送到你选择的 STT 服务商或本地端点，不经过 OpenTypeless 服务器。在 Cloud 模式下，音频会发送到托管代理，用于转录和额度统计。
-
-**可以离线使用吗？**
-使用本地 STT 服务商（通过 Ollama 运行 Whisper）和本地 LLM（Ollama），应用可以完全离线工作，无需网络连接。
-
-**支持哪些语言？**
-STT 根据服务商不同支持 99+ 种语言。AI 润色和翻译支持 20+ 种目标语言。
-
-**应用免费吗？**
-是的。使用自己的 API 密钥（BYOK）即可完整使用所有功能。Cloud 计划是可选的。
-
-## 社区
-
-- 💬 [Discord](https://discord.gg/V6rRpJ4RGD) — 交流、获取帮助、分享反馈
-- 🗣️ [GitHub Discussions](https://github.com/tover0314-w/opentypeless/discussions) — 功能提案、问答
-- 🐛 [Issue Tracker](https://github.com/tover0314-w/opentypeless/issues) — Bug 报告和功能请求
-- 📖 [贡献指南](CONTRIBUTING.md) — 开发环境搭建和贡献规范
-- 🔒 [安全策略](SECURITY.md) — 负责任地报告漏洞
-- 🧭 [愿景](VISION.md) — 项目原则和路线图方向
-
-## 贡献
-
-欢迎贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发设置和指南。
-
-寻找入手点？查看标记为 [`good first issue`](https://github.com/tover0314-w/opentypeless/labels/good%20first%20issue) 的 issue。
-
-## Star History
-
-<a href="https://star-history.com/#tover0314-w/opentypeless&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=tover0314-w/opentypeless&type=Date" />
-  </picture>
-</a>
-
-## 借助 Claude Code 一天完成开发
-
-整个项目在一天之内借助 [Claude Code](https://claude.com/claude-code) 完成开发 — 从架构设计到完整实现，包括 Tauri 后端、React 前端、CI/CD 流水线以及本 README。
+Android 0.3 是可安装的 Voice Core 里程碑，还不是承诺中的完整 Rime 键盘。[Android IME 1.0 升级规范](docs/2026-08-09-android-ime-v1-upgrade-spec.md)定义了 Fcitx5 Android + Rime 集成和小米 15 发布门槛；在取得真机证据前，本仓库不会把它描述为完成。设备端识别并非每台设备、每种语言都有。本项目也尚未发布跨设备 CER/WER、延迟、电量或与 Typeless 的盲测报告。
+仓库已公开可复现的离线候选测试，但尚无跨设备延迟、电量、手机盲测集或与 Typeless 的完整正面对比。因此这里只主张可从代码与测试验证的优势，不宣称所有语言的准确率必然更高。
 
 ## 许可证
 
-[MIT](LICENSE)
+MIT，详见 [LICENSE](LICENSE)。本 fork 保留上游版权和归属，不使用 Typeless 的品牌资产或代码，也不是上游托管服务。

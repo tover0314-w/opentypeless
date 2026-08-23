@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "engine": {
+    "engineId": "local-paraformer",
+    "displayName": "Streaming Paraformer zh/en INT8",
+    "modelRevision": "8e40c43232a1c5c66c82111efc5820d3accca11b",
+    "processingLocation": "ON_DEVICE",
+    "capabilities": ["LIVE_REVISIONS", "SEGMENT_FINALS", "ON_DEVICE"]
+  },
+  "sessionId": "fixture-paraformer",
+  "events": [
+    {"type":"prepare","engineId":"local-paraformer","eventSequence":1,"sessionId":"fixture-paraformer"},
+    {"type":"ready","engineId":"local-paraformer","eventSequence":2,"sessionId":"fixture-paraformer"},
+    {"type":"openSegment","engineId":"local-paraformer","eventSequence":3,"sessionId":"fixture-paraformer","segmentId":1,"joinBefore":"NONE"},
+    {"type":"transcript","engineId":"local-paraformer","eventSequence":4,"revision":{"sessionId":"fixture-paraformer","segmentId":1,"revisionId":1,"stage":"LIVE","fullText":"今天开会","audioStartMs":0,"audioEndMs":700,"origin":"STREAM_ASR","providerFinal":false,"tokenEvidence":[]}},
+    {"type":"transcript","engineId":"local-paraformer","eventSequence":5,"revision":{"sessionId":"fixture-paraformer","segmentId":1,"revisionId":2,"stage":"LIVE","fullText":"今天开会讨论","audioStartMs":0,"audioEndMs":1200,"origin":"STREAM_ASR","providerFinal":false,"tokenEvidence":[]}},
+    {"type":"hardBoundary","engineId":"local-paraformer","eventSequence":6,"sessionId":"fixture-paraformer","segmentId":1},
+    {"type":"transcript","engineId":"local-paraformer","eventSequence":7,"revision":{"sessionId":"fixture-paraformer","segmentId":1,"revisionId":3,"stage":"LIVE","fullText":"今天开会讨论","audioStartMs":0,"audioEndMs":1500,"origin":"STREAM_ASR","providerFinal":true,"tokenEvidence":[]}},
+    {"type":"sealSegment","engineId":"local-paraformer","eventSequence":8,"sessionId":"fixture-paraformer","segmentId":1},
+    {"type":"stopRequested","engineId":"local-paraformer","eventSequence":9,"sessionId":"fixture-paraformer"},
+    {"type":"captureEnded","engineId":"local-paraformer","eventSequence":10,"sessionId":"fixture-paraformer","reason":"USER_FINISH"}
+  ]
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep the voice keyboard and companion app visually stable across OEM accent palettes. -->
+    <color name="ime_primary">#5B57D9</color>
+    <color name="ime_primary_container">#E4E1FF</color>
+    <color name="ime_on_primary_container">#201B6C</color>
+</resources>

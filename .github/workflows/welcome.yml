@@ -14,7 +14,7 @@ jobs:
   welcome:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/first-interaction@v1
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           issue-message: |
@@ -22,12 +22,12 @@ jobs:
 
             We'll take a look as soon as possible. In the meantime:
             - Make sure you've filled out the template completely
-            - Check [existing issues](https://github.com/tover0314-w/opentypeless/issues) for duplicates
-            - Join our [Discord](https://discord.gg/V6rRpJ4RGD) if you need quick help
+            - Check [existing issues](https://github.com/dengxuezhao/opentypeless/issues) for duplicates
+            - Use [Q&A Discussions](https://github.com/dengxuezhao/opentypeless/discussions/categories/q-a) for help
           pr-message: |
             Thanks for your first pull request! 🎉
 
             A maintainer will review it soon. While you wait:
             - Make sure CI checks pass
-            - Check the [contributing guide](https://github.com/tover0314-w/opentypeless/blob/main/CONTRIBUTING.md)
-            - Join our [Discord](https://discord.gg/V6rRpJ4RGD) to chat with the team
+            - Check the [contributing guide](https://github.com/dengxuezhao/opentypeless/blob/main/CONTRIBUTING.md)
+            - Use [Q&A Discussions](https://github.com/dengxuezhao/opentypeless/discussions/categories/q-a) for help

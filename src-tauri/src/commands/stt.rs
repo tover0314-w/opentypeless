@@ -2,9 +2,6 @@ use crate::credentials::{resolve_config_secret, SystemCredentialVault};
 use crate::storage;
 use crate::stt;
 use crate::stt::SttProvider;
-use crate::SessionTokenStore;
-use crate::{api_base_url, with_desktop_client_version};
-use tauri::Emitter;
 
 #[tauri::command]
 pub async fn get_stt_recording_capability(
@@ -17,68 +14,7 @@ pub async fn get_stt_recording_capability(
     config.stt_provider = provider;
     config.recording_limit_mode = mode;
     config.custom_recording_limit_seconds = custom_seconds;
-    Ok(stt::capabilities::resolve_recording_limit(
-        &config,
-        None,
-        chrono::Utc::now().timestamp(),
-    ))
-}
-
-#[tauri::command]
-pub async fn cache_managed_stt_capability(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, storage::ConfigManager>,
-    account_snapshot: stt::capabilities::AuthenticatedAccountSnapshot,
-    expected_user_id: String,
-) -> Result<stt::capabilities::ResolvedRecordingLimit, String> {
-    let now = chrono::Utc::now().timestamp();
-    let managed_state = stt::capabilities::managed_state_from_authenticated_snapshot(
-        account_snapshot,
-        &expected_user_id,
-        now,
-    )?;
-    let mut config = state.load().await.map_err(|error| error.to_string())?;
-    let previous_max_seconds = config.max_recording_seconds;
-    config.managed_stt_capability_state = managed_state;
-    config.recompute_recording_limit_mirror();
-    state
-        .save(&config)
-        .await
-        .map_err(|error| error.to_string())?;
-    if config.max_recording_seconds != previous_max_seconds {
-        let _ = app.emit(
-            "config:patch",
-            serde_json::json!({ "max_recording_seconds": config.max_recording_seconds }),
-        );
-    }
-    Ok(stt::capabilities::resolve_recording_limit(
-        &config, None, now,
-    ))
-}
-
-#[tauri::command]
-pub async fn clear_managed_stt_capability(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, storage::ConfigManager>,
-) -> Result<(), String> {
-    let mut config = state.load().await.map_err(|error| error.to_string())?;
-    if config.managed_stt_capability_state.is_none() {
-        return Ok(());
-    }
-    let previous_max_seconds = config.max_recording_seconds;
-    config.managed_stt_capability_state = None;
-    config.recompute_recording_limit_mirror();
-    state
-        .save(&config)
-        .await
-        .map_err(|error| error.to_string())?;
-    if config.max_recording_seconds != previous_max_seconds {
-        let _ = app.emit(
-            "config:patch",
-            serde_json::json!({ "max_recording_seconds": config.max_recording_seconds }),
-        );
-    }
-    Ok(())
+    Ok(stt::capabilities::resolve_recording_limit(&config))
 }
 
 async fn check_volcengine_doubao_connection(
@@ -93,7 +29,6 @@ async fn check_volcengine_doubao_connection(
         sample_rate: 16000,
         resource_id,
         operation_id: None,
-        managed_audio: None,
         provider_region: None,
     };
     provider.connect(&config).await.map_err(|e| e.to_string())?;
@@ -113,7 +48,6 @@ async fn check_aliyun_qwen3_connection(
         sample_rate: 16_000,
         resource_id: None,
         operation_id: None,
-        managed_audio: None,
         provider_region: region,
     };
     provider
@@ -125,31 +59,6 @@ async fn check_aliyun_qwen3_connection(
         .await
         .map_err(|error| error.to_string())?;
     Ok(())
-}
-
-fn has_managed_cloud_access(body: &serde_json::Value) -> bool {
-    if matches!(
-        body["licenseStatus"].as_str(),
-        Some("refunded") | Some("deactivated")
-    ) {
-        return false;
-    }
-
-    let source = body["source"].as_str().unwrap_or_default();
-    let plan = body["plan"].as_str().unwrap_or_default();
-    let cloud_words_limit = body["cloudWordsLimit"].as_i64().unwrap_or_default();
-    let display_words_limit = body["displayWordsLimit"].as_i64().unwrap_or_default();
-    if source == "appsumo" {
-        return cloud_words_limit > 0 && body["licenseStatus"].as_str() == Some("active");
-    }
-    if source == "lifetime" {
-        return cloud_words_limit > 0 || display_words_limit > 0 || plan == "lifetime_starter";
-    }
-    if source == "creem" && (cloud_words_limit > 0 || display_words_limit > 0) {
-        return true;
-    }
-
-    matches!(plan, "pro" | "lifetime_starter")
 }
 
 fn resolve_whisper_test_config(
@@ -290,16 +199,6 @@ fn build_stt_provider_diagnostics(
                 "No STT provider selected",
             )],
         },
-        "cloud" => SttProviderDiagnostics {
-            provider: provider.to_string(),
-            kind: "cloudManaged".to_string(),
-            endpoint: None,
-            model: None,
-            requires_api_key: false,
-            api_key_configured: false,
-            ready: true,
-            issues: Vec::new(),
-        },
         stt::config::APPLE_SPEECH_PROVIDER => build_apple_speech_diagnostics(
             provider,
             stt::apple_speech::apple_speech_availability(None),
@@ -384,12 +283,9 @@ pub fn get_stt_provider_diagnostics(
     custom_model: Option<String>,
     provider_region: Option<String>,
 ) -> Result<SttProviderDiagnostics, String> {
-    let resolved_api_key = if provider == "cloud" {
-        String::new()
-    } else {
+    let resolved_api_key =
         resolve_config_secret(&api_key, "stt", &provider, &SystemCredentialVault)
-            .map_err(|e| e.to_string())?
-    };
+            .map_err(|e| e.to_string())?;
 
     Ok(build_stt_provider_diagnostics(
         &provider,
@@ -410,37 +306,10 @@ pub async fn test_stt_connection(
     custom_model: Option<String>,
     volcengine_resource_id: Option<String>,
     provider_region: Option<String>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<bool, String> {
     if provider.is_empty() {
         return Ok(false);
-    }
-
-    // Cloud provider: verify session token + managed cloud entitlement via API.
-    if provider == "cloud" {
-        let token = token_store
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if token.is_empty() {
-            return Ok(false);
-        }
-        let api_base = api_base_url();
-        let resp = with_desktop_client_version(
-            client.get(format!("{}/api/subscription/status", api_base)),
-        )
-        .header("Authorization", format!("Bearer {}", token))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Ok(false);
-        }
-        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        return Ok(has_managed_cloud_access(&body));
     }
 
     let api_key = resolve_config_secret(&api_key, "stt", &provider, &SystemCredentialVault)
@@ -671,49 +540,6 @@ mod tests {
         assert_eq!(diagnostics.issues.len(), 1);
         assert_eq!(diagnostics.issues[0].code, "speech_permission_denied");
     }
-
-    #[test]
-    fn managed_cloud_access_requires_active_appsumo_license() {
-        let active = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000,
-            "licenseStatus": "active"
-        });
-        let pending = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000,
-            "licenseStatus": "pending"
-        });
-        let missing = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000
-        });
-
-        assert!(has_managed_cloud_access(&active));
-        assert!(!has_managed_cloud_access(&pending));
-        assert!(!has_managed_cloud_access(&missing));
-    }
-
-    #[test]
-    fn managed_cloud_access_allows_direct_lifetime_license() {
-        let lifetime_legacy_quota = serde_json::json!({
-            "plan": "lifetime_starter",
-            "source": "lifetime",
-            "cloudWordsLimit": 0,
-            "licenseStatus": "active"
-        });
-        let lifetime_cloud_words = serde_json::json!({
-            "plan": "lifetime_starter",
-            "source": "lifetime",
-            "cloudWordsLimit": 100000
-        });
-
-        assert!(has_managed_cloud_access(&lifetime_legacy_quota));
-        assert!(has_managed_cloud_access(&lifetime_cloud_words));
-    }
 }
 
 #[tauri::command]
@@ -726,41 +552,10 @@ pub async fn bench_stt_connection(
     custom_model: Option<String>,
     volcengine_resource_id: Option<String>,
     provider_region: Option<String>,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<u32, String> {
     if provider.is_empty() {
         return Err("No provider specified".to_string());
-    }
-
-    if provider == "cloud" {
-        let token = token_store
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if token.is_empty() {
-            return Err("Not signed in".to_string());
-        }
-        let api_base = api_base_url();
-        let t0 = std::time::Instant::now();
-        let resp = with_desktop_client_version(
-            client.get(format!("{}/api/subscription/status", api_base)),
-        )
-        .header("Authorization", format!("Bearer {}", token))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        let elapsed = t0.elapsed().as_millis() as u32;
-        if !resp.status().is_success() {
-            return Err("Request failed".to_string());
-        }
-        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        if !has_managed_cloud_access(&body) {
-            return Err("Cloud plan required".to_string());
-        }
-        return Ok(elapsed);
     }
 
     let api_key = resolve_config_secret(&api_key, "stt", &provider, &SystemCredentialVault)

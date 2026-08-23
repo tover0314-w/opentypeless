@@ -1,0 +1,42 @@
+{"id":"zh_short_01","language":"zh-CN","category":"short","reference":"好","repetitions":20,"dictionary_terms":[],"notes":"one character"}
+{"id":"zh_short_02","language":"zh-CN","category":"short","reference":"可以","repetitions":20,"dictionary_terms":[],"notes":"two characters"}
+{"id":"zh_short_03","language":"zh-CN","category":"short","reference":"没问题","repetitions":20,"dictionary_terms":[],"notes":"three characters"}
+{"id":"zh_short_04","language":"zh-CN","category":"short","reference":"知道了","repetitions":20,"dictionary_terms":[],"notes":"three characters"}
+{"id":"zh_short_05","language":"zh-CN","category":"short","reference":"稍等一下","repetitions":20,"dictionary_terms":[],"notes":"four characters"}
+{"id":"en_short_01","language":"en-US","category":"short","reference":"Yes","repetitions":20,"dictionary_terms":[],"notes":"one word"}
+{"id":"en_short_02","language":"en-US","category":"short","reference":"Okay","repetitions":20,"dictionary_terms":[],"notes":"one word"}
+{"id":"en_short_03","language":"en-US","category":"short","reference":"Hello","repetitions":20,"dictionary_terms":[],"notes":"one word"}
+{"id":"en_short_04","language":"en-US","category":"short","reference":"Sounds good","repetitions":20,"dictionary_terms":[],"notes":"two words"}
+{"id":"en_short_05","language":"en-US","category":"short","reference":"No problem","repetitions":20,"dictionary_terms":[],"notes":"two words"}
+{"id":"zh_general_01","language":"zh-CN","category":"general","reference":"今天下午三点开产品评审会。","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"zh_general_02","language":"zh-CN","category":"general","reference":"如果网络断开，请保留已经识别的文字。","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"zh_general_03","language":"zh-CN","category":"general","reference":"我已经修改了配置，但是还没有提交代码。","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"en_general_01","language":"en-US","category":"general","reference":"Please schedule the design review for tomorrow afternoon.","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"en_general_02","language":"en-US","category":"general","reference":"The offline recognizer should never upload audio.","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"en_general_03","language":"en-US","category":"general","reference":"We reproduced the bug and verified the fix.","repetitions":3,"dictionary_terms":[],"notes":"ordinary dictation"}
+{"id":"mixed_01","language":"mixed","category":"code_switch","reference":"请把 OpenTypeless 的 Android build 上传到 GitHub Actions。","repetitions":5,"dictionary_terms":["OpenTypeless"],"notes":"Chinese sentence with English product terms"}
+{"id":"mixed_02","language":"mixed","category":"code_switch","reference":"这个 API endpoint 必须使用 HTTPS。","repetitions":5,"dictionary_terms":[],"notes":"technical code switching"}
+{"id":"mixed_03","language":"mixed","category":"code_switch","reference":"明天 review VoicePipeline 的 cancel race condition。","repetitions":5,"dictionary_terms":["VoicePipeline"],"notes":"technical code switching"}
+{"id":"mixed_04","language":"mixed","category":"code_switch","reference":"把 model provider 切换到 system on device 模式。","repetitions":5,"dictionary_terms":[],"notes":"technical code switching"}
+{"id":"number_zh_01","language":"zh-CN","category":"numbers","reference":"会议时间是二零二六年八月十一日下午三点半。","repetitions":5,"dictionary_terms":[],"notes":"date and time; score spoken and formatted forms separately"}
+{"id":"number_zh_02","language":"zh-CN","category":"numbers","reference":"这台设备的价格是四千九百九十九元。","repetitions":5,"dictionary_terms":[],"notes":"money"}
+{"id":"number_zh_03","language":"zh-CN","category":"numbers","reference":"验证码是七三零九二一。","repetitions":5,"dictionary_terms":[],"notes":"digit preservation"}
+{"id":"number_en_01","language":"en-US","category":"numbers","reference":"The meeting starts at three thirty on August eleventh.","repetitions":5,"dictionary_terms":[],"notes":"date and time"}
+{"id":"number_en_02","language":"en-US","category":"numbers","reference":"The total is four thousand nine hundred ninety nine dollars.","repetitions":5,"dictionary_terms":[],"notes":"money"}
+{"id":"number_en_03","language":"en-US","category":"numbers","reference":"The verification code is seven three zero nine two one.","repetitions":5,"dictionary_terms":[],"notes":"digit preservation"}
+{"id":"format_01","language":"mixed","category":"formatting","reference":"请发送邮件到 voice.test@example.com。","repetitions":5,"dictionary_terms":[],"notes":"email must remain exact after formatting"}
+{"id":"format_02","language":"mixed","category":"formatting","reference":"请打开 https://example.com/voice-lab。","repetitions":5,"dictionary_terms":[],"notes":"URL must remain exact after formatting"}
+{"id":"punctuation_zh_01","language":"zh-CN","category":"punctuation","reference":"第一，保留原文；第二，修正标点；第三，不要新增事实。","repetitions":5,"dictionary_terms":[],"notes":"list punctuation"}
+{"id":"punctuation_zh_02","language":"zh-CN","category":"punctuation","reference":"你确认已经保存了吗？如果没有，请先保存。","repetitions":5,"dictionary_terms":[],"notes":"question and sentence boundary"}
+{"id":"punctuation_en_01","language":"en-US","category":"punctuation","reference":"First, preserve the original; second, fix punctuation; third, add no facts.","repetitions":5,"dictionary_terms":[],"notes":"list punctuation"}
+{"id":"punctuation_en_02","language":"en-US","category":"punctuation","reference":"Did you save the draft? If not, save it now.","repetitions":5,"dictionary_terms":[],"notes":"question and sentence boundary"}
+{"id":"entity_zh_01","language":"zh-CN","category":"entity","reference":"请让林语澄确认沐曦工具链的兼容性。","repetitions":10,"dictionary_terms":["林语澄","沐曦"],"notes":"positive dictionary case"}
+{"id":"entity_zh_02","language":"zh-CN","category":"entity","reference":"OpenTypeless 使用 SenseVoice 生成离线结果。","repetitions":10,"dictionary_terms":["OpenTypeless","SenseVoice"],"notes":"positive bilingual dictionary case"}
+{"id":"entity_en_01","language":"en-US","category":"entity","reference":"OpenTypeless stores the model metadata locally.","repetitions":10,"dictionary_terms":["OpenTypeless"],"notes":"positive dictionary case"}
+{"id":"entity_en_02","language":"en-US","category":"entity","reference":"Cloudflare rejected the unsafe redirect.","repetitions":10,"dictionary_terms":["Cloudflare"],"notes":"positive dictionary case"}
+{"id":"control_zh_01","language":"zh-CN","category":"entity_control","reference":"请让林老师确认工具链的兼容性。","repetitions":10,"dictionary_terms":[],"notes":"must not insert 林语澄 or 沐曦"}
+{"id":"control_en_01","language":"en-US","category":"entity_control","reference":"The open type uses fewer dependencies.","repetitions":10,"dictionary_terms":[],"notes":"must not insert OpenTypeless"}
+{"id":"control_en_02","language":"en-US","category":"entity_control","reference":"The cloud layer rejected the redirect.","repetitions":10,"dictionary_terms":[],"notes":"must not insert Cloudflare"}
+{"id":"long_pause_01","language":"zh-CN","category":"long_pause","reference":"我们先确认需求，然后停一下，再继续讨论实现方案。","repetitions":3,"dictionary_terms":[],"notes":"insert a deliberate three-second pause after 然后"}
+{"id":"self_correction_01","language":"zh-CN","category":"self_correction","reference":"明天下午，不对，是后天下午三点开会。","repetitions":5,"dictionary_terms":[],"notes":"preserve correction intent without inventing facts"}
+{"id":"self_correction_02","language":"en-US","category":"self_correction","reference":"Schedule it for Tuesday, sorry, Wednesday morning.","repetitions":5,"dictionary_terms":[],"notes":"self correction"}

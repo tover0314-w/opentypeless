@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.14)'
+        description: 'Desktop release tag (e.g. v1.2.0)'
         required: true
-        default: 'v0.1.14'
+        default: 'v1.2.0'
       platform:
         description: 'Platform group to build'
         required: true
@@ -19,6 +19,7 @@ on:
           - macos
           - linux
           - windows
+          - android
       skip_stapling:
         description: 'macOS only: skip notarization stapling wait (testing only)'
         required: true
@@ -37,10 +38,66 @@ on:
           - 'true'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  verify-release-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: Fetch protected main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Verify release tag is on protected main
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: python3 scripts/verify_release_source.py --repo-root . --tag "$TAG_NAME"
+
+  verify-third-party-material:
+    needs: verify-release-source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-05
+
+      - run: npm ci
+
+      - name: Install pinned cargo-about
+        run: cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Fetch locked Cargo sources for offline license extraction
+        run: cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Verify third-party inventory and complete license material
+        run: |
+          test ! -e src/assets/app-icons/reference
+          node -e "const c=require('./src-tauri/tauri.conf.json'); if (c.bundle?.createUpdaterArtifacts !== false) process.exit(1)"
+          updater_key="$(printf '%s%s' TAURI_SIGNING_PRIVATE _KEY)"
+          updater_sign="$(printf '%s%s' 'tauri signer ' sign)"
+          updater_manifest="$(printf '%s%s' latest .json)"
+          if grep -R -n -E "${updater_key}|${updater_sign}|${updater_manifest}" \
+            .github/workflows .github/scripts/publish-signpath-windows-release.ps1; then
+            echo 'Updater-only release logic is forbidden while createUpdaterArtifacts is false.' >&2
+            exit 1
+          fi
+          python3 scripts/generate_third_party_inventory.py --check
+
   build:
+    needs: verify-third-party-material
     strategy:
       fail-fast: false
       matrix:
@@ -71,8 +128,11 @@ jobs:
     runs-on: ${{ matrix.platform }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
 
       - name: Sync version from tag
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
@@ -103,24 +163,24 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN is required to publish releases to tover0314-w/opentypeless."
+            echo "::error::RELEASE_TOKEN is required to publish releases to dengxuezhao/opentypeless."
             exit 1
           fi
 
-          gh api repos/tover0314-w/opentypeless >/dev/null
+          gh api repos/dengxuezhao/opentypeless >/dev/null
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
         with:
           node-version: 20
           cache: 'npm'
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable 2026-08-05
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
         with:
           targets: ${{ matrix.rust_targets }}
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
         with:
           workspaces: src-tauri -> target
@@ -131,22 +191,6 @@ jobs:
 
       - run: npm ci
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
-
-      - name: Verify updater signing key
-        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY is required to publish auto-update artifacts."
-            exit 1
-          fi
-          if [ -z "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD is required because the updater signing key is encrypted."
-            exit 1
-          fi
 
       - name: Verify Apple signing secrets
         if: ${{ matrix.platform == 'macos-latest' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
@@ -190,7 +234,7 @@ jobs:
           ALLOW_UNSIGNED_WINDOWS: ${{ github.event.inputs.allow_unsigned_windows }}
         run: ./.github/scripts/import-windows-certificate.ps1
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
         id: tauri
         env:
@@ -201,15 +245,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           TAURI_SIGNING_RPM_KEY_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           LINUXDEPLOY_EXCLUDED_LIBRARIES: libwayland-client.so*
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ env.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ env.WINDOWS_TIMESTAMP_URL }}
         with:
-          owner: tover0314-w
+          owner: dengxuezhao
           repo: opentypeless
           releaseCommitish: main
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
@@ -230,3 +272,124 @@ jobs:
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           TAURI_SIGNING_RPM_KEY: ''
         run: ./.github/scripts/upload-linux-verification-artifacts.sh
+
+  build-android:
+    needs: build
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - name: Verify Android release secrets
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD GH_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required for an Android release."
+              exit 1
+            fi
+          done
+
+      - name: Decode Android release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/opentypeless-release.jks"
+          chmod 600 "$RUNNER_TEMP/opentypeless-release.jks"
+
+      - name: Test and build signed Android artifacts
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/opentypeless-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew testDebugUnitTest lintRelease assembleRelease bundleRelease
+
+      - name: Verify signatures and create checksums
+        shell: bash
+        run: |
+          METADATA="android/app/build/outputs/apk/release/output-metadata.json"
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          test -f "$METADATA"
+          ANDROID_ARTIFACT_METADATA="$RUNNER_TEMP/opentypeless-android-artifact.txt"
+          python3 - "$METADATA" > "$ANDROID_ARTIFACT_METADATA" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          metadata_path = pathlib.Path(sys.argv[1])
+          metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+          elements = metadata.get("elements", [])
+          if metadata.get("variantName") != "release" or len(elements) != 1:
+              raise SystemExit("Expected exactly one Android release APK artifact")
+          element = elements[0]
+          version_name = element.get("versionName")
+          output_file = element.get("outputFile")
+          if not isinstance(version_name, str) or not isinstance(output_file, str):
+              raise SystemExit("Android release metadata is missing versionName or outputFile")
+          output_path = pathlib.PurePosixPath(output_file)
+          if (
+              output_path.name != output_file
+              or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", output_file)
+          ):
+              raise SystemExit("Android release metadata contains an unsafe outputFile")
+          print(f"{version_name}|{output_file}")
+          PY
+          IFS='|' read -r ANDROID_VERSION ANDROID_OUTPUT < "$ANDROID_ARTIFACT_METADATA"
+          test -n "$ANDROID_VERSION"
+          test -n "$ANDROID_OUTPUT"
+          APK="$(dirname "$METADATA")/$ANDROID_OUTPUT"
+          if [[ ! "$ANDROID_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Unsafe Android version name: $ANDROID_VERSION"
+            exit 1
+          fi
+          test -f "$APK"
+          test -f "$AAB"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          jarsigner -verify -strict "$AAB"
+          ASSET_DIR="$RUNNER_TEMP/opentypeless-android-release"
+          ASSET_PREFIX="OpenTypeless-Android-$ANDROID_VERSION"
+          mkdir -p "$ASSET_DIR"
+          cp "$APK" "$ASSET_DIR/$ASSET_PREFIX.apk"
+          cp "$AAB" "$ASSET_DIR/$ASSET_PREFIX.aab"
+          (
+            cd "$ASSET_DIR"
+            sha256sum "$ASSET_PREFIX.apk" "$ASSET_PREFIX.aab" \
+              > "$ASSET_PREFIX-SHA256SUMS.txt"
+          )
+          printf 'ANDROID_RELEASE_ASSET_DIR=%s\n' "$ASSET_DIR" >> "$GITHUB_ENV"
+
+      - name: Publish signed Android artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$TAG_NAME" --repo dengxuezhao/opentypeless >/dev/null 2>&1 || \
+            gh release create "$TAG_NAME" --repo dengxuezhao/opentypeless --prerelease \
+              --title "OpenTypeless $TAG_NAME" --notes "See the signed assets below."
+          gh release upload "$TAG_NAME" --repo dengxuezhao/opentypeless --clobber \
+            "$ANDROID_RELEASE_ASSET_DIR"/*

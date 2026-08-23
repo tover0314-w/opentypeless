@@ -1,6 +1,4 @@
 use crate::credentials::{resolve_config_secret, SystemCredentialVault};
-use crate::SessionTokenStore;
-use crate::{api_base_url, with_desktop_client_version};
 
 #[tauri::command]
 pub fn get_llm_model_capability(
@@ -16,84 +14,16 @@ pub fn get_llm_model_capability(
     )
 }
 
-fn synthetic_operation_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        (now >> 96) as u32,
-        (now >> 80) as u16,
-        (now >> 64) as u16,
-        (now >> 48) as u16,
-        now & 0x0000_ffff_ffff_ffff_ffffu128
-    )
-}
-
-fn has_managed_cloud_access(body: &serde_json::Value) -> bool {
-    if matches!(
-        body["licenseStatus"].as_str(),
-        Some("refunded") | Some("deactivated")
-    ) {
-        return false;
-    }
-
-    let source = body["source"].as_str().unwrap_or_default();
-    let plan = body["plan"].as_str().unwrap_or_default();
-    let cloud_words_limit = body["cloudWordsLimit"].as_i64().unwrap_or_default();
-    let display_words_limit = body["displayWordsLimit"].as_i64().unwrap_or_default();
-    if source == "appsumo" {
-        return cloud_words_limit > 0 && body["licenseStatus"].as_str() == Some("active");
-    }
-    if source == "lifetime" {
-        return cloud_words_limit > 0 || display_words_limit > 0 || plan == "lifetime_starter";
-    }
-    if source == "creem" && (cloud_words_limit > 0 || display_words_limit > 0) {
-        return true;
-    }
-
-    matches!(plan, "pro" | "lifetime_starter")
-}
-
 #[tauri::command]
 pub async fn test_llm_connection(
     api_key: String,
     provider: String,
     base_url: String,
     model: String,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<bool, String> {
     if provider.is_empty() {
         return Ok(false);
-    }
-
-    // Cloud provider: verify session token + managed cloud entitlement via API.
-    if provider == "cloud" {
-        let token = token_store
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if token.is_empty() {
-            return Ok(false);
-        }
-        let api_base = api_base_url();
-        let resp = with_desktop_client_version(
-            client.get(format!("{}/api/subscription/status", api_base)),
-        )
-        .header("Authorization", format!("Bearer {}", token))
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Ok(false);
-        }
-        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        return Ok(has_managed_cloud_access(&body));
     }
 
     let api_key = resolve_config_secret(&api_key, "llm", &provider, &SystemCredentialVault)
@@ -197,49 +127,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn managed_cloud_access_requires_active_appsumo_license() {
-        let active = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000,
-            "licenseStatus": "active"
-        });
-        let pending = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000,
-            "licenseStatus": "pending"
-        });
-        let missing = serde_json::json!({
-            "plan": "appsumo_tier1",
-            "source": "appsumo",
-            "cloudWordsLimit": 200000
-        });
-
-        assert!(has_managed_cloud_access(&active));
-        assert!(!has_managed_cloud_access(&pending));
-        assert!(!has_managed_cloud_access(&missing));
-    }
-
-    #[test]
-    fn managed_cloud_access_allows_direct_lifetime_license() {
-        let lifetime_legacy_quota = serde_json::json!({
-            "plan": "lifetime_starter",
-            "source": "lifetime",
-            "cloudWordsLimit": 0,
-            "licenseStatus": "active"
-        });
-        let lifetime_cloud_words = serde_json::json!({
-            "plan": "lifetime_starter",
-            "source": "lifetime",
-            "cloudWordsLimit": 100000
-        });
-
-        assert!(has_managed_cloud_access(&lifetime_legacy_quota));
-        assert!(has_managed_cloud_access(&lifetime_cloud_words));
-    }
-
-    #[test]
     fn model_request_omits_authorization_for_keyless_ollama() {
         let request = build_fetch_models_request(
             &reqwest::Client::new(),
@@ -277,52 +164,10 @@ pub async fn bench_llm_connection(
     provider: String,
     base_url: String,
     model: String,
-    token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<u32, String> {
     if provider.is_empty() {
         return Err("No provider specified".to_string());
-    }
-
-    if provider == "cloud" {
-        let token = token_store
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if token.is_empty() {
-            return Err("Not signed in".to_string());
-        }
-        let api_base = api_base_url();
-        let operation_id = synthetic_operation_id();
-        let body = serde_json::json!({
-            "messages": [{"role": "user", "content": "hi"}],
-            "stream": false,
-            "context": {
-                "operationId": operation_id.clone(),
-                "stageKey": format!("{operation_id}:llm"),
-                "requestType": "connection_benchmark",
-                "clientVersion": crate::desktop_client_version(),
-                "rawTextChars": 2,
-                "selectedTextChars": 0,
-                "hasSelectedText": false,
-                "translateEnabled": false
-            }
-        });
-        let t0 = std::time::Instant::now();
-        let resp = with_desktop_client_version(client.post(format!("{}/api/proxy/llm", api_base)))
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .timeout(std::time::Duration::from_secs(30))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let elapsed = t0.elapsed().as_millis() as u32;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        return Ok(elapsed);
     }
 
     let api_key = resolve_config_secret(&api_key, "llm", &provider, &SystemCredentialVault)

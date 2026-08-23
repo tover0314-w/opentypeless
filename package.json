@@ -1,24 +1,26 @@
 {
   "name": "opentypeless",
   "private": true,
-  "version": "0.1.42",
+  "version": "1.2.0",
   "type": "module",
-  "description": "AI-powered speech-to-text and text polishing desktop app",
+  "description": "BYOK voice input and text polishing for desktop and Android",
   "keywords": [
     "speech-to-text",
     "stt",
     "llm",
     "tauri",
     "desktop",
+    "android",
+    "ime",
     "voice-input"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/tover0314-w/opentypeless"
+    "url": "https://github.com/dengxuezhao/opentypeless"
   },
-  "homepage": "https://www.opentypeless.com",
+  "homepage": "https://github.com/dengxuezhao/opentypeless",
   "bugs": {
-    "url": "https://github.com/tover0314-w/opentypeless/issues"
+    "url": "https://github.com/dengxuezhao/opentypeless/issues"
   },
   "author": "OpenTypeless Contributors",
   "license": "MIT",
@@ -31,18 +33,15 @@
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify:byok": "node scripts/verify-byok-boundary.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.2",
-    "@tauri-apps/plugin-deep-link": "^2.2",
     "@tauri-apps/plugin-global-shortcut": "^2.2",
     "@tauri-apps/plugin-opener": "^2.2",
-    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-store": "^2.2",
-    "@tauri-apps/plugin-updater": "^2.10.1",
-    "better-auth": "1.6.25",
     "framer-motion": "^11.18",
     "i18next": "^24.2",
     "lucide-react": "^0.460",
@@ -72,7 +71,8 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "brace-expansion": "5.0.8",
+    "brace-expansion": "5.0.9",
+    "nanoid": "3.3.17",
     "postcss": "8.5.23"
   }
 }

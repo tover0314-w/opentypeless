@@ -1,0 +1,26 @@
+Use case: ui-mockup
+Asset type: high-fidelity Android settings information-architecture review board for OpenTypeless
+Input images: four Typeless screenshots are visual references only for calm dark hierarchy, generous spacing, restrained cards, and native typography. Do not copy Typeless branding, exact layout, navigation, or icons.
+Primary request: design three side-by-side OpenTypeless Android companion-app screens titled (1) “设置首页”, (2) “语音与模型”, and (3) “隐私与个性化”. The design must make recognition route and data destination understandable before exposing technical provider fields.
+Composition: wide presentation board, three equal modern Android phone mockups, complete status bar and safe areas, crisp readable Simplified Chinese. Use a consistent bottom navigation only on the settings home; nested screens use a back arrow.
+Screen 1 — Settings home:
+- large in-app title “设置”
+- dominant status card with small label “当前语音路线”, main value “Android 设备端”, green status dot, privacy line “音频不离开设备”, success line “快速检查已通过”, and a restrained button “打开语音实验室”
+- grouped rows with clear subtitles: “语音与模型” / “设备端 · 自动模式”; “输入体验” / “按住空格 · 长文听写”; “个性化与数据” / “个人词典 18 · 历史关闭”; “隐私与安全” / “本地加密 · 可恢复草稿 1”; “高级连接” / “端点、密钥与调用白名单”
+- bottom navigation labels: “首页”, “历史”, “词典”, “设置”, with Settings selected
+Screen 2 — Voice and models:
+- top title “语音与模型”
+- route card heading “识别路线”, selected card “Android 设备端” with exact supporting text “系统管理模型 · 音频留在设备”, checked
+- secondary route card “OpenTypeless 离线” with badge “已下载 228 MB”
+- secondary route row “Paraformer 实时” with status “未配置”
+- section “文字处理” with segmented chips “自动” selected, “精确”, “智能”
+- compact model-management row “离线模型管理”
+- collapsed row “高级连接” with subtitle “BYOK、端点与模型名”
+Screen 3 — Privacy and personalization:
+- top title “隐私与个性化”
+- visual data-flow card with three nodes and arrows: “麦克风” → “设备端识别” → “当前输入框”; exact status “本次不上传音频”
+- rows: “个人词典” toggle on with subtitle “18 个明确添加的词”; “历史记录” toggle off with subtitle “默认关闭”; “发送上下文” toggle off; “可恢复草稿” value “1”; “本地加密” value “已保护”
+- final subtle destructive outline row “删除我的数据”
+Visual language: calm native editorial neo-minimalism consistent with the new OpenTypeless IME. Graphite black canvas #171719, charcoal cards #242427, slightly raised #2B2B2F, off-white text, muted warm gray descriptions, periwinkle-violet #7774F2 for current selection, green only for successful/on-device status, 16–22dp corners, thin one-pixel outlines, very subtle elevation, excellent vertical rhythm, 48dp touch targets.
+Typography: large strong Chinese page titles, medium section labels, readable secondary descriptions. Use icons sparingly and consistently.
+Avoid: no giant hero illustration, no glass blur, no gradients, no neon, no feature-button grid, no API key field on the home screen, no technical logs, no duplicated settings, no subscription/account/paywall, no Typeless logo, no fake marketing statistics, no English except the small OpenTypeless wordmark, no watermark.

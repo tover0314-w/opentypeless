@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppThemeBase" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/ime_primary</item>
+        <item name="android:windowBackground">@color/ime_surface</item>
+        <item name="android:navigationBarColor">@color/ime_surface</item>
+        <item name="android:statusBarColor">@color/ime_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="AppTheme" parent="AppThemeBase" />
+</resources>
