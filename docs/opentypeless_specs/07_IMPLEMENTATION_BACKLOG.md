@@ -841,7 +841,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `KBD-007` | P0 | M | 候选栏统一模型 | KBD-001, CMP-002 | CandidatePage/selection/paging，不依赖具体引擎 | Latin/Rime 可复用 | DONE |
 | `KBD-008` | P1 | M | 输入法切换和语言切换 | KBD-002 | next IME、subtype/engine 切换 | OEM/HyperOS 可用 | DONE |
 | `KBD-009` | P1 | M | 横屏和尺寸配置 | KBD-002 | 高度、边距、横屏压缩 | 小米15横竖屏无截断 | IN_PROGRESS |
-| `KBD-010` | P1 | L | Emoji 面板 | KBD-001 | 分类、最近使用、敏感字段策略 | 不阻塞 IME 热路径 | TODO |
+| `KBD-010` | P1 | L | Emoji 面板 | KBD-001 | 分类、最近使用、敏感字段策略 | 不阻塞 IME 热路径 | DONE |
 | `KBD-011` | P1 | L | 剪贴板面板 | KBD-001, SEC-005 | 权限/Android 版本、保留、敏感字段隐藏 | 默认不静默上传/记录 | DONE |
 | `KBD-012` | P2 | L | 单手/紧凑模式 | KBD-002 | 左右/居中、尺寸 | 触控与横屏测试 | TODO |
 | `KBD-013` | P2 | L | 光标手势 | KBD-002 | 空格滑动、删除滑动可配置 | 不与按住说话冲突 | TODO |
@@ -860,6 +860,14 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `RIM-011` | P1 | M | Rime 导入导出 | RIM-007 | Schema 与用户数据分离 | 预览、容量、回滚 | TODO |
 | `RIM-012` | P1 | M | 物理键盘支持 | RIM-004 | KeyEvent、快捷键、候选序号 | 软键盘/物理键盘状态一致 | TODO |
 | `RIM-013` | P0 | S | 个人小鹤输入热路径与状态连续性 | RIM-004..009, KBD-008 | 进程内中英偏好、下一会话预热、隐藏候选展示 | 字段切换后保留中英状态；首键不再承担 native 激活；候选词不显示 | DONE |
+
+**KBD-010 完成说明（2026-08-23，`DONE`）：** More 菜单新增本地 Emoji 面板，固定八类 168 个 Unicode
+Emoji 15.1 序列、48dp 触控目标和 21 项有界 Recent；普通字段只在显式打开时读取 v1 私有 MRU，敏感/
+no-learning 字段保留静态 Emoji 输入但完全不读取、显示或写入 Recent。插入复用既有 `insertKeyboardText`/
+ETM 单写入门面，面板与 store 无 editor capability；没有新增权限、组件、网络、字体、图片或依赖。最终
+`verify_android.sh all` 为 120 个 script tests、269 个 source architecture tests、191 Gradle tasks 全部 PASS，
+五个 APK 资源扫描 0 违规；API35 arm64 emulator 的 store/View 组件测试 5/5 PASS，system-selected IME 普通文本
+与密码字段端到端 1/1 PASS。小米 10 Ultra 本轮未连接，真机执行明确为 `NOT RUN`。
 
 **RIM-003 完成说明（2026-08-16，`DONE`）：** 设置页现提供显式 SAF 本地导入、bounded closed-world manifest/ZIP/YAML
 校验、no-backup copy-once staging、librime 1.17.0 dry deploy、同目录原子 current/rollback 与清除。未验证包固定

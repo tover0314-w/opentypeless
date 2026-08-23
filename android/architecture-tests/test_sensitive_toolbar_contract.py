@@ -76,8 +76,8 @@ class SensitiveToolbarContractTest(unittest.TestCase):
     def test_rejects_service_raw_sensitive_boolean_projection(self) -> None:
         self.mutate(
             SERVICE,
-            "PrivacyPolicyEngine.hardSafety(\n                        privacy.sensitive(), privacy.learningAllowed())",
-            "PrivacyPolicyEngine.hardSafety(false, true)",
+            "privacy.sensitive(), privacy.learningAllowed()",
+            "false, true",
         )
         self.assertIn("SEC005_SERVICE_WIRING", self.rules())
 

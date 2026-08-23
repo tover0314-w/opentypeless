@@ -69,6 +69,11 @@ implicitly version the other. Release entries must name an immutable tag and sou
   panel/editor/IME lifecycle exit, hides destructively in sensitive fields, and pastes through the
   existing ETM typing facade. It adds no listener, history, persistence, sync, export, network path
   or permission.
+- `KBD-010` adds a local categorized Emoji panel with eight Unicode 15.1 groups and a bounded
+  21-item recent list. Static Emoji stays usable in sensitive fields, while sensitive/no-learning
+  policy suppresses every recent-list read and write. The versioned private payload stores only
+  allowlisted code points and no time, count, App or editor context; all insertion still uses the
+  existing ETM typing facade.
 
 - `TST-001` completes the lightweight personal-use Test Host matrix for every current platform
   input type, selected/collapsed ranges, dynamic editor replacement, RTL and local WebView

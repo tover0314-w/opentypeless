@@ -532,6 +532,51 @@ public final class TestHostInstrumentedTest {
     }
 
     @Test
+    public void selectedImeEmojiInsertsAndSuppressesRecentsInSensitiveFieldWhenRequested()
+            throws Exception {
+        String expectedPackage = InstrumentationRegistry.getArguments()
+                .getString("imeEmojiPackage");
+        Assume.assumeTrue("candidate-specific KBD-010 check was not requested",
+                expectedPackage != null && !expectedPackage.isBlank());
+        awaitHostWindowFocus();
+        focusField(R.id.host_plain_text);
+
+        UiAutomation automation = instrumentation.getUiAutomation();
+        AccessibilityServiceInfo serviceInfo = automation.getServiceInfo();
+        serviceInfo.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+        automation.setServiceInfo(serviceInfo);
+        focusField(R.id.host_plain_text);
+
+        activateImeNode(automation, expectedPackage, Set.of(
+                "More voice keyboard actions", "更多语音键盘操作"), false);
+        awaitPackageLabel(automation, expectedPackage, Set.of("Emoji"));
+        activatePackageNode(automation, expectedPackage, Set.of("Emoji"), true);
+        awaitImeLabel(automation, expectedPackage, Set.of(
+                "Smileys and emotion", "笑脸与情绪"));
+        activateImeNode(automation, expectedPackage, Set.of(
+                "Smileys and emotion", "笑脸与情绪"), false);
+        awaitImeLabel(automation, expectedPackage, Set.of("😀"));
+        activateImeNode(automation, expectedPackage, Set.of("😀"), true);
+        assertFieldTextEventually(
+                R.id.host_plain_text, "😀", automation, expectedPackage);
+
+        focusField(R.id.host_password);
+        activateImeNode(automation, expectedPackage, Set.of(
+                "More voice keyboard actions", "更多语音键盘操作"), false);
+        awaitPackageLabel(automation, expectedPackage, Set.of("Emoji"));
+        activatePackageNode(automation, expectedPackage, Set.of("Emoji"), true);
+        awaitImeLabel(automation, expectedPackage, Set.of("😀"));
+        Set<String> sensitivePanel = inputMethodLabels(automation, expectedPackage);
+        assertFalse("sensitive Emoji panel exposed recents: " + sensitivePanel,
+                sensitivePanel.contains("Recently used Emoji")
+                        || sensitivePanel.contains("最近使用的 Emoji"));
+        activateImeNode(automation, expectedPackage, Set.of("😀"), true);
+        assertFieldTextEventually(
+                R.id.host_password, "😀", automation, expectedPackage);
+    }
+
+    @Test
     public void selectedImeRimePreeditUsesRealKeyboardRouteWhenRequested() throws Exception {
         String expectedPackage = InstrumentationRegistry.getArguments()
                 .getString("imeRimePackage");
@@ -638,16 +683,25 @@ public final class TestHostInstrumentedTest {
 
     private void assertPlainTextEventually(
             String expected, UiAutomation automation, String expectedPackage) {
-        EditText plain = activity.findViewById(R.id.host_plain_text);
+        assertFieldTextEventually(
+                R.id.host_plain_text, expected, automation, expectedPackage);
+    }
+
+    private void assertFieldTextEventually(
+            int fieldId,
+            String expected,
+            UiAutomation automation,
+            String expectedPackage) {
+        EditText field = activity.findViewById(fieldId);
         long deadline = SystemClock.uptimeMillis() + 8_000L;
         do {
             AtomicReference<String> value = new AtomicReference<>();
-            instrumentation.runOnMainSync(() -> value.set(plain.getText().toString()));
+            instrumentation.runOnMainSync(() -> value.set(field.getText().toString()));
             if (expected.equals(value.get())) return;
             SystemClock.sleep(100L);
         } while (SystemClock.uptimeMillis() < deadline);
         AtomicReference<String> actual = new AtomicReference<>();
-        instrumentation.runOnMainSync(() -> actual.set(plain.getText().toString()));
+        instrumentation.runOnMainSync(() -> actual.set(field.getText().toString()));
         assertEquals(
                 "unexpected IME text; labels="
                         + inputMethodLabels(automation, expectedPackage),

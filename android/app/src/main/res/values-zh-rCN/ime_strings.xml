@@ -17,6 +17,18 @@
     <string name="ime_clipboard_text_only">只能粘贴已复制的纯文本</string>
     <string name="ime_clipboard_too_large">复制的文字过长，无法安全粘贴</string>
     <string name="ime_clipboard_unavailable">无法读取剪贴板</string>
+    <string name="ime_emoji_title">Emoji</string>
+    <string name="ime_emoji_close">关闭</string>
+    <string name="ime_emoji_recent_empty">暂无最近使用的 Emoji</string>
+    <string name="ime_emoji_category_recent">最近使用的 Emoji</string>
+    <string name="ime_emoji_category_smileys">笑脸与情绪</string>
+    <string name="ime_emoji_category_people">人物与身体</string>
+    <string name="ime_emoji_category_animals">动物与自然</string>
+    <string name="ime_emoji_category_food">食物与饮料</string>
+    <string name="ime_emoji_category_activities">活动</string>
+    <string name="ime_emoji_category_travel">旅行与地点</string>
+    <string name="ime_emoji_category_objects">物品</string>
+    <string name="ime_emoji_category_symbols">符号</string>
     <string name="ime_key_long_dictation_compact">长文</string>
     <string name="ime_key_finish_dictation_compact">上屏</string>
     <string name="ime_key_processing">处理中…</string>
@@ -89,6 +101,8 @@
     <string name="ime_cd_clipboard_refresh">重新读取当前剪贴板</string>
     <string name="ime_cd_clipboard_close">关闭剪贴板面板</string>
     <string name="ime_cd_clipboard_paste">粘贴面板中显示的剪贴板文字</string>
+    <string name="ime_cd_emoji_close">关闭 Emoji 面板</string>
+    <string name="ime_cd_insert_emoji">输入 Emoji %1$s</string>
 
     <!-- 麦克风控件的 TalkBack 状态描述。 -->
     <string name="ime_state_idle">空闲</string>
@@ -167,6 +181,8 @@
     <string name="ime_status_clipboard_sensitive">当前敏感字段不可使用剪贴板</string>
     <string name="ime_status_finish_before_clipboard_paste">请先完成当前语音输入，再粘贴</string>
     <string name="ime_status_finish_rime_before_clipboard_paste">请先完成当前中文组词，再粘贴</string>
+    <string name="ime_status_finish_before_emoji">请先完成当前语音输入，再打开 Emoji</string>
+    <string name="ime_status_finish_rime_before_emoji">请先完成当前中文组词，再打开 Emoji</string>
     <string name="ime_status_editor_action_failed">执行编辑器操作时文本连接失败</string>
     <string name="ime_status_finish_before_mode_change">请先结束或取消当前录音，再更改模式</string>
     <string name="ime_status_mode_selected">已选择%1$s模式</string>

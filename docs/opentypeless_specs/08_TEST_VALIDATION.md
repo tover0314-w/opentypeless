@@ -2779,6 +2779,23 @@ final: "我们今天需要先拆分输入法架构。"
 - Paste 只走 `insertKeyboardText`/ETM，Voice 或非 idle Rime composition 明确拒绝；
 - Android/OEM 拒绝读取时显示 unavailable，不申请额外权限或回退 URI/Intent。
 
+### 12.2 KBD-010 分类 Emoji
+
+- 八个固定 category 共 168 个唯一 Unicode 15.1 序列；每页和 recent 均不超过 21 项；
+- ZWJ/variation-selector 多 code-point Emoji 保持精确提交，所有按钮与 category/close 达到 48dp；
+- MRU 重复项移至首位，v1 code-point payload 跨 store round-trip；unknown version、畸形、越界与非 catalog 数据清空；
+- 普通字段显示并更新 Recent；敏感与 no-learning 字段仍显示静态 Emoji，但不读取、不显示、不写入 Recent；
+- selected system IME 在普通文本与密码字段各精确提交一次，密码面板无 Recent accessibility node；
+- Voice/non-idle Rime 明确拒绝打开或提交，所有合法 Emoji 只走 `insertKeyboardText`/ETM；
+- mode、Voice、field、InputView、window 与 service 生命周期清除面板内存，不新增权限、组件、网络、字体或依赖。
+
+2026-08-23 实际验收：`verify_android.sh all` PASS（120 个 script tests、269 个 source architecture tests、
+compiled architecture debug/release 2 variants、191 Gradle tasks）；最终 Debug/Release/AndroidTest/Test Host 五个 APK
+经 exact resource policy 扫描均为 0 违规、0 真实小鹤资源。API35 arm64 emulator 定向
+`EmojiRecentStoreInstrumentedTest` 与 `KeyboardEmojiPanelInstrumentedTest` 共 5/5 PASS；将最终 Debug APK 真实设为
+系统当前 IME 后，`selectedImeEmojiInsertsAndSuppressesRecentsInSensitiveFieldWhenRequested` 1/1 PASS（5.585s），
+并恢复 LatinIME 为唯一启用/默认输入法。小米 10 Ultra 本轮未连接，因此该设备为 `NOT RUN`。
+
 ---
 
 ## 13. Action Protocol 测试

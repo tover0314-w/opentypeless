@@ -1786,3 +1786,15 @@ generation、selection 和 revision 证明释放之后捕获；pending key/candi
 
 该路径不新增网络、权限、持久化或正文诊断。默认 commit 只提交用户已经可见的本地 Rime composition；cancel 只清空同一
 revision。两种结果都经唯一 ETM/CompositionCoordinator，不能由 Rime native 或 Voice Provider 直接持有编辑能力。
+
+## 34. KBD-010 Emoji 隐私与持久边界
+
+Emoji catalog 是固定本地 Unicode 序列，不读取编辑器上下文、剪贴板或网络。静态 Emoji 在敏感字段仍可输入；这不是对
+Voice、Clipboard、History、Learning 或 Teach 的授权扩张。敏感/no-learning 的 hard safety 会隐藏 Recent category，且
+service 必须在读取 store 之前投影该策略，成功插入后也不得记录。诊断仅允许 category/count，不含 Emoji 序列、App、
+字段、时间、次数或正文。
+
+ADR-0013 的 v1 private SharedPreferences 最多保存 21 个 catalog ID 的 code-point 编码；unknown/malformed/oversized 数据
+fail closed。manifest 继续 `allowBackup=false`，cloud backup 与 device transfer 的 sharedpref 域保持 deny-all。写入使用
+`apply()`，不在普通字母/Rime 热路径加载或同步刷盘。面板和 store 均不持有 `InputConnection`；所有 Emoji 仅通过现有
+ETM 输入 façade 提交。Unicode 15.1 provenance 与 Unicode-3.0 notice 保留在 `third_party/emoji/` 和 App 法律声明中。

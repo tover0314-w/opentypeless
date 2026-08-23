@@ -60,6 +60,11 @@ import com.opentypeless.android.keyboard.candidate.KeyboardCandidateBar;
 import com.opentypeless.android.keyboard.clipboard.ClipboardPanelSnapshot;
 import com.opentypeless.android.keyboard.clipboard.KeyboardClipboardPanel;
 import com.opentypeless.android.keyboard.clipboard.SystemClipboardReader;
+import com.opentypeless.android.keyboard.emoji.EmojiCatalog;
+import com.opentypeless.android.keyboard.emoji.EmojiPrivacyPolicy;
+import com.opentypeless.android.keyboard.emoji.EmojiRecents;
+import com.opentypeless.android.keyboard.emoji.EmojiRecentStore;
+import com.opentypeless.android.keyboard.emoji.KeyboardEmojiPanel;
 import com.opentypeless.android.keyboard.latin.LatinKeyboardLayout;
 import com.opentypeless.android.keyboard.field.KeyboardFieldProfile;
 import com.opentypeless.android.keyboard.feedback.AndroidKeyboardFeedback;
@@ -144,6 +149,7 @@ public final class OpenTypelessImeService extends InputMethodService
     private static final int MENU_UNDO = 210;
     private static final int MENU_VOICE_DIAGNOSTICS = 211;
     private static final int MENU_CLIPBOARD = 212;
+    private static final int MENU_EMOJI = 213;
     private static final int MENU_PUNCTUATION_BASE = 300;
     private static final long DISCARD_CONFIRM_WINDOW_MILLIS = 10_000L;
     private static final long DETACHED_STATE_REFRESH_MILLIS = 500L;
@@ -938,10 +944,15 @@ public final class OpenTypelessImeService extends InputMethodService
     private AndroidKeyboardFeedback keyboardFeedback;
     private KeyboardCandidateBar keyboardCandidateBar;
     private KeyboardClipboardPanel keyboardClipboardPanel;
+    private KeyboardEmojiPanel keyboardEmojiPanel;
     private View keyboardTypingSurface;
     private KeyboardToolbarLayout keyboardToolbarLayout;
     private KeyboardToolbarPrivacyPolicy.State keyboardToolbarPrivacy =
             restrictedToolbarPrivacy();
+    private EmojiPrivacyPolicy.State emojiPrivacy = EmojiPrivacyPolicy.hidden();
+    private EmojiRecentStore emojiRecentStore;
+    private EmojiRecents visibleEmojiRecents = EmojiRecents.empty();
+    private boolean lastKeyboardInsertApplied;
     private boolean compactToolbar;
     private KeyboardFieldProfile currentKeyboardFieldProfile = KeyboardFieldProfile.GENERAL;
     private KeyboardEngineSelection keyboardEngineSelection = KeyboardEngineSelection.latinOnly();
@@ -1072,6 +1083,7 @@ public final class OpenTypelessImeService extends InputMethodService
         rimeRuntimePreferences = new RimeRuntimePreferences(this);
         rimeUserDataStore = new RimeUserDataStore(this);
         keyboardFeedback = new AndroidKeyboardFeedback(this);
+        emojiRecentStore = new EmojiRecentStore(this);
         personalizationStore = new PersonalizationStore(this);
         draftPreferences = new SecurePreferences(this);
         localIo = Executors.newSingleThreadExecutor();
@@ -1314,6 +1326,7 @@ public final class OpenTypelessImeService extends InputMethodService
                             : KeyboardInputModeLayout.Mode.VOICE,
                     mode -> {
                         hideClipboardPanel();
+                        hideEmojiPanel();
                         refreshStatusVisibilityForInputMode(mode);
                         if (mode == KeyboardInputModeLayout.Mode.VOICE
                                 && latinKeyboardLayout != null) {
@@ -1347,9 +1360,24 @@ public final class OpenTypelessImeService extends InputMethodService
                     }
                 });
         keyboardClipboardPanel.root().setVisibility(View.GONE);
+        keyboardEmojiPanel = new KeyboardEmojiPanel(
+                this,
+                new KeyboardEmojiPanel.Listener() {
+                    @Override
+                    public void onEmojiSelected(String emoji) {
+                        insertEmoji(emoji);
+                    }
+
+                    @Override
+                    public void onClose() {
+                        hideEmojiPanel();
+                    }
+                });
+        keyboardEmojiPanel.root().setVisibility(View.GONE);
         FrameLayout typingPages = new FrameLayout(this);
         typingPages.addView(keyboardTypingSurface, frameMatchWrap());
         typingPages.addView(keyboardClipboardPanel.root(), frameMatchWrap());
+        typingPages.addView(keyboardEmojiPanel.root(), frameMatchWrap());
         keyStage.addView(typingPages, matchWrap());
         // The key stage must size to its rows. Giving a WRAP_CONTENT IME window a weighted
         // zero-height child makes the platform expand it to the full display, which separates
@@ -1478,6 +1506,7 @@ public final class OpenTypelessImeService extends InputMethodService
         }
         activeTarget = target;
         hideClipboardPanel();
+        hideEmojiPanel();
         preparingVoiceInput = true;
         finishingVoiceInput = false;
         activeCaptureMode = captureMode;
@@ -3841,6 +3870,7 @@ public final class OpenTypelessImeService extends InputMethodService
     }
 
     private void insertKeyboardText(String text) {
+        lastKeyboardInsertApplied = false;
         boolean voiceWasActive = activeVoiceTransaction != null;
         VoiceTransactionSession.KeyboardPreemption preemption =
                 preemptVoiceForKeyboard();
@@ -3864,8 +3894,8 @@ public final class OpenTypelessImeService extends InputMethodService
             finishVoiceKeyboardPreemption(preemption, false);
             return;
         }
-        boolean preemptionClosed = finishVoiceKeyboardPreemption(
-                preemption, result instanceof EditorTransactionResult.Applied);
+        boolean applied = result instanceof EditorTransactionResult.Applied;
+        boolean preemptionClosed = finishVoiceKeyboardPreemption(preemption, applied);
         handleKeyboardResult(
                 result,
                 R.string.ime_status_key_rejected,
@@ -3874,6 +3904,7 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_status_composition_cleanup_failed, true);
         }
         invalidateLastCommit();
+        lastKeyboardInsertApplied = applied;
     }
 
     private void performKeyboardEnter() {
@@ -4425,25 +4456,32 @@ public final class OpenTypelessImeService extends InputMethodService
                         3,
                         R.string.ime_clipboard_title);
             }
+            if (emojiPrivacy.panelVisible()) {
+                popup.getMenu().add(
+                        Menu.NONE,
+                        MENU_EMOJI,
+                        4,
+                        R.string.ime_emoji_title);
+            }
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_DICTIONARY,
-                    4,
+                    5,
                     R.string.ime_key_dictionary);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_APP_PROFILE,
-                    5,
+                    6,
                     R.string.ime_key_app_profile);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_SETTINGS,
-                    6,
+                    7,
                     R.string.ime_key_settings);
             popup.getMenu().add(
                     Menu.NONE,
                     MENU_VOICE_DIAGNOSTICS,
-                    7,
+                    8,
                     R.string.ime_menu_voice_diagnostics);
         }
         popup.setOnMenuItemClickListener(item -> {
@@ -4461,6 +4499,7 @@ public final class OpenTypelessImeService extends InputMethodService
                 case MENU_DISCARD_AUDIO -> discardSavedAudio();
                 case MENU_UNDO -> undoLastVoiceCommit();
                 case MENU_CLIPBOARD -> showClipboardPanel();
+                case MENU_EMOJI -> showEmojiPanel();
                 default -> {
                     return false;
                 }
@@ -4507,6 +4546,7 @@ public final class OpenTypelessImeService extends InputMethodService
             keyboardInputModeLayout.setVoiceAvailable(voiceVisible);
         }
         if (!keyboardToolbarPrivacy.clipboardVisible()) hideClipboardPanel();
+        if (!emojiPrivacy.panelVisible()) hideEmojiPanel();
         refreshVoicePulseVisibility();
     }
 
@@ -4526,6 +4566,7 @@ public final class OpenTypelessImeService extends InputMethodService
             setStatus(R.string.ime_clipboard_unavailable, true);
             return;
         }
+        hideEmojiPanel();
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
         panel.render(SystemClipboardReader.readCurrentText(this));
         typingSurface.setVisibility(View.GONE);
@@ -4578,6 +4619,70 @@ public final class OpenTypelessImeService extends InputMethodService
             panel.clear();
             panel.root().setVisibility(View.GONE);
         }
+        if (keyboardTypingSurface != null) keyboardTypingSurface.setVisibility(View.VISIBLE);
+    }
+
+    private void showEmojiPanel() {
+        if (currentEditor == null || !emojiPrivacy.panelVisible()) {
+            hideEmojiPanel();
+            setStatus(R.string.ime_status_no_active_field, true);
+            return;
+        }
+        if (activeTarget != null || voiceController.state() != VoiceController.State.IDLE) {
+            setStatus(R.string.ime_status_finish_before_emoji, true);
+            return;
+        }
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease != null && !lease.isIdle()) {
+            setStatus(R.string.ime_status_finish_rime_before_emoji, true);
+            return;
+        }
+        KeyboardEmojiPanel panel = keyboardEmojiPanel;
+        View typingSurface = keyboardTypingSurface;
+        if (panel == null || typingSurface == null) return;
+        hideClipboardPanel();
+        if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
+        visibleEmojiRecents = emojiPrivacy.recentsVisible()
+                ? emojiRecentStore.load()
+                : EmojiRecents.empty();
+        panel.render(visibleEmojiRecents, emojiPrivacy.recentsVisible());
+        typingSurface.setVisibility(View.GONE);
+        panel.root().setVisibility(View.VISIBLE);
+    }
+
+    private void insertEmoji(String emoji) {
+        if (!EmojiCatalog.contains(emoji)
+                || currentEditor == null
+                || !emojiPrivacy.panelVisible()) {
+            hideEmojiPanel();
+            return;
+        }
+        if (activeTarget != null || voiceController.state() != VoiceController.State.IDLE) {
+            setStatus(R.string.ime_status_finish_before_emoji, true);
+            return;
+        }
+        RimeCompositionLease lease = activeRimeLease;
+        if (lease != null && !lease.isIdle()) {
+            setStatus(R.string.ime_status_finish_rime_before_emoji, true);
+            return;
+        }
+        closeIdleRimeSession();
+        insertKeyboardText(emoji);
+        if (!lastKeyboardInsertApplied || !emojiPrivacy.recentsWritable()) return;
+        visibleEmojiRecents = visibleEmojiRecents.record(emoji);
+        emojiRecentStore.save(visibleEmojiRecents);
+        if (keyboardEmojiPanel != null) {
+            keyboardEmojiPanel.recordSelection(visibleEmojiRecents);
+        }
+    }
+
+    private void hideEmojiPanel() {
+        KeyboardEmojiPanel panel = keyboardEmojiPanel;
+        if (panel != null) {
+            panel.clear();
+            panel.root().setVisibility(View.GONE);
+        }
+        visibleEmojiRecents = EmojiRecents.empty();
         if (keyboardTypingSurface != null) keyboardTypingSurface.setVisibility(View.VISIBLE);
     }
 
@@ -5617,6 +5722,7 @@ public final class OpenTypelessImeService extends InputMethodService
     @Override
     public void onStartInput(EditorInfo attribute, boolean restarting) {
         hideClipboardPanel();
+        hideEmojiPanel();
         closeRimeComposition(false);
         rimeAvailabilityRequest++;
         cancelVoiceForLifecycle();
@@ -5640,9 +5746,10 @@ public final class OpenTypelessImeService extends InputMethodService
             keyboardCandidateBar.clear();
             keyboardCandidateBar.setPlaintextVisible(!sensitiveField);
         }
-        keyboardToolbarPrivacy = KeyboardToolbarPrivacyPolicy.resolve(
-                PrivacyPolicyEngine.hardSafety(
-                        privacy.sensitive(), privacy.learningAllowed()));
+        PrivacyPolicyEngine.HardSafety hardSafety = PrivacyPolicyEngine.hardSafety(
+                privacy.sensitive(), privacy.learningAllowed());
+        keyboardToolbarPrivacy = KeyboardToolbarPrivacyPolicy.resolve(hardSafety);
+        emojiPrivacy = EmojiPrivacyPolicy.resolve(currentEditor != null, hardSafety);
         applyKeyboardToolbarPrivacy();
         if (keyboardInputModeLayout != null) {
             keyboardInputModeLayout.select(privacy.sensitive()
@@ -5745,6 +5852,7 @@ public final class OpenTypelessImeService extends InputMethodService
     public void onFinishInput() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
         hideClipboardPanel();
+        hideEmojiPanel();
         closeRimeComposition(true);
         rimeAvailabilityRequest++;
         cancelVoiceForLifecycle();
@@ -5760,6 +5868,7 @@ public final class OpenTypelessImeService extends InputMethodService
             keyboardCandidateBar.setPlaintextVisible(false);
         }
         keyboardToolbarPrivacy = restrictedToolbarPrivacy();
+        emojiPrivacy = EmojiPrivacyPolicy.hidden();
         applyKeyboardToolbarPrivacy();
         invalidateLastCommit();
         super.onFinishInput();
@@ -5769,6 +5878,7 @@ public final class OpenTypelessImeService extends InputMethodService
     public void onFinishInputView(boolean finishingInput) {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
         hideClipboardPanel();
+        hideEmojiPanel();
         closeRimeComposition(false);
         cancelVoiceForLifecycle();
         super.onFinishInputView(finishingInput);
@@ -5778,6 +5888,7 @@ public final class OpenTypelessImeService extends InputMethodService
     public void onWindowHidden() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
         hideClipboardPanel();
+        hideEmojiPanel();
         closeRimeComposition(false);
         cancelVoiceForLifecycle();
         super.onWindowHidden();
@@ -5821,6 +5932,7 @@ public final class OpenTypelessImeService extends InputMethodService
     public void onDestroy() {
         if (latinKeyboardLayout != null) latinKeyboardLayout.cancelTransientGestures();
         hideClipboardPanel();
+        hideEmojiPanel();
         closeRimeComposition(true);
         cancelVoiceForLifecycle();
         unregisterScreenOffReceiver();

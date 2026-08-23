@@ -3382,3 +3382,16 @@ Rime observation，UNCERTAIN 保持 fail-closed pending，二者都不启动识�
 默认策略提交已显示的 Rime 文字，使 `pre` + `ni` + Voice final `voice` 得到 `prenivoice`；显式 cancel 策略得到
 `prevoice`。两条路径均先释放 Rime、后捕获 Voice target，不允许 current-cursor fallback、双 composition 或旧 ticket
 重放。详见 [RIM-009 报告](../2026-08-16-rim-009-rime-voice-conflict.md)。
+
+## 47. KBD-010 分类 Emoji 与最近使用
+
+`EmojiCatalog` 固定 Unicode Emoji 15.1 的 168 项本地子集，分为笑脸、人物、动物、食物、活动、旅行、物品和符号
+八类；每个页面最多 21 项，不在 IME 热路径解析资产、查询网络或加载字体。`KeyboardEmojiPanel` 只持有 View、当前分类
+和 bounded callback，不接收 editor、存储或网络能力。点击最终仍汇入现有 `insertKeyboardText` façade 与唯一 ETM；
+Voice 或非 idle Rime composition 存在时明确拒绝，不能创建第二写入路径。
+
+最近使用由 `EmojiRecents` 维护 21 项 MRU，并通过 ADR-0013 的 private v1 code-point payload 保存。格式只接受 catalog
+成员，unknown version、畸形、过长、过深或额外项均返回空列表。普通字段打开面板时才读取 MRU，成功提交后才异步保存；
+不保存时间、次数、App、字段或上下文。静态 Emoji 在敏感字段保持可输入，但 SEC-001 hard safety 拒绝 Learning/Teach 时
+Recent category 为 `GONE`，且 service 不读取也不写入 store。面板在 mode、Voice、editor、InputView、window 与 service
+生命周期边界清除内存列表。

@@ -49,3 +49,4 @@ Feature Flag 删除条件等不可逆决定时，实施前必须存在可引用�
 | [ADR-0010](0010-recoverable-settings-secret-transaction.md) | Recoverable settings and Secret transaction | Accepted | 2026-08-14 | `CFG-011` |
 | [ADR-0011](0011-keyboard-base-evaluation.md) | Keyboard base evaluation and upstream boundary | Accepted | 2026-08-15 | `KSP-001`, `KSP-010` |
 | [ADR-0012](0012-xiaohe-resource-distribution-policy.md) | Xiaohè resource distribution and local-import boundary | Accepted | 2026-08-16 | `KSP-012` |
+| [ADR-0013](0013-emoji-recents-private-format.md) | Emoji recents private format and sensitive-field policy | Accepted | 2026-08-23 | `KBD-010` |
