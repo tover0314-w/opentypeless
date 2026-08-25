@@ -6,7 +6,7 @@ use crate::HotkeyRegistrationError;
 use crate::HotkeyRoleCache;
 use crate::SessionTokenStore;
 use serde_json::{json, Map, Value};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 fn config_patch_between(previous: &storage::AppConfig, next: &storage::AppConfig) -> Value {
     let mut patch = Map::new();
@@ -149,6 +149,17 @@ fn hotkey_runtime_config_changed(previous: &storage::AppConfig, next: &storage::
         || previous.hotkeys != next.hotkeys
 }
 
+fn provider_connection_config_changed(
+    previous: &storage::AppConfig,
+    next: &storage::AppConfig,
+) -> bool {
+    previous.stt_provider != next.stt_provider
+        || previous.stt_custom_base_url != next.stt_custom_base_url
+        || previous.llm_provider != next.llm_provider
+        || previous.llm_base_url != next.llm_base_url
+        || previous.polish_enabled != next.polish_enabled
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HotkeyRuntimeRefreshError {
     pub registration_error: String,
@@ -234,6 +245,7 @@ pub async fn update_config(
     let config = prepare_config_for_save(config)?;
     let patch = config_patch_between(&previous, &config);
     let refresh_hotkeys = hotkey_runtime_config_changed(&previous, &config);
+    let refresh_provider_connections = provider_connection_config_changed(&previous, &config);
 
     if refresh_hotkeys {
         let generation = hotkey_supervisor.wake_for_settings_change();
@@ -274,6 +286,14 @@ pub async fn update_config(
     emit_config_patch(&app, &patch);
     if patch.get("ui_language").is_some() || patch.get("capsule_auto_hide").is_some() {
         crate::refresh_tray(&app);
+    }
+    if refresh_provider_connections {
+        if let Some(pipeline) = app.try_state::<crate::pipeline::PipelineHandle>() {
+            let pipeline = pipeline.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                pipeline.pre_warm().await;
+            });
+        }
     }
     Ok(())
 }
@@ -379,6 +399,27 @@ mod tests {
 
         assert_eq!(prepared.max_recording_seconds, 600);
         assert_eq!(prepared.custom_recording_limit_seconds, 600);
+    }
+
+    #[test]
+    fn provider_connection_changes_trigger_pre_warm() {
+        let previous = storage::AppConfig::default();
+        let mut next = previous.clone();
+        next.llm_base_url = "https://api.openai.com/v1".to_string();
+        assert!(provider_connection_config_changed(&previous, &next));
+
+        let mut next = previous.clone();
+        next.stt_custom_base_url = "http://localhost:9000/v1".to_string();
+        assert!(provider_connection_config_changed(&previous, &next));
+    }
+
+    #[test]
+    fn unrelated_settings_do_not_trigger_provider_pre_warm() {
+        let previous = storage::AppConfig::default();
+        let mut next = previous.clone();
+        next.theme = "dark".to_string();
+
+        assert!(!provider_connection_config_changed(&previous, &next));
     }
 
     #[test]

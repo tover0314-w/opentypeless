@@ -175,7 +175,7 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   },
   qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-turbo' },
   groq: { baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
-  claude: { baseUrl: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-sonnet-4' },
+  claude: { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-0' },
   ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
   cloud: { baseUrl: `${API_BASE_URL}/api/proxy`, model: 'default' },

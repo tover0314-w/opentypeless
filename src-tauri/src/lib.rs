@@ -33,6 +33,18 @@ use std::sync::{Arc, Mutex};
 /// Default cloud API base URL. Override with the `API_BASE_URL` environment variable.
 pub const DEFAULT_API_BASE_URL: &str = "https://www.opentypeless.com";
 pub const CLIENT_VERSION_HEADER: &str = "X-OpenTypeless-Version";
+const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 10 * 60;
+const HTTP_TCP_KEEPALIVE_SECS: u64 = 60;
+
+fn build_shared_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(2)
+        .pool_idle_timeout(std::time::Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
+        .tcp_keepalive(std::time::Duration::from_secs(HTTP_TCP_KEEPALIVE_SECS))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client")
+}
 
 /// Read the cloud API base URL from the environment, falling back to the compiled default.
 pub fn api_base_url() -> String {
@@ -266,6 +278,13 @@ mod tests {
     fn desktop_client_version_header_matches_frontend_contract() {
         assert_eq!(crate::CLIENT_VERSION_HEADER, "X-OpenTypeless-Version");
         assert_eq!(crate::desktop_client_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn shared_http_pool_survives_normal_gaps_between_dictations() {
+        assert!(HTTP_POOL_IDLE_TIMEOUT_SECS >= 10 * 60);
+        assert!(HTTP_TCP_KEEPALIVE_SECS <= HTTP_POOL_IDLE_TIMEOUT_SECS);
+        let _client = build_shared_http_client();
     }
 
     #[test]
@@ -862,12 +881,7 @@ pub fn run() {
             let dictionary_store = storage::DictionaryStore::new(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to init dictionary store: {}", e))?;
 
-            let shared_client = reqwest::Client::builder()
-                .pool_max_idle_per_host(2)
-                .pool_idle_timeout(std::time::Duration::from_secs(30))
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client");
+            let shared_client = build_shared_http_client();
 
             let app_registry = app_detector::registry::AppRegistry::builtin()
                 .map_err(|error| anyhow::anyhow!("Failed to init app registry: {error}"))?;

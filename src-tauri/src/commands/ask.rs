@@ -567,6 +567,39 @@ fn build_byok_ask_body_for_context(
     Ok(body)
 }
 
+fn build_byok_ask_body_for_config(
+    config: &storage::AppConfig,
+    question: &str,
+    selected_text: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let question = validate_ask_question(question)?;
+    let selected_text = selected_text.and_then(sanitize_selected_text_for_ask);
+    let mut body = crate::llm::protocol::build_chat_body(
+        &config.llm_provider,
+        &config.llm_base_url,
+        &config.llm_model,
+        ask_messages_from_sanitized(&question, selected_text.as_ref()),
+        ASK_OUTPUT_TOKEN_LIMIT as u32,
+        0.2,
+        false,
+    );
+
+    if config.llm_model.starts_with("glm-") {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "thinking".to_string(),
+                json!({
+                    "type": "enabled"
+                }),
+            );
+            obj.insert("temperature".to_string(), json!(1.0));
+            obj.insert("top_p".to_string(), json!(0.95));
+        }
+    }
+
+    Ok(body)
+}
+
 pub fn build_byok_ask_body(question: &str, model: &str) -> Result<serde_json::Value, String> {
     build_byok_ask_body_for_context(question, model, None)
 }
@@ -835,23 +868,28 @@ async fn ask_via_byok(
         return Err("LLM base URL must use http or https scheme".to_string());
     }
 
-    let url = format!(
-        "{}/chat/completions",
-        config.llm_base_url.trim_end_matches('/')
-    );
-    let mut request = client
+    let api_kind =
+        crate::llm::protocol::detect_api_kind(&config.llm_provider, &config.llm_base_url);
+    let url = crate::llm::protocol::chat_endpoint(&config.llm_provider, &config.llm_base_url)?;
+    let request = client
         .post(url)
         .header("Content-Type", "application/json")
-        .json(&build_byok_ask_body_for_context(
+        .json(&build_byok_ask_body_for_config(
+            config,
             question,
-            &config.llm_model,
             selected_text,
         )?)
-        .timeout(std::time::Duration::from_secs(30));
-
-    if !api_key.trim().is_empty() {
-        request = request.header("Authorization", format!("Bearer {}", api_key));
-    }
+        .timeout(crate::llm::protocol::request_timeout(
+            &config.llm_provider,
+            &config.llm_base_url,
+            &config.llm_model,
+        ));
+    let request = crate::llm::protocol::apply_auth_headers(
+        request,
+        &config.llm_provider,
+        &config.llm_base_url,
+        api_key,
+    );
 
     let resp = request.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
@@ -861,7 +899,7 @@ async fn ask_via_byok(
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    extract_byok_ask_answer(&body)
+    validate_ask_answer(&crate::llm::protocol::response_text(api_kind, &body))
 }
 
 fn extract_byok_ask_answer(body: &serde_json::Value) -> Result<String, String> {
@@ -1777,6 +1815,38 @@ mod tests {
         assert_eq!(body["thinking"]["type"], "enabled");
         assert_eq!(body["temperature"], 1.0);
         assert_eq!(body["top_p"], 0.95);
+    }
+
+    #[test]
+    fn byok_ask_config_uses_gpt5_compatible_fields_for_direct_openai() {
+        let config = storage::AppConfig {
+            llm_provider: "openai".to_string(),
+            llm_base_url: "https://api.openai.com/v1".to_string(),
+            llm_model: "gpt-5".to_string(),
+            ..storage::AppConfig::default()
+        };
+
+        let body = build_byok_ask_body_for_config(&config, "What is OpenTypeless?", None).unwrap();
+
+        assert_eq!(body["max_completion_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn byok_ask_config_uses_native_anthropic_message_shape() {
+        let config = storage::AppConfig {
+            llm_provider: "claude".to_string(),
+            llm_base_url: "https://api.anthropic.com/v1".to_string(),
+            llm_model: "claude-sonnet-4-0".to_string(),
+            ..storage::AppConfig::default()
+        };
+
+        let body = build_byok_ask_body_for_config(&config, "What is OpenTypeless?", None).unwrap();
+
+        assert!(body["system"].as_str().unwrap().contains("40 words"));
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(body["max_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
     }
 
     #[test]

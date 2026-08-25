@@ -109,17 +109,23 @@ pub async fn test_llm_connection(
         return Err("Base URL must use http or https scheme".to_string());
     }
 
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [{"role": "user", "content": "hi"}],
-        "max_tokens": 1
-    });
+    let url = crate::llm::protocol::chat_endpoint(&provider, &base_url)?;
+    let body = crate::llm::protocol::build_chat_body(
+        &provider,
+        &base_url,
+        &model,
+        vec![serde_json::json!({"role": "user", "content": "hi"})],
+        1,
+        0.3,
+        false,
+    );
 
     let request = client.post(&url).header("Content-Type", "application/json");
-    let resp = crate::llm::apply_provider_auth_header(request, &provider, &api_key)
+    let resp = crate::llm::protocol::apply_auth_headers(request, &provider, &base_url, &api_key)
         .json(&body)
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(crate::llm::protocol::request_timeout(
+            &provider, &base_url, &model,
+        ))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -130,10 +136,11 @@ pub async fn test_llm_connection(
 fn build_fetch_models_request(
     client: &reqwest::Client,
     provider: &str,
+    base_url: &str,
     api_key: &str,
     url: &str,
 ) -> reqwest::RequestBuilder {
-    crate::llm::apply_provider_auth_header(client.get(url), provider, api_key)
+    crate::llm::protocol::apply_auth_headers(client.get(url), provider, base_url, api_key)
 }
 
 #[tauri::command]
@@ -141,6 +148,7 @@ pub async fn fetch_llm_models(
     api_key: String,
     provider: String,
     base_url: String,
+    client: tauri::State<'_, reqwest::Client>,
 ) -> Result<Vec<String>, String> {
     if base_url.is_empty() {
         return Ok(vec![]);
@@ -155,10 +163,9 @@ pub async fn fetch_llm_models(
         return Err("Base URL must use http or https scheme".to_string());
     }
 
-    let client = reqwest::Client::new();
-    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let url = crate::llm::protocol::models_endpoint(&provider, &base_url)?;
 
-    let resp = build_fetch_models_request(&client, &provider, &api_key, &url)
+    let resp = build_fetch_models_request(&client, &provider, &base_url, &api_key, &url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -244,6 +251,7 @@ mod tests {
         let request = build_fetch_models_request(
             &reqwest::Client::new(),
             "ollama",
+            "http://localhost:11434/v1",
             "",
             "http://localhost:11434/v1/models",
         )
@@ -258,6 +266,7 @@ mod tests {
         let request = build_fetch_models_request(
             &reqwest::Client::new(),
             "openai",
+            "https://api.openai.com/v1",
             "sk-test",
             "https://api.openai.com/v1/models",
         )
@@ -337,25 +346,43 @@ pub async fn bench_llm_connection(
         return Err("Base URL must use http or https scheme".to_string());
     }
 
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [{"role": "user", "content": "hi"}],
-        "max_tokens": 1
-    });
+    let url = crate::llm::protocol::chat_endpoint(&provider, &base_url)?;
+    let body = crate::llm::protocol::build_chat_body(
+        &provider,
+        &base_url,
+        &model,
+        vec![serde_json::json!({"role": "user", "content": "hi"})],
+        1,
+        0.3,
+        false,
+    );
 
     let t0 = std::time::Instant::now();
     let request = client.post(&url).header("Content-Type", "application/json");
-    let resp = crate::llm::apply_provider_auth_header(request, &provider, &api_key)
+    let resp = crate::llm::protocol::apply_auth_headers(request, &provider, &base_url, &api_key)
         .json(&body)
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(crate::llm::protocol::request_timeout(
+            &provider, &base_url, &model,
+        ))
         .send()
         .await
         .map_err(|e| e.to_string())?;
     let elapsed = t0.elapsed().as_millis() as u32;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+        let status = resp.status();
+        let details: String = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(200)
+            .collect();
+        return Err(if details.is_empty() {
+            format!("HTTP {status}")
+        } else {
+            format!("HTTP {status}: {details}")
+        });
     }
 
     Ok(elapsed)
