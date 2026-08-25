@@ -579,7 +579,7 @@ fn build_byok_ask_body_for_config(
         &config.llm_base_url,
         &config.llm_model,
         ask_messages_from_sanitized(&question, selected_text.as_ref()),
-        ASK_OUTPUT_TOKEN_LIMIT as u32,
+        ASK_OUTPUT_TOKEN_LIMIT,
         0.2,
         false,
     );
@@ -900,17 +900,6 @@ async fn ask_via_byok(
 
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     validate_ask_answer(&crate::llm::protocol::response_text(api_kind, &body))
-}
-
-fn extract_byok_ask_answer(body: &serde_json::Value) -> Result<String, String> {
-    let message = &body["choices"][0]["message"];
-    if let Some(content) = message["content"].as_str() {
-        if !content.trim().is_empty() {
-            return validate_ask_answer(content);
-        }
-    }
-
-    validate_ask_answer(message["reasoning_content"].as_str().unwrap_or(""))
 }
 
 async fn ask_via_cloud(
@@ -1863,7 +1852,11 @@ mod tests {
         });
 
         assert_eq!(
-            extract_byok_ask_answer(&body).unwrap(),
+            validate_ask_answer(&crate::llm::protocol::response_text(
+                crate::llm::protocol::LlmApiKind::OpenAiCompatible,
+                &body,
+            ))
+            .unwrap(),
             "Use Command+Period to ask."
         );
     }
