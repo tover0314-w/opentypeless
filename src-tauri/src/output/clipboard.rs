@@ -80,6 +80,12 @@ fn should_auto_paste_after_clipboard(session_type: &str) -> bool {
     !session_type.eq_ignore_ascii_case("wayland")
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn wayland_paste_program(home: Option<&std::ffi::OsStr>) -> std::path::PathBuf {
+    home.map(|home| std::path::Path::new(home).join(".local/bin/opentypeless-paste"))
+        .unwrap_or_else(|| "/usr/bin/false".into())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ClipboardRestoreDecision {
     Restore(String),
@@ -298,6 +304,15 @@ impl TextOutput for ClipboardOutput {
 
             #[cfg(target_os = "linux")]
             if !should_auto_paste_after_clipboard(&crate::platform::current_session_type()) {
+                if let Err(error) = std::process::Command::new(wayland_paste_program(
+                    std::env::var_os("HOME").as_deref(),
+                ))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                {
+                    tracing::warn!("Failed to start Wayland clipboard paste: {error}");
+                }
                 return Ok(InsertResult::copied_fallback(
                     InsertionStrategy::ClipboardCopyOnly,
                     text.chars().count(),
@@ -338,6 +353,18 @@ mod tests {
     fn x11_clipboard_output_keeps_auto_paste() {
         assert!(should_auto_paste_after_clipboard("x11"));
         assert!(should_auto_paste_after_clipboard("unknown"));
+    }
+
+    #[test]
+    fn wayland_paste_program_uses_home_or_safe_fallback() {
+        assert_eq!(
+            wayland_paste_program(Some(std::ffi::OsStr::new("/tmp/home"))),
+            std::path::PathBuf::from("/tmp/home/.local/bin/opentypeless-paste")
+        );
+        assert_eq!(
+            wayland_paste_program(None),
+            std::path::PathBuf::from("/usr/bin/false")
+        );
     }
 
     #[test]
