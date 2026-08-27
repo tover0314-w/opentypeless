@@ -650,6 +650,8 @@ public final class TestHostInstrumentedTest {
         EditText plain = activity.findViewById(R.id.host_plain_text);
         instrumentation.runOnMainSync(() -> plain.setText(""));
         focusField(R.id.host_plain_text);
+        activateImeNode(automation, expectedPackage, Set.of(
+                "Open the QWERTY keyboard", "打开 QWERTY 键盘"), false);
 
         Set<String> latinActive = Set.of(
                 "Latin input active; switch to Chinese input",
@@ -666,9 +668,13 @@ public final class TestHostInstrumentedTest {
             activateImeNode(automation, expectedPackage, latinActive, false);
         }
         awaitImeLabel(automation, expectedPackage, rimeActive);
-        activateImeNode(automation, expectedPackage, Set.of("n"), true);
+        Set<String> nKey = Set.of(
+                "n; touch and hold for !", "n；长按输入 !");
+        awaitImeLabel(automation, expectedPackage, nKey);
+        activateImeNode(automation, expectedPackage, nKey, false);
         assertPlainTextEventually("n", automation, expectedPackage);
-        activateImeNode(automation, expectedPackage, Set.of("i"), true);
+        activateImeNode(automation, expectedPackage, Set.of(
+                "i; touch and hold for 8", "i；长按输入 8"), false);
         assertPlainTextEventually("ni", automation, expectedPackage);
         awaitImeLabel(automation, expectedPackage, Set.of(
                 "Candidate 1: 甲", "第 1 个候选：甲"));

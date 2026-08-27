@@ -102,7 +102,7 @@ public final class RimePreeditInstrumentedTest {
                 RimeInputEngine.ProcessResult replayed = engine.selectCandidate(
                         new RimeInputEngine.CandidateSelectionRequest(7L, candidateSelection));
                 assertTrue(replayed instanceof RimeInputEngine.Rejected);
-                assertEquals(RimeInputEngine.FailureKind.STALE_COORDINATION_GENERATION,
+                assertEquals(RimeInputEngine.FailureKind.INACTIVE,
                         ((RimeInputEngine.Rejected) replayed).failure());
             }
         } finally {

@@ -3526,6 +3526,16 @@ architecture-gate 114/114、Debug/Release compiled 2/2 与 strict offline 191-ta
 本任务关闭 bounded candidate page 与一次性选择，不外推为无限候选、持久 UserDB、真实小鹤、Schema option 或
 Voice/Rime arbitration。
 
+2026-08-27 回归修正：RIM-013 隐藏整页候选的做法被撤回。service 只在 editor/generation、隐私策略、Rime 引擎、
+pending key/selection/page 全部稳定时显示当前精确页；新按键尚未完成时立即清空旧页，避免旧候选闪烁或被误点。
+候选栏固定占用键盘内部 composition slot，与键盘使用同一 surface；候选项默认透明、无卡片间距，不再表现为悬浮
+白色按键层。API35 arm64 emulator 的 View **7/7**、actual librime **1/1**、system-selected IME test-host 翻页并选择
+第二页第 2 项 `庚` **1/1** 均 PASS；外部真实触控截图也读到 `ni`、候选 `甲/乙/丙/丁` 与下一页按钮。提交后的
+native session 按既有领域契约进入 `INACTIVE`，因此重复选择设备断言与 JVM 契约对齐为 `INACTIVE`，仍保证不会二次
+调用 native 或二次提交。完整 `scripts/verify_android.sh all` 最终结果与精确 APK 哈希见
+[2026-08-27 RIM-005 回归报告](../2026-08-27-rim-005-visible-integrated-candidate-strip.md)。本轮未连接 Xiaomi，真实
+小鹤 `xkvi` 候选内容明确 **NOT RUN**，不以合成词库结果冒充。
+
 ## 41. RIM-006 Schema 与 Option 恢复验收
 
 - 两个 ABI 由固定 librime/NDK/CMake 源码重建；native option allowlist、read-back、host-path leak 与精确 hash 全部 PASS。

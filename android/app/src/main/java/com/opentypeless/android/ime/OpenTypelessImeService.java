@@ -3412,7 +3412,7 @@ public final class OpenTypelessImeService extends InputMethodService
         lease.revision = snapshot.revision();
         lease.preedit = snapshot.preedit();
         lease.candidatePage = snapshot.candidatePage().orElse(null);
-        suppressRimeCandidatePage();
+        renderRimeCandidatePage(lease);
         if (!lease.pendingSymbols.isEmpty()) {
             continuePendingRimeSymbols(lease);
             return;
@@ -3470,7 +3470,7 @@ public final class OpenTypelessImeService extends InputMethodService
         lease.revision = snapshot.revision();
         lease.candidatePage = after;
         lease.pendingPageRequest = null;
-        suppressRimeCandidatePage();
+        renderRimeCandidatePage(lease);
     }
 
     private void applyRimeCommit(
@@ -3590,8 +3590,25 @@ public final class OpenTypelessImeService extends InputMethodService
         prepareRimeSession();
     }
 
-    private void suppressRimeCandidatePage() {
-        if (keyboardCandidateBar != null) keyboardCandidateBar.clear();
+    private void renderRimeCandidatePage(RimeCompositionLease lease) {
+        KeyboardCandidateBar bar = keyboardCandidateBar;
+        CandidatePage page = lease == null ? null : lease.candidatePage;
+        if (bar == null) return;
+        if (lease == null
+                || activeRimeLease != lease
+                || page == null
+                || !lease.hasComposition()
+                || lease.pendingKeyCommands != 0
+                || lease.pendingSelection != null
+                || lease.pendingPageRequest != null
+                || currentEditor == null
+                || sensitiveField
+                || !currentLearningAllowed
+                || keyboardEngineSelection.active() != KeyboardEngineSelection.Engine.RIME) {
+            bar.clear();
+            return;
+        }
+        if (bar.showPage(page)) bar.setInteractionEnabled(true);
     }
 
     private void finishEmptyRimeComposition(RimeCompositionLease lease) {

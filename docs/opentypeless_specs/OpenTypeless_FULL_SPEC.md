@@ -4171,7 +4171,8 @@ revision、稳定 candidate ID 与 expected text，`PageRequest` 携带原页身
 
 `KeyboardCandidateBar` 只渲染真实 Android View：一个横向 `HorizontalScrollView`、带可见序号/无障碍描述的候选
 按钮和按 availability 显示的上一页/下一页按钮，交互目标至少 48dp。每次换页会移除旧 View；旧按钮引用、clear、
-disabled 或 privacy-hidden 状态均不能发出 callback。敏感字段隐藏是 destructive clear，切回普通字段不会恢复旧正文。
+disabled 或 privacy-hidden 状态均不能发出 callback。候选使用与键盘一致的扁平 surface 和透明静止态，不绘制第二排
+白色按键卡片或窗口外悬浮层。敏感字段隐藏是 destructive clear，切回普通字段不会恢复旧正文。
 
 产品 Route-A 把唯一候选栏放在 composition slot，并以空态隐藏。KBD-007 不拥有 engine/JNI/editor/网络/存储能力，
 也不调用 EditorOperation；未绑定 engine 的事件明确拒绝。RIM-004/005 后续必须把 preedit 与本栏分开，并用同一
@@ -4267,9 +4268,11 @@ page revision 和方向；选择必须同时匹配 generation、page revision、
 到快照中的 absolute native index。合法选择只调用一次 native `selectCandidate`，且 native commit 必须与 expected text
 一致；成功或拒绝后旧选择均不可重放。
 
-service 在任何 key/page/selection 请求 pending 时锁住候选交互。页变化只更新 CompositionCoordinator 的有界 UI revision，
-不写 editor；选择成功后以原 target lease 调用 Rime set-composition，再 finish 同一 composition。selection、generation、
-revision、正文或策略不匹配都会关闭 interaction 并零写，不重新捕获当前光标。详见
+service 在任何 key/page/selection 请求 pending 时锁住候选交互，并清除快速连按期间的旧页；只有当前 lease、普通字段、
+Rime active 且没有 pending work 时，才把 exact `CandidatePage` 渲染到键盘内部 composition slot。页变化只更新
+CompositionCoordinator 的有界 UI revision，不写 editor；选择成功后以原 target lease 调用 Rime set-composition，再
+finish 同一 composition。selection、generation、revision、正文或策略不匹配都会关闭 interaction 并零写，不重新捕获
+当前光标。详见
 [RIM-005 报告](../2026-08-16-rim-005-candidate-paging-selection.md)。
 
 ## 44. RIM-006 Schema 与 Option 配置

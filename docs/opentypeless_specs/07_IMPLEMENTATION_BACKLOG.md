@@ -859,7 +859,7 @@ OpenTypeless 自造 `SYNTHETIC_TEST_ONLY` fixture。KSP-012 不实现 RIM-003/00
 | `RIM-010` | P1 | M | Rime 诊断页 | RIM-003..007, DIA-001 | 版本、Schema、部署、UserDB、错误 | 不暴露用户词内容到诊断包 | TODO |
 | `RIM-011` | P1 | M | Rime 导入导出 | RIM-007 | Schema 与用户数据分离 | 预览、容量、回滚 | TODO |
 | `RIM-012` | P1 | M | 物理键盘支持 | RIM-004 | KeyEvent、快捷键、候选序号 | 软键盘/物理键盘状态一致 | TODO |
-| `RIM-013` | P0 | S | 个人小鹤输入热路径与状态连续性 | RIM-004..009, KBD-008 | 进程内中英偏好、下一会话预热、隐藏候选展示 | 字段切换后保留中英状态；首键不再承担 native 激活；候选词不显示 | DONE |
+| `RIM-013` | P0 | S | 个人小鹤输入热路径与状态连续性 | RIM-004..009, KBD-008 | 进程内中英偏好、下一会话预热、稳定候选快照 | 字段切换后保留中英状态；首键不再承担 native 激活；旧候选不闪烁 | DONE |
 
 **KBD-010 完成说明（2026-08-23，`DONE`）：** More 菜单新增本地 Emoji 面板，固定八类 168 个 Unicode
 Emoji 15.1 序列、48dp 触控目标和 21 项有界 Recent；普通字段只在显式打开时读取 v1 私有 MRU，敏感/
@@ -928,6 +928,12 @@ EditorTransaction delivery，随后才在有界 worker 预激活下一会话，�
 `中` 只以 content-free 进程状态保留；Rime 不可用或敏感字段仍强制 Latin，重新进入普通字段且本地包有效时恢复偏好。
 本次不新增持久格式，不承诺进程被系统杀死或重启手机后继续记忆；真实小鹤资源仍只在用户设备 app-private no-backup
 目录，Git 与 APK 保持 zero-bundle。
+
+**RIM-005 候选展示回归修正（2026-08-27）：** 8 月 22 日把候选页完全隐藏后，四码存在多个结果时无法点击次选，
+因此不再沿用全局 suppression。当前只在 key/page/selection pending、目标漂移、敏感/no-learning 字段或非 Rime 状态
+清除候选；稳定快照恢复渲染到既有 composition slot，并继续绑定 generation、page revision、candidate ID、index 与
+expected text。候选条改为键盘同底色、静止态透明的 48dp 扁平行，不绘制第二排白色按键卡片或额外悬浮窗口。进程内
+中英偏好与下一会话预热保持不变，真实小鹤仍为 zero-bundle。
 
 **KBD-001 完成说明（2026-08-16，`DONE`）：** 产品 `OpenTypelessImeService` 现只在 `onCreate` 读取一次
 `keyboard_shell_route_a`，并通过闭合 `KeyboardShellSelector` 创建 Route-A 或 legacy voice 二者之一；selected factory

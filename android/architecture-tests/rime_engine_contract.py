@@ -296,7 +296,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "commit.text().equals(selection.expectedText())",
         "lease.candidatePage.selection(selection.candidateIndex()).equals(selection)",
         "lease.pendingKeyCommands!=0",
-        "suppressRimeCandidatePage()",
+        "renderRimeCandidatePage(lease)",
         "if(keyboardCandidateBar!=null)keyboardCandidateBar.clear()",
         "lease.controller.warmUp()",
     ):
@@ -312,11 +312,38 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
     ):
         if token not in service_compact:
             violations.append(Violation("KBD015_RIME_SYMBOL_WIRING", token))
-    if service_compact.count("suppressRimeCandidatePage()") != 3:
+    if service_compact.count("renderRimeCandidatePage(lease)") != 2:
         violations.append(Violation(
             "RIM005_RUNTIME_WIRING",
-            "personal Rime candidate presentation must stay suppressed at both update sites",
+            "each accepted key/page snapshot must render the exact current candidate page",
         ))
+    if "suppressRimeCandidatePage" in service:
+        violations.append(Violation(
+            "RIM005_RUNTIME_WIRING",
+            "the integrated candidate strip must not be unconditionally suppressed",
+        ))
+    render_start = service.find(
+        "private void renderRimeCandidatePage(RimeCompositionLease lease)")
+    render_end = service.find("\n    private void ", render_start + 1)
+    render_body = "" if render_start < 0 else service[
+        render_start:len(service) if render_end < 0 else render_end]
+    render_compact = _compact(render_body)
+    for token in (
+        "activeRimeLease!=lease",
+        "page==null",
+        "!lease.hasComposition()",
+        "lease.pendingKeyCommands!=0",
+        "lease.pendingSelection!=null",
+        "lease.pendingPageRequest!=null",
+        "currentEditor==null",
+        "sensitiveField",
+        "!currentLearningAllowed",
+        "keyboardEngineSelection.active()!=KeyboardEngineSelection.Engine.RIME",
+        "bar.clear()",
+        "if(bar.showPage(page))bar.setInteractionEnabled(true)",
+    ):
+        if token not in render_compact:
+            violations.append(Violation("RIM005_CANDIDATE_PRESENTATION", token))
     expected_caret = service.find("lease.expectedCaret = (int) caret;")
     composition_write = service.find("editorSessionManager.setRimeComposition(")
     if expected_caret < 0 or composition_write < 0 or expected_caret > composition_write:

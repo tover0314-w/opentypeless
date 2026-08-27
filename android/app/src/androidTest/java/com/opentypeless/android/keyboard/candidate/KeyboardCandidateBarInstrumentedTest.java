@@ -5,11 +5,17 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.view.View;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.opentypeless.android.R;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
@@ -128,6 +134,25 @@ public final class KeyboardCandidateBarInstrumentedTest {
             assertEquals(1, harness.bar.candidateRow().getChildCount());
             assertEquals("1 你好", harness.bar.candidateButton(0).getText().toString());
             assertFalse(harness.bar.candidateButton(0).getText().toString().contains("hello"));
+        });
+    }
+
+    @Test
+    public void candidateStripUsesIntegratedSurfaceWithoutFloatingKeyCards() {
+        onMain(() -> {
+            Harness harness = new Harness();
+            harness.bar.showPage(page("rime", 2L, 3L, 0, 1, "行", "型"));
+
+            ColorDrawable surface = (ColorDrawable) harness.bar.root().getBackground();
+            assertEquals(harness.context.getColor(R.color.ime_surface), surface.getColor());
+            StateListDrawable background = (StateListDrawable)
+                    harness.bar.candidateButton(0).getBackground();
+            GradientDrawable restingSurface = (GradientDrawable) background.getCurrent();
+            assertEquals(Color.TRANSPARENT, restingSurface.getColor().getDefaultColor());
+            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams)
+                    harness.bar.candidateButton(0).getLayoutParams();
+            assertEquals(0, params.getMarginStart());
+            assertEquals(0, params.getMarginEnd());
         });
     }
 

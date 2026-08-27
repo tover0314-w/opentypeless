@@ -123,6 +123,8 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "root.setVisibility(View.GONE)",
         "listener.onCandidateSelected(page.selection(candidateIndex))",
         "listener.onPageRequested(page.pageRequest(direction))",
+        "root.setBackgroundColor(context.getColor(R.color.ime_surface))",
+        "button.setBackgroundResource(R.drawable.app_nav_button_background)",
     )
     if any(token not in bar_compact for token in bar_tokens):
         violations.append(Violation(
@@ -180,6 +182,7 @@ def inspect_android(android_root: Path) -> tuple[Violation, ...]:
         "sensitivePolicyDestructivelyClearsPlaintextAndRejectsNewPage",
         "disabledInteractionAndFortyEightDpTargetsRemainFailClosed",
         "latinAndRimePagesReuseTheSameViewWithoutRetainingOldText",
+        "candidateStripUsesIntegratedSurfaceWithoutFloatingKeyCards",
     )
     if any(token not in view_test for token in view_test_tokens):
         violations.append(Violation(

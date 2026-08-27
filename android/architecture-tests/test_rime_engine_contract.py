@@ -149,13 +149,21 @@ class RimeEngineContractTest(unittest.TestCase):
         )
         self.assertIn("KBD015_RIME_SYMBOL_WIRING", self.rules())
 
-    def test_rejects_personal_candidate_suppression_removal(self) -> None:
+    def test_rejects_candidate_rendering_suppression(self) -> None:
         self.mutate(
             SERVICE,
+            "renderRimeCandidatePage(lease);",
             "suppressRimeCandidatePage();",
-            "renderRimeCandidatePage();",
         )
         self.assertIn("RIM005_RUNTIME_WIRING", self.rules())
+
+    def test_rejects_candidate_rendering_without_pending_key_guard(self) -> None:
+        self.mutate(
+            SERVICE,
+            "|| !lease.hasComposition()\n                || lease.pendingKeyCommands != 0",
+            "|| !lease.hasComposition()",
+        )
+        self.assertIn("RIM005_CANDIDATE_PRESENTATION", self.rules())
 
     def test_rejects_missing_complete_lifecycle_test(self) -> None:
         self.mutate(

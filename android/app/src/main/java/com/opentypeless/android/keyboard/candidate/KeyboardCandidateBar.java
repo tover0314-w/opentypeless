@@ -45,6 +45,8 @@ public final class KeyboardCandidateBar {
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setGravity(Gravity.CENTER_VERTICAL);
         root.setMinimumHeight(dp(MINIMUM_TOUCH_TARGET_DP));
+        root.setPadding(dp(4), 0, dp(4), 0);
+        root.setBackgroundColor(context.getColor(R.color.ime_surface));
         root.setVisibility(View.GONE);
 
         previousButton = navigationButton(
@@ -202,9 +204,10 @@ public final class KeyboardCandidateBar {
                 12, 18, 1, TypedValue.COMPLEX_UNIT_SP);
         button.setMinHeight(dp(MINIMUM_TOUCH_TARGET_DP));
         button.setMinimumHeight(dp(MINIMUM_TOUCH_TARGET_DP));
-        button.setBackgroundResource(R.drawable.ime_key_background);
+        // Candidates are part of one flat strip, not a second row of floating key cards.
+        button.setBackgroundResource(R.drawable.app_nav_button_background);
         button.setTextColor(context.getColorStateList(R.color.ime_key_text));
-        button.setPadding(dp(10), 0, dp(10), 0);
+        button.setPadding(dp(12), 0, dp(12), 0);
         button.setElevation(0f);
         button.setStateListAnimator(null);
         return button;
@@ -216,11 +219,8 @@ public final class KeyboardCandidateBar {
     }
 
     private LinearLayout.LayoutParams candidateParams() {
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+        return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(MINIMUM_TOUCH_TARGET_DP));
-        params.setMarginStart(dp(2));
-        params.setMarginEnd(dp(2));
-        return params;
     }
 
     private int dp(int value) {
