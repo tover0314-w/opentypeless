@@ -9,6 +9,8 @@
 - Related discussion: [#93 Custom Whisper query-string endpoints](https://github.com/tover0314-w/opentypeless/discussions/93)
 - Related pull request: [#44 Deepgram truncation](https://github.com/tover0314-w/opentypeless/pull/44)
 
+> Update, 2026-08-29: the `wtype`-only Wayland design below is retained as historical context but is superseded for release by LIVE-41 in the Stripe/cloud reliability super spec. KDE Plasma/KWin Wayland uses `kwtype`; other Wayland compositors use `wtype`; X11 uses `xdotool`. Missing or failed helpers keep the clipboard fallback. PR #103's user-home helper is not executed.
+
 ## 0. 中文范围摘要
 
 本轮只做六件事：同步最新主线、恢复自动测试、修复 Custom Whisper 地址、修复 Deepgram 丢尾字、增加三种标点模式、让 Wayland 在支持时直接输入。
