@@ -41,11 +41,12 @@ function getState() {
 
 describe('authStore', () => {
   it('pins the Better Auth desktop client version', () => {
-    expect(packageJson.dependencies['better-auth']).toBe('1.6.17')
+    expect(packageJson.dependencies['better-auth']).toBe('1.6.24')
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
 
     // Reset store state
     useAuthStore.setState({
@@ -69,6 +70,10 @@ describe('authStore', () => {
       cloudWordsResetAt: null,
       byokUnlimited: true,
       credentialCapability: 'unknown',
+      subscriptionRefreshState: 'unknown',
+      subscriptionRefreshLoading: false,
+      subscriptionLastVerifiedAt: null,
+      subscriptionRefreshError: null,
       loading: false,
       error: null,
     })
@@ -249,9 +254,48 @@ describe('authStore', () => {
       expect(toast).toHaveBeenCalledTimes(1)
       expect(toast).toHaveBeenCalledWith('Cloud words are almost used up.', 'error')
     })
+
+    it('keeps the last verified paid entitlement when refresh later fails', async () => {
+      useAuthStore.setState({
+        user: { id: '1', email: 'test@example.com', name: 'Test', emailVerified: true },
+      })
+      await getState().refreshSubscription()
+      const verifiedAt = getState().subscriptionLastVerifiedAt
+
+      vi.mocked(getSubscriptionStatus).mockRejectedValueOnce(new Error('service unavailable'))
+      await getState().refreshSubscription()
+
+      expect(getState().plan).toBe('pro')
+      expect(getState().subscriptionRefreshState).toBe('stale')
+      expect(getState().subscriptionLastVerifiedAt).toBe(verifiedAt)
+      expect(getState().subscriptionRefreshLoading).toBe(false)
+      expect(getState().subscriptionRefreshError).toBe('service unavailable')
+    })
+
+    it('marks membership unavailable without pretending a failed first refresh is fresh', async () => {
+      useAuthStore.setState({
+        user: { id: 'new-user', email: 'new@example.com', name: null, emailVerified: true },
+      })
+      vi.mocked(getSubscriptionStatus).mockRejectedValueOnce(new Error('offline'))
+
+      await getState().refreshSubscription()
+
+      expect(getState().subscriptionRefreshState).toBe('unavailable')
+      expect(getState().subscriptionLastVerifiedAt).toBeNull()
+    })
   })
 
   describe('hasManagedCloudAccess', () => {
+    it('recognizes Stripe Pro access returned by the new billing backend', () => {
+      expect(
+        hasManagedCloudAccess({
+          plan: 'pro',
+          source: 'stripe',
+          cloudWordsLimit: 100000,
+          licenseStatus: null,
+        }),
+      ).toBe(true)
+    })
     it('allows AppSumo lifetime plans with cloud words', () => {
       expect(
         hasManagedCloudAccess({

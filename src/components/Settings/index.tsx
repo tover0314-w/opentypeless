@@ -21,8 +21,15 @@ const paneTitleKeys: Record<PaneId, string> = {
   about: 'settings.about',
 }
 
+function paneFromHash(): PaneId | null {
+  const query = window.location.hash.split('?')[1]
+  if (!query) return null
+  const requested = new URLSearchParams(query).get('pane')
+  return requested && requested in paneTitleKeys ? (requested as PaneId) : null
+}
+
 export function Settings() {
-  const [activePane, setActivePane] = useState<PaneId>('general')
+  const [activePane, setActivePane] = useState<PaneId>(() => paneFromHash() ?? 'general')
   const contentRef = useRef<HTMLDivElement | null>(null)
   const config = useAppStore((s) => s.config)
   const setSavedConfig = useAppStore((s) => s.setSavedConfig)
@@ -33,6 +40,15 @@ export function Settings() {
   useEffect(() => {
     if (useAppStore.getState().savedConfig === null) setSavedConfig(config)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const syncRequestedPane = () => {
+      const requested = paneFromHash()
+      if (requested) setActivePane(requested)
+    }
+    window.addEventListener('hashchange', syncRequestedPane)
+    return () => window.removeEventListener('hashchange', syncRequestedPane)
+  }, [])
 
   useEffect(() => {
     contentRef.current?.scrollTo?.({ top: 0 })

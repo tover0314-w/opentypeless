@@ -11,14 +11,23 @@ import {
 } from '../lib/cloud-session'
 import {
   getSubscriptionStatus,
+  type BillingProvider,
   type LicenseStatus,
   type QuotaModel,
   type SubscriptionPlan,
   type SubscriptionSource,
+  type SubscriptionStatus,
 } from '../lib/api'
 import { isActiveCloudPlan } from '../lib/constants'
 import { toast } from '../components/toast-service'
 import i18n from '../i18n'
+import {
+  clearLastKnownSubscription,
+  isLastKnownSubscriptionUsable,
+  loadLastKnownSubscription,
+  saveLastKnownSubscription,
+} from '../lib/last-known-subscription'
+import { clearPendingDesktopCheckout } from '../lib/desktop-checkout-intent'
 
 let sttWarningShown = false
 let llmWarningShown = false
@@ -32,6 +41,7 @@ export interface AuthUser {
 }
 
 export type CredentialCapability = 'unknown' | 'present' | 'none'
+export type SubscriptionRefreshState = 'unknown' | 'fresh' | 'stale' | 'unavailable'
 
 interface AuthState {
   // User
@@ -42,8 +52,16 @@ interface AuthState {
   subscriptionEnd: string | null
   subscriptionStatus: string | null
   licenseStatus: LicenseStatus | null
+  billingProvider: BillingProvider
+  cancelAtPeriodEnd: boolean
+  canManageBilling: boolean
+  canMigrateToStripe: boolean
   quotaModel: QuotaModel
   credentialCapability: CredentialCapability
+  subscriptionRefreshState: SubscriptionRefreshState
+  subscriptionRefreshLoading: boolean
+  subscriptionLastVerifiedAt: string | null
+  subscriptionRefreshError: string | null
 
   // Quotas
   displayWordsUsedEstimate: number
@@ -91,8 +109,16 @@ interface AuthState {
 }
 
 export function hasManagedCloudAccess(
-  state: Pick<AuthState, 'plan' | 'source' | 'cloudWordsLimit' | 'licenseStatus'>,
+  state: Pick<AuthState, 'plan' | 'source' | 'cloudWordsLimit' | 'licenseStatus'> &
+    Partial<Pick<AuthState, 'subscriptionRefreshState' | 'subscriptionLastVerifiedAt'>>,
 ): boolean {
+  if (state.subscriptionRefreshState === 'unavailable') return false
+  if (
+    state.subscriptionRefreshState === 'stale' &&
+    !isLastKnownSubscriptionUsable(state.subscriptionLastVerifiedAt ?? null)
+  ) {
+    return false
+  }
   if (state.licenseStatus === 'refunded' || state.licenseStatus === 'deactivated') return false
   if (state.source === 'appsumo') {
     return state.cloudWordsLimit > 0 && state.licenseStatus === 'active'
@@ -100,7 +126,7 @@ export function hasManagedCloudAccess(
   if (state.source === 'lifetime') {
     return state.cloudWordsLimit > 0 || state.plan === 'lifetime_starter'
   }
-  if (state.source === 'creem' && state.cloudWordsLimit > 0) {
+  if ((state.source === 'creem' || state.source === 'stripe') && state.cloudWordsLimit > 0) {
     return true
   }
   return isActiveCloudPlan(state.plan)
@@ -121,8 +147,16 @@ function signedOutCloudState() {
     subscriptionEnd: null,
     subscriptionStatus: null,
     licenseStatus: null,
+    billingProvider: null,
+    cancelAtPeriodEnd: false,
+    canManageBilling: false,
+    canMigrateToStripe: false,
     quotaModel: 'legacy_dual_meter' as const,
     credentialCapability: 'unknown' as const,
+    subscriptionRefreshState: 'unknown' as const,
+    subscriptionRefreshLoading: false,
+    subscriptionLastVerifiedAt: null,
+    subscriptionRefreshError: null,
     displayWordsUsedEstimate: 0,
     displayWordsLimit: 0,
     displayWordsResetAt: null,
@@ -141,6 +175,33 @@ function signedOutCloudState() {
   }
 }
 
+function subscriptionStateFromStatus(status: SubscriptionStatus) {
+  return {
+    plan: status.plan,
+    source: status.source,
+    displayName: status.displayName,
+    subscriptionEnd: status.subscriptionEnd,
+    subscriptionStatus: status.subscriptionStatus,
+    licenseStatus: status.licenseStatus ?? null,
+    billingProvider: status.billingProvider ?? null,
+    cancelAtPeriodEnd: status.cancelAtPeriodEnd === true,
+    canManageBilling: status.canManageBilling === true,
+    canMigrateToStripe: status.canMigrateToStripe === true,
+    quotaModel: status.quotaModel,
+    displayWordsUsedEstimate: status.displayWordsUsedEstimate,
+    displayWordsLimit: status.displayWordsLimit,
+    displayWordsResetAt: status.displayWordsResetAt,
+    sttSecondsUsed: status.sttSecondsUsed,
+    sttSecondsLimit: status.sttSecondsLimit,
+    llmTokensUsed: status.llmTokensUsed,
+    llmTokensLimit: status.llmTokensLimit,
+    cloudWordsUsed: status.cloudWordsUsed,
+    cloudWordsLimit: status.cloudWordsLimit,
+    cloudWordsResetAt: status.cloudWordsResetAt,
+    byokUnlimited: status.byokUnlimited,
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   plan: 'free',
@@ -149,8 +210,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   subscriptionEnd: null,
   subscriptionStatus: null,
   licenseStatus: null,
+  billingProvider: null,
+  cancelAtPeriodEnd: false,
+  canManageBilling: false,
+  canMigrateToStripe: false,
   quotaModel: 'legacy_dual_meter',
   credentialCapability: 'unknown',
+  subscriptionRefreshState: 'unknown',
+  subscriptionRefreshLoading: false,
+  subscriptionLastVerifiedAt: null,
+  subscriptionRefreshError: null,
   displayWordsUsedEstimate: 0,
   displayWordsLimit: 0,
   displayWordsResetAt: null,
@@ -384,12 +453,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   invalidateCloudSession: async () => {
+    const userId = get().user?.id
     try {
       await persistSessionToken(null)
     } catch (e) {
       localStorage.removeItem('session_token')
       console.error('Failed to clear session token in backend:', e)
     }
+    if (userId) clearLastKnownSubscription(localStorage, userId)
+    clearPendingDesktopCheckout(localStorage)
     set(signedOutCloudState())
     sttWarningShown = false
     llmWarningShown = false
@@ -398,6 +470,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    const userId = get().user?.id
     try {
       await authClient.signOut()
     } finally {
@@ -405,6 +478,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         localStorage.removeItem('session_token')
         console.error('Failed to clear session token in backend:', e)
       })
+      if (userId) clearLastKnownSubscription(localStorage, userId)
+      clearPendingDesktopCheckout(localStorage)
       set(signedOutCloudState())
       sttWarningShown = false
       llmWarningShown = false
@@ -413,28 +488,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   refreshSubscription: async () => {
+    const userId = get().user?.id
+    if (!userId) return
+
+    if (!get().subscriptionLastVerifiedAt) {
+      const cached = loadLastKnownSubscription(localStorage, userId)
+      if (cached) {
+        set({
+          ...subscriptionStateFromStatus(cached.snapshot),
+          subscriptionRefreshState: 'stale',
+          subscriptionLastVerifiedAt: cached.verifiedAt,
+        })
+      }
+    }
+
+    set({ subscriptionRefreshLoading: true, subscriptionRefreshError: null })
     try {
       const status = await getSubscriptionStatus()
+      const verifiedAt = new Date().toISOString()
       set({
-        plan: status.plan,
-        source: status.source,
-        displayName: status.displayName,
-        subscriptionEnd: status.subscriptionEnd,
-        subscriptionStatus: status.subscriptionStatus,
-        licenseStatus: status.licenseStatus ?? null,
-        quotaModel: status.quotaModel,
-        displayWordsUsedEstimate: status.displayWordsUsedEstimate,
-        displayWordsLimit: status.displayWordsLimit,
-        displayWordsResetAt: status.displayWordsResetAt,
-        sttSecondsUsed: status.sttSecondsUsed,
-        sttSecondsLimit: status.sttSecondsLimit,
-        llmTokensUsed: status.llmTokensUsed,
-        llmTokensLimit: status.llmTokensLimit,
-        cloudWordsUsed: status.cloudWordsUsed,
-        cloudWordsLimit: status.cloudWordsLimit,
-        cloudWordsResetAt: status.cloudWordsResetAt,
-        byokUnlimited: status.byokUnlimited,
+        ...subscriptionStateFromStatus(status),
+        subscriptionRefreshState: 'fresh',
+        subscriptionLastVerifiedAt: verifiedAt,
       })
+      saveLastKnownSubscription(localStorage, userId, status, verifiedAt)
       // Clear checkout pending flag after first post-checkout refresh
       if (get().checkoutPending) {
         set({ checkoutPending: false })
@@ -474,7 +551,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         llmWarningShown = true
       }
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      set({
+        subscriptionRefreshState: get().subscriptionLastVerifiedAt ? 'stale' : 'unavailable',
+        subscriptionRefreshError: message,
+      })
       console.warn('Failed to refresh subscription status:', e instanceof Error ? e.message : e)
+    } finally {
+      set({ subscriptionRefreshLoading: false })
     }
   },
 

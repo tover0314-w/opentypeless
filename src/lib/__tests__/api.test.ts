@@ -71,6 +71,51 @@ describe('request() via getSubscriptionStatus', () => {
     expect(result.displayWordsLimit).toBe(100000)
     expect(result.sttSecondsLimit).toBe(36000)
   })
+
+  it('uses the explicit billing provider without breaking the legacy source field', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          plan: 'pro',
+          source: 'creem',
+          billingProvider: 'stripe',
+          subscriptionStatus: 'active',
+          canManageBilling: true,
+          canMigrateToStripe: false,
+        }),
+    } as Response)
+
+    const { getSubscriptionStatus } = await import('../api')
+    const result = await getSubscriptionStatus()
+
+    expect(result.source).toBe('creem')
+    expect(result.billingProvider).toBe('stripe')
+    expect(result.canManageBilling).toBe(true)
+    expect(result.canMigrateToStripe).toBe(false)
+  })
+
+  it('only exposes Stripe migration for an explicit failed Creem account', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          plan: 'free',
+          source: 'free',
+          billingProvider: 'creem',
+          subscriptionStatus: 'past_due',
+          canManageBilling: true,
+          canMigrateToStripe: true,
+        }),
+    } as Response)
+
+    const { getSubscriptionStatus } = await import('../api')
+    const result = await getSubscriptionStatus()
+
+    expect(result.billingProvider).toBe('creem')
+    expect(result.subscriptionStatus).toBe('past_due')
+    expect(result.canMigrateToStripe).toBe(true)
+  })
 })
 
 describe('request() error handling', () => {

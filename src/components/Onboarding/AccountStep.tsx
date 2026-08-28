@@ -12,7 +12,10 @@ import {
   clearOAuthState,
   handleDeepLinkUrl,
 } from '../../lib/deep-link'
-import { createDesktopAuthCallbackURL } from '../../lib/desktop-auth-callback'
+import {
+  claimDesktopAuthCallbackURL,
+  createDesktopAuthCallbackURL,
+} from '../../lib/desktop-auth-callback'
 
 type Tab = 'signin' | 'signup'
 
@@ -54,7 +57,9 @@ export function AccountStep() {
     let verificationCallbackURL: string | null = null
     try {
       if (tab === 'signin') {
-        verificationCallbackURL = createDesktopAuthCallbackURL(EMAIL_VERIFICATION_STATE_TTL_MS)
+        verificationCallbackURL = await createDesktopAuthCallbackURL(
+          EMAIL_VERIFICATION_STATE_TTL_MS,
+        )
         await signIn(email, password, { verificationCallbackURL })
         if (!useAuthStore.getState().emailVerificationPending) {
           clearOAuthState()
@@ -68,7 +73,9 @@ export function AccountStep() {
           setLocalError(t('onboarding.account.passwordTooShort'))
           return
         }
-        verificationCallbackURL = createDesktopAuthCallbackURL(EMAIL_VERIFICATION_STATE_TTL_MS)
+        verificationCallbackURL = await createDesktopAuthCallbackURL(
+          EMAIL_VERIFICATION_STATE_TTL_MS,
+        )
         await signUp(email, password, name, { verificationCallbackURL })
       }
     } catch {
@@ -84,10 +91,12 @@ export function AccountStep() {
       setOauthPending(provider)
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      const callbackURL = createDesktopAuthCallbackURL()
+      const callbackURL = await claimDesktopAuthCallbackURL()
+      if (!callbackURL) return
       const url = `${API_BASE_URL}/api/auth/desktop-oauth?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`
       await openUrl(url)
     } catch {
+      clearOAuthState()
       setOauthPending(null)
       setLocalError(t('onboarding.account.failedToStart'))
     }
@@ -166,7 +175,7 @@ export function AccountStep() {
           <button
             onClick={async () => {
               setResent(false)
-              const verificationCallbackURL = createDesktopAuthCallbackURL(
+              const verificationCallbackURL = await createDesktopAuthCallbackURL(
                 EMAIL_VERIFICATION_STATE_TTL_MS,
               )
               await resendVerification({ verificationCallbackURL })

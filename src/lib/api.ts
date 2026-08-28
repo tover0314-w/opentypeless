@@ -110,7 +110,8 @@ export type SubscriptionPlan =
   | 'appsumo_tier2'
   | 'appsumo_tier3'
 
-export type SubscriptionSource = 'free' | 'creem' | 'lifetime' | 'appsumo'
+export type SubscriptionSource = 'free' | 'creem' | 'stripe' | 'lifetime' | 'appsumo'
+export type BillingProvider = 'stripe' | 'creem' | 'appsumo' | null
 export type LicenseStatus = 'pending' | 'active' | 'refunded' | 'deactivated'
 export type QuotaModel = 'legacy_dual_meter' | 'cloud_words'
 
@@ -121,6 +122,11 @@ export interface SubscriptionStatus {
   subscriptionEnd: string | null
   subscriptionStatus: string | null
   licenseStatus?: LicenseStatus | null
+  billingProvider?: BillingProvider
+  cancelAtPeriodEnd?: boolean
+  canManageBilling?: boolean
+  canMigrateToStripe?: boolean
+  entitlementVersion?: number
   quotaModel: QuotaModel
   displayWordsUsedEstimate: number
   displayWordsLimit: number
@@ -150,6 +156,16 @@ export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
 
     const quotaModel =
       status.quotaModel ?? (source === 'appsumo' ? 'cloud_words' : 'legacy_dual_meter')
+    const billingProvider: BillingProvider =
+      status.billingProvider === 'stripe' ||
+      status.billingProvider === 'creem' ||
+      status.billingProvider === 'appsumo'
+        ? status.billingProvider
+        : source === 'stripe' || source === 'creem'
+          ? source
+          : source === 'appsumo'
+            ? 'appsumo'
+            : null
     const displayWordsUsedEstimate = status.displayWordsUsedEstimate ?? 0
     const displayWordsLimit = status.displayWordsLimit ?? 0
     const displayWordsResetAt = status.displayWordsResetAt ?? null
@@ -169,6 +185,15 @@ export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
       subscriptionEnd: status.subscriptionEnd ?? null,
       subscriptionStatus: status.subscriptionStatus ?? null,
       licenseStatus: status.licenseStatus ?? null,
+      billingProvider,
+      cancelAtPeriodEnd: status.cancelAtPeriodEnd === true,
+      canManageBilling:
+        typeof status.canManageBilling === 'boolean'
+          ? status.canManageBilling
+          : plan === 'pro' && (billingProvider === 'stripe' || billingProvider === 'creem'),
+      canMigrateToStripe: status.canMigrateToStripe === true && billingProvider === 'creem',
+      entitlementVersion:
+        typeof status.entitlementVersion === 'number' ? status.entitlementVersion : 1,
       quotaModel,
       displayWordsUsedEstimate,
       displayWordsLimit,

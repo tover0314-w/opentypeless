@@ -16,6 +16,7 @@ import {
   getHotkeyRegistrationError,
 } from './lib/tauri'
 import { initDeepLinkListener } from './lib/deep-link'
+import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
 import { Capsule } from './components/Capsule'
 import { Settings } from './components/Settings'
 import { History } from './components/History'
@@ -99,7 +100,7 @@ function MainApp() {
   const setHotkeyRegistrationError = useAppStore((s) => s.setHotkeyRegistrationError)
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const { route } = useRoute()
+  const { route, navigate } = useRoute()
 
   useEffect(() => {
     loadOnboardingCompleted().then(async (done) => {
@@ -165,6 +166,12 @@ function MainApp() {
   ])
 
   const user = useAuthStore((s) => s.user)
+  const authLoading = useAuthStore((s) => s.loading)
+
+  useEffect(() => {
+    if (!loaded || authLoading || !user || route !== 'account') return
+    if (readPendingDesktopCheckout(localStorage)) navigate('upgrade')
+  }, [authLoading, loaded, navigate, route, user])
 
   // Periodically refresh subscription status + refresh on window focus (throttled)
   useEffect(() => {
