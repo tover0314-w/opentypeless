@@ -7,6 +7,8 @@ use crate::storage::AppConfig;
 const SERVICE_NAME: &str = "OpenTypeless";
 const API_KEY_ACCOUNT_SUFFIX: &str = "api_key";
 const STORED_CREDENTIAL_VERSION: u8 = 1;
+const CLOUD_SESSION_NAMESPACE: &str = "session";
+const CLOUD_SESSION_PROVIDER: &str = "cloud";
 
 pub trait CredentialVault {
     fn set_secret(&self, namespace: &str, provider: &str, secret: &str) -> Result<()>;
@@ -99,6 +101,30 @@ impl CredentialSecretRemover for SystemCredentialVault {
     fn remove_secret(&self, namespace: &str, provider: &str) -> Result<()> {
         Self::remove_secret(self, namespace, provider)
     }
+}
+
+pub fn load_cloud_session_token<V: CredentialSecretReader>(vault: &V) -> Result<Option<String>> {
+    Ok(vault
+        .get_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER)?
+        .filter(|token| !token.trim().is_empty()))
+}
+
+pub fn store_cloud_session_token<V: CredentialVault + CredentialSecretReader>(
+    vault: &V,
+    token: &str,
+) -> Result<()> {
+    if token.trim().is_empty() {
+        return Err(anyhow!("cloud session token is empty"));
+    }
+    vault.set_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER, token)?;
+    if load_cloud_session_token(vault)?.as_deref() != Some(token) {
+        return Err(anyhow!("cloud session vault verification failed"));
+    }
+    Ok(())
+}
+
+pub fn remove_cloud_session_token<V: CredentialSecretRemover>(vault: &V) -> Result<()> {
+    vault.remove_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

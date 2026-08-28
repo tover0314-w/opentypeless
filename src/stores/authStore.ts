@@ -5,6 +5,8 @@ import {
   setOpenTypelessPassword,
 } from '../lib/auth-client'
 import {
+  clearSessionTokenFromMemory,
+  loadSessionToken,
   markCloudSessionAuthenticated,
   persistSessionToken,
   registerCloudSessionInvalidation,
@@ -245,6 +247,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialize: async () => {
     try {
       set({ loading: true, error: null })
+      const savedToken = await loadSessionToken()
       const { data: session } = await authClient.getSession()
       if (session?.user) {
         set({
@@ -255,9 +258,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             emailVerified: session.user.emailVerified === true,
           },
         })
-        const savedToken = localStorage.getItem('session_token')
         if (savedToken) {
-          await persistSessionToken(savedToken)
           markCloudSessionAuthenticated()
         }
         await get().refreshCredentialCapability()
@@ -462,7 +463,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await persistSessionToken(null)
     } catch (e) {
-      localStorage.removeItem('session_token')
+      clearSessionTokenFromMemory()
       console.error('Failed to clear session token in backend:', e)
     }
     if (userId) clearLastKnownSubscription(localStorage, userId)
@@ -480,7 +481,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await authClient.signOut()
     } finally {
       await persistSessionToken(null).catch((e: unknown) => {
-        localStorage.removeItem('session_token')
+        clearSessionTokenFromMemory()
         console.error('Failed to clear session token in backend:', e)
       })
       if (userId) clearLastKnownSubscription(localStorage, userId)

@@ -75,8 +75,8 @@ pub struct CloseToTrayCache(pub Arc<Mutex<bool>>);
 /// Last global-hotkey registration error, if startup or settings registration failed.
 pub struct HotkeyRegistrationError(pub Arc<Mutex<Option<String>>>);
 
-/// Session token for cloud providers. Set by the frontend after Better Auth login.
-/// The Rust pipeline reads this when creating cloud STT/LLM providers.
+/// In-memory copy of the system-vault-backed cloud session token.
+/// The main renderer may restore it for authenticated API calls; native STT/LLM reads it directly.
 pub struct SessionTokenStore(pub Arc<Mutex<String>>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -929,7 +929,18 @@ pub fn run() {
             app.manage(CloseToTrayCache(Arc::new(Mutex::new(
                 initial_config.close_to_tray,
             ))));
-            app.manage(SessionTokenStore(Arc::new(Mutex::new(String::new()))));
+            let initial_session_token =
+                credentials::load_cloud_session_token(&credentials::SystemCredentialVault)
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(
+                            "Failed to restore cloud session from the system vault: {error}"
+                        );
+                        None
+                    })
+                    .unwrap_or_default();
+            app.manage(SessionTokenStore(Arc::new(Mutex::new(
+                initial_session_token,
+            ))));
 
             // Register global shortcut from config
             let handler = hotkey::build_shortcut_handler(app_handle.clone());
@@ -1232,6 +1243,7 @@ pub fn run() {
             commands::misc::get_system_diagnostics,
             commands::config::set_auto_start,
             commands::config::set_capsule_auto_hide,
+            commands::config::get_session_token,
             commands::config::set_session_token,
         ])
         .build(tauri::generate_context!())

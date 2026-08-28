@@ -33,6 +33,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { authClient } from '../../lib/auth-client'
 import { requestOpenTypelessPasswordReset, setOpenTypelessPassword } from '../../lib/auth-client'
 import { getSubscriptionStatus } from '../../lib/api'
+import {
+  loadSessionToken,
+  persistSessionToken,
+  resetCloudSessionCoordinatorForTests,
+} from '../../lib/cloud-session'
 import { toast } from '../../components/toast-service'
 
 function getState() {
@@ -47,6 +52,7 @@ describe('authStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    resetCloudSessionCoordinatorForTests()
 
     // Reset store state
     useAuthStore.setState({
@@ -485,7 +491,8 @@ describe('authStore', () => {
         },
         expect.objectContaining({ onSuccess: expect.any(Function) }),
       )
-      expect(localStorage.getItem('session_token')).toBe('rotated-token')
+      expect(await loadSessionToken()).toBe('rotated-token')
+      expect(localStorage.getItem('session_token')).toBeNull()
       expect(invoke).toHaveBeenCalledWith('set_session_token', { token: 'rotated-token' })
       expect(vi.mocked(invoke).mock.invocationCallOrder[0]).toBeLessThan(
         vi.mocked(getSubscriptionStatus).mock.invocationCallOrder[0]!,
@@ -493,7 +500,8 @@ describe('authStore', () => {
     })
 
     it('sets a password for a verified OAuth-only account without rotating its token', async () => {
-      localStorage.setItem('session_token', 'existing-token')
+      await persistSessionToken('existing-token')
+      vi.mocked(invoke).mockClear()
       useAuthStore.setState({
         user: {
           id: 'user-1',
@@ -512,7 +520,8 @@ describe('authStore', () => {
 
       expect(setOpenTypelessPassword).toHaveBeenCalledWith('new-password')
       expect(authClient.changePassword).not.toHaveBeenCalled()
-      expect(localStorage.getItem('session_token')).toBe('existing-token')
+      expect(await loadSessionToken()).toBe('existing-token')
+      expect(localStorage.getItem('session_token')).toBeNull()
       expect(getState().credentialCapability).toBe('present')
     })
 

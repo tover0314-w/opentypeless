@@ -1,3 +1,6 @@
+use crate::credentials::{
+    self, CredentialSecretReader, CredentialSecretRemover, CredentialVault, SystemCredentialVault,
+};
 use crate::storage;
 use crate::AskHotkeyCache;
 use crate::CloseToTrayCache;
@@ -6,7 +9,7 @@ use crate::HotkeyRegistrationError;
 use crate::HotkeyRoleCache;
 use crate::SessionTokenStore;
 use serde_json::{json, Map, Value};
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, Window};
 
 fn config_patch_between(previous: &storage::AppConfig, next: &storage::AppConfig) -> Value {
     let mut patch = Map::new();
@@ -330,17 +333,168 @@ pub async fn set_capsule_auto_hide(
 }
 
 #[tauri::command]
+pub fn get_session_token(
+    window: Window,
+    state: tauri::State<'_, SessionTokenStore>,
+) -> Result<Option<String>, String> {
+    ensure_main_session_window(&window)?;
+    get_session_token_from_vault(state.inner(), &SystemCredentialVault)
+}
+
+#[tauri::command]
 pub async fn set_session_token(
+    window: Window,
     state: tauri::State<'_, SessionTokenStore>,
     token: String,
 ) -> Result<(), String> {
-    *state.0.lock().unwrap_or_else(|e| e.into_inner()) = token;
+    ensure_main_session_window(&window)?;
+    set_session_token_with_vault(state.inner(), token, &SystemCredentialVault)
+}
+
+fn ensure_main_session_window(window: &Window) -> Result<(), String> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err("cloud session access is only allowed from the main window".to_string())
+    }
+}
+
+fn get_session_token_from_vault<V: CredentialSecretReader>(
+    state: &SessionTokenStore,
+    vault: &V,
+) -> Result<Option<String>, String> {
+    let cached = state.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !cached.trim().is_empty() {
+        return Ok(Some(cached));
+    }
+
+    let restored = credentials::load_cloud_session_token(vault).map_err(|e| e.to_string())?;
+    if let Some(token) = restored.as_ref() {
+        *state.0.lock().unwrap_or_else(|e| e.into_inner()) = token.clone();
+    }
+    Ok(restored)
+}
+
+fn set_session_token_with_vault<
+    V: CredentialVault + CredentialSecretReader + CredentialSecretRemover,
+>(
+    state: &SessionTokenStore,
+    token: String,
+    vault: &V,
+) -> Result<(), String> {
+    if token.trim().is_empty() {
+        credentials::remove_cloud_session_token(vault).map_err(|e| e.to_string())?;
+        state.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    } else {
+        credentials::store_cloud_session_token(vault, &token).map_err(|e| e.to_string())?;
+        *state.0.lock().unwrap_or_else(|e| e.into_inner()) = token;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{anyhow, Result};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct MemorySessionVault {
+        token: Mutex<Option<String>>,
+        fail_write: bool,
+    }
+
+    impl CredentialVault for MemorySessionVault {
+        fn set_secret(&self, _namespace: &str, _provider: &str, secret: &str) -> Result<()> {
+            if self.fail_write {
+                return Err(anyhow!("vault write failed"));
+            }
+            *self.token.lock().unwrap() = Some(secret.to_string());
+            Ok(())
+        }
+    }
+
+    impl CredentialSecretReader for MemorySessionVault {
+        fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+            Ok(self.token.lock().unwrap().clone())
+        }
+    }
+
+    impl CredentialSecretRemover for MemorySessionVault {
+        fn remove_secret(&self, _namespace: &str, _provider: &str) -> Result<()> {
+            *self.token.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
+    fn session_store(token: &str) -> SessionTokenStore {
+        SessionTokenStore(Arc::new(Mutex::new(token.to_string())))
+    }
+
+    #[test]
+    fn session_token_round_trips_through_vault_and_runtime_cache() {
+        let state = session_store("");
+        let vault = MemorySessionVault::default();
+
+        set_session_token_with_vault(&state, "vault-token".to_string(), &vault).unwrap();
+
+        assert_eq!(vault.token.lock().unwrap().as_deref(), Some("vault-token"));
+        assert_eq!(
+            get_session_token_from_vault(&state, &vault)
+                .unwrap()
+                .as_deref(),
+            Some("vault-token")
+        );
+    }
+
+    #[test]
+    fn session_token_restores_runtime_cache_after_restart() {
+        let state = session_store("");
+        let vault = MemorySessionVault {
+            token: Mutex::new(Some("restored-token".to_string())),
+            fail_write: false,
+        };
+
+        let restored = get_session_token_from_vault(&state, &vault).unwrap();
+
+        assert_eq!(restored.as_deref(), Some("restored-token"));
+        assert_eq!(
+            state.0.lock().unwrap_or_else(|e| e.into_inner()).as_str(),
+            "restored-token"
+        );
+    }
+
+    #[test]
+    fn failed_session_vault_write_keeps_previous_runtime_token() {
+        let state = session_store("previous-token");
+        let vault = MemorySessionVault {
+            token: Mutex::new(None),
+            fail_write: true,
+        };
+
+        let error =
+            set_session_token_with_vault(&state, "new-token".to_string(), &vault).unwrap_err();
+
+        assert!(error.contains("vault write failed"));
+        assert_eq!(
+            state.0.lock().unwrap_or_else(|e| e.into_inner()).as_str(),
+            "previous-token"
+        );
+    }
+
+    #[test]
+    fn clearing_session_removes_vault_and_runtime_token() {
+        let state = session_store("session-token");
+        let vault = MemorySessionVault {
+            token: Mutex::new(Some("session-token".to_string())),
+            fail_write: false,
+        };
+
+        set_session_token_with_vault(&state, String::new(), &vault).unwrap();
+
+        assert_eq!(*vault.token.lock().unwrap(), None);
+        assert!(state.0.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+    }
 
     #[test]
     fn config_patch_includes_capsule_auto_hide_change() {

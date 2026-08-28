@@ -3,9 +3,11 @@ import { ApiError, CloudApiError } from '../api'
 import { API_BASE_URL, APP_VERSION_HEADER_VALUE, CLIENT_VERSION_HEADER } from '../constants'
 
 const invalidateCloudSessionOnce = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const loadSessionToken = vi.hoisted(() => vi.fn().mockResolvedValue(null))
 
 vi.mock('../cloud-session', () => ({
   invalidateCloudSessionOnce,
+  loadSessionToken,
 }))
 
 const API_BASE = API_BASE_URL
@@ -22,6 +24,7 @@ describe('ApiError', () => {
 
 describe('request() via getSubscriptionStatus', () => {
   beforeEach(() => {
+    loadSessionToken.mockResolvedValue(null)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -61,6 +64,21 @@ describe('request() via getSubscriptionStatus', () => {
         }),
       }),
     )
+  })
+
+  it('uses the system-vault-backed in-memory bearer without localStorage', async () => {
+    loadSessionToken.mockResolvedValueOnce('vault-token')
+
+    const { getSubscriptionStatus } = await import('../api')
+    await getSubscriptionStatus()
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/subscription/status`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer vault-token' }),
+      }),
+    )
+    expect(localStorage.getItem('session_token')).toBeNull()
   })
 
   it('returns parsed JSON on success', async () => {

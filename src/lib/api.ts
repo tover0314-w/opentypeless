@@ -5,12 +5,12 @@ import {
   DEFAULT_CHECKOUT_PRODUCT,
   type CheckoutProduct,
 } from './constants'
-import { invalidateCloudSessionOnce } from './cloud-session'
+import { invalidateCloudSessionOnce, loadSessionToken } from './cloud-session'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('session_token')
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await loadSessionToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
@@ -34,7 +34,7 @@ async function request<T>(
       headers: {
         'Content-Type': 'application/json',
         ...clientHeaders(),
-        ...authHeaders(),
+        ...(await authHeaders()),
         ...fetchOptions?.headers,
       },
     })
@@ -283,7 +283,7 @@ export async function proxyStt(
       signal: controller.signal,
       headers: {
         ...clientHeaders(),
-        ...authHeaders(),
+        ...(await authHeaders()),
       },
       body: formData,
     })
