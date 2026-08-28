@@ -110,4 +110,5 @@ fingerprint/key ID as `LINUX_GPG_KEY_ID`, and the passphrase as
 
 The workflow embeds an AppImage signature, signs RPM bundles through Tauri,
 creates detached `.asc` signatures for Linux artifacts, and uploads
-`SHA256SUMS-linux-x86_64.txt`.
+architecture-specific checksum manifests such as `SHA256SUMS-linux-x86_64.txt`
+and `SHA256SUMS-linux-aarch64.txt`.

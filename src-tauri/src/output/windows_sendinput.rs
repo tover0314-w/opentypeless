@@ -139,6 +139,9 @@ fn type_unicode_chunk_with_options(
         return Ok(0);
     }
 
+    super::windows_modifier_guard::wait_for_modifier_release()
+        .map_err(|error| TypeError::SendInputFailed(error.to_string()))?;
+
     let mut typed_chars = 0usize;
     let mut sent_in_chunk = 0usize;
     let mut chars = text.chars().peekable();

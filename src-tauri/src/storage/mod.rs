@@ -337,6 +337,7 @@ pub struct AppConfig {
     pub stt_custom_base_url: String,
     pub stt_custom_model: String,
     pub stt_volcengine_resource_id: String,
+    pub stt_aliyun_qwen_region: String,
     pub llm_provider: String,
     pub llm_api_key: String,
     pub llm_model: String,
@@ -369,7 +370,10 @@ pub struct AppConfig {
     pub auto_start: bool,
     pub close_to_tray: bool,
     pub start_minimized: bool,
+    pub recording_limit_mode: crate::stt::capabilities::RecordingLimitMode,
+    pub custom_recording_limit_seconds: u32,
     pub max_recording_seconds: u32,
+    pub managed_stt_capability_state: Option<crate::stt::capabilities::ManagedSttCapabilityState>,
     pub history_enabled: bool,
     pub history_retention_days: u32,
     pub history_max_entries: u32,
@@ -389,6 +393,8 @@ impl Default for AppConfig {
             stt_custom_model: crate::stt::config::DEFAULT_CUSTOM_WHISPER_MODEL.to_string(),
             stt_volcengine_resource_id: crate::stt::volcengine::VOLCENGINE_SEEDASR_RESOURCE_ID
                 .to_string(),
+            stt_aliyun_qwen_region:
+                crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND.to_string(),
             llm_provider: "openrouter".to_string(),
             llm_api_key: String::new(),
             llm_model: "google/gemini-2.5-flash".to_string(),
@@ -421,7 +427,10 @@ impl Default for AppConfig {
             auto_start: true,
             close_to_tray: true,
             start_minimized: false,
+            recording_limit_mode: crate::stt::capabilities::RecordingLimitMode::Auto,
+            custom_recording_limit_seconds: 600,
             max_recording_seconds: 30,
+            managed_stt_capability_state: None,
             history_enabled: true,
             history_retention_days: 0,
             history_max_entries: DEFAULT_HISTORY_MAX_ENTRIES,
@@ -548,6 +557,14 @@ impl AppConfig {
     }
 
     pub(crate) fn normalize_values(&mut self) {
+        if !matches!(
+            self.stt_aliyun_qwen_region.as_str(),
+            crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND
+                | crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_INTERNATIONAL
+        ) {
+            self.stt_aliyun_qwen_region =
+                crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND.to_string();
+        }
         self.polish_style = normalize_polish_style(&self.polish_style).to_string();
         self.polish_custom_prompt = sanitize_polish_custom_prompt(&self.polish_custom_prompt);
         self.polish_chinese_script = "preserve".to_string();
@@ -566,6 +583,7 @@ impl AppConfig {
         self.normalize_windows_sendinput_newline_mode();
         self.normalize_hotkey_settings();
         self.normalize_history_settings();
+        self.recompute_recording_limit_mirror();
     }
 
     fn normalize_insertion_strategy(&mut self) {
@@ -613,6 +631,24 @@ impl AppConfig {
         }
     }
 
+    pub(crate) fn recompute_recording_limit_mirror(&mut self) {
+        let resolved = crate::stt::capabilities::resolve_recording_limit(
+            self,
+            None,
+            chrono::Utc::now().timestamp(),
+        );
+        self.max_recording_seconds = resolved.effective_max_seconds;
+    }
+
+    pub(crate) fn clamp_recording_limit_intent_for_save(&mut self) {
+        self.recompute_recording_limit_mirror();
+        if self.recording_limit_mode == crate::stt::capabilities::RecordingLimitMode::Custom {
+            self.custom_recording_limit_seconds = self.max_recording_seconds;
+        } else if self.custom_recording_limit_seconds == 0 {
+            self.custom_recording_limit_seconds = 600;
+        }
+    }
+
     pub fn from_stored_value(value: serde_json::Value) -> Result<Self, serde_json::Error> {
         let mut value = value;
         if let Some(object) = value.as_object_mut() {
@@ -641,7 +677,24 @@ impl AppConfig {
         let has_legacy_target = value
             .as_object()
             .is_some_and(|object| object.contains_key("target_lang"));
+        let has_recording_limit_mode = value
+            .as_object()
+            .is_some_and(|object| object.contains_key("recording_limit_mode"));
+        let has_custom_recording_limit = value
+            .as_object()
+            .is_some_and(|object| object.contains_key("custom_recording_limit_seconds"));
         let mut config: Self = serde_json::from_value(value)?;
+        if !has_recording_limit_mode {
+            if config.max_recording_seconds == 0 || config.max_recording_seconds == 30 {
+                config.recording_limit_mode = crate::stt::capabilities::RecordingLimitMode::Auto;
+                config.custom_recording_limit_seconds = 600;
+            } else {
+                config.recording_limit_mode = crate::stt::capabilities::RecordingLimitMode::Custom;
+                config.custom_recording_limit_seconds = config.max_recording_seconds;
+            }
+        } else if !has_custom_recording_limit {
+            config.custom_recording_limit_seconds = 600;
+        }
         if !has_translation {
             config.translation = TranslationConfig::from_legacy(&config.target_lang);
         } else if !has_legacy_target {
@@ -2092,6 +2145,30 @@ mod tests {
             config.stt_volcengine_resource_id,
             crate::stt::volcengine::VOLCENGINE_SEEDASR_RESOURCE_ID
         );
+        assert_eq!(
+            config.stt_aliyun_qwen_region,
+            crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND
+        );
+    }
+
+    #[test]
+    fn app_config_preserves_supported_qwen_region_and_normalizes_unknown_values() {
+        let international = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "aliyun-qwen3-asr",
+            "stt_aliyun_qwen_region": "international"
+        }))
+        .unwrap();
+        assert_eq!(international.stt_aliyun_qwen_region, "international");
+
+        let unknown = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "aliyun-qwen3-asr",
+            "stt_aliyun_qwen_region": "unknown"
+        }))
+        .unwrap();
+        assert_eq!(
+            unknown.stt_aliyun_qwen_region,
+            crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND
+        );
     }
 
     #[test]
@@ -2124,6 +2201,72 @@ mod tests {
         assert_eq!(config.polish_custom_prompt, "");
         assert_eq!(config.polish_chinese_script, "preserve");
         assert_eq!(config.polish_style, "clean");
+    }
+
+    #[test]
+    fn recording_limit_migrates_historical_default_to_provider_auto() {
+        let config = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "groq-whisper",
+            "max_recording_seconds": 30
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.recording_limit_mode,
+            crate::stt::capabilities::RecordingLimitMode::Auto
+        );
+        assert_eq!(config.custom_recording_limit_seconds, 600);
+        assert_eq!(config.max_recording_seconds, 600);
+    }
+
+    #[test]
+    fn recording_limit_migrates_historical_custom_value_without_losing_intent() {
+        let config = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "groq-whisper",
+            "max_recording_seconds": 120
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.recording_limit_mode,
+            crate::stt::capabilities::RecordingLimitMode::Custom
+        );
+        assert_eq!(config.custom_recording_limit_seconds, 120);
+        assert_eq!(config.max_recording_seconds, 120);
+    }
+
+    #[test]
+    fn recording_limit_migrates_zero_to_a_safe_auto_default() {
+        let config = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "deepgram",
+            "max_recording_seconds": 0
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.recording_limit_mode,
+            crate::stt::capabilities::RecordingLimitMode::Auto
+        );
+        assert_eq!(config.custom_recording_limit_seconds, 600);
+        assert_eq!(config.max_recording_seconds, 600);
+    }
+
+    #[test]
+    fn recording_limit_clamps_the_compatibility_mirror_but_preserves_new_user_intent_on_load() {
+        let config = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "glm-asr",
+            "recording_limit_mode": "custom",
+            "custom_recording_limit_seconds": 9999,
+            "max_recording_seconds": 9999
+        }))
+        .unwrap();
+
+        assert_eq!(
+            config.recording_limit_mode,
+            crate::stt::capabilities::RecordingLimitMode::Custom
+        );
+        assert_eq!(config.custom_recording_limit_seconds, 9999);
+        assert_eq!(config.max_recording_seconds, 30);
     }
 
     #[test]

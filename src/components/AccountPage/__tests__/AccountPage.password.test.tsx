@@ -40,6 +40,8 @@ function signedIn(capability: 'unknown' | 'present' | 'none') {
     billingProvider: null,
     canManageBilling: false,
     canMigrateToStripe: false,
+    subscriptionRefreshState: 'fresh',
+    subscriptionRefreshedAt: Date.now(),
     requestPasswordReset,
     changePassword,
     refreshCredentialCapability,

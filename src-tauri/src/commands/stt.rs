@@ -1,8 +1,85 @@
 use crate::credentials::{resolve_config_secret, SystemCredentialVault};
+use crate::storage;
 use crate::stt;
 use crate::stt::SttProvider;
 use crate::SessionTokenStore;
 use crate::{api_base_url, with_desktop_client_version};
+use tauri::Emitter;
+
+#[tauri::command]
+pub async fn get_stt_recording_capability(
+    state: tauri::State<'_, storage::ConfigManager>,
+    provider: String,
+    mode: stt::capabilities::RecordingLimitMode,
+    custom_seconds: u32,
+) -> Result<stt::capabilities::ResolvedRecordingLimit, String> {
+    let mut config = state.load().await.map_err(|error| error.to_string())?;
+    config.stt_provider = provider;
+    config.recording_limit_mode = mode;
+    config.custom_recording_limit_seconds = custom_seconds;
+    Ok(stt::capabilities::resolve_recording_limit(
+        &config,
+        None,
+        chrono::Utc::now().timestamp(),
+    ))
+}
+
+#[tauri::command]
+pub async fn cache_managed_stt_capability(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, storage::ConfigManager>,
+    account_snapshot: stt::capabilities::AuthenticatedAccountSnapshot,
+    expected_user_id: String,
+) -> Result<stt::capabilities::ResolvedRecordingLimit, String> {
+    let now = chrono::Utc::now().timestamp();
+    let managed_state = stt::capabilities::managed_state_from_authenticated_snapshot(
+        account_snapshot,
+        &expected_user_id,
+        now,
+    )?;
+    let mut config = state.load().await.map_err(|error| error.to_string())?;
+    let previous_max_seconds = config.max_recording_seconds;
+    config.managed_stt_capability_state = managed_state;
+    config.recompute_recording_limit_mirror();
+    state
+        .save(&config)
+        .await
+        .map_err(|error| error.to_string())?;
+    if config.max_recording_seconds != previous_max_seconds {
+        let _ = app.emit(
+            "config:patch",
+            serde_json::json!({ "max_recording_seconds": config.max_recording_seconds }),
+        );
+    }
+    Ok(stt::capabilities::resolve_recording_limit(
+        &config, None, now,
+    ))
+}
+
+#[tauri::command]
+pub async fn clear_managed_stt_capability(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, storage::ConfigManager>,
+) -> Result<(), String> {
+    let mut config = state.load().await.map_err(|error| error.to_string())?;
+    if config.managed_stt_capability_state.is_none() {
+        return Ok(());
+    }
+    let previous_max_seconds = config.max_recording_seconds;
+    config.managed_stt_capability_state = None;
+    config.recompute_recording_limit_mirror();
+    state
+        .save(&config)
+        .await
+        .map_err(|error| error.to_string())?;
+    if config.max_recording_seconds != previous_max_seconds {
+        let _ = app.emit(
+            "config:patch",
+            serde_json::json!({ "max_recording_seconds": config.max_recording_seconds }),
+        );
+    }
+    Ok(())
+}
 
 async fn check_volcengine_doubao_connection(
     api_key: &str,
@@ -16,9 +93,37 @@ async fn check_volcengine_doubao_connection(
         sample_rate: 16000,
         resource_id,
         operation_id: None,
+        managed_audio: None,
+        provider_region: None,
     };
     provider.connect(&config).await.map_err(|e| e.to_string())?;
     let _ = provider.disconnect().await;
+    Ok(())
+}
+
+async fn check_aliyun_qwen3_connection(
+    api_key: &str,
+    region: Option<String>,
+) -> Result<(), String> {
+    let mut provider = stt::aliyun_qwen3_asr::AliyunQwen3AsrProvider::new();
+    let config = stt::SttConfig {
+        api_key: api_key.to_string(),
+        language: Some("zh".to_string()),
+        smart_format: true,
+        sample_rate: 16_000,
+        resource_id: None,
+        operation_id: None,
+        managed_audio: None,
+        provider_region: region,
+    };
+    provider
+        .connect(&config)
+        .await
+        .map_err(|error| error.to_string())?;
+    provider
+        .disconnect()
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -90,7 +195,11 @@ fn diagnostic_issue(code: &str, message: impl Into<String>) -> SttProviderDiagno
     }
 }
 
-fn build_remote_stt_diagnostics(provider: &str, api_key: &str) -> SttProviderDiagnostics {
+fn build_remote_stt_diagnostics(
+    provider: &str,
+    api_key: &str,
+    provider_region: Option<&str>,
+) -> SttProviderDiagnostics {
     let whisper_config = stt::config::build_known_whisper_config(provider);
     let (endpoint, model) = if let Some(cfg) = whisper_config {
         (Some(cfg.endpoint), Some(cfg.model))
@@ -104,6 +213,10 @@ fn build_remote_stt_diagnostics(provider: &str, api_key: &str) -> SttProviderDia
             stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => (
                 Some("wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".to_string()),
                 None,
+            ),
+            stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => (
+                Some(stt::aliyun_qwen3_asr::qwen_realtime_url(provider_region).to_string()),
+                Some("qwen3-asr-flash-realtime".to_string()),
             ),
             _ => (None, None),
         }
@@ -161,6 +274,7 @@ fn build_stt_provider_diagnostics(
     api_key: &str,
     custom_base_url: Option<&str>,
     custom_model: Option<&str>,
+    provider_region: Option<&str>,
 ) -> SttProviderDiagnostics {
     match provider {
         "" => SttProviderDiagnostics {
@@ -221,11 +335,14 @@ fn build_stt_provider_diagnostics(
                 },
             }
         }
-        "deepgram" | "assemblyai" | stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
-            build_remote_stt_diagnostics(provider, api_key)
+        "deepgram"
+        | "assemblyai"
+        | stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
+        | stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            build_remote_stt_diagnostics(provider, api_key, provider_region)
         }
         _ if stt::config::build_known_whisper_config(provider).is_some() => {
-            build_remote_stt_diagnostics(provider, api_key)
+            build_remote_stt_diagnostics(provider, api_key, provider_region)
         }
         _ => SttProviderDiagnostics {
             provider: provider.to_string(),
@@ -265,6 +382,7 @@ pub fn get_stt_provider_diagnostics(
     provider: String,
     custom_base_url: Option<String>,
     custom_model: Option<String>,
+    provider_region: Option<String>,
 ) -> Result<SttProviderDiagnostics, String> {
     let resolved_api_key = if provider == "cloud" {
         String::new()
@@ -278,16 +396,20 @@ pub fn get_stt_provider_diagnostics(
         &resolved_api_key,
         custom_base_url.as_deref(),
         custom_model.as_deref(),
+        provider_region.as_deref(),
     ))
 }
 
 #[tauri::command]
+// Keep these as explicit IPC fields so older desktop callers remain wire-compatible.
+#[allow(clippy::too_many_arguments)]
 pub async fn test_stt_connection(
     api_key: String,
     provider: String,
     custom_base_url: Option<String>,
     custom_model: Option<String>,
     volcengine_resource_id: Option<String>,
+    provider_region: Option<String>,
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<bool, String> {
@@ -355,6 +477,11 @@ pub async fn test_stt_connection(
         )
         .await
         .is_ok()),
+        stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            Ok(check_aliyun_qwen3_connection(&api_key, provider_region)
+                .await
+                .is_ok())
+        }
         stt::config::APPLE_SPEECH_PROVIDER => {
             let authorization = stt::apple_speech::request_apple_speech_authorization()
                 .map_err(|e| e.to_string())?;
@@ -433,6 +560,7 @@ mod tests {
             "",
             Some("http://localhost:8000/v1"),
             Some("Systran/faster-whisper-large-v3"),
+            None,
         );
 
         assert_eq!(diagnostics.provider, stt::config::CUSTOM_WHISPER_PROVIDER);
@@ -457,6 +585,7 @@ mod tests {
             "",
             Some("file:///tmp/server"),
             Some(" "),
+            None,
         );
 
         assert_eq!(diagnostics.kind, "localCompatible");
@@ -467,7 +596,7 @@ mod tests {
 
     #[test]
     fn remote_stt_diagnostics_requires_api_key() {
-        let diagnostics = build_stt_provider_diagnostics("deepgram", "", None, None);
+        let diagnostics = build_stt_provider_diagnostics("deepgram", "", None, None, None);
 
         assert_eq!(diagnostics.kind, "byokRemote");
         assert!(diagnostics.requires_api_key);
@@ -477,8 +606,30 @@ mod tests {
     }
 
     #[test]
+    fn aliyun_qwen3_diagnostics_exposes_realtime_endpoint() {
+        let diagnostics = build_stt_provider_diagnostics(
+            "aliyun-qwen3-asr",
+            "",
+            None,
+            None,
+            Some(stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_INTERNATIONAL),
+        );
+
+        assert_eq!(diagnostics.kind, "byokRemote");
+        assert_eq!(
+            diagnostics.endpoint.as_deref(),
+            Some(stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_INTERNATIONAL_URL)
+        );
+        assert_eq!(
+            diagnostics.model.as_deref(),
+            Some("qwen3-asr-flash-realtime")
+        );
+        assert_eq!(diagnostics.issues[0].code, "missing_api_key");
+    }
+
+    #[test]
     fn apple_speech_diagnostics_are_platform_gated_builtin_local() {
-        let diagnostics = build_stt_provider_diagnostics("apple-speech", "", None, None);
+        let diagnostics = build_stt_provider_diagnostics("apple-speech", "", None, None, None);
 
         assert_eq!(diagnostics.provider, "apple-speech");
         assert_eq!(diagnostics.kind, "builtinLocal");
@@ -566,12 +717,15 @@ mod tests {
 }
 
 #[tauri::command]
+// Keep these as explicit IPC fields so older desktop callers remain wire-compatible.
+#[allow(clippy::too_many_arguments)]
 pub async fn bench_stt_connection(
     api_key: String,
     provider: String,
     custom_base_url: Option<String>,
     custom_model: Option<String>,
     volcengine_resource_id: Option<String>,
+    provider_region: Option<String>,
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<u32, String> {
@@ -650,6 +804,11 @@ pub async fn bench_stt_connection(
         stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
             let t0 = std::time::Instant::now();
             check_volcengine_doubao_connection(&api_key, volcengine_resource_id).await?;
+            Ok(t0.elapsed().as_millis() as u32)
+        }
+        stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            let t0 = std::time::Instant::now();
+            check_aliyun_qwen3_connection(&api_key, provider_region).await?;
             Ok(t0.elapsed().as_millis() as u32)
         }
         stt::config::APPLE_SPEECH_PROVIDER => {

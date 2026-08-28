@@ -235,6 +235,8 @@ fn paste_keys(shortcut: PasteShortcut) -> (Vec<enigo::Key>, enigo::Key) {
 
 #[cfg(not(target_os = "macos"))]
 fn simulate_paste(shortcut: PasteShortcut) -> Result<(), AppError> {
+    super::windows_modifier_guard::wait_for_modifier_release()?;
+
     use enigo::{Direction, Enigo, Keyboard, Settings};
     let (modifiers, primary) = paste_keys(shortcut);
     let mut enigo = Enigo::new(&Settings::default())

@@ -12,6 +12,7 @@ pub mod native_hotkey;
 pub mod output;
 pub mod pipeline;
 pub mod platform;
+pub mod recording_deadline;
 pub mod selection;
 pub mod storage;
 pub mod stt;
@@ -32,6 +33,18 @@ use std::sync::{Arc, Mutex};
 /// Default cloud API base URL. Override with the `API_BASE_URL` environment variable.
 pub const DEFAULT_API_BASE_URL: &str = "https://www.opentypeless.com";
 pub const CLIENT_VERSION_HEADER: &str = "X-OpenTypeless-Version";
+const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 10 * 60;
+const HTTP_TCP_KEEPALIVE_SECS: u64 = 60;
+
+fn build_shared_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .pool_max_idle_per_host(2)
+        .pool_idle_timeout(std::time::Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
+        .tcp_keepalive(std::time::Duration::from_secs(HTTP_TCP_KEEPALIVE_SECS))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client")
+}
 
 /// Read the cloud API base URL from the environment, falling back to the compiled default.
 pub fn api_base_url() -> String {
@@ -265,6 +278,40 @@ mod tests {
     fn desktop_client_version_header_matches_frontend_contract() {
         assert_eq!(crate::CLIENT_VERSION_HEADER, "X-OpenTypeless-Version");
         assert_eq!(crate::desktop_client_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn shared_http_pool_survives_normal_gaps_between_dictations() {
+        const {
+            assert!(HTTP_POOL_IDLE_TIMEOUT_SECS >= 10 * 60);
+            assert!(HTTP_TCP_KEEPALIVE_SECS <= HTTP_POOL_IDLE_TIMEOUT_SECS);
+        }
+        let _client = build_shared_http_client();
+    }
+
+    #[test]
+    fn cli_action_parser_supports_first_and_later_instance_arguments() {
+        let toggle = vec!["/usr/bin/opentypeless".to_string(), "toggle".to_string()];
+        let ask = vec!["OpenTypeless.exe".to_string(), "ask".to_string()];
+
+        assert_eq!(parse_cli_action(&toggle), Some(CliAction::Toggle));
+        assert_eq!(parse_cli_action(&ask), Some(CliAction::Ask));
+    }
+
+    #[test]
+    fn cli_action_parser_does_not_hijack_deep_links_or_ambiguous_commands() {
+        let deep_link = vec![
+            "opentypeless".to_string(),
+            "opentypeless://auth/callback?mode=toggle".to_string(),
+        ];
+        let ambiguous = vec![
+            "opentypeless".to_string(),
+            "toggle".to_string(),
+            "ask".to_string(),
+        ];
+
+        assert_eq!(parse_cli_action(&deep_link), None);
+        assert_eq!(parse_cli_action(&ambiguous), None);
     }
 
     #[test]
@@ -689,6 +736,71 @@ fn spawn_hotkey_supervisor(app_handle: tauri::AppHandle) {
     });
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CliAction {
+    Toggle,
+    Ask,
+}
+
+fn parse_cli_action(args: &[String]) -> Option<CliAction> {
+    let mut actions = args.iter().filter_map(|argument| match argument.as_str() {
+        "toggle" => Some(CliAction::Toggle),
+        "ask" => Some(CliAction::Ask),
+        _ => None,
+    });
+    let action = actions.next()?;
+    actions.next().is_none().then_some(action)
+}
+
+fn dispatch_cli_action(app: &tauri::AppHandle, action: CliAction) {
+    match action {
+        CliAction::Toggle => {
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let Some(pipeline) = app_handle.try_state::<pipeline::PipelineHandle>() else {
+                    tracing::warn!("Ignoring CLI toggle before the recording pipeline is ready");
+                    return;
+                };
+                let result = if pipeline.current_state() == pipeline::PipelineState::Idle {
+                    pipeline.start().await
+                } else {
+                    pipeline.stop().await
+                };
+                if let Err(error) = result {
+                    tracing::error!("CLI toggle failed: {error}");
+                }
+            });
+        }
+        CliAction::Ask => {
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                if app_handle
+                    .try_state::<commands::ask::AskDictationState>()
+                    .is_none()
+                {
+                    tracing::warn!("Ignoring CLI ask before Ask Anything is ready");
+                    return;
+                }
+                let ask_state = app_handle.state::<commands::ask::AskDictationState>();
+                let config_state = app_handle.state::<storage::ConfigManager>();
+                let token_store = app_handle.state::<SessionTokenStore>();
+                let client = app_handle.state::<reqwest::Client>();
+                if let Err(error) = commands::ask::start_ask_flow(
+                    app_handle.clone(),
+                    ask_state,
+                    config_state,
+                    token_store,
+                    client,
+                )
+                .await
+                {
+                    tracing::error!("CLI ask failed: {error}");
+                }
+            });
+        }
+    }
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     let xinitthreads_status = linux_x11::init_xlib_threads();
@@ -731,7 +843,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(action) = parse_cli_action(&args) {
+                dispatch_cli_action(app, action);
+                return;
+            }
             // Deep-link URL forwarding is handled automatically by the
             // "deep-link" feature of single-instance plugin.
             // Just focus the main window so the user sees the result.
@@ -767,12 +883,7 @@ pub fn run() {
             let dictionary_store = storage::DictionaryStore::new(db_path)
                 .map_err(|e| anyhow::anyhow!("Failed to init dictionary store: {}", e))?;
 
-            let shared_client = reqwest::Client::builder()
-                .pool_max_idle_per_host(2)
-                .pool_idle_timeout(std::time::Duration::from_secs(30))
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client");
+            let shared_client = build_shared_http_client();
 
             let app_registry = app_detector::registry::AppRegistry::builtin()
                 .map_err(|error| anyhow::anyhow!("Failed to init app registry: {error}"))?;
@@ -1046,6 +1157,11 @@ pub fn run() {
                 pipeline.pre_warm().await;
             });
 
+            let startup_args = std::env::args().collect::<Vec<_>>();
+            if let Some(action) = parse_cli_action(&startup_args) {
+                dispatch_cli_action(&app_handle, action);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1080,6 +1196,9 @@ pub fn run() {
             commands::credentials::clear_credential,
             commands::credentials::migrate_legacy_credentials,
             commands::stt::get_stt_provider_diagnostics,
+            commands::stt::get_stt_recording_capability,
+            commands::stt::cache_managed_stt_capability,
+            commands::stt::clear_managed_stt_capability,
             commands::stt::test_stt_connection,
             commands::llm::test_llm_connection,
             commands::llm::bench_llm_connection,

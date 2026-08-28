@@ -5,6 +5,7 @@ description = "AI-powered speech-to-text and text polishing desktop app"
 authors = ["OpenTypeless Contributors"]
 license = "MIT"
 edition = "2021"
+rust-version = "1.82"
 
 [lib]
 name = "opentypeless_lib"
@@ -29,10 +30,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.15"
 enigo = "0.2"
-tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+ogg = "=0.9.2"
+opusic-c = "=1.6.1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 anyhow = "1"
+base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"

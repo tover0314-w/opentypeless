@@ -17,6 +17,7 @@ import {
 } from './lib/tauri'
 import { initDeepLinkListener } from './lib/deep-link'
 import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
+import { shouldRefreshSubscriptionOnFocus } from './lib/subscription-refresh-policy'
 import { Capsule } from './components/Capsule'
 import { Settings } from './components/Settings'
 import { History } from './components/History'
@@ -173,33 +174,27 @@ function MainApp() {
     if (readPendingDesktopCheckout(localStorage)) navigate('upgrade')
   }, [authLoading, loaded, navigate, route, user])
 
-  // Periodically refresh subscription status + refresh on window focus (throttled)
+  // Subscription changes are event-driven. Focus refresh is reserved for a pending checkout.
   useEffect(() => {
     if (!loaded || !user) return
 
-    let lastRefresh = 0
-    const throttledRefresh = () => {
-      const now = Date.now()
+    let refreshInFlight = false
+    const refreshPendingCheckout = () => {
       const { checkoutPending } = useAuthStore.getState()
-      // Skip throttle if user just came back from checkout
-      if (!checkoutPending && now - lastRefresh < 30_000) return
-      lastRefresh = now
-      useAuthStore.getState().refreshSubscription()
+      if (!shouldRefreshSubscriptionOnFocus(checkoutPending) || refreshInFlight) return
+      refreshInFlight = true
+      void useAuthStore
+        .getState()
+        .refreshSubscription()
+        .finally(() => {
+          refreshInFlight = false
+        })
     }
 
-    const interval = setInterval(
-      () => {
-        lastRefresh = Date.now()
-        useAuthStore.getState().refreshSubscription()
-      },
-      5 * 60 * 1000,
-    )
-
-    window.addEventListener('focus', throttledRefresh)
+    window.addEventListener('focus', refreshPendingCheckout)
 
     return () => {
-      clearInterval(interval)
-      window.removeEventListener('focus', throttledRefresh)
+      window.removeEventListener('focus', refreshPendingCheckout)
     }
   }, [loaded, user])
 

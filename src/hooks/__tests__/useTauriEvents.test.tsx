@@ -4,9 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTauriEvents } from '../useTauriEvents'
 import { useAppStore } from '../../stores/appStore'
 import { useCloudServiceStore } from '../../stores/cloudServiceStore'
+import { toast } from '../../components/toast-service'
 
 const eventListeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>())
 const invalidateCloudSessionOnce = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const refreshSubscription = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn((event: string, handler: (event: { payload: unknown }) => void) => {
@@ -36,6 +38,15 @@ vi.mock('../../components/toast-service', () => ({
 
 vi.mock('../../lib/cloud-session', () => ({
   invalidateCloudSessionOnce,
+}))
+
+vi.mock('../../stores/authStore', () => ({
+  useAuthStore: {
+    getState: () => ({
+      user: { id: 'user-1' },
+      refreshSubscription,
+    }),
+  },
 }))
 
 function HookHarness() {
@@ -211,5 +222,55 @@ describe('useTauriEvents', () => {
       eventListeners.get('pipeline:state')?.({ payload: 'preparing' })
     })
     expect(useCloudServiceStore.getState().incident).toBeNull()
+  })
+
+  it('shows deadline warnings and explains an automatic graceful stop', async () => {
+    render(<HookHarness />)
+
+    await waitFor(() => {
+      expect(eventListeners.has('recording:deadline-warning')).toBe(true)
+      expect(eventListeners.has('recording:deadline-reached')).toBe(true)
+    })
+
+    const base = {
+      sessionId: 7,
+      recordingKind: 'dictation',
+      effectiveMaxSeconds: 600,
+      providerId: 'cloud',
+      explanationKey: 'recordingLimits.reasons.managedCapability',
+    }
+    act(() => {
+      eventListeners.get('recording:deadline-warning')?.({
+        payload: { ...base, secondsRemaining: 10 },
+      })
+      eventListeners.get('recording:deadline-reached')?.({ payload: base })
+    })
+
+    expect(toast).toHaveBeenNthCalledWith(1, 'recordingLimits.deadlineWarning', 'info')
+    expect(toast).toHaveBeenNthCalledWith(2, 'recordingLimits.deadlineReached', 'info')
+  })
+
+  it('refreshes managed usage after output without polling idle windows', async () => {
+    useAppStore.setState({
+      config: {
+        ...useAppStore.getState().config,
+        stt_provider: 'cloud',
+      },
+    })
+    render(<HookHarness />)
+
+    await waitFor(() => expect(eventListeners.has('pipeline:state')).toBe(true))
+    act(() => {
+      eventListeners.get('pipeline:state')?.({ payload: 'preparing' })
+      eventListeners.get('pipeline:state')?.({ payload: 'recording' })
+      eventListeners.get('pipeline:state')?.({ payload: 'idle' })
+    })
+
+    expect(refreshSubscription).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      eventListeners.get('pipeline:state')?.({ payload: 'idle' })
+    })
+    expect(refreshSubscription).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,12 +1,60 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+
+struct CaptureStartupNotifier {
+    sender: Option<
+        oneshot::Sender<std::result::Result<crate::recording_deadline::CaptureReadyAt, String>>,
+    >,
+}
+
+struct CaptureStartupWaiter {
+    receiver:
+        oneshot::Receiver<std::result::Result<crate::recording_deadline::CaptureReadyAt, String>>,
+}
+
+fn capture_startup_channel() -> (CaptureStartupNotifier, CaptureStartupWaiter) {
+    let (sender, receiver) = oneshot::channel();
+    (
+        CaptureStartupNotifier {
+            sender: Some(sender),
+        },
+        CaptureStartupWaiter { receiver },
+    )
+}
+
+impl CaptureStartupNotifier {
+    fn ready(&mut self, ready_at: crate::recording_deadline::CaptureReadyAt) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(Ok(ready_at));
+        }
+    }
+
+    fn failed(&mut self, message: String) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(Err(message));
+        }
+    }
+}
+
+impl CaptureStartupWaiter {
+    async fn wait(self) -> std::result::Result<crate::recording_deadline::CaptureReadyAt, String> {
+        self.receiver.await.unwrap_or_else(|_| {
+            Err("Audio capture thread ended before reporting readiness".to_string())
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CaptureState {
     Idle,
+    Starting,
     Recording,
+}
+
+fn initial_capture_state() -> CaptureState {
+    CaptureState::Starting
 }
 
 #[derive(Debug, Clone)]
@@ -29,11 +77,18 @@ impl Default for AudioConfig {
 /// Maximum audio buffer size in samples before we stop accumulating.
 /// ~24 MB of i16 samples ≈ 12.5 min at 16kHz mono, matching the STT provider limits.
 const MAX_BUFFER_SAMPLES: usize = 12 * 1024 * 1024;
+const AUDIO_CHANNEL_BUFFER_DURATION_MS: u32 = 60_000;
+
+fn audio_channel_capacity(config: &AudioConfig) -> usize {
+    let chunk_duration_ms = config.chunk_duration_ms.max(1);
+    AUDIO_CHANNEL_BUFFER_DURATION_MS.div_ceil(chunk_duration_ms) as usize
+}
 
 /// Handle to control audio capture running on a dedicated thread.
 /// This is Send + Sync safe because it only holds channels and atomic state.
 pub struct AudioCaptureHandle {
     stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    startup_waiter: Option<CaptureStartupWaiter>,
     volume: Arc<Mutex<f32>>,
     state: Arc<Mutex<CaptureState>>,
 }
@@ -41,17 +96,30 @@ pub struct AudioCaptureHandle {
 impl AudioCaptureHandle {
     /// Start audio capture on a dedicated thread. Returns a handle and a receiver for audio chunks.
     pub fn start(config: AudioConfig) -> Result<(Self, mpsc::Receiver<Vec<u8>>)> {
-        let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>(200);
+        let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>(audio_channel_capacity(&config));
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
         let volume = Arc::new(Mutex::new(0.0f32));
-        let state = Arc::new(Mutex::new(CaptureState::Recording));
+        let state = Arc::new(Mutex::new(initial_capture_state()));
+        let (mut startup_notifier, startup_waiter) = capture_startup_channel();
 
         let vol_clone = volume.clone();
         let state_clone = state.clone();
+        let failed_state = state.clone();
 
         // Audio capture must run on a dedicated OS thread because cpal::Stream is !Send
         std::thread::spawn(move || {
-            if let Err(e) = run_capture(config, audio_tx, stop_rx, vol_clone, state_clone) {
+            if let Err(e) = run_capture(
+                config,
+                audio_tx,
+                stop_rx,
+                vol_clone,
+                state_clone,
+                &mut startup_notifier,
+            ) {
+                *failed_state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = CaptureState::Idle;
+                startup_notifier.failed(e.to_string());
                 tracing::error!("Audio capture thread error: {}", e);
             }
         });
@@ -59,11 +127,23 @@ impl AudioCaptureHandle {
         Ok((
             Self {
                 stop_tx: Some(stop_tx),
+                startup_waiter: Some(startup_waiter),
                 volume,
                 state,
             },
             audio_rx,
         ))
+    }
+
+    /// Wait until the platform backend has opened the input stream and
+    /// `play()` has succeeded. The CPAL boundary is shared by CoreAudio,
+    /// WASAPI, ALSA and PipeWire, so callers do not need platform delays.
+    pub async fn wait_until_ready(&mut self) -> Result<crate::recording_deadline::CaptureReadyAt> {
+        let waiter = self
+            .startup_waiter
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Audio capture readiness was already consumed"))?;
+        waiter.wait().await.map_err(anyhow::Error::msg)
     }
 
     pub fn stop(&mut self) {
@@ -122,6 +202,7 @@ fn run_capture(
     stop_rx: std::sync::mpsc::Receiver<()>,
     volume: Arc<Mutex<f32>>,
     state: Arc<Mutex<CaptureState>>,
+    startup_notifier: &mut CaptureStartupNotifier,
 ) -> Result<()> {
     let host = cpal::default_host();
     let device = host
@@ -200,7 +281,9 @@ fn run_capture(
     )?;
 
     stream.play()?;
+    let capture_ready_at = crate::recording_deadline::CaptureReadyAt::now();
     *state.lock().unwrap_or_else(|e| e.into_inner()) = CaptureState::Recording;
+    startup_notifier.ready(capture_ready_at);
     tracing::info!(
         "Audio capture started (device: {}Hz {}ch -> target: {}Hz {}ch)",
         device_sample_rate,
@@ -217,4 +300,54 @@ fn run_capture(
     *state.lock().unwrap_or_else(|e| e.into_inner()) = CaptureState::Idle;
     tracing::info!("Audio capture stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn capture_does_not_report_recording_before_the_backend_is_ready() {
+        assert_eq!(initial_capture_state(), CaptureState::Starting);
+    }
+
+    #[test]
+    fn audio_queue_preserves_a_minute_while_the_provider_connects() {
+        assert_eq!(audio_channel_capacity(&AudioConfig::default()), 3_000);
+    }
+
+    #[tokio::test]
+    async fn capture_startup_waits_for_the_backend_ready_signal() {
+        let (_notifier, waiter) = capture_startup_channel();
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), waiter.wait())
+                .await
+                .is_err(),
+            "capture startup completed before the backend reported readiness"
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_startup_completes_after_the_backend_is_ready() {
+        let (mut notifier, waiter) = capture_startup_channel();
+        let ready_at = crate::recording_deadline::CaptureReadyAt::now();
+        notifier.ready(ready_at);
+
+        let observed = waiter.wait().await.unwrap();
+        assert_eq!(observed.unix_millis, ready_at.unix_millis);
+        assert_eq!(observed.monotonic, ready_at.monotonic);
+    }
+
+    #[tokio::test]
+    async fn capture_startup_propagates_backend_failure() {
+        let (mut notifier, waiter) = capture_startup_channel();
+        notifier.failed("input device unavailable".to_string());
+
+        assert_eq!(
+            waiter.wait().await,
+            Err("input device unavailable".to_string())
+        );
+    }
 }

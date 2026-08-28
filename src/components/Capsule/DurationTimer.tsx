@@ -1,31 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../../stores/appStore'
 
-export function DurationTimer() {
-  const pipelineState = useAppStore((s) => s.pipelineState)
-  const maxSeconds = useAppStore((s) => s.config.max_recording_seconds)
-  const [seconds, setSeconds] = useState(0)
-  const stoppedRef = useRef(false)
+type RecordingKind = 'dictation' | 'ask'
+
+export function DurationTimer({ recordingKind = 'dictation' }: { recordingKind?: RecordingKind }) {
+  const recordingDeadline = useAppStore((s) => s.recordingDeadline)
+  const fallbackStartedAtRef = useRef(Date.now())
+  const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
-    if (pipelineState !== 'recording') {
-      setSeconds(0)
-      stoppedRef.current = false
-      return
-    }
-    const interval = setInterval(() => setSeconds((s) => s + 1), 1000)
+    const interval = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(interval)
-  }, [pipelineState])
+  }, [])
 
-  useEffect(() => {
-    if (pipelineState === 'recording' && seconds >= maxSeconds && !stoppedRef.current) {
-      stoppedRef.current = true
-      invoke('stop_recording').catch((e: unknown) => {
-        console.error('Failed to auto-stop recording at max duration:', e)
-      })
-    }
-  }, [seconds, pipelineState, maxSeconds])
+  const activeDeadline =
+    recordingDeadline?.recordingKind === recordingKind ? recordingDeadline : null
+  const startedAt = activeDeadline?.startedAtUnixMs ?? fallbackStartedAtRef.current
+  const displayNow = activeDeadline ? Math.min(now, activeDeadline.deadlineAtUnixMs) : now
+  const seconds = Math.max(0, Math.floor((displayNow - startedAt) / 1000))
 
   const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
   const ss = String(seconds % 60).padStart(2, '0')

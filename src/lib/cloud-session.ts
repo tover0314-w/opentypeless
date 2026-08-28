@@ -9,6 +9,7 @@ export async function persistSessionToken(token: string | null): Promise<void> {
   else localStorage.removeItem('session_token')
 
   try {
+    if (!token) await invoke('clear_managed_stt_capability')
     await invoke('set_session_token', { token: token ?? '' })
   } catch (error) {
     if (previousToken) localStorage.setItem('session_token', previousToken)

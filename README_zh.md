@@ -195,7 +195,7 @@ chmod +x OpenTypeless_x.x.x_amd64.AppImage
 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./OpenTypeless
 ```
 
-**Wayland 用户：**全局热键和自动粘贴会受到桌面环境限制。OpenTypeless 会在设置中提示，并可退回到托盘/应用内控制或仅复制输出。
+**Wayland 用户：**安装 `wtype` 后，OpenTypeless 可以把结果直接输入当前应用。Ubuntu/Debian 使用 `sudo apt install wtype`，Arch/Manjaro 使用 `sudo pacman -S wtype`。全局热键仍可能受桌面环境限制；如果未安装 `wtype`，OpenTypeless 会退回为复制结果到剪贴板。
 
 ## 前置要求
 

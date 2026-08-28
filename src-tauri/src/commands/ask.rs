@@ -13,6 +13,7 @@ use crate::voice_intent::{
 };
 use crate::{api_base_url, with_desktop_client_version, SessionTokenStore};
 use serde_json::json;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -22,6 +23,7 @@ pub const ASK_MAX_QUESTION_CHARS: usize = 500;
 pub const ASK_MAX_SELECTED_TEXT_CHARS: usize = 4_000;
 pub const ASK_OUTPUT_TOKEN_LIMIT: u32 = 80;
 const ASK_STT_FINALIZE_TIMEOUT_SECS: u64 = 12;
+static ASK_RECORDING_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +140,7 @@ impl AskDictationState {
 
 pub struct AskDictationSession {
     handle: AudioCaptureHandle,
+    recording_session_id: u64,
     operation_id: String,
     recording_context: RecordingContext,
     selected_text: Option<String>,
@@ -564,6 +567,39 @@ fn build_byok_ask_body_for_context(
     Ok(body)
 }
 
+fn build_byok_ask_body_for_config(
+    config: &storage::AppConfig,
+    question: &str,
+    selected_text: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let question = validate_ask_question(question)?;
+    let selected_text = selected_text.and_then(sanitize_selected_text_for_ask);
+    let mut body = crate::llm::protocol::build_chat_body(
+        &config.llm_provider,
+        &config.llm_base_url,
+        &config.llm_model,
+        ask_messages_from_sanitized(&question, selected_text.as_ref()),
+        ASK_OUTPUT_TOKEN_LIMIT,
+        0.2,
+        false,
+    );
+
+    if config.llm_model.starts_with("glm-") {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "thinking".to_string(),
+                json!({
+                    "type": "enabled"
+                }),
+            );
+            obj.insert("temperature".to_string(), json!(1.0));
+            obj.insert("top_p".to_string(), json!(0.95));
+        }
+    }
+
+    Ok(body)
+}
+
 pub fn build_byok_ask_body(question: &str, model: &str) -> Result<serde_json::Value, String> {
     build_byok_ask_body_for_context(question, model, None)
 }
@@ -636,6 +672,12 @@ fn build_ask_stt_config(
             None
         },
         operation_id: Some(operation_id),
+        managed_audio: stt::capabilities::managed_audio_encoding_config(
+            config,
+            chrono::Utc::now().timestamp(),
+        ),
+        provider_region: (config.stt_provider == stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER)
+            .then(|| config.stt_aliyun_qwen_region.clone()),
     }
 }
 
@@ -826,23 +868,28 @@ async fn ask_via_byok(
         return Err("LLM base URL must use http or https scheme".to_string());
     }
 
-    let url = format!(
-        "{}/chat/completions",
-        config.llm_base_url.trim_end_matches('/')
-    );
-    let mut request = client
+    let api_kind =
+        crate::llm::protocol::detect_api_kind(&config.llm_provider, &config.llm_base_url);
+    let url = crate::llm::protocol::chat_endpoint(&config.llm_provider, &config.llm_base_url)?;
+    let request = client
         .post(url)
         .header("Content-Type", "application/json")
-        .json(&build_byok_ask_body_for_context(
+        .json(&build_byok_ask_body_for_config(
+            config,
             question,
-            &config.llm_model,
             selected_text,
         )?)
-        .timeout(std::time::Duration::from_secs(30));
-
-    if !api_key.trim().is_empty() {
-        request = request.header("Authorization", format!("Bearer {}", api_key));
-    }
+        .timeout(crate::llm::protocol::request_timeout(
+            &config.llm_provider,
+            &config.llm_base_url,
+            &config.llm_model,
+        ));
+    let request = crate::llm::protocol::apply_auth_headers(
+        request,
+        &config.llm_provider,
+        &config.llm_base_url,
+        api_key,
+    );
 
     let resp = request.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
@@ -852,18 +899,7 @@ async fn ask_via_byok(
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    extract_byok_ask_answer(&body)
-}
-
-fn extract_byok_ask_answer(body: &serde_json::Value) -> Result<String, String> {
-    let message = &body["choices"][0]["message"];
-    if let Some(content) = message["content"].as_str() {
-        if !content.trim().is_empty() {
-            return validate_ask_answer(content);
-        }
-    }
-
-    validate_ask_answer(message["reasoning_content"].as_str().unwrap_or(""))
+    validate_ask_answer(&crate::llm::protocol::response_text(api_kind, &body))
 }
 
 async fn ask_via_cloud(
@@ -1026,19 +1062,61 @@ pub(crate) async fn start_reserved_ask_dictation(
         };
         let operation_id = synthetic_operation_id();
         let stt_config = build_ask_stt_config(&config, stt_api_key, operation_id.clone());
+        let managed_cloud_session_token =
+            (config.stt_provider == "cloud").then(|| stt_config.api_key.clone());
+        if let Some(session_token) = managed_cloud_session_token.clone() {
+            stt::cloud::warm_managed_cloud_on_intent(client.inner().clone(), session_token);
+        }
         let mut provider = stt::create_provider(
             &config.stt_provider,
             custom_whisper_config,
             Some(client.inner().clone()),
         )
         .map_err(|e| e.to_string())?;
-        provider
-            .connect(&stt_config)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let (handle, mut audio_rx) = AudioCaptureHandle::start(AudioConfig::default())
+        let (mut handle, mut audio_rx) = AudioCaptureHandle::start(AudioConfig::default())
             .map_err(|e| map_audio_capture_error(&e.to_string()))?;
+        let capture_ready_at = match crate::audio::await_recording_startup(
+            handle.wait_until_ready(),
+            provider.connect(&stt_config),
+        )
+        .await
+        {
+            Ok(capture_ready_at) => capture_ready_at,
+            Err(error) => {
+                handle.stop();
+                return Err(match error {
+                crate::audio::RecordingStartupError::Audio(error) => {
+                    map_audio_capture_error(&error.to_string())
+                }
+                crate::audio::RecordingStartupError::Stt(error) => error.to_string(),
+                crate::audio::RecordingStartupError::Timeout => {
+                    "Recording startup timed out after 30 seconds. Please try again.".to_string()
+                }
+                });
+            }
+        };
+        let recording_session_id = ASK_RECORDING_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let resolved_limit = stt::capabilities::resolve_recording_limit(
+            &config,
+            None,
+            chrono::Utc::now().timestamp(),
+        );
+        let effective_max_seconds = provider
+            .recording_limit_override_seconds()
+            .map_or(resolved_limit.effective_max_seconds, |override_seconds| {
+                resolved_limit.effective_max_seconds.min(override_seconds)
+            });
+        let deadline_explanation_key = provider
+            .recording_limit_override_explanation_key()
+            .unwrap_or(&resolved_limit.capability.explanation_key)
+            .to_string();
+        let deadline_provider_id = resolved_limit.capability.provider_id;
+        let recording_deadline = crate::recording_deadline::RecordingDeadline::new(
+            recording_session_id,
+            crate::recording_deadline::RecordingKind::Ask,
+            capture_ready_at,
+            effective_max_seconds,
+        );
         let mut handle = Some(handle);
         let transcript = Arc::new(Mutex::new(String::new()));
         let error = Arc::new(Mutex::new(None::<String>));
@@ -1055,6 +1133,7 @@ pub(crate) async fn start_reserved_ask_dictation(
                 guard.starting = false;
                 guard.session = Some(AskDictationSession {
                     handle: handle.take().expect("Ask audio handle was already consumed"),
+                    recording_session_id,
                     operation_id,
                     recording_context,
                     selected_text,
@@ -1075,7 +1154,41 @@ pub(crate) async fn start_reserved_ask_dictation(
         }
 
         emit_capsule_state(&app, PipelineState::AskRecording);
+        let _ = app.emit("recording:deadline", recording_deadline.event);
         let state_inner = state.0.clone();
+        let deadline_state_inner = state.0.clone();
+        let deadline_app = app.clone();
+        if let Some(session_token) = managed_cloud_session_token {
+            let warmup_client = client.inner().clone();
+            let warmup_state_inner = state.0.clone();
+            tauri::async_runtime::spawn(async move {
+                for elapsed_seconds in [240u64, 480] {
+                    if elapsed_seconds >= u64::from(effective_max_seconds) {
+                        break;
+                    }
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(
+                        capture_ready_at.monotonic
+                            + std::time::Duration::from_secs(elapsed_seconds),
+                    ))
+                    .await;
+                    let is_active = warmup_state_inner
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| {
+                            session.recording_session_id == recording_session_id
+                        });
+                    if !is_active {
+                        break;
+                    }
+                    stt::cloud::warm_managed_cloud_on_intent(
+                        warmup_client.clone(),
+                        session_token.clone(),
+                    );
+                }
+            });
+        }
 
         tauri::async_runtime::spawn(async move {
             loop {
@@ -1157,6 +1270,69 @@ pub(crate) async fn start_reserved_ask_dictation(
             }
 
             done.notify_waiters();
+        });
+
+        tauri::async_runtime::spawn(async move {
+            let reached = crate::recording_deadline::drive_recording_deadline(
+                recording_deadline,
+                || {
+                    deadline_state_inner
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| {
+                            session.recording_session_id == recording_session_id
+                        })
+                },
+                |signal| match signal {
+                    crate::recording_deadline::RecordingDeadlineSignal::Warning {
+                        seconds_remaining,
+                    } => {
+                        let _ = deadline_app.emit(
+                            "recording:deadline-warning",
+                            json!({
+                                "sessionId": recording_session_id,
+                                "recordingKind": "ask",
+                                "secondsRemaining": seconds_remaining,
+                                "effectiveMaxSeconds": effective_max_seconds,
+                                "providerId": deadline_provider_id.as_str(),
+                                "explanationKey": deadline_explanation_key.as_str(),
+                            }),
+                        );
+                    }
+                    crate::recording_deadline::RecordingDeadlineSignal::Reached => {
+                        let _ = deadline_app.emit(
+                            "recording:deadline-reached",
+                            json!({
+                                "sessionId": recording_session_id,
+                                "recordingKind": "ask",
+                                "effectiveMaxSeconds": effective_max_seconds,
+                                "providerId": deadline_provider_id.as_str(),
+                                "explanationKey": deadline_explanation_key.as_str(),
+                            }),
+                        );
+                    }
+                },
+            )
+            .await;
+            if reached {
+                let ask_state = deadline_app.state::<AskDictationState>();
+                let config_state = deadline_app.state::<storage::ConfigManager>();
+                let token_store = deadline_app.state::<SessionTokenStore>();
+                let client = deadline_app.state::<reqwest::Client>();
+                if let Err(error) = stop_ask_flow(
+                    deadline_app.clone(),
+                    ask_state,
+                    config_state,
+                    token_store,
+                    client,
+                )
+                .await
+                {
+                    tracing::error!("Failed to stop Ask at the provider deadline: {error}");
+                }
+            }
         });
 
         Ok(start_result)
@@ -1631,6 +1807,38 @@ mod tests {
     }
 
     #[test]
+    fn byok_ask_config_uses_gpt5_compatible_fields_for_direct_openai() {
+        let config = storage::AppConfig {
+            llm_provider: "openai".to_string(),
+            llm_base_url: "https://api.openai.com/v1".to_string(),
+            llm_model: "gpt-5".to_string(),
+            ..storage::AppConfig::default()
+        };
+
+        let body = build_byok_ask_body_for_config(&config, "What is OpenTypeless?", None).unwrap();
+
+        assert_eq!(body["max_completion_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn byok_ask_config_uses_native_anthropic_message_shape() {
+        let config = storage::AppConfig {
+            llm_provider: "claude".to_string(),
+            llm_base_url: "https://api.anthropic.com/v1".to_string(),
+            llm_model: "claude-sonnet-4-0".to_string(),
+            ..storage::AppConfig::default()
+        };
+
+        let body = build_byok_ask_body_for_config(&config, "What is OpenTypeless?", None).unwrap();
+
+        assert!(body["system"].as_str().unwrap().contains("40 words"));
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(body["max_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+    }
+
+    #[test]
     fn byok_ask_answer_falls_back_to_reasoning_content() {
         let body = json!({
             "choices": [
@@ -1644,7 +1852,11 @@ mod tests {
         });
 
         assert_eq!(
-            extract_byok_ask_answer(&body).unwrap(),
+            validate_ask_answer(&crate::llm::protocol::response_text(
+                crate::llm::protocol::LlmApiKind::OpenAiCompatible,
+                &body,
+            ))
+            .unwrap(),
             "Use Command+Period to ask."
         );
     }

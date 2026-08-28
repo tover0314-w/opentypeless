@@ -85,6 +85,21 @@ vi.mock('react-i18next', async (importOriginal) => {
 // ─── Mock Tauri plugins / lib/tauri ──────────────────────────────────────────
 vi.mock('../../../lib/tauri', () => ({
   getConfig: vi.fn().mockResolvedValue(null),
+  getSttRecordingCapability: vi.fn().mockResolvedValue({
+    capability: {
+      registryVersion: 1,
+      providerId: 'glm-asr',
+      transport: 'fileUpload',
+      recommendedMaxSeconds: 30,
+      hardMaxSeconds: 30,
+      maxUploadBytes: 24 * 1024 * 1024,
+      source: 'provider',
+      explanationKey: 'recordingLimits.reasons.providerDuration',
+    },
+    mode: 'auto',
+    requestedSeconds: 30,
+    effectiveMaxSeconds: 30,
+  }),
   updateHotkey: vi.fn().mockResolvedValue(undefined),
   updateAskHotkey: vi.fn().mockResolvedValue(undefined),
   askAnything: vi.fn().mockResolvedValue('A concise answer.'),

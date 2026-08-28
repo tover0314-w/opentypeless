@@ -1,8 +1,11 @@
+pub mod aliyun_qwen3_asr;
 pub mod apple_speech;
 pub mod assemblyai;
+pub mod capabilities;
 pub mod cloud;
 pub mod config;
 pub mod deepgram;
+pub mod managed_audio;
 pub mod volcengine;
 pub mod whisper_compat;
 
@@ -21,6 +24,8 @@ pub struct SttConfig {
     pub sample_rate: u32,
     pub resource_id: Option<String>,
     pub operation_id: Option<String>,
+    pub managed_audio: Option<managed_audio::ManagedAudioEncodingConfig>,
+    pub provider_region: Option<String>,
 }
 
 impl Default for SttConfig {
@@ -32,6 +37,8 @@ impl Default for SttConfig {
             sample_rate: 16000,
             resource_id: None,
             operation_id: None,
+            managed_audio: None,
+            provider_region: None,
         }
     }
 }
@@ -52,6 +59,12 @@ pub trait SttProvider: Send + Sync {
     async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError>;
     /// Disconnect and optionally return a final transcript (for file-based providers).
     async fn disconnect(&mut self) -> Result<Option<String>, AppError>;
+    fn recording_limit_override_seconds(&self) -> Option<u32> {
+        None
+    }
+    fn recording_limit_override_explanation_key(&self) -> Option<&'static str> {
+        None
+    }
     fn name(&self) -> &str;
 }
 
@@ -73,6 +86,9 @@ pub fn create_provider(
         }
         "assemblyai" => Ok(Box::new(assemblyai::AssemblyAiProvider::new())),
         "deepgram" => Ok(Box::new(deepgram::DeepgramProvider::new())),
+        aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
+            Ok(Box::new(aliyun_qwen3_asr::AliyunQwen3AsrProvider::new()))
+        }
         apple_speech::APPLE_SPEECH_PROVIDER => {
             Ok(Box::new(apple_speech::AppleSpeechProvider::new()))
         }
@@ -127,6 +143,12 @@ mod tests {
     fn creates_volcengine_doubao_realtime_provider() {
         let provider = create_provider("volcengine-doubao", None, None).unwrap();
         assert_eq!(provider.name(), "Volcengine Doubao Realtime ASR");
+    }
+
+    #[test]
+    fn creates_aliyun_qwen3_realtime_provider() {
+        let provider = create_provider("aliyun-qwen3-asr", None, None).unwrap();
+        assert_eq!(provider.name(), "Aliyun Qwen3 Realtime ASR");
     }
 
     #[test]

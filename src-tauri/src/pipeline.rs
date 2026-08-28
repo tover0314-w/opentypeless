@@ -630,6 +630,22 @@ fn take_matching_stt_error(
     None
 }
 
+fn latch_stt_task_error_if_active(
+    abort_flag: &AtomicBool,
+    active_session_id: &AtomicU64,
+    stt_error: &Mutex<Option<(u64, crate::error::UserError)>>,
+    task_session_id: u64,
+    error: &crate::error::AppError,
+) -> Option<crate::error::UserError> {
+    if !should_finalize_stt_task(abort_flag, active_session_id, task_session_id) {
+        return None;
+    }
+    let user_error = error.to_user_error();
+    *stt_error.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((task_session_id, user_error.clone()));
+    Some(user_error)
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PipelineStartOptions {
     pub force_translate: bool,
@@ -678,6 +694,7 @@ fn apply_pipeline_start_options(
     config
 }
 
+#[derive(Clone)]
 pub struct PipelineHandle {
     app_handle: tauri::AppHandle,
     context_detector: app_detector::ContextDetectorHandle,
@@ -688,6 +705,7 @@ pub struct PipelineHandle {
     stt_session: Arc<Mutex<Option<SttTaskControl>>>,
     stt_error: Arc<Mutex<Option<(u64, crate::error::UserError)>>>,
     active_stt_session_id: Arc<AtomicU64>,
+    active_deadline_session_id: Arc<AtomicU64>,
     abort_flag: Arc<AtomicBool>,
     preloaded_config: Arc<Mutex<Option<storage::AppConfig>>>,
     preloaded_app_ctx: Arc<Mutex<Option<RecordingContext>>>,
@@ -703,7 +721,7 @@ pub struct PipelineHandle {
     /// its setup before reading shared state (preloaded_config, audio_handle, etc.).
     /// Without this, a quick press-release in hold mode causes stop() to run
     /// while start() is still connecting to STT, finding empty fields.
-    pipeline_lock: tokio::sync::Mutex<()>,
+    pipeline_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct PolishTextInput<'a> {
@@ -897,6 +915,7 @@ impl PipelineHandle {
             stt_session: Arc::new(Mutex::new(None)),
             stt_error: Arc::new(Mutex::new(None)),
             active_stt_session_id: Arc::new(AtomicU64::new(0)),
+            active_deadline_session_id: Arc::new(AtomicU64::new(0)),
             abort_flag: Arc::new(AtomicBool::new(false)),
             preloaded_config: Arc::new(Mutex::new(None)),
             preloaded_app_ctx: Arc::new(Mutex::new(None)),
@@ -908,7 +927,7 @@ impl PipelineHandle {
             recording_start: Arc::new(Mutex::new(None)),
             active_translation_operation: Arc::new(Mutex::new(None)),
             shared_client,
-            pipeline_lock: tokio::sync::Mutex::new(()),
+            pipeline_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -979,6 +998,7 @@ impl PipelineHandle {
         // Set abort flag so any running stop() exits early
         self.abort_flag.store(true, Ordering::SeqCst);
         self.active_stt_session_id.fetch_add(1, Ordering::SeqCst);
+        self.active_deadline_session_id.store(0, Ordering::SeqCst);
 
         // Stop audio capture (closes channel → STT task terminates naturally)
         {
@@ -1221,7 +1241,7 @@ impl PipelineHandle {
                 None
             };
 
-        // P0-3: Pre-connect STT provider before spawning task
+        // Prepare STT configuration before starting the shared audio/STT readiness phase.
         let cloud_operation_id = generate_cloud_operation_id();
         *self
             .cloud_operation_id
@@ -1244,7 +1264,19 @@ impl PipelineHandle {
                 None
             },
             operation_id: Some(cloud_operation_id),
+            managed_audio: stt::capabilities::managed_audio_encoding_config(
+                &config_data,
+                chrono::Utc::now().timestamp(),
+            ),
+            provider_region: (config_data.stt_provider
+                == stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER)
+                .then(|| config_data.stt_aliyun_qwen_region.clone()),
         };
+        let managed_cloud_session_token =
+            (config_data.stt_provider == "cloud").then(|| stt_config.api_key.clone());
+        if let Some(session_token) = managed_cloud_session_token.clone() {
+            stt::cloud::warm_managed_cloud_on_intent(self.shared_client.clone(), session_token);
+        }
 
         let mut provider = match stt::create_provider(
             &config_data.stt_provider,
@@ -1277,40 +1309,60 @@ impl PipelineHandle {
                 return Ok(());
             }
         };
-        if let Err(e) = provider.connect(&stt_config).await {
-            tracing::error!("STT connect failed: {}", e);
-            let _ = self
-                .app_handle
-                .emit("pipeline:error", format!("STT connection failed: {e}"));
-            *self
-                .preloaded_config
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            *self
-                .preloaded_app_ctx
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            *self
-                .preloaded_dictionary
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            *self
-                .preloaded_correction_rules
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = None;
-            self.set_state(PipelineState::Idle);
-            return Ok(());
-        }
-
-        // Start audio capture on dedicated thread
+        // Start the platform audio backend before connecting STT. Both readiness
+        // operations are then polled concurrently, so speech captured while a
+        // network provider connects remains queued instead of being clipped.
         let config = AudioConfig::default();
-        let (handle, mut audio_rx) = match AudioCaptureHandle::start(config) {
+        let (mut handle, mut audio_rx) = match AudioCaptureHandle::start(config) {
             Ok(result) => result,
             Err(e) => {
                 tracing::error!("Audio capture failed: {}", e);
                 let _ = self
                     .app_handle
                     .emit("pipeline:error", format!("Audio capture failed: {e}"));
+                *self
+                    .preloaded_config
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self
+                    .preloaded_app_ctx
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self
+                    .preloaded_dictionary
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                *self
+                    .preloaded_correction_rules
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = None;
+                self.set_state(PipelineState::Idle);
+                return Ok(());
+            }
+        };
+        let startup_result = crate::audio::await_recording_startup(
+            handle.wait_until_ready(),
+            provider.connect(&stt_config),
+        )
+        .await;
+        let capture_ready_at = match startup_result {
+            Ok(capture_ready_at) => capture_ready_at,
+            Err(error) => {
+                let message = match error {
+                    crate::audio::RecordingStartupError::Audio(error) => {
+                        format!("Audio capture failed: {error}")
+                    }
+                    crate::audio::RecordingStartupError::Stt(error) => {
+                        format!("STT connection failed: {error}")
+                    }
+                    crate::audio::RecordingStartupError::Timeout => {
+                        "Recording startup timed out after 30 seconds. Please try again."
+                            .to_string()
+                    }
+                };
+                tracing::error!("Recording startup failed: {}", message);
+                handle.stop();
+                let _ = self.app_handle.emit("pipeline:error", message);
                 *self
                     .preloaded_config
                     .lock()
@@ -1389,10 +1441,56 @@ impl PipelineHandle {
             return Ok(());
         }
 
+        let session_id = self.active_stt_session_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let resolved_limit = stt::capabilities::resolve_recording_limit(
+            &config_data,
+            None,
+            chrono::Utc::now().timestamp(),
+        );
+        let effective_max_seconds = provider
+            .recording_limit_override_seconds()
+            .map_or(resolved_limit.effective_max_seconds, |override_seconds| {
+                resolved_limit.effective_max_seconds.min(override_seconds)
+            });
+        let deadline_explanation_key = provider
+            .recording_limit_override_explanation_key()
+            .unwrap_or(&resolved_limit.capability.explanation_key)
+            .to_string();
+        let recording_deadline = crate::recording_deadline::RecordingDeadline::new(
+            session_id,
+            crate::recording_deadline::RecordingKind::Dictation,
+            capture_ready_at,
+            effective_max_seconds,
+        );
+        self.active_deadline_session_id
+            .store(session_id, Ordering::SeqCst);
+        if let Some(session_token) = managed_cloud_session_token {
+            let warmup_client = self.shared_client.clone();
+            let warmup_active_session_id = self.active_deadline_session_id.clone();
+            tokio::spawn(async move {
+                for elapsed_seconds in [240u64, 480] {
+                    if elapsed_seconds >= u64::from(effective_max_seconds) {
+                        break;
+                    }
+                    tokio::time::sleep_until(tokio::time::Instant::from_std(
+                        capture_ready_at.monotonic
+                            + std::time::Duration::from_secs(elapsed_seconds),
+                    ))
+                    .await;
+                    if warmup_active_session_id.load(Ordering::SeqCst) != session_id {
+                        break;
+                    }
+                    stt::cloud::warm_managed_cloud_on_intent(
+                        warmup_client.clone(),
+                        session_token.clone(),
+                    );
+                }
+            });
+        }
         *self
             .recording_start
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
+            .unwrap_or_else(|e| e.into_inner()) = Some(capture_ready_at.monotonic);
         *self
             .active_translation_operation
             .lock()
@@ -1401,6 +1499,9 @@ impl PipelineHandle {
             .then(|| TranslationOperationState::new(config_data.translation.active_target.clone()));
         self.set_state(PipelineState::Recording);
         let _ = self.app_handle.emit("pipeline:voice_mode", voice_mode);
+        let _ = self
+            .app_handle
+            .emit("recording:deadline", recording_deadline.event);
 
         // Volume monitoring task
         let app_handle = self.app_handle.clone();
@@ -1433,7 +1534,6 @@ impl PipelineHandle {
         // STT streaming task — provider is already connected
         let app_handle = self.app_handle.clone();
         let accumulated = self.accumulated_text.clone();
-        let session_id = self.active_stt_session_id.fetch_add(1, Ordering::SeqCst) + 1;
         let stt_control = SttTaskControl {
             id: session_id,
             done: Arc::new(Notify::new()),
@@ -1463,7 +1563,20 @@ impl PipelineHandle {
                     chunk = audio_rx.recv() => {
                         match chunk {
                             Some(data) => {
-                                let _ = provider.send_audio(&data).await;
+                                if let Err(error) = provider.send_audio(&data).await {
+                                    tracing::error!("STT send audio error: {}", error);
+                                    crate::error::emit_cloud_session_invalid(&app_handle, &error);
+                                    if let Some(user_error) = latch_stt_task_error_if_active(
+                                        abort_flag_ref.as_ref(),
+                                        active_session_id_ref.as_ref(),
+                                        stt_error_ref.as_ref(),
+                                        stt_control.id,
+                                        &error,
+                                    ) {
+                                        let _ = app_handle.emit("pipeline:error", user_error);
+                                    }
+                                    break;
+                                }
                             }
                             None => {
                                 // Audio channel closed — disconnect and capture final transcript
@@ -1586,12 +1699,58 @@ impl PipelineHandle {
             stt_control.done.notify_one();
         });
 
+        let deadline_pipeline = self.clone();
+        let deadline_app = self.app_handle.clone();
+        let active_deadline_session_id = self.active_deadline_session_id.clone();
+        let deadline_provider_id = resolved_limit.capability.provider_id;
+        tokio::spawn(async move {
+            let reached = crate::recording_deadline::drive_recording_deadline(
+                recording_deadline,
+                || active_deadline_session_id.load(Ordering::SeqCst) == session_id,
+                |signal| match signal {
+                    crate::recording_deadline::RecordingDeadlineSignal::Warning {
+                        seconds_remaining,
+                    } => {
+                        let _ = deadline_app.emit(
+                            "recording:deadline-warning",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "recordingKind": "dictation",
+                                "secondsRemaining": seconds_remaining,
+                                "effectiveMaxSeconds": effective_max_seconds,
+                                "providerId": deadline_provider_id.as_str(),
+                                "explanationKey": deadline_explanation_key.as_str(),
+                            }),
+                        );
+                    }
+                    crate::recording_deadline::RecordingDeadlineSignal::Reached => {
+                        let _ = deadline_app.emit(
+                            "recording:deadline-reached",
+                            serde_json::json!({
+                                "sessionId": session_id,
+                                "recordingKind": "dictation",
+                                "effectiveMaxSeconds": effective_max_seconds,
+                                "providerId": deadline_provider_id.as_str(),
+                                "explanationKey": deadline_explanation_key.as_str(),
+                            }),
+                        );
+                    }
+                },
+            )
+            .await;
+            if reached {
+                if let Err(error) = deadline_pipeline.stop().await {
+                    tracing::error!("Failed to stop recording at the provider deadline: {error}");
+                }
+            }
+        });
+
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {
         // Acquire pipeline_lock so we wait for start() to finish its setup
-        // (load_config, connect STT, start audio) before reading shared state.
+        // (load config, initialize audio and connect STT) before reading shared state.
         // Released before the long stt_done wait so start() isn't blocked 120s.
         let guard = self.pipeline_lock.lock().await;
 
@@ -1608,6 +1767,7 @@ impl PipelineHandle {
         {
             return Ok(());
         }
+        self.active_deadline_session_id.store(0, Ordering::SeqCst);
         let _ = self
             .app_handle
             .emit("pipeline:state", PipelineState::Transcribing);
@@ -2705,68 +2865,97 @@ impl PipelineHandle {
         Ok(insert_result)
     }
 
-    /// P1-2: Pre-warm HTTP connection pool by issuing a HEAD request to the STT endpoint.
-    /// Call once after app startup to avoid cold-start TLS handshake on first recording.
+    async fn pre_warm_endpoint(&self, endpoint: &str, managed_cloud: bool) {
+        tracing::debug!("Pre-warming HTTP connection to {}", endpoint);
+        let request = self.shared_client.head(endpoint);
+        let request = if managed_cloud {
+            crate::with_desktop_client_version(request)
+        } else {
+            request
+        };
+        if let Err(error) = request
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            tracing::debug!("HTTP connection pre-warm did not complete: {error}");
+        }
+    }
+
+    /// Pre-warm the active STT and LLM hosts concurrently so the next dictation can reuse TLS.
+    /// Called after startup and whenever provider connection settings change.
     pub async fn pre_warm(&self) {
         let config = self.load_config().await;
 
-        // Pre-warm STT endpoint
         let stt_endpoint = match config.stt_provider.as_str() {
             "cloud" => {
                 let base = crate::api_base_url();
-                format!("{}/api/proxy/stt", base)
+                Some((format!("{}/api/proxy/stt", base), true))
             }
-            "glm-asr" => "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions".to_string(),
-            "openai-whisper" => "https://api.openai.com/v1/audio/transcriptions".to_string(),
-            "groq-whisper" => "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
-            "siliconflow" => "https://api.siliconflow.cn/v1/audio/transcriptions".to_string(),
-            "deepgram" => "https://api.deepgram.com/v1/listen".to_string(),
-            "assemblyai" => "https://api.assemblyai.com/v2/transcript".to_string(),
-            stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
-                "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_async".to_string()
+            "glm-asr" => Some((
+                "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions".to_string(),
+                false,
+            )),
+            "openai-whisper" => Some((
+                "https://api.openai.com/v1/audio/transcriptions".to_string(),
+                false,
+            )),
+            "groq-whisper" => Some((
+                "https://api.groq.com/openai/v1/audio/transcriptions".to_string(),
+                false,
+            )),
+            "siliconflow" => Some((
+                "https://api.siliconflow.cn/v1/audio/transcriptions".to_string(),
+                false,
+            )),
+            "deepgram" => Some(("https://api.deepgram.com/v1/listen".to_string(), false)),
+            "assemblyai" => Some((
+                "https://api.assemblyai.com/v2/transcript".to_string(),
+                false,
+            )),
+            stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => Some((
+                "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_async".to_string(),
+                false,
+            )),
+            stt::config::CUSTOM_WHISPER_PROVIDER => {
+                stt::config::normalize_custom_whisper_endpoint(&config.stt_custom_base_url)
+                    .ok()
+                    .map(|endpoint| (endpoint, false))
             }
             _ => {
                 tracing::debug!(
                     "Unknown STT provider '{}', skipping pre-warm",
                     config.stt_provider
                 );
-                return;
+                None
             }
         };
-        tracing::debug!("Pre-warming HTTP connection to {}", stt_endpoint);
-        let stt_prewarm = self.shared_client.head(&stt_endpoint);
-        let stt_prewarm = if config.stt_provider == "cloud" {
-            crate::with_desktop_client_version(stt_prewarm)
-        } else {
-            stt_prewarm
-        };
-        let _ = stt_prewarm
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await;
-        tracing::debug!("STT connection pre-warm complete");
 
-        // Pre-warm LLM endpoint if polish is enabled
-        if config.polish_enabled {
-            let llm_url = if config.llm_provider == "cloud" {
+        let llm_endpoint = if config.polish_enabled {
+            if config.llm_provider == "cloud" {
                 let base = crate::api_base_url();
-                format!("{}/api/proxy/llm", base)
+                Some((format!("{}/api/proxy/llm", base), true))
             } else {
-                config.llm_base_url.clone()
-            };
-            tracing::debug!("Pre-warming LLM connection to {}", llm_url);
-            let llm_prewarm = self.shared_client.head(&llm_url);
-            let llm_prewarm = if config.llm_provider == "cloud" {
-                crate::with_desktop_client_version(llm_prewarm)
-            } else {
-                llm_prewarm
-            };
-            let _ = llm_prewarm
-                .timeout(std::time::Duration::from_secs(5))
-                .send()
-                .await;
-            tracing::debug!("LLM connection pre-warm complete");
-        }
+                crate::llm::protocol::chat_endpoint(&config.llm_provider, &config.llm_base_url)
+                    .ok()
+                    .map(|endpoint| (endpoint, false))
+            }
+        } else {
+            None
+        };
+
+        let warm_stt = async {
+            if let Some((endpoint, managed_cloud)) = stt_endpoint {
+                self.pre_warm_endpoint(&endpoint, managed_cloud).await;
+            }
+        };
+        let warm_llm = async {
+            if let Some((endpoint, managed_cloud)) = llm_endpoint {
+                self.pre_warm_endpoint(&endpoint, managed_cloud).await;
+            }
+        };
+        tokio::join!(warm_stt, warm_llm);
+        tracing::debug!("Provider connection pre-warm complete");
     }
 }
 
@@ -3201,6 +3390,31 @@ mod tests {
 
         assert!(take_matching_stt_error(&latch, 7).is_none());
         assert!(latch.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn send_audio_error_is_latched_only_for_the_active_session() {
+        let abort_flag = AtomicBool::new(false);
+        let active_session_id = AtomicU64::new(7);
+        let latch = Mutex::new(None);
+        let error = crate::error::AppError::Network("socket closed".to_string());
+
+        let user_error =
+            latch_stt_task_error_if_active(&abort_flag, &active_session_id, &latch, 7, &error)
+                .expect("active send failure should be surfaced");
+
+        assert_eq!(user_error.code, "stt_timeout");
+        assert_eq!(
+            take_matching_stt_error(&latch, 7)
+                .expect("matching error should be consumable")
+                .code,
+            "stt_timeout"
+        );
+
+        assert!(
+            latch_stt_task_error_if_active(&abort_flag, &active_session_id, &latch, 6, &error,)
+                .is_none()
+        );
     }
 
     #[test]

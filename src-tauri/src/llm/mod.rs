@@ -3,6 +3,7 @@ pub mod context_policy;
 pub mod model_capabilities;
 pub mod openai;
 pub mod prompt;
+pub mod protocol;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

@@ -34,6 +34,15 @@ describe('cloud session coordinator', () => {
     expect(localStorage.getItem('session_token')).toBe('previous-token')
   })
 
+  it('clears user-bound managed capability before signing out', async () => {
+    localStorage.setItem('session_token', 'previous-token')
+
+    await persistSessionToken(null)
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'clear_managed_stt_capability')
+    expect(invoke).toHaveBeenNthCalledWith(2, 'set_session_token', { token: '' })
+  })
+
   it('shares one invalidation across concurrent managed-cloud failures', async () => {
     let release!: () => void
     const pending = new Promise<void>((resolve) => {

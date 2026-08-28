@@ -17,6 +17,7 @@ type SafeScalarKey =
   | 'stt_custom_base_url'
   | 'stt_custom_model'
   | 'stt_volcengine_resource_id'
+  | 'stt_aliyun_qwen_region'
   | 'llm_provider'
   | 'llm_model'
   | 'llm_base_url'
@@ -41,6 +42,8 @@ type SafeScalarKey =
   | 'auto_start'
   | 'close_to_tray'
   | 'start_minimized'
+  | 'recording_limit_mode'
+  | 'custom_recording_limit_seconds'
   | 'max_recording_seconds'
   | 'history_enabled'
   | 'history_retention_days'
@@ -74,6 +77,7 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
     stt_custom_base_url: config.stt_custom_base_url,
     stt_custom_model: config.stt_custom_model,
     stt_volcengine_resource_id: config.stt_volcengine_resource_id,
+    stt_aliyun_qwen_region: config.stt_aliyun_qwen_region,
     llm_provider: config.llm_provider,
     llm_model: config.llm_model,
     llm_base_url: config.llm_base_url,
@@ -167,6 +171,8 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
     auto_start: config.auto_start,
     close_to_tray: config.close_to_tray,
     start_minimized: config.start_minimized,
+    recording_limit_mode: config.recording_limit_mode,
+    custom_recording_limit_seconds: config.custom_recording_limit_seconds,
     max_recording_seconds: config.max_recording_seconds,
     history_enabled: config.history_enabled,
     history_retention_days: config.history_retention_days,
@@ -194,6 +200,7 @@ const SAFE_SCALAR_KEYS: readonly SafeScalarKey[] = [
   'stt_custom_base_url',
   'stt_custom_model',
   'stt_volcengine_resource_id',
+  'stt_aliyun_qwen_region',
   'llm_provider',
   'llm_model',
   'llm_base_url',
@@ -218,6 +225,8 @@ const SAFE_SCALAR_KEYS: readonly SafeScalarKey[] = [
   'auto_start',
   'close_to_tray',
   'start_minimized',
+  'recording_limit_mode',
+  'custom_recording_limit_seconds',
   'max_recording_seconds',
   'history_enabled',
   'history_retention_days',

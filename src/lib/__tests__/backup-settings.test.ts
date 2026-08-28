@@ -79,4 +79,27 @@ describe('createBackupSettings', () => {
     expect(merged.stt_api_key).toBe('local-stt-secret')
     expect(merged).not.toHaveProperty('custom_app_mappings')
   })
+
+  it('round-trips recording-limit intent while retaining the compatibility mirror', () => {
+    const configured = {
+      ...useAppStore.getState().config,
+      recording_limit_mode: 'custom',
+      custom_recording_limit_seconds: 300,
+      max_recording_seconds: 300,
+    } as AppConfig
+
+    const settings = createBackupSettings(configured)
+    const restored = mergeBackupSettings(useAppStore.getState().config, settings)
+
+    expect(settings).toMatchObject({
+      recording_limit_mode: 'custom',
+      custom_recording_limit_seconds: 300,
+      max_recording_seconds: 300,
+    })
+    expect(restored).toMatchObject({
+      recording_limit_mode: 'custom',
+      custom_recording_limit_seconds: 300,
+      max_recording_seconds: 300,
+    })
+  })
 })

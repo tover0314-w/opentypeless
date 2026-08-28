@@ -19,6 +19,7 @@ import {
   type SubscriptionStatus,
 } from '../lib/api'
 import { isActiveCloudPlan } from '../lib/constants'
+import { syncManagedSttCapability } from '../lib/managed-stt-capability'
 import { toast } from '../components/toast-service'
 import i18n from '../i18n'
 import {
@@ -32,6 +33,7 @@ import { clearPendingDesktopCheckout } from '../lib/desktop-checkout-intent'
 let sttWarningShown = false
 let llmWarningShown = false
 let cloudWordsWarningShown = false
+let subscriptionRefreshInFlight: Promise<void> | null = null
 
 export interface AuthUser {
   id: string
@@ -84,6 +86,7 @@ interface AuthState {
 
   // Checkout flow
   checkoutPending: boolean
+  subscriptionRefreshedAt: number | null
 
   // Actions
   initialize: () => Promise<void>
@@ -172,6 +175,7 @@ function signedOutCloudState() {
     emailVerificationPending: false,
     pendingEmail: null,
     checkoutPending: false,
+    subscriptionRefreshedAt: null,
   }
 }
 
@@ -236,6 +240,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   emailVerificationPending: false,
   pendingEmail: null,
   checkoutPending: false,
+  subscriptionRefreshedAt: null,
 
   initialize: async () => {
     try {
@@ -487,79 +492,95 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  refreshSubscription: async () => {
+  refreshSubscription: () => {
     const userId = get().user?.id
-    if (!userId) return
+    if (!userId) return Promise.resolve()
+    if (subscriptionRefreshInFlight) return subscriptionRefreshInFlight
 
-    if (!get().subscriptionLastVerifiedAt) {
-      const cached = loadLastKnownSubscription(localStorage, userId)
-      if (cached) {
-        set({
-          ...subscriptionStateFromStatus(cached.snapshot),
-          subscriptionRefreshState: 'stale',
-          subscriptionLastVerifiedAt: cached.verifiedAt,
-        })
-      }
-    }
-
-    set({ subscriptionRefreshLoading: true, subscriptionRefreshError: null })
-    try {
-      const status = await getSubscriptionStatus()
-      const verifiedAt = new Date().toISOString()
-      set({
-        ...subscriptionStateFromStatus(status),
-        subscriptionRefreshState: 'fresh',
-        subscriptionLastVerifiedAt: verifiedAt,
-      })
-      saveLastKnownSubscription(localStorage, userId, status, verifiedAt)
-      // Clear checkout pending flag after first post-checkout refresh
-      if (get().checkoutPending) {
-        set({ checkoutPending: false })
-      }
-      const wordsUsed =
-        status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
-          ? status.displayWordsUsedEstimate
-          : status.cloudWordsUsed
-      const wordsLimit =
-        status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
-          ? status.displayWordsLimit
-          : status.cloudWordsLimit
-      if (wordsLimit > 0 && wordsUsed / wordsLimit >= 0.9) {
-        if (!cloudWordsWarningShown) {
-          toast(i18n.t('account.cloudQuotaWarning', 'Cloud words are almost used up.'), 'error')
-          cloudWordsWarningShown = true
+    const refresh = (async () => {
+      if (!get().subscriptionLastVerifiedAt) {
+        const cached = loadLastKnownSubscription(localStorage, userId)
+        if (cached) {
+          set({
+            ...subscriptionStateFromStatus(cached.snapshot),
+            subscriptionRefreshState: 'stale',
+            subscriptionLastVerifiedAt: cached.verifiedAt,
+          })
         }
-        sttWarningShown = true
-        llmWarningShown = true
-      } else {
-        cloudWordsWarningShown = false
       }
-      if (
-        status.sttSecondsLimit > 0 &&
-        status.sttSecondsUsed / status.sttSecondsLimit >= 0.9 &&
-        !sttWarningShown
-      ) {
-        toast(i18n.t('account.sttQuotaWarning'), 'error')
-        sttWarningShown = true
+
+      set({ subscriptionRefreshLoading: true, subscriptionRefreshError: null })
+      try {
+        const status = await getSubscriptionStatus()
+        if (get().user?.id !== userId) return
+        const verifiedAt = new Date().toISOString()
+        set({
+          ...subscriptionStateFromStatus(status),
+          subscriptionRefreshState: 'fresh',
+          subscriptionLastVerifiedAt: verifiedAt,
+          subscriptionRefreshedAt: Date.now(),
+        })
+        saveLastKnownSubscription(localStorage, userId, status, verifiedAt)
+        try {
+          await syncManagedSttCapability(status.accountSnapshot ?? null, userId)
+        } catch (error) {
+          console.warn('Failed to sync managed STT capability; using the safe fallback.', error)
+        }
+        // Clear checkout pending flag after first post-checkout refresh
+        if (get().checkoutPending) {
+          set({ checkoutPending: false })
+        }
+        const wordsUsed =
+          status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
+            ? status.displayWordsUsedEstimate
+            : status.cloudWordsUsed
+        const wordsLimit =
+          status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
+            ? status.displayWordsLimit
+            : status.cloudWordsLimit
+        if (wordsLimit > 0 && wordsUsed / wordsLimit >= 0.9) {
+          if (!cloudWordsWarningShown) {
+            toast(i18n.t('account.cloudQuotaWarning', 'Cloud words are almost used up.'), 'error')
+            cloudWordsWarningShown = true
+          }
+          sttWarningShown = true
+          llmWarningShown = true
+        } else {
+          cloudWordsWarningShown = false
+        }
+        if (
+          status.sttSecondsLimit > 0 &&
+          status.sttSecondsUsed / status.sttSecondsLimit >= 0.9 &&
+          !sttWarningShown
+        ) {
+          toast(i18n.t('account.sttQuotaWarning'), 'error')
+          sttWarningShown = true
+        }
+        if (
+          status.llmTokensLimit > 0 &&
+          status.llmTokensUsed / status.llmTokensLimit >= 0.9 &&
+          !llmWarningShown
+        ) {
+          toast(i18n.t('account.llmQuotaWarning'), 'error')
+          llmWarningShown = true
+        }
+      } catch (e) {
+        if (get().user?.id !== userId) return
+        const message = e instanceof Error ? e.message : String(e)
+        set({
+          subscriptionRefreshState: get().subscriptionLastVerifiedAt ? 'stale' : 'unavailable',
+          subscriptionRefreshError: message,
+        })
+        console.warn('Failed to refresh subscription status:', message)
+      } finally {
+        if (get().user?.id === userId) set({ subscriptionRefreshLoading: false })
       }
-      if (
-        status.llmTokensLimit > 0 &&
-        status.llmTokensUsed / status.llmTokensLimit >= 0.9 &&
-        !llmWarningShown
-      ) {
-        toast(i18n.t('account.llmQuotaWarning'), 'error')
-        llmWarningShown = true
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      set({
-        subscriptionRefreshState: get().subscriptionLastVerifiedAt ? 'stale' : 'unavailable',
-        subscriptionRefreshError: message,
-      })
-      console.warn('Failed to refresh subscription status:', e instanceof Error ? e.message : e)
-    } finally {
-      set({ subscriptionRefreshLoading: false })
-    }
+    })()
+    subscriptionRefreshInFlight = refresh
+    void refresh.finally(() => {
+      if (subscriptionRefreshInFlight === refresh) subscriptionRefreshInFlight = null
+    })
+    return refresh
   },
 
   handleDeepLinkToken: async (token: string) => {

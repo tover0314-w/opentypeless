@@ -54,7 +54,14 @@ jobs:
             platform_group: linux
             rust_targets: x86_64-unknown-linux-gnu
             args: ''
+            linux_arch: x86_64
             timeout_minutes: 45
+          - platform: ubuntu-22.04-arm
+            platform_group: linux
+            rust_targets: aarch64-unknown-linux-gnu
+            args: '--target aarch64-unknown-linux-gnu'
+            linux_arch: aarch64
+            timeout_minutes: 60
           - platform: windows-latest
             platform_group: windows
             rust_targets: x86_64-pc-windows-msvc
@@ -83,10 +90,11 @@ jobs:
           node -e "const fs=require('fs');let c=fs.readFileSync('src-tauri/Cargo.toml','utf8');c=c.replace(/^version = \".*\"/m,'version = \"$VERSION\"');fs.writeFileSync('src-tauri/Cargo.toml',c);"
 
       - name: Install Linux dependencies
-        if: ${{ matrix.platform == 'ubuntu-22.04' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
+        if: ${{ matrix.platform_group == 'linux' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libxdo-dev libfuse2 gnupg rpm
+          sudo apt-get install -y cmake libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libxdo-dev libfuse2 gnupg rpm xdg-utils
+          command -v xdg-mime >/dev/null
 
       - name: Verify release publishing token
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
@@ -116,6 +124,10 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
         with:
           workspaces: src-tauri -> target
+
+      - name: Verify bundled Opus build tool
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
+        run: cmake --version
 
       - run: npm ci
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group }}
@@ -155,13 +167,18 @@ jobs:
           done
 
       - name: Import Linux GPG signing key
-        if: ${{ matrix.platform == 'ubuntu-22.04' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
+        if: ${{ matrix.platform_group == 'linux' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
         shell: bash
         env:
           LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
           LINUX_GPG_KEY_ID: ${{ secrets.LINUX_GPG_KEY_ID }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
         run: ./.github/scripts/import-linux-gpg-key.sh
+
+      - name: Prepare Linux AppImage library exclusions
+        if: ${{ matrix.platform_group == 'linux' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
+        shell: bash
+        run: ./.github/scripts/prepare-linuxdeploy-wrapper.sh "${{ matrix.linux_arch }}"
 
       - name: Import Windows signing certificate
         if: ${{ matrix.platform == 'windows-latest' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
@@ -188,6 +205,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPIMAGETOOL_SIGN_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           TAURI_SIGNING_RPM_KEY_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+          LINUXDEPLOY_EXCLUDED_LIBRARIES: libwayland-client.so*
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ env.WINDOWS_CERTIFICATE_THUMBPRINT }}
           WINDOWS_TIMESTAMP_URL: ${{ env.WINDOWS_TIMESTAMP_URL }}
         with:
@@ -202,11 +220,12 @@ jobs:
           args: ${{ matrix.args }} ${{ matrix.platform == 'macos-latest' && github.event.inputs.skip_stapling == 'true' && '--skip-stapling' || '' }}
 
       - name: Upload Linux verification artifacts
-        if: ${{ matrix.platform == 'ubuntu-22.04' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
+        if: ${{ matrix.platform_group == 'linux' && (github.event_name != 'workflow_dispatch' || github.event.inputs.platform == 'all' || github.event.inputs.platform == matrix.platform_group) }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+          LINUX_ARCH: ${{ matrix.linux_arch }}
           LINUX_GPG_KEY_ID: ${{ secrets.LINUX_GPG_KEY_ID }}
           LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
           TAURI_SIGNING_RPM_KEY: ''

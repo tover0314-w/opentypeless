@@ -1,7 +1,7 @@
 # Issues #81/#83, STT Recording Limits, and Cloud Usage Efficiency Design
 
 - Date: 2026-07-22
-- Status: Reviewed and approved for phased implementation
+- Status: TalkMore compatibility server deployed to Production with capability v2 disabled; desktop/cross-platform rollout pending; atomic quota cutover deferred
 - Repositories: `opentypeless` desktop and `talkmore` cloud service
 - Issues: [OpenTypeless #81](https://github.com/tover0314-w/opentypeless/issues/81), [OpenTypeless #83](https://github.com/tover0314-w/opentypeless/issues/83)
 
@@ -18,9 +18,10 @@ The approved direction is:
 - start microphone capture and STT connection concurrently, and do not report recording readiness before the platform audio stream is actually running;
 - replace the global 30-second rule with a Rust-owned provider capability resolver and an `Auto (recommended)` or custom user setting;
 - make the TalkMore Cloud product limit 10 minutes through a hybrid managed-upload path: preserve WAV for short recordings and use bounded Ogg/Opus for long recordings;
-- replace fixed subscription polling with a persisted local account snapshot, server-returned usage snapshots, and refreshes only at meaningful product events;
+- replace fixed subscription polling with deduplicated refreshes only at meaningful product events; for the current release, refresh status once after managed output is delivered rather than changing billing-response contracts;
 - hide Neon scale-to-zero wake-up latency behind active Cloud recording time instead of keeping Neon awake while the desktop is idle;
-- preserve Neon as the billing source of truth and make quota mutations atomic and idempotent without adding Redis;
+- preserve Neon and the existing production quota implementation as the billing source of truth for this release;
+- defer the atomic/idempotent quota rewrite until an isolated real-PostgreSQL test environment is intentionally added;
 - deploy server changes before desktop changes and retain backward-compatible response fields for existing clients;
 - require Windows, macOS, and Linux runtime verification before closing the issues.
 
@@ -43,7 +44,7 @@ The current file-upload providers buffer 16 kHz, 16-bit, mono PCM and build a WA
 
 Issue #83 occurs because the UI can enter a recording state while platform audio capture and the STT connection are still becoming ready. A fixed platform delay would be unreliable and would slow every recording.
 
-The approved behavior is already represented in the current uncommitted desktop worktree:
+The approved behavior is committed on the current desktop feature branch:
 
 - audio capture has `Starting`, `Recording`, and `Idle` states;
 - capture reports ready only after CPAL `stream.play()` succeeds;
@@ -76,6 +77,34 @@ Current cloud quota flows also issue several statements for reserve, settle, or 
 
 No audio payload is stored in Neon. The dominant optimization target is compute activity and database round trips, not storage volume.
 
+### 2.4 Implementation and Production Checkpoint (2026-07-22)
+
+The implementation has passed its automated, Preview, and compatibility-only Production gates:
+
+- the desktop implementation is committed on `codex/issues-83-startup` and the TalkMore compatibility implementation is committed on `codex/issues-81-cloud-usage`;
+- the TalkMore suite passes 121 test files and 717 tests, `tsc --noEmit`, a local Webpack production build, and Vercel's clean-install default Turbopack production build;
+- final Vercel Preview `talkmore-opt40ya29-tovers-projects.vercel.app` is `READY`, generated all 5,517 static pages, and produced all Serverless Functions without build or runtime error logs during the verification window;
+- the deployed `/api/proxy/stt` Lambda is Node.js 24.x in `iad1`, has 2,048 MB memory, and has an effective 210-second timeout; project Fluid Compute is enabled;
+- a pre-production ORM audit found that the deferred Drizzle columns would be selected implicitly by legacy `select()` and `returning()` calls when the migration was not applied; commit `6bb76b5` removed the deferred runtime schema and migration artifacts and added a regression test before Production deployment;
+- Production deployment `talkmore-d02ldydr8-tovers-projects.vercel.app` is `READY` and owns the `opentypeless.com`, `www.opentypeless.com`, and `talkmore.vercel.app` aliases; the previous deployment `talkmore-o6mr5rgsa-tovers-projects.vercel.app` is the recorded rollback target;
+- public browser verification rendered the homepage and Features route with meaningful content, correct headings, working navigation, no framework error overlay, and no captured console errors;
+- unauthenticated application requests returned 401 from `/api/subscription/status` and from `/api/proxy/stt` before media parsing or database-backed quota work;
+- neither Preview nor Production defines `MANAGED_STT_V2_ENABLED`, so capability version 2 remains disabled and current cloud users retain the existing compatible recording path;
+- the post-deploy verification window contains no Vercel error-level or HTTP 500 logs; no database migration, production environment variable, or production billing path was changed.
+
+The remaining release gates are an authenticated end-to-end managed long-form Ogg session, the 20-trial latency/quality measurements, real Windows/Linux desktop validation, desktop rollout, and 24–48 hour post-rollout Neon/latency observation. The authenticated macOS short-WAV gate is complete, but server deployment and one macOS sample alone do not close either issue.
+
+### 2.5 Desktop Runtime Checkpoint (2026-07-22)
+
+- Apple Silicon macOS successfully compiled and bundled the debug Tauri app at `src-tauri/target/debug/bundle/macos/OpenTypeless.app`; the generated bundle is arm64, ad-hoc signed, and includes the microphone usage description.
+- The debug app launched as a real macOS process and rendered Home and Settings without a crash. Speech Recognition displayed `Auto (recommended) — 30 seconds` for OpenTypeless Cloud and the explicit stale/unavailable-capability warning, proving that Production's disabled capability does not expose the 10-minute path.
+- The packaging command subsequently failed only when signing the updater archive because `TAURI_SIGNING_PRIVATE_KEY` is unavailable. The local debug `.app` is usable for QA, but it is not a releasable signed updater artifact.
+- The owner explicitly approved macOS Accessibility and microphone access for the debug bundle. System Settings shows both permissions enabled, the restarted app no longer reports an Accessibility blocker, and the default input remains the built-in MacBook Air microphone.
+- A controlled authenticated managed-Cloud short-WAV run disabled AI Polish, started recording after a local countdown, recorded for eight seconds, and stopped automatically. Capture readiness completed in 107 ms and `stop_recording` completed after the managed STT result in 4,539 ms. The newest local history row records `provider_kind = managed_cloud`, equal raw/polished text, and no output error; the owner confirmed the observed first-audio experience passed. AI Polish was restored to its original enabled setting afterward.
+- This is one real Apple Silicon macOS sample, not the required 20-trial latency/quality cohort. It validates the macOS short-recording path and Issue #83 startup experience for this device, but does not validate the capability-v2 long Ogg path or other operating systems.
+- A Windows MSVC-target `cargo check` was attempted from macOS but stopped in `ring`'s C build because the Windows MSVC headers/sysroot are unavailable (`assert.h` not found). This is a cross-toolchain limitation and is not counted as a Windows pass or an application-code failure.
+- Linux was not run in this macOS environment. Windows and Linux still require their native build/runtime jobs; macOS still requires the broader latency/quality matrix and signed-release verification.
+
 ## 3. Goals
 
 ### 3.1 Recording and Provider Goals
@@ -94,9 +123,9 @@ No audio payload is stored in Neon. The dominant optimization target is compute 
 1. Remove the five-minute desktop subscription polling loop for upgraded clients.
 2. Let an idle signed-in app stop generating TalkMore database traffic.
 3. Show quota changes immediately after successful managed-cloud STT, LLM, or Ask calls.
-4. Preserve correct entitlement and quota enforcement under retries, concurrent requests, and multiple devices.
+4. Preserve the current production entitlement and quota behavior while reducing read frequency and status-route round trips.
 5. Reduce business-data work for `/api/subscription/status` to one read-only database round trip after authentication.
-6. Reduce each quota state transition to one atomic business-data statement or transaction round trip.
+6. Treat reducing each quota state transition to one atomic business-data statement or transaction round trip as a separate future milestone that requires real-PostgreSQL concurrency evidence.
 7. Avoid Redis, personalized CDN caching, and cron jobs that wake Neon while idle.
 8. Wake Neon only for real account activity or an in-progress managed-cloud operation, and overlap that wake-up with time the user is already speaking.
 
@@ -121,6 +150,18 @@ No audio payload is stored in Neon. The dominant optimization target is compute 
 - Do not use a Vercel process-local cache as the correctness authority for subscriptions or quota.
 - Do not force-upgrade old desktop clients solely to obtain the Compute savings.
 - Do not claim Issue #81 or #83 is closed before release and cross-platform runtime verification.
+- Do not introduce a project test-database requirement or cut production billing over to the staged atomic quota schema in the current release.
+
+### 4.1 Current Billing-Scope Decision
+
+The owner does not plan to add an isolated database test environment in the current phase. Therefore:
+
+- atomic reserve, settle, release, replay, and reconciliation remain designed but are not current release scope;
+- the additive atomic-usage schema and migration artifacts must be excluded from the current release; legacy Drizzle `select()` and `returning()` calls can otherwise reference unapplied columns implicitly even when the new routes do not use those fields directly;
+- existing production quota mutations and billing formulas remain unchanged;
+- unit and contract tests may cover compatibility, but they must not be represented as proof of PostgreSQL concurrency correctness;
+- the atomic quota cutover can resume only when an isolated real PostgreSQL endpoint is available for destructive, concurrent, and replay testing;
+- this deferral does not block Issues #81/#83, provider-aware recording limits, managed Ogg/Opus upload, removal of idle polling, or the single-read account-status optimization.
 
 ## 5. Product Decisions
 
@@ -441,6 +482,8 @@ CPAL's `stream.play()` boundary is shared by CoreAudio, WASAPI, ALSA, and PipeWi
 
 ## 8. Account and Usage Snapshot Contract
 
+Current scope uses the account snapshot only in the read-only status response and for managed-STT capability negotiation. Operation-returned usage snapshots and the desktop persistence/merge behavior described below are the future contract for the deferred atomic quota phase.
+
 ### 8.1 Snapshot Types
 
 The server retains all existing flat status and proxy response fields. New clients prefer optional nested snapshots.
@@ -492,11 +535,11 @@ Conceptual account snapshot:
 }
 ```
 
-`revision` is serialized as a decimal string to avoid JavaScript integer precision problems.
+`revision` is serialized as a decimal string to avoid JavaScript integer precision problems. In the current non-atomic release, the status query returns the compatibility value `"0"` and does not reference the staged `usage_revision` column. Real monotonic revisions begin only with the deferred atomic quota cutover.
 
 Cloud operation responses add an optional `usageSnapshot`. They do not need to repeat all entitlement fields on every request.
 
-### 8.2 Snapshot Ordering
+### 8.2 Snapshot Ordering (Deferred)
 
 The `quota` table adds a non-null `usage_revision` bigint with default zero. Every successful mutation of displayed quota counters or limits increments it in the same transaction.
 
@@ -520,9 +563,13 @@ After authentication, `/api/subscription/status` performs one read-only business
 
 Entitlement resolution remains a pure function over the returned rows. A missing quota row is represented as zero usage with entitlement-derived limits. GET must not insert or update quota.
 
+The current query must use only pre-existing production columns and return revision `"0"`; deploying the additive atomic-meter migration is not a prerequisite for this status optimization.
+
 Do not force an entitlement index merely because PostgreSQL chooses a sequential scan for a seven-row table. Check the combined account query with realistic data before changing subscription/license indexes. Add a `(user_id, expires_at)` operation index for the required per-user expiration/reconciliation path and verify that query with `EXPLAIN (ANALYZE, BUFFERS)` in staging.
 
 ## 9. Desktop AccountSnapshotCoordinator
+
+The durable Rust coordinator in this section is deferred with the atomic response contract. In the current release, the existing frontend auth store owns status data, deduplicates concurrent refreshes, and refreshes once after managed output; the active-intent warming policy in Section 9.2 is implemented independently in Rust and discards its response after warming.
 
 Rust owns a device-wide `AccountSnapshotCoordinator` shared by every Tauri window.
 
@@ -603,6 +650,8 @@ Warm-up failure is silent outside Account/Usage: retain cached state and continu
 
 ## 10. Cloud Quota Service
 
+This entire section is deferred. It remains the required design for a future cutover and must not be treated as current production behavior.
+
 ### 10.1 Interface
 
 Both legacy dual-meter plans and cloud-word plans use one conceptual quota interface:
@@ -629,7 +678,7 @@ Implementations may differ in counters, but they share:
 
 For managed cloud words, `operationId` and `${operationId}:${stage}` remain the idempotency keys.
 
-The additive schema includes:
+The future additive schema design includes the following fields. They are intentionally absent from the current runtime schema and migration journal until the isolated-PostgreSQL phase resumes:
 
 - `quota.usage_revision bigint NOT NULL DEFAULT 0`;
 - `cloud_usage_operation.quota_model text NOT NULL DEFAULT 'cloud_words'`;
@@ -697,6 +746,8 @@ State transitions are explicit:
 If a user never returns, old rows do not wake compute. Cleanup may also run during an already-active administrative maintenance operation, but not through a new always-on scheduler.
 
 ## 11. Cloud Response Data Flow
+
+This section describes the deferred operation-snapshot contract. The current release preserves existing response payloads and performs its non-blocking status refresh only after primary output is delivered.
 
 ### 11.1 Non-Streaming STT and Ask
 
@@ -770,6 +821,8 @@ The desktop applies the snapshot before showing the error. Authentication-invali
 
 ## 12. Failure Semantics
 
+Status-refresh failure semantics apply to the current release. Mutation-returned snapshot and settlement synchronization semantics apply only to the deferred quota phase.
+
 ### 12.1 Status Refresh
 
 - timeout, offline, 429, or 5xx: retain the current snapshot, mark it stale, and do not show a disruptive global error outside Account/Usage;
@@ -814,6 +867,8 @@ These rare, user-initiated requests are acceptable because they protect a high-v
 
 ## 13. Warning and Presentation Rules
 
+Existing quota and error presentation remains current. Rules that depend on persisted or operation-returned snapshots are deferred with Sections 9–11.
+
 - use one shared reducer to apply status and operation snapshots to the frontend auth/account store;
 - preserve the existing quota model distinction between legacy dual meters and cloud words;
 - show a 90% warning only when crossing from below the threshold to at-or-above it;
@@ -833,7 +888,7 @@ For an upgraded idle desktop:
 - after: zero fixed-interval calls;
 - typical day: one startup refresh plus only meaningful focus/account/purchase actions;
 - managed Cloud use may add a deduplicated status warm-up at user intent and, only for recordings longer than four minutes, at active-use boundaries;
-- real cloud operations carry usage in their existing responses and do not trigger a follow-up status call.
+- current-release managed operations trigger one deduplicated status refresh only after output is delivered; this replaces polling while keeping quota UI current without adding to stop-to-output latency.
 
 Old clients continue their existing polling behavior. Compute savings therefore increase with desktop-version adoption. The server cannot safely suppress personalized old-client status responses without either stale authorization data or another durable cache.
 
@@ -845,12 +900,12 @@ Old clients continue their existing polling behavior. Compute savings therefore 
 - managed Cloud recordings whose WAV part is at most 3.5 MB use the current WAV upload; recordings of 60 seconds or less retain the current 60-second timeout, while longer payloads use the byte-derived timeout;
 - only larger managed recordings pay Opus container finalization, and normal success must not perform full-recording transcoding after the user stops;
 - no object-storage upload/download hop is added to the primary path;
-- the atomic quota reservation completes before Groq starts; unlike the current cached-session parallel branch, correctness no longer spends upstream quota before authorization, so intent warming and the one-round-trip reserve are required to keep this serial boundary below the short-recording latency gate;
-- Cloud LLM first-token latency is not delayed by settlement work;
-- STT and Ask do not make a second status request after success;
-- returned snapshots come from quota mutation `RETURNING` data rather than an extra SELECT;
+- the current production authorization, reservation, settlement, and release ordering is preserved in this release;
+- Cloud LLM first-token and STT/Ask final-output latency are not delayed by account synchronization;
+- the one post-use status refresh starts only after managed output has reached its normal completed/idle state and is non-fatal;
+- directly returning snapshots from atomic mutations remains part of the deferred quota phase and will eventually remove that post-use read;
 - status business data is fetched in one read-only round trip;
-- no implementation may restore per-request explicit flushing while also claiming that an in-memory cache batches writes.
+- the current production mutation/flush implementation is left unchanged; when the atomic phase resumes, it may remove that implementation only after real-PostgreSQL verification.
 
 Expected managed upload sizes at the current 16 kHz mono input are:
 
@@ -890,7 +945,7 @@ Success indicators:
 - no five-minute cadence from upgraded clients;
 - more than 90% reduction in status requests for an idle upgraded-client cohort;
 - one business query after auth for status;
-- one business-data round trip for each quota state transition;
+- no increase in business-data round trips inside the existing production quota state transitions; the one-round-trip mutation target belongs to the deferred atomic phase;
 - over a seven-day version-matched cohort, cloud request success rate does not fall by more than 0.5 percentage points;
 - for managed recordings of 60 seconds or less, warm and cold `record_stop_to_transcript_ms` p50 do not regress by more than the greater of 50 ms or 5%, and p95 does not regress by more than the greater of 150 ms or 10%;
 - over the same cohort, Cloud LLM first-token p95 does not regress by more than the greater of 100 ms or 10% from baseline;
@@ -918,8 +973,8 @@ Because the contract spans three independently reviewable subsystems, execution 
 - configure and verify the STT function duration for the adaptive client timeout;
 - add a global capability-advertisement kill switch that does not remove WAV/Ogg parser compatibility;
 - make status read-only and collapse its business reads;
-- return a correct post-settlement snapshot from existing quota paths;
-- allow a temporary final quota-row read when the existing mutation cannot yet return the complete snapshot, because this happens only during real cloud usage and avoids a separate desktop status call;
+- preserve existing production quota mutation and response behavior;
+- let upgraded desktops perform one deduplicated, non-blocking status refresh after managed output is delivered;
 - expand server contract tests;
 - deploy and verify old desktop clients before changing desktop polling.
 
@@ -929,19 +984,18 @@ Rollback: old fields and route behavior remain available; new fields are optiona
 
 ### Phase 2: Desktop Event-Driven Account Sync
 
-- add `AccountSnapshotCoordinator` and account-scoped persistence;
-- parse optional snapshots in Cloud STT, LLM, and Ask;
-- update frontend stores through Rust events/local getters;
 - centralize and deduplicate refresh triggers;
 - remove hidden Ask auth initialization;
 - remove the five-minute interval;
 - add deduplicated, non-blocking managed-intent warming at Cloud recording/Ask start and active long-recording boundaries;
-- retain the status endpoint for startup, account, focus-stale, and purchase flows;
+- retain the status endpoint for startup, account, pending-checkout focus, purchase flows, and one post-use refresh after managed output;
+- make concurrent refreshes singleflight and ensure post-use refresh failure cannot remove or delay user output;
+- defer Rust snapshot persistence, managed-response snapshots, and cross-window revision merging with the atomic quota response contract;
 - confirm the idle upgraded-client request reduction before starting the quota rewrite.
 
 Rollback: a desktop rollback continues using the unchanged legacy flat status fields. The server compatibility foundation remains safe for old and new clients.
 
-### Phase 3: Atomic Quota and Active-Usage Compute Reduction
+### Deferred Phase 3: Atomic Quota Cutover
 
 - add `usage_revision`, stage reservation expiry/replay count, and the operation reconciliation indexes;
 - move both legacy dual-meter and cloud-word paths behind the unified quota interface;
@@ -950,7 +1004,9 @@ Rollback: a desktop rollback continues using the unchanged legacy flat status fi
 - remove contradictory in-memory batching/explicit-flush behavior;
 - run real-PostgreSQL concurrency and idempotency tests before deployment.
 
-Rollback: additive columns remain in place. Route handlers can return to the Phase 1 compatibility implementation without changing desktop contracts.
+This phase is explicitly deferred by the owner because the project is not adding an isolated database test environment now. It is not a release gate for the other phases. Do not implement the service cutover, remove the current billing implementation, or enable routes that depend on the staged schema until the required PostgreSQL tests can run outside production.
+
+Current-release rollback: there are no atomic-usage columns to roll back because this phase is not shipped. After a future isolated-database rollout, its migration must remain additive so route handlers can return to the Phase 1 compatibility implementation without changing desktop contracts.
 
 ### Phase 4: Provider-Aware Recording Limits
 
@@ -973,7 +1029,7 @@ Rollback: the provider-resolved `max_recording_seconds` mirror remains readable 
 - publish release notes that distinguish provider restrictions from the former global 30-second behavior;
 - monitor before closing Issues #81 and #83.
 
-The phases may be separate commits, pull requests, and deployments. Server compatibility must land before a desktop release that consumes snapshots. The atomic quota phase must not be bundled into the polling removal if that would delay or increase the rollback risk of the idle-Compute improvement.
+The phases may be separate commits, pull requests, and deployments. Server compatibility must land before a desktop release that consumes snapshots. The deferred atomic quota phase must not be bundled into, or block, the polling removal and idle-Compute improvement.
 
 ## 16. Test Strategy
 
@@ -1040,6 +1096,8 @@ Cloud protocol:
 
 ### 16.2 Frontend Tests
 
+Persisted-snapshot and revision-order tests in this subsection belong to the deferred phase. Fixed-polling removal, singleflight refresh, pending-checkout refresh, explicit account refresh, and post-use refresh tests remain current-release requirements.
+
 - Settings shows Auto with the resolved provider value;
 - presets above the provider maximum are absent/disabled;
 - Custom validation explains and clamps invalid values;
@@ -1076,6 +1134,8 @@ Cloud protocol:
 - stream cancellation settles partial usage without duplicate charge.
 
 ### 16.4 Real PostgreSQL Concurrency Tests
+
+This subsection is deferred and is not part of the current release gate. It becomes mandatory before any production route switches to the atomic quota service.
 
 Mocks are insufficient for billing correctness. Run integration tests against PostgreSQL for:
 
@@ -1142,15 +1202,15 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 - real-device first-recording tests pass on Windows, macOS, and Linux;
 - the fixed behavior is included in a published desktop release.
 
-### 17.3 Cloud Efficiency Is Complete When
+### 17.3 Current Cloud Efficiency Release Is Complete When
 
-- TalkMore additive schema and response changes are deployed first;
+- compatible TalkMore status/parser changes are deployed before the desktop consumer;
 - upgraded desktop clients generate no fixed five-minute status traffic;
 - idle upgraded clients perform no Cloud intent warm-ups, while real Cloud recording/Ask intent overlaps Neon wake-up without blocking capture;
-- successful cloud operations update visible usage without a follow-up status request;
+- successful cloud operations trigger at most one deduplicated follow-up status request after output is delivered;
 - status GET performs no quota write;
-- quota transitions pass real-PostgreSQL idempotency and concurrency tests;
-- cached/offline startup, purchase propagation, session invalidation, and multiple-window behavior pass UX tests;
+- production quota mutation behavior and billing formulas remain unchanged;
+- purchase propagation, session invalidation, refresh singleflight, and multiple-window behavior pass UX tests;
 - monitoring shows the expected request reduction without higher user-visible error rates;
 - short-recording latency, first-token latency, long-upload, quality, CPU, and dropped-audio release gates pass;
 - old supported desktop clients still complete status, STT, LLM, and Ask requests.
@@ -1173,21 +1233,23 @@ Cross-compilation alone is not runtime verification. A Windows check blocked by 
 | Codec packaging differs across operating systems | Pin and bundle one implementation, avoid system codecs, build all supported architectures, and run real-device packaging/runtime tests. |
 | A larger upload exceeds the desktop's current 60-second timeout | Keep 60 seconds through 60 seconds of audio and use a byte-derived timeout capped at 180 seconds for longer managed uploads. |
 | Server/client format rollout is out of order | Deploy parser and capability version 2 first; new desktops retain a 30-second managed fallback until compatible metadata is authenticated. |
-| Atomic SQL rewrite changes billing behavior | Preserve existing billing formulas and operation ids; use real PostgreSQL concurrency tests and server-first rollout. |
+| Atomic SQL rewrite changes billing behavior | Do not cut over in the current release; preserve existing billing formulas and operation ids, then require real PostgreSQL concurrency tests and a server-first rollout when the work resumes. |
 
 ## 19. Definition of Done
 
-The combined work is done only when:
+The current Issues #81/#83 and Compute-efficiency release is done only when:
 
 - all approved product limits and migration rules are implemented;
 - TalkMore Cloud 10-minute audio crosses the deployed Vercel route within the documented byte budget, while short recordings remain on WAV;
 - #83 startup behavior is implemented and cross-platform verified;
 - TalkMore is backward compatible and server-first deployed;
 - desktop account state is event-driven and locally resilient;
-- quota mutation is atomic, idempotent, and snapshot-returning;
+- existing production quota behavior remains compatible and no route accidentally depends on the staged atomic schema;
 - no fixed subscription polling remains in the upgraded desktop;
 - idle Compute savings do not expose a release-gate regression in Cloud stop-to-transcript or first-token latency;
 - cloud content remains responsive and is not discarded by late usage-sync failures;
 - no audio/transcript content is added to Neon or telemetry;
-- automated suites, production builds, contract tests, PostgreSQL concurrency tests, and the three-platform manual matrix pass;
+- automated suites, production builds, contract tests, and the three-platform manual matrix pass;
 - issue closure occurs only after the behavior is present in a published release.
+
+The separate atomic-quota milestone is done only after atomic, idempotent, snapshot-returning mutations pass the specified real-PostgreSQL concurrency and replay tests. That future milestone is not part of the current release definition of done.

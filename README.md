@@ -265,7 +265,7 @@ chmod +x OpenTypeless_x.x.x_amd64.AppImage
 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./OpenTypeless
 ```
 
-**Wayland users:** global hotkeys and automatic paste are limited by the desktop environment. OpenTypeless shows this in Settings and falls back to tray/app controls or copy-only clipboard output where needed.
+**Wayland users:** install `wtype` to let OpenTypeless type the result directly into the focused app. On Ubuntu/Debian use `sudo apt install wtype`; on Arch/Manjaro use `sudo pacman -S wtype`. Global hotkeys can still depend on the desktop environment. If `wtype` is unavailable, OpenTypeless falls back to copying the result to the clipboard.
 
 ## Prerequisites
 

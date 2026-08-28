@@ -89,6 +89,9 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Verify bundled Opus build tool
+        run: cmake --version
+
       - run: npm ci
 
       - name: Build unsigned Windows installers

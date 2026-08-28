@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${TAG_NAME:-}" ]]; then
-  echo "::error::TAG_NAME is required to upload Linux verification artifacts."
-  exit 1
-fi
-
-for name in LINUX_GPG_KEY_ID LINUX_GPG_PASSPHRASE; do
+for name in TAG_NAME LINUX_ARCH LINUX_GPG_KEY_ID LINUX_GPG_PASSPHRASE; do
   if [[ -z "${!name:-}" ]]; then
-    echo "::error::$name is required to sign Linux verification artifacts."
+    echo "::error::$name is required to upload Linux verification artifacts."
     exit 1
   fi
 done
 
-verification_dir="release-verification/linux-x86_64"
+case "$LINUX_ARCH" in
+  x86_64)
+    bundle_dir="src-tauri/target/release/bundle"
+    ;;
+  aarch64)
+    bundle_dir="src-tauri/target/aarch64-unknown-linux-gnu/release/bundle"
+    ;;
+  *)
+    echo "::error::Unsupported Linux release architecture: $LINUX_ARCH"
+    exit 1
+    ;;
+esac
+
+verification_dir="release-verification/linux-${LINUX_ARCH}"
 mkdir -p "$verification_dir"
 
 mapfile -d '' artifacts < <(
-  find src-tauri/target/release/bundle -type f \
+  find "$bundle_dir" -type f \
     \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
     -print0 | sort -z
 )
@@ -27,7 +35,7 @@ if (( ${#artifacts[@]} == 0 )); then
   exit 1
 fi
 
-sha_file="$verification_dir/SHA256SUMS-linux-x86_64.txt"
+sha_file="$verification_dir/SHA256SUMS-linux-${LINUX_ARCH}.txt"
 : > "$sha_file"
 
 for artifact in "${artifacts[@]}"; do
@@ -49,18 +57,23 @@ gpg --batch --yes --pinentry-mode loopback \
   --output "${sha_file}.asc" \
   "$sha_file"
 
-gpg --armor --export "$LINUX_GPG_KEY_ID" > "$verification_dir/OpenTypeless-Linux-GPG-KEY.asc"
+public_key_path="$verification_dir/OpenTypeless-Linux-${LINUX_ARCH}-GPG-KEY.asc"
+gpg --armor --export "$LINUX_GPG_KEY_ID" > "$public_key_path"
 
-if compgen -G "src-tauri/target/release/bundle/appimage/*.AppImage" >/dev/null; then
-  for appimage in src-tauri/target/release/bundle/appimage/*.AppImage; do
+if compgen -G "$bundle_dir/appimage/*.AppImage" >/dev/null; then
+  for appimage in "$bundle_dir"/appimage/*.AppImage; do
     chmod +x "$appimage"
+    if ! ./.github/scripts/verify-appimage-runtime-libraries.sh "$appimage"; then
+      echo "::error::Linux AppImage runtime-library verification failed."
+      exit 1
+    fi
     "$appimage" --appimage-signature >/dev/null
   done
 fi
 
-if compgen -G "src-tauri/target/release/bundle/rpm/*.rpm" >/dev/null; then
-  if sudo rpm --import "$verification_dir/OpenTypeless-Linux-GPG-KEY.asc"; then
-    rpm --checksig -v src-tauri/target/release/bundle/rpm/*.rpm
+if compgen -G "$bundle_dir/rpm/*.rpm" >/dev/null; then
+  if sudo rpm --import "$public_key_path"; then
+    rpm --checksig -v "$bundle_dir"/rpm/*.rpm
   else
     echo "::warning::rpm could not import the exported public key; uploading detached GPG verification artifacts without rpm database verification."
   fi

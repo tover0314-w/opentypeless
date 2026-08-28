@@ -116,6 +116,29 @@ describe('request() via getSubscriptionStatus', () => {
     expect(result.subscriptionStatus).toBe('past_due')
     expect(result.canMigrateToStripe).toBe(true)
   })
+
+  it('preserves the authenticated account snapshot for Rust capability negotiation', async () => {
+    const accountSnapshot = {
+      schemaVersion: 1,
+      userId: 'user-1',
+      managedSttCapabilities: {
+        version: 2,
+        maxRecordingSeconds: 600,
+        maxMultipartBytes: 4_200_000,
+        formats: [],
+      },
+      generatedAt: '2026-07-22T08:00:00.000Z',
+    }
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ plan: 'pro', accountSnapshot }),
+    } as Response)
+
+    const { getSubscriptionStatus } = await import('../api')
+    const result = await getSubscriptionStatus()
+
+    expect(result.accountSnapshot).toEqual(accountSnapshot)
+  })
 })
 
 describe('request() error handling', () => {

@@ -4,7 +4,9 @@ use reqwest::Client;
 
 use crate::error::AppError;
 
-use super::{prompt, ChunkCallback, LlmConfig, LlmProvider, PolishRequest, PolishResponse};
+use super::{
+    prompt, protocol, ChunkCallback, LlmConfig, LlmProvider, PolishRequest, PolishResponse,
+};
 
 pub struct OpenAiProvider {
     client: Client,
@@ -68,13 +70,18 @@ impl LlmProvider for OpenAiProvider {
             "content": format!("<transcription>\n{}\n</transcription>", req.raw_text)
         }));
 
-        let mut body = serde_json::json!({
-            "model": config.model,
-            "messages": messages,
-            "max_tokens": config.max_tokens,
-            "temperature": config.temperature,
-            "stream": on_chunk.is_some()
-        });
+        let api_kind = protocol::detect_api_kind(&config.provider, &config.base_url);
+        let endpoint = protocol::chat_endpoint(&config.provider, &config.base_url)
+            .map_err(AppError::Config)?;
+        let mut body = protocol::build_chat_body(
+            &config.provider,
+            &config.base_url,
+            &config.model,
+            messages,
+            config.max_tokens,
+            config.temperature,
+            on_chunk.is_some(),
+        );
 
         // GLM-4.7/4.5/5 default to thinking mode, but without explicitly enabling it
         // the API may return content in reasoning_content only, leaving content empty.
@@ -100,13 +107,22 @@ impl LlmProvider for OpenAiProvider {
         loop {
             let request = self
                 .client
-                .post(format!("{}/chat/completions", config.base_url))
+                .post(&endpoint)
                 .header("Content-Type", "application/json");
-            match super::apply_provider_auth_header(request, &config.provider, &config.api_key)
-                .json(&body)
-                .timeout(std::time::Duration::from_secs(15))
-                .send()
-                .await
+            match protocol::apply_auth_headers(
+                request,
+                &config.provider,
+                &config.base_url,
+                &config.api_key,
+            )
+            .json(&body)
+            .timeout(protocol::request_timeout(
+                &config.provider,
+                &config.base_url,
+                &config.model,
+            ))
+            .send()
+            .await
             {
                 Ok(resp) => {
                     let status = resp.status();
@@ -186,7 +202,11 @@ impl LlmProvider for OpenAiProvider {
             let mut stream = response.bytes_stream();
 
             let mut buffer = String::new();
-            while let Some(chunk) = stream.next().await {
+            let mut stream_done = false;
+            while !stream_done {
+                let Some(chunk) = stream.next().await else {
+                    break;
+                };
                 let chunk = chunk?;
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -197,25 +217,29 @@ impl LlmProvider for OpenAiProvider {
 
                     if let Some(data) = line.strip_prefix("data: ") {
                         if data == "[DONE]" {
+                            stream_done = true;
                             break;
                         }
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                            let delta = &v["choices"][0]["delta"];
-
-                            if let Some(content) = delta["content"].as_str() {
+                            let event = protocol::parse_stream_event(api_kind, &v);
+                            if let Some(error) = event.error {
+                                return Err(AppError::Config(error));
+                            }
+                            if let Some(content) = event.text {
                                 if !content.is_empty() {
-                                    full_text.push_str(content);
-                                    callback(content);
+                                    full_text.push_str(&content);
+                                    callback(&content);
                                 }
                             }
 
                             // Collect reasoning_content as fallback for thinking-mode models
                             // where all output may land in this field instead of content
-                            if let Some(rc) = delta["reasoning_content"].as_str() {
+                            if let Some(rc) = event.reasoning {
                                 if !rc.is_empty() {
-                                    reasoning_text.push_str(rc);
+                                    reasoning_text.push_str(&rc);
                                 }
                             }
+                            stream_done = event.done;
                         }
                     }
                 }
@@ -240,10 +264,7 @@ impl LlmProvider for OpenAiProvider {
         } else {
             // Non-streaming mode
             let v: serde_json::Value = response.json().await?;
-            let text = v["choices"][0]["message"]["content"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let text = protocol::response_text(api_kind, &v);
 
             if text.is_empty() {
                 tracing::warn!(

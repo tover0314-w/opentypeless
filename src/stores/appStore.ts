@@ -16,6 +16,7 @@ export type VoiceMode = 'dictate' | 'ask' | 'translate'
 export type SttProvider =
   | 'deepgram'
   | 'assemblyai'
+  | 'aliyun-qwen3-asr'
   | 'volcengine-doubao'
   | 'glm-asr'
   | 'openai-whisper'
@@ -24,6 +25,8 @@ export type SttProvider =
   | 'apple-speech'
   | 'custom-whisper'
   | 'cloud'
+
+export type AliyunQwenRegion = 'china-mainland' | 'international'
 export type LlmProvider =
   | 'zhipu'
   | 'deepseek'
@@ -193,6 +196,7 @@ export interface AppConfig {
   stt_custom_base_url: string
   stt_custom_model: string
   stt_volcengine_resource_id: string
+  stt_aliyun_qwen_region: AliyunQwenRegion
   stt_language: string
   llm_provider: LlmProvider
   llm_api_key: string
@@ -226,7 +230,10 @@ export interface AppConfig {
   auto_start: boolean
   close_to_tray: boolean
   start_minimized: boolean
+  recording_limit_mode: 'auto' | 'custom'
+  custom_recording_limit_seconds: number
   max_recording_seconds: number
+  managed_stt_capability_state?: unknown
   history_enabled: boolean
   history_retention_days: number
   history_max_entries: number
@@ -235,6 +242,14 @@ export interface AppConfig {
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
+
+export interface RecordingDeadlineSnapshot {
+  sessionId: number
+  recordingKind: 'dictation' | 'ask'
+  startedAtUnixMs: number
+  deadlineAtUnixMs: number
+  effectiveMaxSeconds: number
+}
 
 interface AppState {
   // Pipeline
@@ -255,6 +270,8 @@ interface AppState {
   appendPolishedChunk: (chunk: string) => void
   recordingDuration: number
   setRecordingDuration: (d: number) => void
+  recordingDeadline: RecordingDeadlineSnapshot | null
+  setRecordingDeadline: (deadline: RecordingDeadlineSnapshot | null) => void
   targetApp: string
   setTargetApp: (app: string) => void
   lastInsertResult: InsertResult | null
@@ -711,6 +728,7 @@ const defaultConfig: AppConfig = {
   stt_custom_base_url: 'http://localhost:8000/v1',
   stt_custom_model: 'Systran/faster-whisper-large-v3',
   stt_volcengine_resource_id: 'volc.seedasr.sauc.duration',
+  stt_aliyun_qwen_region: 'china-mainland',
   stt_language: 'multi',
   llm_provider: 'openrouter',
   llm_api_key: '',
@@ -762,6 +780,8 @@ const defaultConfig: AppConfig = {
   auto_start: true,
   close_to_tray: true,
   start_minimized: false,
+  recording_limit_mode: 'auto',
+  custom_recording_limit_seconds: 600,
   max_recording_seconds: 30,
   history_enabled: true,
   history_retention_days: 0,
@@ -787,6 +807,8 @@ export const useAppStore = create<AppState>((set) => ({
   appendPolishedChunk: (chunk) => set((s) => ({ polishedText: s.polishedText + chunk })),
   recordingDuration: 0,
   setRecordingDuration: (recordingDuration) => set({ recordingDuration }),
+  recordingDeadline: null,
+  setRecordingDeadline: (recordingDeadline) => set({ recordingDeadline }),
   targetApp: '',
   setTargetApp: (targetApp) => set({ targetApp }),
   lastInsertResult: null,
@@ -858,6 +880,7 @@ export const useAppStore = create<AppState>((set) => ({
       finalTranscript: '',
       polishedText: '',
       recordingDuration: 0,
+      recordingDeadline: null,
     }),
 
   savedConfig: null,

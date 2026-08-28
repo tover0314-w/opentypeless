@@ -41,7 +41,7 @@ function getState() {
 
 describe('authStore', () => {
   it('pins the Better Auth desktop client version', () => {
-    expect(packageJson.dependencies['better-auth']).toBe('1.6.24')
+    expect(packageJson.dependencies['better-auth']).toBe('1.6.25')
   })
 
   beforeEach(() => {
@@ -111,6 +111,12 @@ describe('authStore', () => {
       cloudWordsLimit: 0,
       cloudWordsResetAt: null,
       byokUnlimited: true,
+      accountSnapshot: {
+        schemaVersion: 1,
+        userId: '1',
+        managedSttCapabilities: null,
+        generatedAt: '2026-07-22T08:00:00.000Z',
+      },
     })
   })
 
@@ -208,6 +214,32 @@ describe('authStore', () => {
   })
 
   describe('refreshSubscription', () => {
+    it('coalesces concurrent refresh triggers into one status request', async () => {
+      useAuthStore.setState({
+        user: { id: '1', email: 'test@example.com', name: 'Test', emailVerified: true },
+      })
+      let release: (() => void) | undefined
+      vi.mocked(getSubscriptionStatus).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ accountSnapshot: null } as never)
+          }),
+      )
+
+      const first = getState().refreshSubscription()
+      const second = getState().refreshSubscription()
+
+      expect(getSubscriptionStatus).toHaveBeenCalledTimes(1)
+      release?.()
+      await Promise.all([first, second])
+    })
+
+    it('does not request subscription state while signed out', async () => {
+      await getState().refreshSubscription()
+
+      expect(getSubscriptionStatus).not.toHaveBeenCalled()
+    })
+
     it('updates quota fields from API response', async () => {
       useAuthStore.setState({
         user: { id: '1', email: 'test@example.com', name: 'Test', emailVerified: true },
@@ -221,6 +253,10 @@ describe('authStore', () => {
       expect(getState().sttSecondsLimit).toBe(36000)
       expect(getState().llmTokensUsed).toBe(5000)
       expect(getState().llmTokensLimit).toBe(5000000)
+      expect(invoke).toHaveBeenCalledWith('cache_managed_stt_capability', {
+        accountSnapshot: expect.objectContaining({ userId: '1' }),
+        expectedUserId: '1',
+      })
     })
 
     it('shows cloud words quota warning only once while usage stays high', async () => {

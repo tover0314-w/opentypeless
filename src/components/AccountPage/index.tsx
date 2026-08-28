@@ -34,6 +34,7 @@ import {
   createDesktopAuthCallbackURL,
 } from '../../lib/desktop-auth-callback'
 import { readPendingDesktopCheckout } from '../../lib/desktop-checkout-intent'
+import { shouldRefreshSubscriptionOnAccountOpen } from '../../lib/subscription-refresh-policy'
 import { PasswordDialog } from './PasswordDialog'
 import { PasswordField } from './PasswordField'
 
@@ -593,6 +594,7 @@ function AccountDetails() {
     changePassword,
     loading,
     signOut,
+    subscriptionRefreshedAt,
   } = useAuthStore()
   const config = useAppStore((s) => s.config)
   const history = useAppStore((s) => s.history)
@@ -611,6 +613,20 @@ function AccountDetails() {
   const [billingError, setBillingError] = useState<string | null>(null)
   const [securityOpen, setSecurityOpen] = useState(false)
   const passwordTriggerRef = useRef<HTMLButtonElement>(null)
+  const subscriptionRefreshInFlightRef = useRef(false)
+
+  useEffect(() => {
+    if (
+      subscriptionRefreshInFlightRef.current ||
+      !shouldRefreshSubscriptionOnAccountOpen(subscriptionRefreshedAt, Date.now())
+    ) {
+      return
+    }
+    subscriptionRefreshInFlightRef.current = true
+    void refreshSubscription().finally(() => {
+      subscriptionRefreshInFlightRef.current = false
+    })
+  }, [refreshSubscription, subscriptionRefreshedAt])
 
   useEffect(() => {
     if (credentialCapability !== 'unknown') return
