@@ -884,6 +884,7 @@
       "claude": "Claude",
       "ollama": "Ollama (本地)",
       "openrouter": "OpenRouter",
+      "requesty": "Requesty",
       "cloud": "OpenTypeless 云服务"
     }
   }
