@@ -31,7 +31,7 @@ export function AccountStep() {
   const [resent, setResent] = useState(false)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
 
-  // Keep the UI timeout aligned with the persisted OAuth state TTL.
+  // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
   useEffect(() => {
     if (!oauthPending) return
     const timer = setTimeout(() => {

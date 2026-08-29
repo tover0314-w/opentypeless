@@ -31,13 +31,14 @@ describe('deep-link OAuth callback', () => {
     vi.stubGlobal('fetch', mocks.fetch)
     mocks.fetch.mockReset().mockResolvedValue(Response.json({ token: 'valid-token-12345' }))
     localStorage.clear()
+    sessionStorage.clear()
     window.location.hash = ''
     mocks.deepLinkHandler = null
     mocks.handleDeepLinkToken.mockReset()
     mocks.refreshSubscription.mockReset()
   })
 
-  it('accepts the callback after a reload loses in-memory OAuth state', async () => {
+  it('rejects a callback after a reload loses the in-memory OAuth proof', async () => {
     const firstModule = await import('../deep-link')
     const state = firstModule.generateOAuthState()
 
@@ -48,12 +49,19 @@ describe('deep-link OAuth callback', () => {
       `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${state}`,
     ])
 
-    expect(mocks.handleDeepLinkToken).toHaveBeenCalledWith('valid-token-12345')
-    expect(mocks.fetch).toHaveBeenCalledWith(
-      'https://www.opentypeless.com/api/auth/desktop-handoff/exchange',
-      expect.objectContaining({ method: 'POST' }),
-    )
-    expect(window.location.hash).toBe('#/account')
+    expect(mocks.handleDeepLinkToken).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(window.location.hash).toBe('')
+  })
+
+  it('keeps the OAuth state and verifier out of browser storage', async () => {
+    const module = await import('../deep-link')
+    const state = module.generateOAuthState()
+    const verifier = module.getPendingOAuthVerifier(state)
+
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+    expect(verifier).toMatch(/^[A-Za-z0-9._~-]{43,128}$/)
   })
 
   it('returns true when a pasted desktop callback signs the user in', async () => {

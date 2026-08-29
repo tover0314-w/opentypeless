@@ -6,52 +6,8 @@ import { API_BASE_URL } from './constants'
 let pendingOAuthState: string | null = null
 let pendingOAuthVerifier: string | null = null
 let pendingOAuthTimer: ReturnType<typeof setTimeout> | null = null
-const OAUTH_STATE_STORAGE_KEY = 'opentypeless.pendingOAuthState'
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
 export const EMAIL_VERIFICATION_STATE_TTL_MS = 60 * 60 * 1000
-
-function persistOAuthState(state: string, verifier: string, ttlMs: number): void {
-  try {
-    localStorage.setItem(
-      OAUTH_STATE_STORAGE_KEY,
-      JSON.stringify({ state, verifier, expiresAt: Date.now() + ttlMs }),
-    )
-  } catch {
-    // localStorage may be unavailable in some webview/test contexts.
-  }
-}
-
-interface PendingOAuthFlow {
-  state: string
-  verifier: string
-}
-
-function loadPersistedOAuthFlow(): PendingOAuthFlow | null {
-  try {
-    const raw = localStorage.getItem(OAUTH_STATE_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as {
-      state?: unknown
-      verifier?: unknown
-      expiresAt?: unknown
-    }
-    if (
-      typeof parsed.state !== 'string' ||
-      typeof parsed.verifier !== 'string' ||
-      typeof parsed.expiresAt !== 'number'
-    ) {
-      localStorage.removeItem(OAUTH_STATE_STORAGE_KEY)
-      return null
-    }
-    if (Date.now() > parsed.expiresAt) {
-      localStorage.removeItem(OAUTH_STATE_STORAGE_KEY)
-      return null
-    }
-    return { state: parsed.state, verifier: parsed.verifier }
-  } catch {
-    return null
-  }
-}
 
 /** Generate and store a random state string for OAuth CSRF protection. */
 export function generateOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string {
@@ -60,7 +16,6 @@ export function generateOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string {
   const verifier = `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`
   pendingOAuthState = state
   pendingOAuthVerifier = verifier
-  persistOAuthState(state, verifier, ttlMs)
   pendingOAuthTimer = setTimeout(clearOAuthState, ttlMs)
   return state
 }
@@ -73,25 +28,19 @@ export function generateOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string {
  * OAuth request, overwrite the cookie, and make the first callback fail.
  */
 export function claimOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string | null {
-  if (pendingOAuthState ?? loadPersistedOAuthFlow()?.state) return null
+  if (pendingOAuthState) return null
   return generateOAuthState(ttlMs)
 }
 
 export function getPendingOAuthVerifier(state: string): string | null {
   if (pendingOAuthState === state && pendingOAuthVerifier) return pendingOAuthVerifier
-  const persisted = loadPersistedOAuthFlow()
-  return persisted?.state === state ? persisted.verifier : null
+  return null
 }
 
 /** Clear pending OAuth state (e.g. user cancelled or timed out). */
 export function clearOAuthState(): void {
   pendingOAuthState = null
   pendingOAuthVerifier = null
-  try {
-    localStorage.removeItem(OAUTH_STATE_STORAGE_KEY)
-  } catch {
-    // localStorage may be unavailable in some webview/test contexts.
-  }
   if (pendingOAuthTimer) {
     clearTimeout(pendingOAuthTimer)
     pendingOAuthTimer = null
@@ -134,10 +83,8 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
   if (path === 'auth/callback' || path === 'auth/callback/') {
     const code = params.get('code')
     const state = params.get('state')
-    const persisted = loadPersistedOAuthFlow()
-    const expectedState = pendingOAuthState ?? persisted?.state ?? null
-    const verifier =
-      pendingOAuthState === expectedState ? pendingOAuthVerifier : (persisted?.verifier ?? null)
+    const expectedState = pendingOAuthState
+    const verifier = pendingOAuthVerifier
 
     // Reject tokens when no OAuth flow was initiated (prevents external injection)
     if (!expectedState) {
