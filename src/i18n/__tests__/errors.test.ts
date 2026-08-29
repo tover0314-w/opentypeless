@@ -70,4 +70,15 @@ describe('localized error messages', () => {
       }
     }
   })
+
+  it('describes the Wayland fallback as session-specific instead of unsupported', () => {
+    expect(en.errors.output_wayland_unsupported).toBe(
+      'Direct typing is unavailable in this Wayland session. The result was copied to the clipboard.',
+    )
+    expect(zh.errors.output_wayland_unsupported).toBe(
+      '当前 Wayland 会话无法直接输入，结果已复制到剪贴板。',
+    )
+    expect(en.errors.output_wayland_unsupported).not.toContain('not supported')
+    expect(zh.errors.output_wayland_unsupported).not.toContain('暂不支持')
+  })
 })

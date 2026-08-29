@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "A cota de reconhecimento de fala na nuvem acabou. Atualize para Pro ou mude para o modo BYOK.",
     "stt_no_speech_detected": "Nenhuma fala detectada. Tente novamente.",
     "output_fallback_clipboard": "A saída de texto falhou. O resultado foi copiado para a área de transferência. {{details}}",
-    "output_wayland_unsupported": "A saída por teclado não é compatível com Wayland. O resultado foi copiado para a área de transferência.",
+    "output_wayland_unsupported": "A digitação direta não está disponível nesta sessão Wayland. O resultado foi copiado para a área de transferência.",
     "accessibility_required": "A permissão de acessibilidade está ausente. O resultado foi copiado para a área de transferência.",
     "output_streaming_partial": "A inserção por streaming parou antes do fim. O texto inserido foi mantido. {{details}}",
     "llm_failed": "O polimento por IA falhou. O texto original foi gerado em vez disso. {{details}}",

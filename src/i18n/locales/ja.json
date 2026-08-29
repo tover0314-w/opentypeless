@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "クラウド音声認識の利用枠を超えました。Proにアップグレードするか、BYOKモードに切り替えてください。",
     "stt_no_speech_detected": "音声が検出されませんでした。もう一度お試しください。",
     "output_fallback_clipboard": "テキスト出力に失敗しました。代わりに結果をクリップボードにコピーしました。{{details}}",
-    "output_wayland_unsupported": "Waylandではキーボード出力に対応していません。結果をクリップボードにコピーしました。",
+    "output_wayland_unsupported": "現在のWaylandセッションでは直接入力できません。結果をクリップボードにコピーしました。",
     "accessibility_required": "アクセシビリティ権限がありません。結果をクリップボードにコピーしました。",
     "output_streaming_partial": "ストリーミング挿入が途中で停止しました。挿入済みのテキストは保持されました。{{details}}",
     "llm_failed": "AIによる整形に失敗しました。代わりに元のテキストを出力しました。{{details}}",

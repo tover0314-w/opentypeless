@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "클라우드 음성 인식 할당량을 모두 사용했습니다. Pro로 업그레이드하거나 BYOK 모드로 전환해 주세요.",
     "stt_no_speech_detected": "음성이 감지되지 않았습니다. 다시 시도해 주세요.",
     "output_fallback_clipboard": "텍스트 출력에 실패했습니다. 대신 결과를 클립보드에 복사했습니다. {{details}}",
-    "output_wayland_unsupported": "Wayland에서는 키보드 출력을 지원하지 않습니다. 결과를 클립보드에 복사했습니다.",
+    "output_wayland_unsupported": "현재 Wayland 세션에서는 직접 입력할 수 없습니다. 결과를 클립보드에 복사했습니다.",
     "accessibility_required": "손쉬운 사용 권한이 없습니다. 결과를 클립보드에 복사했습니다.",
     "output_streaming_partial": "스트리밍 삽입이 일찍 중지되었습니다. 삽입된 텍스트는 유지되었습니다. {{details}}",
     "llm_failed": "AI 다듬기에 실패했습니다. 대신 원문을 출력했습니다. {{details}}",

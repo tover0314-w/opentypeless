@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "云端语音识别额度已用完。请升级到 Pro 或切换到 BYOK 模式。",
     "stt_no_speech_detected": "未检测到语音，请重试。",
     "output_fallback_clipboard": "文本输出失败，结果已改为复制到剪贴板。{{details}}",
-    "output_wayland_unsupported": "Wayland 暂不支持键盘输出，结果已改为复制到剪贴板。",
+    "output_wayland_unsupported": "当前 Wayland 会话无法直接输入，结果已复制到剪贴板。",
     "accessibility_required": "缺少辅助功能权限，结果已复制到剪贴板。",
     "output_streaming_partial": "流式插入提前停止，已保留插入的文本。{{details}}",
     "llm_failed": "AI 润色失败，已改为输出原始文本。{{details}}",

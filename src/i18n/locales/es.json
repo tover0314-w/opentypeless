@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "Se agotó la cuota de reconocimiento de voz en la nube. Actualiza a Pro o cambia al modo BYOK.",
     "stt_no_speech_detected": "No se detectó voz. Inténtalo de nuevo.",
     "output_fallback_clipboard": "La salida de texto falló. El resultado se copió al portapapeles. {{details}}",
-    "output_wayland_unsupported": "Wayland no admite la salida por teclado. El resultado se copió al portapapeles.",
+    "output_wayland_unsupported": "La escritura directa no está disponible en esta sesión de Wayland. El resultado se copió al portapapeles.",
     "accessibility_required": "Falta el permiso de accesibilidad. El resultado se copió al portapapeles.",
     "output_streaming_partial": "La inserción en streaming se detuvo antes de tiempo. Se conservó el texto insertado. {{details}}",
     "llm_failed": "Falló el pulido con IA. Se emitió el texto original en su lugar. {{details}}",

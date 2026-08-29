@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "Cloud speech quota exceeded. Upgrade to Pro or switch to BYOK mode.",
     "stt_no_speech_detected": "No speech detected. Please try again.",
     "output_fallback_clipboard": "Text output failed. The result was copied to clipboard instead. {{details}}",
-    "output_wayland_unsupported": "Keyboard output is not supported on Wayland. The result was copied to clipboard instead.",
+    "output_wayland_unsupported": "Direct typing is unavailable in this Wayland session. The result was copied to the clipboard.",
     "accessibility_required": "Accessibility permission is missing. The result was copied to clipboard.",
     "output_streaming_partial": "Streaming insert stopped early. The inserted text was kept. {{details}}",
     "llm_failed": "AI polishing failed. The original text was output instead. {{details}}",

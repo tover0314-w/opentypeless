@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "Das Kontingent für Cloud-Spracherkennung ist aufgebraucht. Wechseln Sie zu Pro oder in den BYOK-Modus.",
     "stt_no_speech_detected": "Keine Sprache erkannt. Bitte versuchen Sie es erneut.",
     "output_fallback_clipboard": "Die Textausgabe ist fehlgeschlagen. Das Ergebnis wurde stattdessen in die Zwischenablage kopiert. {{details}}",
-    "output_wayland_unsupported": "Tastaturausgabe wird unter Wayland nicht unterstützt. Das Ergebnis wurde in die Zwischenablage kopiert.",
+    "output_wayland_unsupported": "Die direkte Eingabe ist in dieser Wayland-Sitzung nicht verfügbar. Das Ergebnis wurde in die Zwischenablage kopiert.",
     "accessibility_required": "Die Bedienungshilfe-Berechtigung fehlt. Das Ergebnis wurde in die Zwischenablage kopiert.",
     "output_streaming_partial": "Streaming-Einfügen wurde vorzeitig beendet. Der eingefügte Text wurde beibehalten. {{details}}",
     "llm_failed": "Die KI-Glättung ist fehlgeschlagen. Stattdessen wurde der Originaltext ausgegeben. {{details}}",

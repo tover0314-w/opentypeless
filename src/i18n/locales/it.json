@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "La quota di riconoscimento vocale cloud è esaurita. Passa a Pro o usa la modalità BYOK.",
     "stt_no_speech_detected": "Nessun parlato rilevato. Riprova.",
     "output_fallback_clipboard": "L'output del testo non è riuscito. Il risultato è stato copiato negli appunti. {{details}}",
-    "output_wayland_unsupported": "L'output da tastiera non è supportato su Wayland. Il risultato è stato copiato negli appunti.",
+    "output_wayland_unsupported": "La digitazione diretta non è disponibile in questa sessione Wayland. Il risultato è stato copiato negli appunti.",
     "accessibility_required": "Manca l'autorizzazione di accessibilità. Il risultato è stato copiato negli appunti.",
     "output_streaming_partial": "L'inserimento in streaming si è interrotto in anticipo. Il testo inserito è stato mantenuto. {{details}}",
     "llm_failed": "La rifinitura con IA non è riuscita. È stato generato il testo originale. {{details}}",

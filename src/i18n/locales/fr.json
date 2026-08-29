@@ -45,7 +45,7 @@
     "stt_quota_exceeded": "Le quota de reconnaissance vocale cloud est dépassé. Passez à Pro ou utilisez le mode BYOK.",
     "stt_no_speech_detected": "Aucune parole détectée. Veuillez réessayer.",
     "output_fallback_clipboard": "La sortie de texte a échoué. Le résultat a été copié dans le presse-papiers. {{details}}",
-    "output_wayland_unsupported": "La sortie clavier n'est pas prise en charge sur Wayland. Le résultat a été copié dans le presse-papiers.",
+    "output_wayland_unsupported": "La saisie directe n’est pas disponible dans cette session Wayland. Le résultat a été copié dans le presse-papiers.",
     "accessibility_required": "L'autorisation d'accessibilité manque. Le résultat a été copié dans le presse-papiers.",
     "output_streaming_partial": "L'insertion en streaming s'est arrêtée trop tôt. Le texte inséré a été conservé. {{details}}",
     "llm_failed": "Le polissage IA a échoué. Le texte original a été sorti à la place. {{details}}",
