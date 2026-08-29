@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Demo OpenTypeless" />
 </p>
 
-## Yang baru di v1.1.49
+## Fitur unggulan
 
 - **Penulisan berbasis aplikasi** mendeteksi aplikasi aktif secara lokal dan menyesuaikan struktur serta nada untuk email, obrolan, dokumen, pelacak isu, alat pengembangan, dan lingkungan lainnya.
 - **Perutean maksud suara** membedakan dikte, penyuntingan teks terpilih, terjemahan, Ask Anything, dan tindakan suara yang didukung dalam bahasa Inggris, Mandarin Sederhana, dan Mandarin Tradisional.

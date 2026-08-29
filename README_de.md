@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless Demo" />
 </p>
 
-## Neu in v1.1.49
+## Produkt-Highlights
 
 - **App-spezifisches Schreiben** erkennt die aktive Anwendung lokal und passt Struktur und Ton für E-Mail, Chat, Dokumente, Issue-Tracker, Entwicklungswerkzeuge und weitere Arbeitsbereiche an.
 - **Sprachintent-Erkennung** unterscheidet Diktat, Bearbeitung ausgewählten Textes, Übersetzung, Ask Anything und unterstützte Sprachaktionen auf Englisch sowie vereinfachtem und traditionellem Chinesisch.

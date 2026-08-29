@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless Demo" />
 </p>
 
-## Novidades da v1.1.49
+## Destaques
 
 - **Escrita sensível ao aplicativo** detecta localmente o aplicativo ativo e adapta a estrutura e o tom para e-mail, chat, documentos, rastreadores de tarefas, ferramentas de desenvolvimento e muito mais.
 - **Roteamento de intenção por voz** distingue ditado, edição de texto selecionado, tradução, Ask Anything e ações de voz compatíveis em inglês, chinês simplificado e chinês tradicional.

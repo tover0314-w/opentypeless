@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Demo OpenTypeless" />
 </p>
 
-## Nowości w v1.1.49
+## Najważniejsze funkcje
 
 - **Pisanie z uwzględnieniem aplikacji** lokalnie wykrywa aktywną aplikację i dopasowuje strukturę oraz ton do poczty, czatu, dokumentów, narzędzi do śledzenia zgłoszeń, środowisk programistycznych i innych zastosowań.
 - **Rozpoznawanie intencji głosowych** odróżnia dyktowanie, edycję zaznaczonego tekstu, tłumaczenie, Ask Anything i obsługiwane akcje głosowe w języku angielskim oraz chińskim uproszczonym i tradycyjnym.

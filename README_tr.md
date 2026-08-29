@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless Demo" />
 </p>
 
-## v1.1.49'daki yenilikler
+## Öne çıkan özellikler
 
 - **Uygulamaya duyarlı yazma** etkin uygulamayı yerel olarak algılar ve e-posta, sohbet, belge, sorun takip sistemi, geliştirme aracı ve diğer ortamlara göre yapı ile tonu uyarlar.
 - **Sesli niyet yönlendirme** dikte, seçili metni düzenleme, çeviri, Ask Anything ve desteklenen sesli işlemleri İngilizce, Basitleştirilmiş Çince ve Geleneksel Çince dillerinde ayırt eder.

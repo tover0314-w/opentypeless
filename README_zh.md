@@ -42,7 +42,18 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless 演示" />
 </p>
 
-## v1.1.49 新功能
+## v1.1.55 新功能
+
+- **新用户购买已切换到 Stripe**，已有 Creem 订阅继续有效，不影响存量用户权益。
+- **云端登录和付费流程更可靠**，会话改为安全存储，并完善了服务故障提示与账号状态恢复。
+- **语音识别和 AI 服务更稳定**，加入连接复用与预热，修复 Deepgram、AssemblyAI 结尾内容丢失以及 Custom Whisper 查询参数丢失。
+- **支持更新的大模型接口**，包括 GPT-5/o 系列和 Anthropic Claude 原生 Messages API，同时继续支持通过 OpenRouter 使用 Claude。
+- **更多语音识别选择和更清晰的录音时长**，新增分区域 Qwen3 ASR Realtime，并根据服务商能力显示录音限制。
+- **平台兼容性继续提升**，新增 Linux ARM64 安装包、Wayland 直接输入适配，以及更安全的 Windows 组合键输出。
+
+完整改动和经过验证的安装包请查看[最新正式版](https://github.com/tover0314-w/opentypeless/releases/latest)。
+
+## 产品亮点
 
 - **应用感知写作**会在本地识别当前应用，并针对邮件、聊天、文档、Issue 跟踪、开发工具等场景调整结构和语气。
 - **语音意图路由**可区分普通听写、选中文本编辑、翻译、Ask Anything 和受支持的语音操作，并支持简体中文、繁体中文和英文。
@@ -139,7 +150,7 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 
 下载适用于你平台的最新版本：
 
-**[前往 Releases 下载](https://github.com/tover0314-w/opentypeless/releases)**
+**[下载最新正式版](https://github.com/tover0314-w/opentypeless/releases/latest)**
 
 | 平台 | 文件 |
 |------|------|

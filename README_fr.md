@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Démo OpenTypeless" />
 </p>
 
-## Nouveautés de la v1.1.49
+## Points forts
 
 - **L’écriture adaptée à l’application** détecte localement l’application active et ajuste la structure et le ton pour les e-mails, les discussions, les documents, les outils de suivi et de développement, entre autres.
 - **Le routage des intentions vocales** distingue la dictée, la modification du texte sélectionné, la traduction, Ask Anything et les actions vocales prises en charge en anglais, chinois simplifié et chinois traditionnel.
