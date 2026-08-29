@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="OpenTypeless Demo" />
 </p>
 
-## Nieuw in v1.1.49
+## Belangrijkste functies
 
 - **App-bewust schrijven** herkent de actieve toepassing lokaal en past structuur en toon aan voor e-mail, chat, documenten, issuetrackers, ontwikkeltools en meer.
 - **Routering van spraakintenties** onderscheidt dicteren, geselecteerde tekst bewerken, vertalen, Ask Anything en ondersteunde spraakacties in het Engels, vereenvoudigd Chinees en traditioneel Chinees.

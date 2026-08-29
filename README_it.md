@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Demo OpenTypeless" />
 </p>
 
-## Novità della v1.1.49
+## Funzionalità principali
 
 - **Scrittura consapevole dell’app** rileva localmente l’applicazione attiva e adatta struttura e tono per e-mail, chat, documenti, sistemi di gestione delle issue, strumenti di sviluppo e altro ancora.
 - **Instradamento dell’intento vocale** distingue dettatura, modifica del testo selezionato, traduzione, Ask Anything e azioni vocali supportate in inglese, cinese semplificato e cinese tradizionale.

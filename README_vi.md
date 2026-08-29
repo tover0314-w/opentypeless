@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Demo OpenTypeless" />
 </p>
 
-## Điểm mới trong v1.1.49
+## Tính năng nổi bật
 
 - **Viết theo ngữ cảnh ứng dụng** nhận diện ứng dụng đang hoạt động ngay trên máy và điều chỉnh cấu trúc, giọng điệu cho email, trò chuyện, tài liệu, công cụ theo dõi vấn đề, công cụ lập trình và nhiều môi trường khác.
 - **Định tuyến ý định giọng nói** phân biệt đọc chính tả, chỉnh sửa văn bản đã chọn, dịch thuật, Ask Anything và các thao tác giọng nói được hỗ trợ bằng tiếng Anh, tiếng Trung giản thể và phồn thể.

@@ -34,7 +34,7 @@
   <img src="docs/images/voice-flow-demo.gif" width="720" alt="Demo de OpenTypeless" />
 </p>
 
-## Novedades de v1.1.49
+## Funciones destacadas
 
 - **Escritura adaptada a cada aplicación** detecta localmente la aplicación activa y ajusta la estructura y el tono para correo, chat, documentos, gestores de incidencias, herramientas de desarrollo y más.
 - **Enrutamiento de intención por voz** distingue entre dictado, edición del texto seleccionado, traducción, Ask Anything y acciones de voz compatibles en inglés, chino simplificado y chino tradicional.

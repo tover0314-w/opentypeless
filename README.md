@@ -44,9 +44,20 @@
   <strong>Dictate anywhere</strong> · <strong>Rewrite selected text</strong> · <strong>Ask one-shot voice questions</strong> · <strong>Bring your own keys or use managed cloud words</strong>
 </p>
 
-## What's New in v1.1.49
+## What's New in v1.1.55
 
-OpenTypeless now understands more of the workflow around your voice, not only the words you said:
+- **Stripe checkout for new purchases** with existing Creem subscriptions kept valid.
+- **More reliable cloud sign-in and billing** with secure session storage, clearer service-status messages, and stronger account-state recovery.
+- **Faster and more reliable providers** through connection reuse and warm-up, complete Deepgram and AssemblyAI final transcripts, and preserved Custom Whisper URL queries.
+- **Modern model support** for GPT-5/o-series requests and the native Anthropic Claude Messages API, while Claude through OpenRouter remains supported.
+- **More STT choices and safer recording limits** including regional Qwen3 ASR Realtime, provider-aware duration controls, and preserved audio while providers connect.
+- **Better platform support** including Linux ARM64 packages, Wayland direct typing with compositor-specific helpers, and safer Windows modifier-key output.
+
+See the complete notes and verified installers on the [latest release page](https://github.com/tover0314-w/opentypeless/releases/latest).
+
+## Product Highlights
+
+OpenTypeless understands more of the workflow around your voice, not only the words you said:
 
 - **App-aware writing** detects the active application locally and adapts structure and tone for email, chat, documents, issue trackers, coding tools, and more.
 - **Voice intent routing** distinguishes dictation, selected-text editing, translation, Ask Anything, and supported voice actions in English, Simplified Chinese, and Traditional Chinese.
@@ -209,7 +220,7 @@ sequenceDiagram
 
 Download the latest version for your platform:
 
-**[Download from Releases](https://github.com/tover0314-w/opentypeless/releases)**
+**[Download the latest release](https://github.com/tover0314-w/opentypeless/releases/latest)**
 
 | Platform | File                                         |
 | -------- | -------------------------------------------- |
