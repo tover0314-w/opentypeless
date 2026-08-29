@@ -33,6 +33,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { authClient } from '../../lib/auth-client'
 import { requestOpenTypelessPasswordReset, setOpenTypelessPassword } from '../../lib/auth-client'
 import { getSubscriptionStatus } from '../../lib/api'
+import {
+  loadSessionToken,
+  persistSessionToken,
+  resetCloudSessionCoordinatorForTests,
+} from '../../lib/cloud-session'
 import { toast } from '../../components/toast-service'
 
 function getState() {
@@ -46,6 +51,8 @@ describe('authStore', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    resetCloudSessionCoordinatorForTests()
 
     // Reset store state
     useAuthStore.setState({
@@ -69,6 +76,10 @@ describe('authStore', () => {
       cloudWordsResetAt: null,
       byokUnlimited: true,
       credentialCapability: 'unknown',
+      subscriptionRefreshState: 'unknown',
+      subscriptionRefreshLoading: false,
+      subscriptionLastVerifiedAt: null,
+      subscriptionRefreshError: null,
       loading: false,
       error: null,
     })
@@ -210,6 +221,9 @@ describe('authStore', () => {
 
   describe('refreshSubscription', () => {
     it('coalesces concurrent refresh triggers into one status request', async () => {
+      useAuthStore.setState({
+        user: { id: '1', email: 'test@example.com', name: 'Test', emailVerified: true },
+      })
       let release: (() => void) | undefined
       vi.mocked(getSubscriptionStatus).mockImplementationOnce(
         () =>
@@ -224,6 +238,12 @@ describe('authStore', () => {
       expect(getSubscriptionStatus).toHaveBeenCalledTimes(1)
       release?.()
       await Promise.all([first, second])
+    })
+
+    it('does not request subscription state while signed out', async () => {
+      await getState().refreshSubscription()
+
+      expect(getSubscriptionStatus).not.toHaveBeenCalled()
     })
 
     it('updates quota fields from API response', async () => {
@@ -276,9 +296,48 @@ describe('authStore', () => {
       expect(toast).toHaveBeenCalledTimes(1)
       expect(toast).toHaveBeenCalledWith('Cloud words are almost used up.', 'error')
     })
+
+    it('keeps the last verified paid entitlement when refresh later fails', async () => {
+      useAuthStore.setState({
+        user: { id: '1', email: 'test@example.com', name: 'Test', emailVerified: true },
+      })
+      await getState().refreshSubscription()
+      const verifiedAt = getState().subscriptionLastVerifiedAt
+
+      vi.mocked(getSubscriptionStatus).mockRejectedValueOnce(new Error('service unavailable'))
+      await getState().refreshSubscription()
+
+      expect(getState().plan).toBe('pro')
+      expect(getState().subscriptionRefreshState).toBe('stale')
+      expect(getState().subscriptionLastVerifiedAt).toBe(verifiedAt)
+      expect(getState().subscriptionRefreshLoading).toBe(false)
+      expect(getState().subscriptionRefreshError).toBe('service unavailable')
+    })
+
+    it('marks membership unavailable without pretending a failed first refresh is fresh', async () => {
+      useAuthStore.setState({
+        user: { id: 'new-user', email: 'new@example.com', name: null, emailVerified: true },
+      })
+      vi.mocked(getSubscriptionStatus).mockRejectedValueOnce(new Error('offline'))
+
+      await getState().refreshSubscription()
+
+      expect(getState().subscriptionRefreshState).toBe('unavailable')
+      expect(getState().subscriptionLastVerifiedAt).toBeNull()
+    })
   })
 
   describe('hasManagedCloudAccess', () => {
+    it('recognizes Stripe Pro access returned by the new billing backend', () => {
+      expect(
+        hasManagedCloudAccess({
+          plan: 'pro',
+          source: 'stripe',
+          cloudWordsLimit: 100000,
+          licenseStatus: null,
+        }),
+      ).toBe(true)
+    })
     it('allows AppSumo lifetime plans with cloud words', () => {
       expect(
         hasManagedCloudAccess({
@@ -432,7 +491,8 @@ describe('authStore', () => {
         },
         expect.objectContaining({ onSuccess: expect.any(Function) }),
       )
-      expect(localStorage.getItem('session_token')).toBe('rotated-token')
+      expect(await loadSessionToken()).toBe('rotated-token')
+      expect(localStorage.getItem('session_token')).toBeNull()
       expect(invoke).toHaveBeenCalledWith('set_session_token', { token: 'rotated-token' })
       expect(vi.mocked(invoke).mock.invocationCallOrder[0]).toBeLessThan(
         vi.mocked(getSubscriptionStatus).mock.invocationCallOrder[0]!,
@@ -440,7 +500,8 @@ describe('authStore', () => {
     })
 
     it('sets a password for a verified OAuth-only account without rotating its token', async () => {
-      localStorage.setItem('session_token', 'existing-token')
+      await persistSessionToken('existing-token')
+      vi.mocked(invoke).mockClear()
       useAuthStore.setState({
         user: {
           id: 'user-1',
@@ -459,7 +520,8 @@ describe('authStore', () => {
 
       expect(setOpenTypelessPassword).toHaveBeenCalledWith('new-password')
       expect(authClient.changePassword).not.toHaveBeenCalled()
-      expect(localStorage.getItem('session_token')).toBe('existing-token')
+      expect(await loadSessionToken()).toBe('existing-token')
+      expect(localStorage.getItem('session_token')).toBeNull()
       expect(getState().credentialCapability).toBe('present')
     })
 

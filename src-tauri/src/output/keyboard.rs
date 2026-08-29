@@ -9,6 +9,9 @@ use super::{InsertResult, InsertionStrategy, OutputMode, TextOutput};
 const TYPE_CHUNK_SIZE: usize = 200;
 /// Delay between typing chunks.
 const TYPE_CHUNK_DELAY_MS: u64 = 5;
+/// Keep every `kwtype` positional argument well below Linux's per-argument limit.
+#[cfg(any(target_os = "linux", test))]
+const KWTYPE_CHUNK_SIZE: usize = 8_192;
 /// Base timeout for macOS main-thread keyboard output.
 #[cfg(target_os = "macos")]
 const MACOS_TYPE_BASE_TIMEOUT_SECS: u64 = 30;
@@ -21,15 +24,24 @@ const MACOS_TYPE_MAX_TIMEOUT_SECS: u64 = 300;
 enum LinuxKeyboardBackend {
     Xdotool,
     Wtype,
+    Kwtype,
 }
 
 #[cfg(any(target_os = "linux", test))]
 fn select_linux_keyboard_backend(
     session_type: &str,
+    current_desktop: &str,
     xdotool_available: bool,
     wtype_available: bool,
+    kwtype_available: bool,
 ) -> std::result::Result<LinuxKeyboardBackend, String> {
     if session_type.eq_ignore_ascii_case("wayland") {
+        if is_kde_desktop(current_desktop) {
+            return kwtype_available
+                .then_some(LinuxKeyboardBackend::Kwtype)
+                .ok_or_else(|| "wayland_unsupported".to_string());
+        }
+
         return wtype_available
             .then_some(LinuxKeyboardBackend::Wtype)
             .ok_or_else(|| "wayland_unsupported".to_string());
@@ -38,6 +50,19 @@ fn select_linux_keyboard_backend(
     xdotool_available
         .then_some(LinuxKeyboardBackend::Xdotool)
         .ok_or_else(|| "xdotool_missing".to_string())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn is_kde_desktop(current_desktop: &str) -> bool {
+    current_desktop
+        .split([':', ';'])
+        .map(str::trim)
+        .any(|part| {
+            part.eq_ignore_ascii_case("kde")
+                || part.eq_ignore_ascii_case("plasma")
+                || part.eq_ignore_ascii_case("plasmawayland")
+                || part.eq_ignore_ascii_case("plasmax11")
+        })
 }
 
 #[cfg(target_os = "linux")]
@@ -58,17 +83,37 @@ fn executable_on_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "linux")]
+fn detect_linux_keyboard_backend() -> std::result::Result<LinuxKeyboardBackend, String> {
+    let current_desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .ok()
+        .filter(|desktop| !desktop.trim().is_empty())
+        .or_else(|| std::env::var("DESKTOP_SESSION").ok())
+        .unwrap_or_default();
+    let current_desktop = if current_desktop.trim().is_empty()
+        && (std::env::var_os("KDE_FULL_SESSION").is_some()
+            || std::env::var_os("KDE_SESSION_VERSION").is_some())
+    {
+        "KDE".to_string()
+    } else {
+        current_desktop
+    };
+
+    select_linux_keyboard_backend(
+        &crate::platform::current_session_type(),
+        &current_desktop,
+        executable_on_path("xdotool"),
+        executable_on_path("wtype"),
+        executable_on_path("kwtype"),
+    )
+}
+
 /// Check if keyboard simulation is reliable on this platform.
 /// Returns Ok(()) if fine, or Err with a reason string for the caller.
 pub fn check_keyboard_available() -> std::result::Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let session = crate::platform::current_session_type();
-        select_linux_keyboard_backend(
-            &session,
-            executable_on_path("xdotool"),
-            executable_on_path("wtype"),
-        )?;
+        detect_linux_keyboard_backend()?;
     }
     let _ = (); // suppress unused warning on non-Linux
     Ok(())
@@ -163,8 +208,12 @@ fn type_text_sync(text: &str) -> Result<(), AppError> {
     super::windows_modifier_guard::wait_for_modifier_release()?;
 
     #[cfg(target_os = "linux")]
-    if crate::platform::current_session_type().eq_ignore_ascii_case("wayland") {
-        return type_text_with_wtype(text);
+    match detect_linux_keyboard_backend().map_err(|reason| {
+        AppError::Output(format!("Linux keyboard backend unavailable: {reason}"))
+    })? {
+        LinuxKeyboardBackend::Wtype => return type_text_with_wtype(text),
+        LinuxKeyboardBackend::Kwtype => return type_text_with_kwtype(text),
+        LinuxKeyboardBackend::Xdotool => {}
     }
 
     let mut enigo = Enigo::new(&Settings::default())
@@ -244,6 +293,47 @@ fn type_text_with_wtype(text: &str) -> Result<(), AppError> {
     }))
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn kwtype_chunks(text: &str) -> Vec<String> {
+    text.chars()
+        .collect::<Vec<_>>()
+        .chunks(KWTYPE_CHUNK_SIZE)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn type_text_with_kwtype(text: &str) -> Result<(), AppError> {
+    use std::process::{Command, Stdio};
+
+    for chunk in kwtype_chunks(text) {
+        let output = Command::new("kwtype")
+            .arg("--")
+            .arg(chunk)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|error| AppError::Output(format!("Failed to start kwtype: {error}")))?;
+
+        if output.status.success() {
+            continue;
+        }
+
+        let details: String = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .chars()
+            .take(200)
+            .collect();
+        return Err(AppError::Output(if details.is_empty() {
+            format!("kwtype failed with exit code {:?}", output.status.code())
+        } else {
+            format!("kwtype failed: {details}")
+        }));
+    }
+
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn macos_type_timeout(text: &str) -> std::time::Duration {
     let char_count = text.chars().count();
@@ -265,7 +355,7 @@ mod tests {
     #[test]
     fn wayland_uses_wtype_when_installed() {
         assert_eq!(
-            select_linux_keyboard_backend("wayland", false, true),
+            select_linux_keyboard_backend("wayland", "sway", false, true, false),
             Ok(LinuxKeyboardBackend::Wtype)
         );
     }
@@ -273,20 +363,60 @@ mod tests {
     #[test]
     fn wayland_keeps_existing_clipboard_fallback_when_wtype_is_missing() {
         assert_eq!(
-            select_linux_keyboard_backend("WAYLAND", true, false),
+            select_linux_keyboard_backend("WAYLAND", "sway", true, false, false),
             Err("wayland_unsupported".to_string())
         );
     }
 
     #[test]
+    fn kde_wayland_uses_kwtype_instead_of_wtype() {
+        assert_eq!(
+            select_linux_keyboard_backend("wayland", "KDE", false, true, true),
+            Ok(LinuxKeyboardBackend::Kwtype)
+        );
+        assert_eq!(
+            select_linux_keyboard_backend("wayland", "KDE:Plasma", false, true, false),
+            Err("wayland_unsupported".to_string())
+        );
+    }
+
+    #[test]
+    fn kde_desktop_detection_is_delimited_and_case_insensitive() {
+        assert!(is_kde_desktop("KDE"));
+        assert!(is_kde_desktop("ubuntu:PLASMA"));
+        assert!(is_kde_desktop("GNOME;KDE"));
+        assert!(is_kde_desktop("plasmawayland"));
+        assert!(is_kde_desktop("PlasmaX11"));
+        assert!(!is_kde_desktop("GNOME"));
+        assert!(!is_kde_desktop("notkde"));
+    }
+
+    #[test]
     fn x11_still_requires_xdotool() {
         assert_eq!(
-            select_linux_keyboard_backend("x11", true, false),
+            select_linux_keyboard_backend("x11", "KDE", true, false, false),
             Ok(LinuxKeyboardBackend::Xdotool)
         );
         assert_eq!(
-            select_linux_keyboard_backend("x11", false, true),
+            select_linux_keyboard_backend("x11", "KDE", false, true, true),
             Err("xdotool_missing".to_string())
         );
+    }
+
+    #[test]
+    fn kwtype_chunks_preserve_text_and_bound_each_argument() {
+        let text = format!("{}{}", "a".repeat(KWTYPE_CHUNK_SIZE), "界".repeat(3));
+        let chunks = kwtype_chunks(&text);
+
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.chars().count() <= KWTYPE_CHUNK_SIZE));
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn kwtype_empty_text_is_a_noop() {
+        assert!(type_text_with_kwtype("").is_ok());
     }
 }

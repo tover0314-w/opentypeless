@@ -265,7 +265,12 @@ chmod +x OpenTypeless_x.x.x_amd64.AppImage
 WEBKIT_DISABLE_DMABUF_RENDERER=1 ./OpenTypeless
 ```
 
-**Wayland users:** install `wtype` to let OpenTypeless type the result directly into the focused app. On Ubuntu/Debian use `sudo apt install wtype`; on Arch/Manjaro use `sudo pacman -S wtype`. Global hotkeys can still depend on the desktop environment. If `wtype` is unavailable, OpenTypeless falls back to copying the result to the clipboard.
+**Wayland users:** the required helper depends on the compositor:
+
+- KDE Plasma/KWin Wayland uses [`kwtype`](https://github.com/Sporif/KWtype), which must currently be built and installed using the upstream instructions.
+- Other Wayland compositors use `wtype`. On Ubuntu/Debian run `sudo apt install wtype`; on Arch/Manjaro run `sudo pacman -S wtype`.
+
+Global hotkeys can still depend on the desktop environment. If the matching helper is unavailable or fails, OpenTypeless keeps the result in the clipboard instead of running an untrusted user script.
 
 ## Prerequisites
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import i18n from '../../../i18n'
 import * as api from '../../../lib/api'
 import * as tauri from '../../../lib/tauri'
+import { savePendingDesktopCheckout } from '../../../lib/desktop-checkout-intent'
 import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import { AccountPage } from '../index'
@@ -12,6 +13,7 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ readText: vi.fn() }))
 vi.mock('../../../lib/api', () => ({
   uploadBackup: vi.fn(),
   downloadBackup: vi.fn(),
+  createCheckout: vi.fn(),
   createPortalSession: vi.fn(),
 }))
 vi.mock('../../../lib/tauri')
@@ -34,6 +36,12 @@ function signedIn(capability: 'unknown' | 'present' | 'none') {
     plan: 'free',
     source: 'free',
     displayName: 'Free',
+    subscriptionStatus: null,
+    billingProvider: null,
+    canManageBilling: false,
+    canMigrateToStripe: false,
+    subscriptionRefreshState: 'fresh',
+    subscriptionRefreshedAt: Date.now(),
     requestPasswordReset,
     changePassword,
     refreshCredentialCapability,
@@ -43,6 +51,7 @@ function signedIn(capability: 'unknown' | 'present' | 'none') {
 describe('AccountPage password controls', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    localStorage.clear()
     await i18n.changeLanguage('en')
     useAuthStore.setState({
       user: null,
@@ -51,6 +60,10 @@ describe('AccountPage password controls', () => {
       emailVerificationPending: false,
       pendingEmail: null,
       credentialCapability: 'unknown',
+      subscriptionStatus: null,
+      billingProvider: null,
+      canManageBilling: false,
+      canMigrateToStripe: false,
       requestPasswordReset,
       changePassword,
       refreshCredentialCapability,
@@ -76,6 +89,79 @@ describe('AccountPage password controls', () => {
     })
     expect(screen.getByText('请检查邮箱')).toBeInTheDocument()
   })
+
+  it('explains that the selected desktop purchase will continue after sign-in', () => {
+    savePendingDesktopCheckout(localStorage, 'lifetime_starter')
+
+    render(<AccountPage />)
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Sign in to continue with Lifetime Starter.',
+    )
+  })
+
+  it('shows payment management only for an active provider-backed subscription', () => {
+    signedIn('present')
+    useAuthStore.setState({
+      plan: 'pro',
+      source: 'creem',
+      subscriptionStatus: 'active',
+      billingProvider: 'stripe',
+      canManageBilling: true,
+      canMigrateToStripe: false,
+    })
+
+    render(<AccountPage />)
+
+    expect(screen.getByRole('button', { name: 'Manage payment' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue with Stripe' })).not.toBeInTheDocument()
+  })
+
+  it('offers Stripe recovery instead of a portal after a failed Creem renewal', async () => {
+    signedIn('present')
+    useAuthStore.setState({
+      plan: 'free',
+      source: 'free',
+      subscriptionStatus: 'past_due',
+      billingProvider: 'creem',
+      canManageBilling: true,
+      canMigrateToStripe: true,
+    })
+    vi.mocked(api.createCheckout).mockResolvedValue({
+      url: 'https://checkout.stripe.com/recover-pro',
+    })
+
+    render(<AccountPage />)
+    expect(screen.queryByRole('button', { name: 'Manage payment' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Stripe' }))
+
+    await waitFor(() => {
+      expect(api.createCheckout).toHaveBeenCalledWith('desktop', 'pro_monthly')
+    })
+  })
+
+  it.each([
+    ['lifetime_starter', 'lifetime', 'stripe'],
+    ['appsumo_tier1', 'appsumo', 'appsumo'],
+  ] as const)(
+    'never shows monthly payment controls for a %s entitlement',
+    (plan, source, provider) => {
+      signedIn('present')
+      useAuthStore.setState({
+        plan,
+        source,
+        licenseStatus: 'active',
+        billingProvider: provider,
+        canManageBilling: true,
+        canMigrateToStripe: false,
+      })
+
+      render(<AccountPage />)
+
+      expect(screen.queryByRole('button', { name: 'Manage payment' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Continue with Stripe' })).not.toBeInTheDocument()
+    },
+  )
 
   it('opens credential password controls in a focused modal and keeps invalid forms disabled', () => {
     signedIn('present')

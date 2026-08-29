@@ -3,9 +3,11 @@ import { ApiError, CloudApiError } from '../api'
 import { API_BASE_URL, APP_VERSION_HEADER_VALUE, CLIENT_VERSION_HEADER } from '../constants'
 
 const invalidateCloudSessionOnce = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const loadSessionToken = vi.hoisted(() => vi.fn().mockResolvedValue(null))
 
 vi.mock('../cloud-session', () => ({
   invalidateCloudSessionOnce,
+  loadSessionToken,
 }))
 
 const API_BASE = API_BASE_URL
@@ -22,6 +24,7 @@ describe('ApiError', () => {
 
 describe('request() via getSubscriptionStatus', () => {
   beforeEach(() => {
+    loadSessionToken.mockResolvedValue(null)
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -63,6 +66,21 @@ describe('request() via getSubscriptionStatus', () => {
     )
   })
 
+  it('uses the system-vault-backed in-memory bearer without localStorage', async () => {
+    loadSessionToken.mockResolvedValueOnce('vault-token')
+
+    const { getSubscriptionStatus } = await import('../api')
+    await getSubscriptionStatus()
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/subscription/status`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer vault-token' }),
+      }),
+    )
+    expect(localStorage.getItem('session_token')).toBeNull()
+  })
+
   it('returns parsed JSON on success', async () => {
     const { getSubscriptionStatus } = await import('../api')
     const result = await getSubscriptionStatus()
@@ -70,6 +88,51 @@ describe('request() via getSubscriptionStatus', () => {
     expect(result.quotaModel).toBe('legacy_dual_meter')
     expect(result.displayWordsLimit).toBe(100000)
     expect(result.sttSecondsLimit).toBe(36000)
+  })
+
+  it('uses the explicit billing provider without breaking the legacy source field', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          plan: 'pro',
+          source: 'creem',
+          billingProvider: 'stripe',
+          subscriptionStatus: 'active',
+          canManageBilling: true,
+          canMigrateToStripe: false,
+        }),
+    } as Response)
+
+    const { getSubscriptionStatus } = await import('../api')
+    const result = await getSubscriptionStatus()
+
+    expect(result.source).toBe('creem')
+    expect(result.billingProvider).toBe('stripe')
+    expect(result.canManageBilling).toBe(true)
+    expect(result.canMigrateToStripe).toBe(false)
+  })
+
+  it('only exposes Stripe migration for an explicit failed Creem account', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          plan: 'free',
+          source: 'free',
+          billingProvider: 'creem',
+          subscriptionStatus: 'past_due',
+          canManageBilling: true,
+          canMigrateToStripe: true,
+        }),
+    } as Response)
+
+    const { getSubscriptionStatus } = await import('../api')
+    const result = await getSubscriptionStatus()
+
+    expect(result.billingProvider).toBe('creem')
+    expect(result.subscriptionStatus).toBe('past_due')
+    expect(result.canMigrateToStripe).toBe(true)
   })
 
   it('preserves the authenticated account snapshot for Rust capability negotiation', async () => {

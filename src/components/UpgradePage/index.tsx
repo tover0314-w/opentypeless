@@ -1,10 +1,30 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, CreditCard, Loader2, Sparkles } from 'lucide-react'
+import { Check, CreditCard, Loader2, LogIn } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
 import { CHECKOUT_PLANS, PRO_PLAN, type CheckoutProduct } from '../../lib/constants'
-import { createCheckout } from '../../lib/api'
+import { CloudApiError, createCheckout } from '../../lib/api'
+import { useRoute } from '../../lib/router'
+import {
+  clearPendingDesktopCheckout,
+  readPendingDesktopCheckout,
+  savePendingDesktopCheckout,
+} from '../../lib/desktop-checkout-intent'
+
+function checkoutErrorMessage(error: unknown, t: ReturnType<typeof useTranslation>['t']) {
+  if (error instanceof CloudApiError) {
+    if (error.status === 429) return t('upgrade.checkoutRateLimited')
+    if (
+      error.code === 'checkout_intent_conflict' ||
+      error.code === 'checkout_intent_in_progress' ||
+      error.code === 'checkout_intent_claimed'
+    ) {
+      return t('upgrade.checkoutInProgress')
+    }
+  }
+  return t('upgrade.checkoutTemporarilyUnavailable')
+}
 
 export function UpgradePage() {
   const {
@@ -12,6 +32,9 @@ export function UpgradePage() {
     plan,
     source,
     displayName,
+    subscriptionStatus,
+    billingProvider,
+    canMigrateToStripe,
     quotaModel,
     displayWordsUsedEstimate,
     displayWordsLimit,
@@ -23,19 +46,30 @@ export function UpgradePage() {
     llmTokensLimit,
   } = useAuthStore()
   const { t } = useTranslation()
+  const { navigate } = useRoute()
   const [loadingProduct, setLoadingProduct] = useState<CheckoutProduct | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const checkoutInFlight = useRef(false)
+  const resumeAttempted = useRef(false)
 
   const hasCloudAccess = useAuthStore(hasManagedCloudAccess)
   const hasLifetimeAccess =
     plan === 'lifetime_starter' || source === 'lifetime' || source === 'appsumo'
-  const hasMonthlyAccess = !hasLifetimeAccess && (plan === 'pro' || source === 'creem')
+  const hasMonthlyAccess = !hasLifetimeAccess && plan === 'pro' && hasCloudAccess
+  const isCreemMigration =
+    billingProvider === 'creem' &&
+    canMigrateToStripe &&
+    (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid')
   const hasLifetimeCheckoutPlan = CHECKOUT_PLANS.some(
     (checkoutPlan) => checkoutPlan.product === 'lifetime_starter',
   )
-  const visiblePlans = hasMonthlyAccess
-    ? CHECKOUT_PLANS.filter((checkoutPlan) => checkoutPlan.product === 'lifetime_starter')
-    : CHECKOUT_PLANS
+  const visiblePlans = hasLifetimeAccess
+    ? []
+    : isCreemMigration
+      ? CHECKOUT_PLANS.filter((checkoutPlan) => checkoutPlan.product === 'pro_monthly')
+      : hasMonthlyAccess
+        ? CHECKOUT_PLANS.filter((checkoutPlan) => checkoutPlan.product === 'lifetime_starter')
+        : CHECKOUT_PLANS
   const wordsUsed =
     quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
       ? displayWordsUsedEstimate
@@ -46,23 +80,50 @@ export function UpgradePage() {
       : cloudWordsLimit
   const canStartCheckout = (product: CheckoutProduct) => {
     if (hasLifetimeAccess) return false
+    if (isCreemMigration) return product === 'pro_monthly'
     if (product === 'lifetime_starter') return true
     return !hasCloudAccess
   }
 
-  const handleSubscribe = async (product: CheckoutProduct) => {
-    setLoadingProduct(product)
-    setError(null)
-    try {
-      const { url } = await createCheckout('desktop', product)
-      useAuthStore.setState({ checkoutPending: true })
-      await openUrl(url)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('account.toast.subscriptionFail'))
-    } finally {
-      setLoadingProduct(null)
-    }
-  }
+  const handleSubscribe = useCallback(
+    async (product: CheckoutProduct) => {
+      if (checkoutInFlight.current) return
+      if (!user) {
+        try {
+          savePendingDesktopCheckout(localStorage, product)
+          navigate('account')
+        } catch {
+          setError(t('upgrade.checkoutTemporarilyUnavailable'))
+        }
+        return
+      }
+
+      checkoutInFlight.current = true
+      setLoadingProduct(product)
+      setError(null)
+      try {
+        const { url } = await createCheckout('desktop', product)
+        await openUrl(url)
+        clearPendingDesktopCheckout(localStorage)
+        useAuthStore.setState({ checkoutPending: true })
+      } catch (e) {
+        setError(checkoutErrorMessage(e, t))
+      } finally {
+        checkoutInFlight.current = false
+        setLoadingProduct(null)
+      }
+    },
+    [navigate, t, user],
+  )
+
+  useEffect(() => {
+    if (!user || resumeAttempted.current) return
+    const pending = readPendingDesktopCheckout(localStorage)
+    if (!pending) return
+    resumeAttempted.current = true
+    clearPendingDesktopCheckout(localStorage)
+    void handleSubscribe(pending.product)
+  }, [handleSubscribe, user])
 
   return (
     <div className="max-w-[620px] mx-auto py-7 px-6 text-[13px]">
@@ -78,16 +139,21 @@ export function UpgradePage() {
             hasCloudAccess ? 'bg-accent-light text-accent' : 'bg-bg-secondary text-text-secondary'
           }`}
         >
-          {t('upgrade.currentPlan', { plan: displayName })}
+          {t('upgrade.currentPlan', {
+            plan: isCreemMigration ? t('upgrade.paymentNeedsAttention') : displayName,
+          })}
         </span>
       </header>
 
       {/* Pricing cards */}
       {visiblePlans.length > 0 && (
-        <div className={`grid gap-3 mb-4 ${hasMonthlyAccess ? '' : 'min-[620px]:grid-cols-2'}`}>
+        <div
+          className={`grid gap-3 mb-4 ${visiblePlans.length > 1 ? 'min-[620px]:grid-cols-2' : ''}`}
+        >
           {visiblePlans.map((checkoutPlan) => {
             const isLoading = loadingProduct === checkoutPlan.product
             const isLifetime = checkoutPlan.product === 'lifetime_starter'
+            const isMigrationPlan = isCreemMigration && !isLifetime
             const price =
               hasMonthlyAccess && isLifetime && checkoutPlan.upgradePrice
                 ? checkoutPlan.upgradePrice
@@ -106,7 +172,7 @@ export function UpgradePage() {
                 <div className="relative z-[1] flex h-full w-full flex-col">
                   <div className="flex min-h-6 items-start justify-between gap-2">
                     <h2 className="text-[14px] font-semibold text-text-primary">
-                      {t(checkoutPlan.nameKey)}
+                      {isMigrationPlan ? t('upgrade.restorePro') : t(checkoutPlan.nameKey)}
                     </h2>
                     {checkoutPlan.badgeKey && (
                       <span className="shrink-0 rounded-full border border-accent/20 bg-accent-light px-2 py-0.5 text-[10px] font-semibold text-accent">
@@ -122,11 +188,12 @@ export function UpgradePage() {
                     </span>
                   </p>
                   <p className="mt-2 min-h-[36px] text-[12px] leading-5 text-text-secondary">
-                    {t(checkoutPlan.descriptionKey)}
+                    {isMigrationPlan
+                      ? t('upgrade.migrationDescription')
+                      : t(checkoutPlan.descriptionKey)}
                   </p>
                   {sublineKey && (
                     <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-bg-secondary/70 px-2 py-1 text-[11px] font-medium text-text-secondary">
-                      <Sparkles size={12} />
                       {t(sublineKey)}
                     </p>
                   )}
@@ -134,15 +201,21 @@ export function UpgradePage() {
                     <div className="mt-auto pt-4">
                       <button
                         onClick={() => handleSubscribe(checkoutPlan.product)}
-                        disabled={loadingProduct !== null || !user}
+                        disabled={loadingProduct !== null}
                         className="jelly-btn-accent flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {isLoading ? (
                           <Loader2 size={14} className="animate-spin" />
+                        ) : !user ? (
+                          <LogIn size={14} />
                         ) : (
                           <CreditCard size={14} />
                         )}
-                        {t(checkoutPlan.ctaKey)}
+                        {isLoading
+                          ? t('upgrade.openingCheckout')
+                          : isMigrationPlan
+                            ? t('upgrade.switchToStripe')
+                            : t(checkoutPlan.ctaKey)}
                       </button>
                     </div>
                   )}
@@ -185,10 +258,10 @@ export function UpgradePage() {
           <div className="px-4 py-3 space-y-3">
             {wordsLimit > 0 ? (
               <QuotaBar
-                label={t('account.cloudWords', 'Cloud words')}
+                label={t('upgrade.cloudWords')}
                 used={wordsUsed}
                 limit={wordsLimit}
-                unit={t('account.quotaKWords', 'k words')}
+                unit={t('upgrade.kWords')}
                 divisor={1000}
               />
             ) : (
@@ -232,7 +305,6 @@ export function UpgradePage() {
                 )
               : t('upgrade.monthlyActive', 'Pro is active.')}
           </p>
-          {error && <p className="text-red-500 text-[12px] mt-2 text-center">{error}</p>}
         </div>
       ) : (
         <>
@@ -241,8 +313,12 @@ export function UpgradePage() {
               {t('upgrade.signInFirst')}
             </p>
           )}
-          {error && <p className="text-red-500 text-[12px] mt-2 text-center">{error}</p>}
         </>
+      )}
+      {error && (
+        <p role="alert" className="text-red-500 text-[12px] mt-2 text-center">
+          {error}
+        </p>
       )}
     </div>
   )

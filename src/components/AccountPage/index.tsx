@@ -15,7 +15,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { API_BASE_URL } from '../../lib/constants'
-import { uploadBackup, downloadBackup, createPortalSession } from '../../lib/api'
+import { uploadBackup, downloadBackup, createCheckout, createPortalSession } from '../../lib/api'
 import { createBackupSettings, mergeBackupSettings } from '../../lib/backup-settings'
 import {
   getConfig,
@@ -29,8 +29,12 @@ import {
   clearOAuthState,
   handleDeepLinkUrl,
 } from '../../lib/deep-link'
+import {
+  claimDesktopAuthCallbackURL,
+  createDesktopAuthCallbackURL,
+} from '../../lib/desktop-auth-callback'
+import { readPendingDesktopCheckout } from '../../lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnAccountOpen } from '../../lib/subscription-refresh-policy'
-import { createDesktopAuthCallbackURL } from '../../lib/desktop-auth-callback'
 import { PasswordDialog } from './PasswordDialog'
 import { PasswordField } from './PasswordField'
 
@@ -90,8 +94,11 @@ function AuthForm() {
   const [resent, setResent] = useState(false)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
   const { t, i18n } = useTranslation()
+  const pendingCheckout = readPendingDesktopCheckout(localStorage)
+  const pendingPlan =
+    pendingCheckout?.product === 'lifetime_starter' ? t('upgrade.lifetime') : t('upgrade.pro')
 
-  // Keep the UI timeout aligned with the persisted OAuth state TTL.
+  // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
   useEffect(() => {
     if (!oauthPending) return
     const timer = setTimeout(() => {
@@ -112,7 +119,7 @@ function AuthForm() {
         await requestPasswordReset(email, i18n.resolvedLanguage ?? i18n.language ?? 'en')
         setMode('forgot-sent')
       } else if (tab === 'signin') {
-        const verificationCallbackURL = createDesktopAuthCallbackURL(
+        const verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
         )
         await signIn(email, password, { verificationCallbackURL })
@@ -128,7 +135,7 @@ function AuthForm() {
           setLocalError(t('account.passwordMinLength'))
           return
         }
-        const verificationCallbackURL = createDesktopAuthCallbackURL(
+        const verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
         )
         await signUp(email, password, name, { verificationCallbackURL })
@@ -158,7 +165,7 @@ function AuthForm() {
           <button
             onClick={async () => {
               setResent(false)
-              const verificationCallbackURL = createDesktopAuthCallbackURL(
+              const verificationCallbackURL = await createDesktopAuthCallbackURL(
                 EMAIL_VERIFICATION_STATE_TTL_MS,
               )
               await resendVerification({ verificationCallbackURL })
@@ -201,7 +208,8 @@ function AuthForm() {
       setOauthPending(provider)
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      const callbackURL = createDesktopAuthCallbackURL()
+      const callbackURL = await claimDesktopAuthCallbackURL()
+      if (!callbackURL) return
       // Open the desktop-oauth bridge route in the system browser. The server
       // internally POSTs to Better Auth, then 302-redirects the browser to the
       // OAuth provider while forwarding the state cookie — keeping cookie and
@@ -209,6 +217,7 @@ function AuthForm() {
       const url = `${API_BASE_URL}/api/auth/desktop-oauth?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`
       await openUrl(url)
     } catch {
+      clearOAuthState()
       setOauthPending(null)
       setLocalError(t('account.oauthFailed'))
     }
@@ -381,6 +390,16 @@ function AuthForm() {
         </p>
       </div>
 
+      {!forgotMode && pendingCheckout && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-[8px] border border-border bg-bg-secondary/50 px-3 py-2 text-[12px] text-text-secondary"
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+          <span>{t('upgrade.continueAfterSignIn', { plan: pendingPlan })}</span>
+        </div>
+      )}
+
       {/* Tab switcher */}
       {!forgotMode && (
         <div className="flex border border-border rounded-[8px] overflow-hidden">
@@ -552,6 +571,10 @@ function AccountDetails() {
     source,
     displayName,
     subscriptionEnd,
+    subscriptionStatus,
+    billingProvider,
+    canManageBilling,
+    canMigrateToStripe,
     quotaModel,
     displayWordsUsedEstimate,
     displayWordsLimit,
@@ -564,11 +587,13 @@ function AccountDetails() {
     llmTokensUsed,
     llmTokensLimit,
     credentialCapability,
+    subscriptionRefreshState,
+    subscriptionRefreshLoading,
+    refreshSubscription,
     refreshCredentialCapability,
     changePassword,
     loading,
     signOut,
-    refreshSubscription,
     subscriptionRefreshedAt,
   } = useAuthStore()
   const config = useAppStore((s) => s.config)
@@ -584,6 +609,8 @@ function AccountDetails() {
   const [backupLoading, setBackupLoading] = useState(false)
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
+  const [migrationLoading, setMigrationLoading] = useState(false)
+  const [billingError, setBillingError] = useState<string | null>(null)
   const [securityOpen, setSecurityOpen] = useState(false)
   const passwordTriggerRef = useRef<HTMLButtonElement>(null)
   const subscriptionRefreshInFlightRef = useRef(false)
@@ -609,7 +636,19 @@ function AccountDetails() {
   const hasCloudAccess = useAuthStore(hasManagedCloudAccess)
   const isAppSumo = source === 'appsumo'
   const isDirectLifetime = source === 'lifetime' || plan === 'lifetime_starter'
-  const canManageSubscription = source === 'creem' || plan === 'pro'
+  const isCreemPaymentFailed =
+    billingProvider === 'creem' &&
+    canMigrateToStripe &&
+    (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid')
+  const canManageSubscription =
+    !isCreemPaymentFailed &&
+    plan === 'pro' &&
+    !isAppSumo &&
+    !isDirectLifetime &&
+    canManageBilling &&
+    (billingProvider === 'creem' || billingProvider === 'stripe')
+  const subscriptionUnavailable = subscriptionRefreshState === 'unavailable'
+  const subscriptionStale = subscriptionRefreshState === 'stale'
   const wordsUsed =
     quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
       ? displayWordsUsedEstimate
@@ -679,13 +718,28 @@ function AccountDetails() {
 
   const handleManageSubscription = async () => {
     setPortalLoading(true)
+    setBillingError(null)
     try {
       const { url } = await createPortalSession()
       await openUrl(url)
-    } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : t('account.toast.subscriptionFail'))
+    } catch {
+      setBillingError(t('account.paymentPortalUnavailable'))
     } finally {
       setPortalLoading(false)
+    }
+  }
+
+  const handleMigrateToStripe = async () => {
+    setMigrationLoading(true)
+    setBillingError(null)
+    try {
+      const { url } = await createCheckout('desktop', 'pro_monthly')
+      await openUrl(url)
+      useAuthStore.setState({ checkoutPending: true })
+    } catch {
+      setBillingError(t('upgrade.checkoutTemporarilyUnavailable'))
+    } finally {
+      setMigrationLoading(false)
     }
   }
 
@@ -700,11 +754,54 @@ function AccountDetails() {
         <h1 className="text-[18px] font-semibold text-text-primary">{t('account.title')}</h1>
       </div>
 
+      {(subscriptionStale || subscriptionUnavailable) && (
+        <section
+          role="status"
+          aria-live="polite"
+          className="rounded-[8px] border border-amber-400/25 bg-amber-500/[0.06] px-2.5 py-2"
+          data-testid="subscription-refresh-notice"
+        >
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+            <p className="min-w-0 flex-1 text-[12px] leading-4">
+              <span className="font-medium text-text-primary">
+                {subscriptionStale
+                  ? t('account.subscriptionStaleTitle', 'Membership not refreshed')
+                  : t('account.subscriptionUnavailableTitle', 'Membership unavailable')}
+              </span>
+              <span className="text-text-secondary">
+                {' · '}
+                {subscriptionStale
+                  ? t('account.subscriptionStaleBody', 'using your last verified plan')
+                  : t('account.subscriptionUnavailableBody', 'try again shortly')}
+              </span>
+            </p>
+            <button
+              type="button"
+              onClick={() => void refreshSubscription()}
+              disabled={subscriptionRefreshLoading}
+              className="h-7 shrink-0 rounded-[6px] border border-amber-400/30 bg-transparent px-2 text-[11px] font-medium text-text-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {subscriptionRefreshLoading
+                ? t('account.subscriptionRetrying', 'Checking...')
+                : t('account.subscriptionRetry', 'Try again')}
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* User info */}
       <div className="border border-border rounded-[10px] overflow-hidden">
         <InfoRow label={t('account.email')} value={user!.email} />
         {user!.name && <InfoRow label={t('account.name')} value={user!.name} />}
-        <InfoRow label={t('account.plan')} value={displayName} />
+        <InfoRow
+          label={t('account.plan')}
+          value={
+            subscriptionUnavailable
+              ? t('account.subscriptionStatusUnknown', 'Temporarily unavailable')
+              : displayName
+          }
+        />
         {(isAppSumo || isDirectLifetime) && (
           <InfoRow
             label={t('account.license', 'License')}
@@ -853,6 +950,32 @@ function AccountDetails() {
       )}
 
       {/* Manage subscription (Pro) */}
+      {isCreemPaymentFailed && (
+        <section className="rounded-[10px] border border-amber-400/30 px-3 py-3">
+          <div className="flex items-start gap-2.5">
+            <span
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+              aria-hidden="true"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-text-primary">{t('upgrade.paymentNeedsAttention')}</p>
+              <p className="mt-0.5 text-[12px] leading-5 text-text-secondary">
+                {t('upgrade.migrationDescription')}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleMigrateToStripe}
+            disabled={migrationLoading}
+            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-[8px] bg-accent py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {migrationLoading && <Loader2 size={14} className="animate-spin" />}
+            {migrationLoading ? t('upgrade.openingCheckout') : t('upgrade.switchToStripe')}
+          </button>
+        </section>
+      )}
+
       {canManageSubscription && (
         <button
           onClick={handleManageSubscription}
@@ -864,8 +987,14 @@ function AccountDetails() {
           ) : (
             <ExternalLink size={14} />
           )}
-          {portalLoading ? t('account.opening') : t('account.manageSubscription')}
+          {portalLoading ? t('account.opening') : t('account.managePayment')}
         </button>
+      )}
+
+      {billingError && (
+        <p role="alert" className="text-center text-[12px] text-red-500">
+          {billingError}
+        </p>
       )}
 
       {/* Sign out */}

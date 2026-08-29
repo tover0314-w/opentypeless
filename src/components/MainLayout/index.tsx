@@ -5,6 +5,7 @@ import { spring } from '../../lib/animations'
 import { useRoute, type Route } from '../../lib/router'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
 import { AccessibilityBanner } from './AccessibilityBanner'
+import { CloudServiceBanner } from './CloudServiceBanner'
 
 const baseNavItems: { id: Route; labelKey: string; icon: typeof Home }[] = [
   { id: 'home', labelKey: 'nav.home', icon: Home },
@@ -139,6 +140,7 @@ export function MainLayout({ children }: Props) {
       {/* Content */}
       <main className="flex-1 min-w-0 flex flex-col">
         <AccessibilityBanner />
+        <CloudServiceBanner />
         <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
     </div>

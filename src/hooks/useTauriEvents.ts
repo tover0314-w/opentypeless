@@ -16,6 +16,10 @@ import { getHistory } from '../lib/tauri'
 import { toast } from '../components/toast-service'
 import { capsuleErrorKeyFromPayload, type PipelineErrorPayload } from '../lib/capsuleError'
 import { invalidateCloudSessionOnce } from '../lib/cloud-session'
+import {
+  managedCloudIncidentFromPipelineError,
+  useCloudServiceStore,
+} from '../stores/cloudServiceStore'
 
 type Unlisten = () => void | Promise<void>
 
@@ -101,6 +105,7 @@ export function useTauriEvents() {
       if (state === 'preparing' || state === 'recording' || state === 'ask_recording') {
         // Clear any previous error when starting a new pipeline run
         setPipelineError(null)
+        useCloudServiceStore.getState().clearIncident()
       }
       if (state === 'idle') {
         // Don't clear pipelineError here — CapsuleError auto-resets after 2.5s.
@@ -147,6 +152,8 @@ export function useTauriEvents() {
       if (capsuleErrorKey === 'accessibility_required') {
         setAccessibilityTrusted(false)
       }
+      const incident = managedCloudIncidentFromPipelineError(payload, useAppStore.getState().config)
+      if (incident) useCloudServiceStore.getState().setIncident(incident)
     })
     addListener<{ code: string; details?: string }>('pipeline:warning', (payload) => {
       const message = t(`errors.${payload.code}`, { details: payload.details ?? '' })
