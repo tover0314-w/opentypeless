@@ -753,6 +753,8 @@
     "paymentPortalUnavailable": "支払い設定は一時的に利用できません。しばらくしてから再試行してください。",
     "signOut": "サインアウト",
     "oauthFailed": "ログインの開始に失敗しました",
+    "signInUnavailable": "サインインサービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
+    "signInUnavailableWithStatus": "サインインサービスは一時的に利用できません（HTTP {{status}}）。しばらくしてからもう一度お試しください。",
     "oauthPendingTitle": "サインインを完了中...",
     "oauthPendingDesc": "ブラウザでサインインを完了してください。自動的にリダイレクトされます。",
     "oauthPendingHint": "ブラウザに「Load failed」と表示された場合は、ブラウザのアドレスをコピーし、下の「クリップボードから完了」を使ってください。",

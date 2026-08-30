@@ -758,6 +758,8 @@
     "oauthTimeout": "Anmeldung abgelaufen. Bitte versuchen Sie es erneut.",
     "cancel": "Abbrechen",
     "oauthFailed": "Anmeldung konnte nicht gestartet werden",
+    "signInUnavailable": "Der Anmeldedienst ist vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.",
+    "signInUnavailableWithStatus": "Der Anmeldedienst ist vorübergehend nicht verfügbar (HTTP {{status}}). Bitte versuchen Sie es später erneut.",
     "completeFromClipboard": "Aus Zwischenablage abschließen",
     "oauthClipboardInvalid": "Kein gültiger Anmeldelink gefunden.",
     "toast": {

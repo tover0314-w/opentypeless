@@ -19,19 +19,39 @@ async function pkceChallenge(verifier: string): Promise<string> {
     .replace(/=+$/, '')
 }
 
+export type DesktopAuthErrorReason = 'network' | 'http'
+
+export class DesktopAuthError extends Error {
+  constructor(
+    public reason: DesktopAuthErrorReason,
+    public status: number | null,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'DesktopAuthError'
+  }
+}
+
 async function registerDesktopAuthFlow(state: string, ttlMs: number): Promise<string> {
   const verifier = getPendingOAuthVerifier(state)
   if (!verifier) throw new Error('Desktop authentication proof is unavailable')
-  const response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/initiate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      state,
-      challenge: await pkceChallenge(verifier),
-      ttlSeconds: ttlMs >= 60 * 60 * 1000 ? 3_600 : 600,
-    }),
-  })
-  if (!response.ok) throw new Error('Unable to initiate desktop authentication')
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        state,
+        challenge: await pkceChallenge(verifier),
+        ttlSeconds: ttlMs >= 60 * 60 * 1000 ? 3_600 : 600,
+      }),
+    })
+  } catch {
+    throw new DesktopAuthError('network', null, 'Unable to reach the sign-in service')
+  }
+  if (!response.ok) {
+    throw new DesktopAuthError('http', response.status, 'Unable to initiate desktop authentication')
+  }
   return callbackURLForState(state)
 }
 

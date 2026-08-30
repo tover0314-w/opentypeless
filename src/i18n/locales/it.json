@@ -757,6 +757,8 @@
     "oauthPendingHint": "Se il browser mostra “Load failed”, copia l’indirizzo del browser e usa Completa dagli appunti qui sotto.",
     "oauthTimeout": "Accesso scaduto. Riprova.",
     "oauthFailed": "Impossibile avviare l'accesso",
+    "signInUnavailable": "Il servizio di accesso è temporaneamente non disponibile. Riprova più tardi.",
+    "signInUnavailableWithStatus": "Il servizio di accesso è temporaneamente non disponibile (HTTP {{status}}). Riprova più tardi.",
     "cancel": "Annulla",
     "completeFromClipboard": "Completa dagli appunti",
     "oauthClipboardInvalid": "Nessun link di accesso valido trovato.",

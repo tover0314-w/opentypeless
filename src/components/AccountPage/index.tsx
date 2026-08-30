@@ -32,6 +32,7 @@ import {
 import {
   claimDesktopAuthCallbackURL,
   createDesktopAuthCallbackURL,
+  DesktopAuthError,
 } from '../../lib/desktop-auth-callback'
 import { readPendingDesktopCheckout } from '../../lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnAccountOpen } from '../../lib/subscription-refresh-policy'
@@ -55,6 +56,23 @@ function accountErrorMessage(message: string | null, t: ReturnType<typeof useTra
     )
   }
   return message
+}
+
+function desktopAuthErrorMessage(
+  error: DesktopAuthError,
+  t: ReturnType<typeof useTranslation>['t'],
+) {
+  if (error.status !== null) {
+    return t(
+      'account.signInUnavailableWithStatus',
+      'The sign-in service is temporarily unavailable (HTTP {{status}}). Please try again later.',
+      { status: error.status },
+    )
+  }
+  return t(
+    'account.signInUnavailable',
+    'The sign-in service is temporarily unavailable. Please try again later.',
+  )
 }
 
 export function AccountPage() {
@@ -140,9 +158,14 @@ function AuthForm() {
         )
         await signUp(email, password, name, { verificationCallbackURL })
       }
-    } catch {
+    } catch (error) {
       if (!useAuthStore.getState().emailVerificationPending) {
         clearOAuthState()
+      }
+      // The store only records errors thrown by signIn/signUp; a failed
+      // desktop-handoff registration throws before those run, so surface it here.
+      if (error instanceof DesktopAuthError) {
+        setLocalError(desktopAuthErrorMessage(error, t))
       }
       // Error already set in store
     }
@@ -216,10 +239,14 @@ function AuthForm() {
       // callback in the same browser context.
       const url = `${API_BASE_URL}/api/auth/desktop-oauth?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`
       await openUrl(url)
-    } catch {
+    } catch (error) {
       clearOAuthState()
       setOauthPending(null)
-      setLocalError(t('account.oauthFailed'))
+      setLocalError(
+        error instanceof DesktopAuthError
+          ? desktopAuthErrorMessage(error, t)
+          : t('account.oauthFailed'),
+      )
     }
   }
 

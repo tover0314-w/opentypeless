@@ -757,6 +757,8 @@
     "oauthPendingHint": "브라우저에 “Load failed”가 표시되면 브라우저 주소를 복사한 뒤 아래의 클립보드에서 완료를 사용하세요.",
     "oauthTimeout": "로그인 시간이 초과되었습니다. 다시 시도해 주세요.",
     "oauthFailed": "로그인 시작에 실패했습니다",
+    "signInUnavailable": "로그인 서비스를 일시적으로 사용할 수 없습니다. 나중에 다시 시도해 주세요.",
+    "signInUnavailableWithStatus": "로그인 서비스를 일시적으로 사용할 수 없습니다(HTTP {{status}}). 나중에 다시 시도해 주세요.",
     "cancel": "취소",
     "completeFromClipboard": "클립보드에서 완료",
     "oauthClipboardInvalid": "유효한 로그인 링크를 찾을 수 없습니다.",

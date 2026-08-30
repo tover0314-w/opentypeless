@@ -758,6 +758,8 @@
     "oauthTimeout": "El inicio de sesión expiró. Por favor, inténtalo de nuevo.",
     "cancel": "Cancelar",
     "oauthFailed": "Error al iniciar sesión",
+    "signInUnavailable": "El servicio de inicio de sesión no está disponible temporalmente. Inténtalo de nuevo más tarde.",
+    "signInUnavailableWithStatus": "El servicio de inicio de sesión no está disponible temporalmente (HTTP {{status}}). Inténtalo de nuevo más tarde.",
     "completeFromClipboard": "Completar desde el portapapeles",
     "oauthClipboardInvalid": "No se encontró un enlace de inicio de sesión válido.",
     "toast": {
