@@ -7,8 +7,14 @@ import {
   OAUTH_STATE_TTL_MS,
 } from './deep-link'
 
-function callbackURLForState(state: string): string {
-  return `${API_BASE_URL}/auth/callback?desktop=${encodeURIComponent(state)}`
+function callbackURLForState(state: string, locale?: string): string {
+  const callbackURL = new URL('/auth/callback', API_BASE_URL)
+  callbackURL.searchParams.set('desktop', state)
+  const normalizedLocale = locale?.trim().toLowerCase().replace(/_/g, '-').split('-')[0]
+  if (normalizedLocale && /^[a-z]{2,3}$/.test(normalizedLocale)) {
+    callbackURL.searchParams.set('locale', normalizedLocale)
+  }
+  return callbackURL.toString()
 }
 
 async function pkceChallenge(verifier: string): Promise<string> {
@@ -32,7 +38,11 @@ export class DesktopAuthError extends Error {
   }
 }
 
-async function registerDesktopAuthFlow(state: string, ttlMs: number): Promise<string> {
+async function registerDesktopAuthFlow(
+  state: string,
+  ttlMs: number,
+  locale?: string,
+): Promise<string> {
   const verifier = getPendingOAuthVerifier(state)
   if (!verifier) throw new Error('Desktop authentication proof is unavailable')
   let response: Response
@@ -52,15 +62,16 @@ async function registerDesktopAuthFlow(state: string, ttlMs: number): Promise<st
   if (!response.ok) {
     throw new DesktopAuthError('http', response.status, 'Unable to initiate desktop authentication')
   }
-  return callbackURLForState(state)
+  return callbackURLForState(state, locale)
 }
 
 export async function createDesktopAuthCallbackURL(
   stateTtlMs = OAUTH_STATE_TTL_MS,
+  locale?: string,
 ): Promise<string> {
   const state = generateOAuthState(stateTtlMs)
   try {
-    return await registerDesktopAuthFlow(state, stateTtlMs)
+    return await registerDesktopAuthFlow(state, stateTtlMs, locale)
   } catch (error) {
     clearOAuthState()
     throw error
@@ -70,11 +81,12 @@ export async function createDesktopAuthCallbackURL(
 /** Return null while another desktop OAuth or verification flow is pending. */
 export async function claimDesktopAuthCallbackURL(
   stateTtlMs = OAUTH_STATE_TTL_MS,
+  locale?: string,
 ): Promise<string | null> {
   const state = claimOAuthState(stateTtlMs)
   if (!state) return null
   try {
-    return await registerDesktopAuthFlow(state, stateTtlMs)
+    return await registerDesktopAuthFlow(state, stateTtlMs, locale)
   } catch (error) {
     clearOAuthState()
     throw error

@@ -35,6 +35,12 @@ describe('createDesktopAuthCallbackURL', () => {
     expect(request.body).not.toContain('11111111111111111111111111111111'.repeat(2))
   })
 
+  it('adds the selected UI language without exposing proof material', async () => {
+    await expect(createDesktopAuthCallbackURL(undefined, 'zh-CN')).resolves.toBe(
+      'https://www.opentypeless.com/auth/callback?desktop=11111111-1111-4111-8111-111111111111&locale=zh',
+    )
+  })
+
   it('only claims one callback URL until the pending state is cleared', async () => {
     clearOAuthState()
 

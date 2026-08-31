@@ -20,7 +20,7 @@ import {
 type Tab = 'signin' | 'signup'
 
 export function AccountStep() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user, loading, error, emailVerificationPending, resendVerification, signIn, signUp } =
     useAuthStore()
   const [tab, setTab] = useState<Tab>('signin')
@@ -30,6 +30,7 @@ export function AccountStep() {
   const [localError, setLocalError] = useState<string | null>(null)
   const [resent, setResent] = useState(false)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
+  const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
 
   // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
   useEffect(() => {
@@ -59,6 +60,7 @@ export function AccountStep() {
       if (tab === 'signin') {
         verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
+          authLocale,
         )
         await signIn(email, password, { verificationCallbackURL })
         if (!useAuthStore.getState().emailVerificationPending) {
@@ -75,6 +77,7 @@ export function AccountStep() {
         }
         verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
+          authLocale,
         )
         await signUp(email, password, name, { verificationCallbackURL })
       }
@@ -91,7 +94,7 @@ export function AccountStep() {
       setOauthPending(provider)
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      const callbackURL = await claimDesktopAuthCallbackURL()
+      const callbackURL = await claimDesktopAuthCallbackURL(OAUTH_STATE_TTL_MS, authLocale)
       if (!callbackURL) return
       const url = `${API_BASE_URL}/api/auth/desktop-oauth?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`
       await openUrl(url)
@@ -177,6 +180,7 @@ export function AccountStep() {
               setResent(false)
               const verificationCallbackURL = await createDesktopAuthCallbackURL(
                 EMAIL_VERIFICATION_STATE_TTL_MS,
+                authLocale,
               )
               await resendVerification({ verificationCallbackURL })
               if (!useAuthStore.getState().error) {

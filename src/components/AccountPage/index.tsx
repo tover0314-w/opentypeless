@@ -112,6 +112,7 @@ function AuthForm() {
   const [resent, setResent] = useState(false)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
   const { t, i18n } = useTranslation()
+  const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const pendingCheckout = readPendingDesktopCheckout(localStorage)
   const pendingPlan =
     pendingCheckout?.product === 'lifetime_starter' ? t('upgrade.lifetime') : t('upgrade.pro')
@@ -139,6 +140,7 @@ function AuthForm() {
       } else if (tab === 'signin') {
         const verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
+          authLocale,
         )
         await signIn(email, password, { verificationCallbackURL })
         if (!useAuthStore.getState().emailVerificationPending) {
@@ -155,6 +157,7 @@ function AuthForm() {
         }
         const verificationCallbackURL = await createDesktopAuthCallbackURL(
           EMAIL_VERIFICATION_STATE_TTL_MS,
+          authLocale,
         )
         await signUp(email, password, name, { verificationCallbackURL })
       }
@@ -190,6 +193,7 @@ function AuthForm() {
               setResent(false)
               const verificationCallbackURL = await createDesktopAuthCallbackURL(
                 EMAIL_VERIFICATION_STATE_TTL_MS,
+                authLocale,
               )
               await resendVerification({ verificationCallbackURL })
               // Only show success if store didn't set an error
@@ -231,7 +235,7 @@ function AuthForm() {
       setOauthPending(provider)
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      const callbackURL = await claimDesktopAuthCallbackURL()
+      const callbackURL = await claimDesktopAuthCallbackURL(OAUTH_STATE_TTL_MS, authLocale)
       if (!callbackURL) return
       // Open the desktop-oauth bridge route in the system browser. The server
       // internally POSTs to Better Auth, then 302-redirects the browser to the
