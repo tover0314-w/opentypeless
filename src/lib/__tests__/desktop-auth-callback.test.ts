@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { claimDesktopAuthCallbackURL, createDesktopAuthCallbackURL } from '../desktop-auth-callback'
+import {
+  claimDesktopAuthCallbackURL,
+  createDesktopAuthCallbackURL,
+  DesktopAuthError,
+} from '../desktop-auth-callback'
 import { clearOAuthState } from '../deep-link'
 
 describe('createDesktopAuthCallbackURL', () => {
@@ -50,5 +54,23 @@ describe('createDesktopAuthCallbackURL', () => {
     )
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 201 }))
     await expect(claimDesktopAuthCallbackURL()).resolves.not.toBeNull()
+  })
+
+  it('throws a typed http error with the status when initiate returns 404', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }))
+
+    const error = await createDesktopAuthCallbackURL().catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(DesktopAuthError)
+    expect((error as DesktopAuthError).reason).toBe('http')
+    expect((error as DesktopAuthError).status).toBe(404)
+  })
+
+  it('throws a typed network error when fetch rejects', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
+
+    const error = await createDesktopAuthCallbackURL().catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(DesktopAuthError)
+    expect((error as DesktopAuthError).reason).toBe('network')
+    expect((error as DesktopAuthError).status).toBeNull()
   })
 })

@@ -758,6 +758,8 @@
     "oauthTimeout": "La connexion a expiré. Veuillez réessayer.",
     "cancel": "Annuler",
     "oauthFailed": "Échec du démarrage de la connexion",
+    "signInUnavailable": "Le service de connexion est temporairement indisponible. Veuillez réessayer plus tard.",
+    "signInUnavailableWithStatus": "Le service de connexion est temporairement indisponible (HTTP {{status}}). Veuillez réessayer plus tard.",
     "completeFromClipboard": "Terminer depuis le presse-papiers",
     "oauthClipboardInvalid": "Aucun lien de connexion valide trouvé.",
     "toast": {

@@ -757,6 +757,8 @@
     "oauthPendingHint": "Se o navegador mostrar “Load failed”, copie o endereço do navegador e use Concluir da área de transferência abaixo.",
     "oauthTimeout": "O login expirou. Tente novamente.",
     "oauthFailed": "Falha ao iniciar sessão",
+    "signInUnavailable": "O serviço de início de sessão está temporariamente indisponível. Tente novamente mais tarde.",
+    "signInUnavailableWithStatus": "O serviço de início de sessão está temporariamente indisponível (HTTP {{status}}). Tente novamente mais tarde.",
     "cancel": "Cancelar",
     "completeFromClipboard": "Concluir da área de transferência",
     "oauthClipboardInvalid": "Nenhum link de login válido encontrado.",

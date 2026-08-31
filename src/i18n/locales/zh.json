@@ -757,6 +757,8 @@
     "oauthPendingHint": "如果浏览器显示“Load failed”，复制浏览器地址栏里的链接，然后点击下方“从剪贴板完成登录”。",
     "oauthTimeout": "登录超时，请重试。",
     "oauthFailed": "启动登录失败",
+    "signInUnavailable": "登录服务暂时不可用，请稍后重试。",
+    "signInUnavailableWithStatus": "登录服务暂时不可用（HTTP {{status}}），请稍后重试。",
     "completeFromClipboard": "从剪贴板完成登录",
     "oauthClipboardInvalid": "没有找到有效的登录链接。",
     "sttQuotaWarning": "语音转文字额度已超过 90%，建议切换到自带密钥模式。",
