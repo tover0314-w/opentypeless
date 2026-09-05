@@ -458,11 +458,6 @@ impl AppConfig {
             self.hotkey = "Fn".to_string();
             self.hotkey_mode = "toggle".to_string();
         }
-        #[cfg(target_os = "windows")]
-        if self.hotkey == "RightAlt" && self.hotkey_mode == "toggle" {
-            self.hotkey = "Ctrl+/".to_string();
-            self.hotkey_mode = "hold".to_string();
-        }
         #[cfg(target_os = "macos")]
         if self.ask_hotkey == "Alt+Shift+/"
             || self.ask_hotkey == "Option+Shift+/"
@@ -508,13 +503,6 @@ impl AppConfig {
     fn migrate_platform_typed_hotkeys(&mut self) {
         #[cfg(target_os = "windows")]
         {
-            if self.hotkeys.dictation.to_hotkey_string().as_deref() == Some("RightAlt") {
-                if let Some(binding) = ShortcutBinding::from_hotkey("Ctrl+/") {
-                    self.hotkeys.dictation = binding.clone();
-                    self.hotkeys.dictation_bindings = vec![binding];
-                }
-                self.hotkeys.dictation_mode = "hold".to_string();
-            }
             if self
                 .hotkeys
                 .ask
@@ -807,6 +795,9 @@ fn normalize_optional_binding(binding: &mut Option<ShortcutBinding>) {
 fn normalize_hotkey_modifier(value: &str) -> Option<(&'static str, &'static str)> {
     match value.trim().to_lowercase().as_str() {
         "fn" | "function" => Some(("fn", "Fn")),
+        "leftalt" | "left_alt" | "left-alt" | "altleft" | "alt_left" | "alt-left" => {
+            Some(("leftalt", "LeftAlt"))
+        }
         "rightalt" | "right_alt" | "right-alt" | "altright" | "alt_right" | "alt-right" => {
             Some(("rightalt", "RightAlt"))
         }
@@ -822,7 +813,7 @@ fn normalize_hotkey_modifier(value: &str) -> Option<(&'static str, &'static str)
 
 fn hotkey_modifier_rank(value: &str) -> u8 {
     match value {
-        "Fn" | "RightAlt" => 0,
+        "Fn" | "LeftAlt" | "RightAlt" => 0,
         "Command" | "Super" => 0,
         "Ctrl" => 1,
         "Option" | "Alt" => 2,
@@ -857,6 +848,9 @@ fn normalize_hotkey_primary(value: &str) -> Option<String> {
         "arrowleft" | "left" => "Left".to_string(),
         "arrowright" | "right" => "Right".to_string(),
         "fn" | "function" => "Fn".to_string(),
+        "leftalt" | "left_alt" | "left-alt" | "altleft" | "alt_left" | "alt-left" => {
+            "LeftAlt".to_string()
+        }
         "rightalt" | "right_alt" | "right-alt" | "altright" | "alt_right" | "alt-right" => {
             "RightAlt".to_string()
         }
@@ -2402,6 +2396,11 @@ mod tests {
         assert_eq!(right_alt.primary, "RightAlt");
         assert!(right_alt.modifiers.is_empty());
         assert_eq!(right_alt.to_hotkey_string().as_deref(), Some("RightAlt"));
+
+        let left_alt = ShortcutBinding::from_hotkey("LeftAlt").expect("LeftAlt parses");
+        assert_eq!(left_alt.primary, "LeftAlt");
+        assert!(left_alt.modifiers.is_empty());
+        assert_eq!(left_alt.to_hotkey_string().as_deref(), Some("LeftAlt"));
     }
 
     #[test]
@@ -3127,6 +3126,24 @@ mod tests {
         );
         assert_eq!(config.hotkey_mode, "hold");
         assert_eq!(config.hotkeys.dictation_mode, "hold");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn app_config_preserves_single_right_alt_dictation_hotkey() {
+        let value = serde_json::json!({
+            "hotkey": "RightAlt",
+            "ask_hotkey": "Ctrl+.",
+            "hotkey_mode": "toggle"
+        });
+
+        let config = AppConfig::from_stored_value(value).unwrap();
+
+        assert_eq!(config.hotkey, "RightAlt");
+        assert_eq!(config.hotkeys.dictation.primary, "RightAlt");
+        assert!(config.hotkeys.dictation.modifiers.is_empty());
+        assert_eq!(config.hotkey_mode, "toggle");
+        assert_eq!(config.hotkeys.dictation_mode, "toggle");
     }
 
     #[test]

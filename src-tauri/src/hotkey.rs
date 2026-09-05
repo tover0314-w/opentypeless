@@ -414,7 +414,8 @@ pub fn native_trigger_supported_on_platform(trigger: NativeHotkeyTrigger, platfo
         ),
         "windows" => matches!(
             trigger,
-            NativeHotkeyTrigger::RightAlt
+            NativeHotkeyTrigger::LeftAlt
+                | NativeHotkeyTrigger::RightAlt
                 | NativeHotkeyTrigger::RightAltSpace
                 | NativeHotkeyTrigger::RightAltLeftShift
         ),
@@ -428,6 +429,9 @@ pub fn native_trigger_from_binding(
     if binding.modifiers.is_empty() {
         return match binding.primary.trim().to_lowercase().as_str() {
             "fn" | "function" => Some(NativeHotkeyTrigger::Fn),
+            "leftalt" | "left_alt" | "left-alt" | "altleft" | "alt_left" | "alt-left" => {
+                Some(NativeHotkeyTrigger::LeftAlt)
+            }
             "rightalt" | "right_alt" | "right-alt" | "altright" | "alt_right" | "alt-right" => {
                 Some(NativeHotkeyTrigger::RightAlt)
             }
@@ -1244,6 +1248,25 @@ mod tests {
     }
 
     #[test]
+    fn native_left_alt_dictation_uses_native_adapter_plan() {
+        let dictation = storage::ShortcutBinding {
+            primary: "LeftAlt".to_string(),
+            modifiers: vec![],
+        };
+        let config = storage::HotkeyConfig {
+            dictation_bindings: vec![dictation.clone()],
+            dictation,
+            ..storage::HotkeyConfig::default()
+        };
+
+        let plan = hotkey_registration_plan_from_config_for_platform(&config, "windows")
+            .expect("LeftAlt should be supported on Windows");
+
+        assert_eq!(plan.native.len(), 1);
+        assert_eq!(plan.native[0].trigger, NativeHotkeyTrigger::LeftAlt);
+    }
+
+    #[test]
     fn native_typeless_mode_shortcuts_use_native_adapter_plan() {
         let dictation = storage::ShortcutBinding::from_hotkey("Fn").unwrap();
         let ask = storage::ShortcutBinding::from_hotkey("Fn+Space");
@@ -1472,6 +1495,10 @@ mod tests {
         assert!(!native_trigger_supported_on_platform(
             NativeHotkeyTrigger::RightAlt,
             "macos"
+        ));
+        assert!(native_trigger_supported_on_platform(
+            NativeHotkeyTrigger::LeftAlt,
+            "windows"
         ));
         assert!(native_trigger_supported_on_platform(
             NativeHotkeyTrigger::RightAltLeftShift,
