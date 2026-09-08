@@ -79,6 +79,21 @@ pub struct HotkeyRegistrationError(pub Arc<Mutex<Option<String>>>);
 /// The main renderer may restore it for authenticated API calls; native STT/LLM reads it directly.
 pub struct SessionTokenStore(pub Arc<Mutex<String>>);
 
+fn with_restored_session_token<R, V>(builder: tauri::Builder<R>, vault: &V) -> tauri::Builder<R>
+where
+    R: tauri::Runtime,
+    V: credentials::CredentialSecretReader,
+{
+    let token = credentials::load_cloud_session_token(vault)
+        .unwrap_or_else(|error| {
+            tracing::warn!("Failed to restore cloud session from the system vault: {error}");
+            None
+        })
+        .unwrap_or_default();
+
+    builder.manage(SessionTokenStore(Arc::new(Mutex::new(token))))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AutoStartSyncOutcome {
     config_auto_start: bool,
@@ -258,6 +273,7 @@ async fn show_ask_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     fn text_mentions(text: &str, keywords: &[&str]) -> bool {
         let normalized = text.to_ascii_lowercase();
@@ -278,6 +294,30 @@ mod tests {
     fn desktop_client_version_header_matches_frontend_contract() {
         assert_eq!(crate::CLIENT_VERSION_HEADER, "X-OpenTypeless-Version");
         assert_eq!(crate::desktop_client_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    struct StaticSessionVault(&'static str);
+
+    impl credentials::CredentialSecretReader for StaticSessionVault {
+        fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+            Ok(Some(self.0.to_string()))
+        }
+    }
+
+    #[test]
+    fn cloud_session_state_is_managed_before_setup_and_window_scripts() {
+        let app = with_restored_session_token(
+            tauri::test::mock_builder(),
+            &StaticSessionVault("restored-token"),
+        )
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+
+        let state = app.state::<SessionTokenStore>();
+        assert_eq!(
+            state.0.lock().unwrap_or_else(|e| e.into_inner()).as_str(),
+            "restored-token"
+        );
     }
 
     #[test]
@@ -833,7 +873,14 @@ pub fn run() {
         }
     }
 
-    tauri::Builder::default()
+    // Builder-managed state exists before Tauri creates configured webviews.
+    // Registering this in `.setup(...)` races the main renderer's first invoke on WebView2.
+    let builder = with_restored_session_token(
+        tauri::Builder::default(),
+        &credentials::SystemCredentialVault,
+    );
+
+    builder
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_autostart::init(
@@ -929,19 +976,6 @@ pub fn run() {
             app.manage(CloseToTrayCache(Arc::new(Mutex::new(
                 initial_config.close_to_tray,
             ))));
-            let initial_session_token =
-                credentials::load_cloud_session_token(&credentials::SystemCredentialVault)
-                    .unwrap_or_else(|error| {
-                        tracing::warn!(
-                            "Failed to restore cloud session from the system vault: {error}"
-                        );
-                        None
-                    })
-                    .unwrap_or_default();
-            app.manage(SessionTokenStore(Arc::new(Mutex::new(
-                initial_session_token,
-            ))));
-
             // Register global shortcut from config
             let handler = hotkey::build_shortcut_handler(app_handle.clone());
             app.handle().plugin(
