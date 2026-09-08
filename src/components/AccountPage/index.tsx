@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Mail,
   KeyRound,
+  UserCircle,
 } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { readText } from '@tauri-apps/plugin-clipboard-manager'
@@ -31,7 +32,7 @@ import {
 } from '../../lib/deep-link'
 import {
   claimDesktopAuthCallbackURL,
-  createDesktopAuthCallbackURL,
+  createDesktopWebAuthURL,
   DesktopAuthError,
 } from '../../lib/desktop-auth-callback'
 import { readPendingDesktopCheckout } from '../../lib/desktop-checkout-intent'
@@ -40,7 +41,7 @@ import { PasswordDialog } from './PasswordDialog'
 import { PasswordField } from './PasswordField'
 
 type Tab = 'signin' | 'signup'
-type AuthMode = 'auth' | 'forgot' | 'forgot-sent'
+type AuthMode = 'auth' | 'forgot'
 
 function accountErrorMessage(message: string | null, t: ReturnType<typeof useTranslation>['t']) {
   if (!message) return null
@@ -98,19 +99,14 @@ function AuthForm() {
   const [mode, setMode] = useState<AuthMode>('auth')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
   const {
     signIn,
-    signUp,
-    requestPasswordReset,
     loading,
     error,
     emailVerificationPending,
-    resendVerification,
   } = useAuthStore()
   const [localError, setLocalError] = useState<string | null>(null)
-  const [resent, setResent] = useState(false)
-  const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
+  const [oauthPending, setOauthPending] = useState<'google' | 'github' | 'browser' | null>(null)
   const { t, i18n } = useTranslation()
   const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const pendingCheckout = readPendingDesktopCheckout(localStorage)
@@ -130,43 +126,37 @@ function AuthForm() {
 
   const displayError = accountErrorMessage(localError ?? error, t)
 
+  const handleBrowserAuth = async (browserMode: 'signup' | 'verify' | 'forgot') => {
+    try {
+      setOauthPending('browser')
+      setLocalError(null)
+      useAuthStore.setState({ error: null })
+      await openUrl(await createDesktopWebAuthURL(
+        browserMode,
+        EMAIL_VERIFICATION_STATE_TTL_MS,
+        authLocale,
+      ))
+    } catch (error) {
+      clearOAuthState()
+      setOauthPending(null)
+      setLocalError(
+        error instanceof DesktopAuthError
+          ? desktopAuthErrorMessage(error, t)
+          : t('account.oauthFailed'),
+      )
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLocalError(null)
     try {
       if (mode === 'forgot') {
-        await requestPasswordReset(email, i18n.resolvedLanguage ?? i18n.language ?? 'en')
-        setMode('forgot-sent')
-      } else if (tab === 'signin') {
-        const verificationCallbackURL = await createDesktopAuthCallbackURL(
-          EMAIL_VERIFICATION_STATE_TTL_MS,
-          authLocale,
-        )
-        await signIn(email, password, { verificationCallbackURL })
-        if (!useAuthStore.getState().emailVerificationPending) {
-          clearOAuthState()
-        }
+        await handleBrowserAuth('forgot')
       } else {
-        if (!name.trim()) {
-          setLocalError(t('account.nameRequired'))
-          return
-        }
-        if (password.length < 8) {
-          setLocalError(t('account.passwordMinLength'))
-          return
-        }
-        const verificationCallbackURL = await createDesktopAuthCallbackURL(
-          EMAIL_VERIFICATION_STATE_TTL_MS,
-          authLocale,
-        )
-        await signUp(email, password, name, { verificationCallbackURL })
+        await signIn(email, password)
       }
     } catch (error) {
-      if (!useAuthStore.getState().emailVerificationPending) {
-        clearOAuthState()
-      }
-      // The store only records errors thrown by signIn/signUp; a failed
-      // desktop-handoff registration throws before those run, so surface it here.
       if (error instanceof DesktopAuthError) {
         setLocalError(desktopAuthErrorMessage(error, t))
       }
@@ -190,36 +180,22 @@ function AuthForm() {
         <div className="flex flex-col items-center gap-2 mt-4">
           <button
             onClick={async () => {
-              setResent(false)
-              const verificationCallbackURL = await createDesktopAuthCallbackURL(
-                EMAIL_VERIFICATION_STATE_TTL_MS,
-                authLocale,
-              )
-              await resendVerification({ verificationCallbackURL })
-              // Only show success if store didn't set an error
-              if (!useAuthStore.getState().error) {
-                setResent(true)
-              }
+              await handleBrowserAuth('verify')
             }}
-            disabled={loading}
+            disabled={loading || oauthPending === 'browser'}
             className="px-4 py-2 rounded-[8px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            {loading
+            {loading || oauthPending === 'browser'
               ? t('account.sending', 'Sending...')
               : t('account.resendVerification', 'Resend verification email')}
           </button>
-          {resent && (
-            <p className="text-green-500 text-[12px]">
-              {t('account.verificationResent', 'Verification email sent!')}
-            </p>
-          )}
-          {error && <p className="text-red-500 text-[12px]">{error}</p>}
+          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
           <button
             onClick={() => {
               useAuthStore.setState({ emailVerificationPending: false, pendingEmail: null })
               clearOAuthState()
               setTab('signin')
-              setResent(false)
+              setOauthPending(null)
             }}
             className="px-4 py-2 rounded-[8px] bg-bg-secondary border border-border text-text-primary text-[13px] cursor-pointer hover:bg-bg-tertiary transition-colors"
           >
@@ -267,34 +243,6 @@ function AuthForm() {
     }
   }
 
-  if (mode === 'forgot-sent') {
-    return (
-      <div className="max-w-[340px] mx-auto py-8 px-6 space-y-4 text-[13px] text-center">
-        <Mail size={28} className="mx-auto text-text-secondary" aria-hidden="true" />
-        <h2 className="text-[16px] font-semibold text-text-primary">
-          {t('account.resetLinkSent', 'Check your email')}
-        </h2>
-        <p className="text-text-secondary">
-          {t(
-            'account.resetLinkSentDesc',
-            'If an account exists for that email, a password reset link is on its way.',
-          )}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setMode('auth')
-            setTab('signin')
-            setLocalError(null)
-          }}
-          className="px-4 py-2 rounded-[8px] border border-border bg-transparent text-text-primary text-[13px] cursor-pointer hover:bg-bg-secondary transition-colors"
-        >
-          {t('account.backToSignIn', 'Back to Sign In')}
-        </button>
-      </div>
-    )
-  }
-
   if (oauthPending) {
     return (
       <div className="max-w-[340px] mx-auto py-8 px-6 text-[13px] text-center">
@@ -320,7 +268,9 @@ function AuthForm() {
                   'inset 0 1px 3px rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.04)',
               }}
             >
-              {oauthPending === 'google' ? (
+              {oauthPending === 'browser' ? (
+                <UserCircle size={24} className="text-accent" />
+              ) : oauthPending === 'google' ? (
                 <svg width="24" height="24" viewBox="0 0 24 24">
                   <path
                     d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
@@ -414,8 +364,8 @@ function AuthForm() {
         <p className="text-text-secondary mt-1">
           {forgotMode
             ? t(
-                'account.forgotPasswordDescription',
-                'Enter your email and we will send a secure reset link.',
+                'account.forgotPasswordBrowserDescription',
+                'Continue in your browser to complete human verification and request a secure reset link.',
               )
             : t('account.subtitle')}
         </p>
@@ -463,73 +413,16 @@ function AuthForm() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {!forgotMode && tab === 'signup' && (
-          <input
-            type="text"
-            aria-label={t('account.name')}
-            autoComplete="name"
-            placeholder={t('account.name')}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-secondary text-text-primary text-[13px] outline-none focus:border-accent transition-colors"
-          />
-        )}
-        <input
-          type="email"
-          aria-label={t('account.email')}
-          autoComplete="email"
-          placeholder={t('account.email')}
-          value={email}
-          onChange={(e) => {
-            setEmail(e.target.value)
-            useAuthStore.setState({ error: null })
-          }}
-          className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-secondary text-text-primary text-[13px] outline-none focus:border-accent transition-colors"
-          required
-        />
-        {!forgotMode && (
-          <>
-            <PasswordField
-              label={t('account.password')}
-              value={password}
-              onChange={(value) => {
-                setPassword(value)
-                useAuthStore.setState({ error: null })
-              }}
-              autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
-            />
-            {tab === 'signin' && (
-              <div className="text-right">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode('forgot')
-                    setLocalError(null)
-                    useAuthStore.setState({ error: null })
-                  }}
-                  className="p-0 text-[12px] text-accent bg-transparent border-none cursor-pointer hover:underline"
-                >
-                  {t('account.forgotPassword', 'Forgot password?')}
-                </button>
-              </div>
-            )}
-          </>
-        )}
-        {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2 rounded-[8px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          {loading && <Loader2 size={14} className="animate-spin" />}
-          {forgotMode
-            ? t('account.sendResetLink', 'Send reset link')
-            : tab === 'signin'
-              ? t('account.signIn')
-              : t('account.signUp')}
-        </button>
-        {forgotMode && (
+      {forgotMode ? (
+        <div className="space-y-3">
+          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
+          <button
+            type="button"
+            onClick={() => handleBrowserAuth('forgot')}
+            className="w-full py-2 rounded-[8px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity"
+          >
+            {t('account.sendResetLink', 'Send reset link')}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -541,8 +434,63 @@ function AuthForm() {
           >
             {t('account.backToSignIn', 'Back to Sign In')}
           </button>
-        )}
-      </form>
+        </div>
+      ) : tab === 'signin' ? (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            type="email"
+            aria-label={t('account.email')}
+            autoComplete="email"
+            placeholder={t('account.email')}
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              useAuthStore.setState({ error: null })
+            }}
+            className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-secondary text-text-primary text-[13px] outline-none focus:border-accent transition-colors"
+            required
+          />
+          <PasswordField
+            label={t('account.password')}
+            value={password}
+            onChange={(value) => {
+              setPassword(value)
+              useAuthStore.setState({ error: null })
+            }}
+            autoComplete="current-password"
+          />
+          <div className="text-right">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('forgot')
+                setLocalError(null)
+                useAuthStore.setState({ error: null })
+              }}
+              className="p-0 text-[12px] text-accent bg-transparent border-none cursor-pointer hover:underline"
+            >
+              {t('account.forgotPassword', 'Forgot password?')}
+            </button>
+          </div>
+          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 rounded-[8px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            {t('account.signIn')}
+          </button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => handleBrowserAuth('signup')}
+          className="w-full py-2 rounded-[8px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity"
+        >
+          {t('account.signUp')}
+        </button>
+      )}
 
       {/* Divider */}
       {!forgotMode && (

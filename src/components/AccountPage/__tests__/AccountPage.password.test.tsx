@@ -7,6 +7,7 @@ import { savePendingDesktopCheckout } from '../../../lib/desktop-checkout-intent
 import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import { AccountPage } from '../index'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ readText: vi.fn() }))
@@ -72,7 +73,7 @@ describe('AccountPage password controls', () => {
 
   afterEach(cleanup)
 
-  it('places forgot password beneath the signed-out password field and uses the current locale', async () => {
+  it('opens the localized Turnstile-protected reset page from beneath the password field', async () => {
     await i18n.changeLanguage('zh')
     render(<AccountPage />)
 
@@ -81,13 +82,14 @@ describe('AccountPage password controls', () => {
     expect(password.compareDocumentPosition(forgot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     fireEvent.click(forgot)
-    fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'person@example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '发送重置链接' }))
 
     await waitFor(() => {
-      expect(requestPasswordReset).toHaveBeenCalledWith('person@example.com', 'zh')
+      expect(openUrl).toHaveBeenCalledWith(
+        'https://www.opentypeless.com/zh/login?mode=forgot',
+      )
     })
-    expect(screen.getByText('请检查邮箱')).toBeInTheDocument()
+    expect(requestPasswordReset).not.toHaveBeenCalled()
   })
 
   it('explains that the selected desktop purchase will continue after sign-in', () => {

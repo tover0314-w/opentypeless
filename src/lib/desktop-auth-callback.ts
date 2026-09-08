@@ -17,6 +17,11 @@ function callbackURLForState(state: string, locale?: string): string {
   return callbackURL.toString()
 }
 
+function normalizedAuthLocale(locale?: string): string {
+  const normalized = locale?.trim().toLowerCase().replace(/_/g, '-').split('-')[0]
+  return normalized && /^[a-z]{2,3}$/.test(normalized) ? normalized : 'en'
+}
+
 async function pkceChallenge(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
   return btoa(String.fromCharCode(...new Uint8Array(digest)))
@@ -76,6 +81,35 @@ export async function createDesktopAuthCallbackURL(
     clearOAuthState()
     throw error
   }
+}
+
+export type DesktopWebAuthMode = 'signup' | 'verify' | 'forgot'
+
+/**
+ * Route desktop actions that can create accounts or send email through the
+ * browser page protected by Cloudflare Turnstile. Password reset does not need
+ * a desktop session handoff, so it deliberately avoids creating a database row.
+ */
+export async function createDesktopWebAuthURL(
+  mode: DesktopWebAuthMode,
+  stateTtlMs = OAUTH_STATE_TTL_MS,
+  locale?: string,
+): Promise<string> {
+  const url = new URL(`/${normalizedAuthLocale(locale)}/login`, API_BASE_URL)
+  if (mode === 'forgot') {
+    url.searchParams.set('mode', 'forgot')
+    return url.toString()
+  }
+
+  const callbackURL = await createDesktopAuthCallbackURL(stateTtlMs, locale)
+  const state = new URL(callbackURL).searchParams.get('desktop')
+  if (!state) {
+    clearOAuthState()
+    throw new Error('Desktop authentication state is unavailable')
+  }
+  url.searchParams.set(mode === 'signup' ? 'tab' : 'mode', mode)
+  url.searchParams.set('desktop', state)
+  return url.toString()
 }
 
 /** Return null while another desktop OAuth or verification flow is pending. */

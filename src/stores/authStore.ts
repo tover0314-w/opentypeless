@@ -423,12 +423,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       if (capability === 'none') {
         if (!state.user.emailVerified) {
-          const verification = await authClient.sendVerificationEmail({ email: state.user.email })
-          if (verification.error) {
-            throw new Error(verification.error.message ?? 'Failed to send verification email')
-          }
           set({ emailVerificationPending: true, pendingEmail: state.user.email })
-          throw new Error('Verify your email before setting a password')
+          throw new Error('Verify your email in the secure browser before setting a password')
         }
 
         await setOpenTypelessPassword(newPassword)

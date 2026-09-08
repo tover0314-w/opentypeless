@@ -14,22 +14,20 @@ import {
 } from '../../lib/deep-link'
 import {
   claimDesktopAuthCallbackURL,
-  createDesktopAuthCallbackURL,
+  createDesktopWebAuthURL,
 } from '../../lib/desktop-auth-callback'
 
 type Tab = 'signin' | 'signup'
 
 export function AccountStep() {
   const { t, i18n } = useTranslation()
-  const { user, loading, error, emailVerificationPending, resendVerification, signIn, signUp } =
+  const { user, loading, error, emailVerificationPending, signIn } =
     useAuthStore()
   const [tab, setTab] = useState<Tab>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
-  const [resent, setResent] = useState(false)
-  const [oauthPending, setOauthPending] = useState<'google' | 'github' | null>(null)
+  const [oauthPending, setOauthPending] = useState<'google' | 'github' | 'browser' | null>(null)
   const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
 
   // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
@@ -55,37 +53,27 @@ export function AccountStep() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLocalError(null)
-    let verificationCallbackURL: string | null = null
     try {
-      if (tab === 'signin') {
-        verificationCallbackURL = await createDesktopAuthCallbackURL(
-          EMAIL_VERIFICATION_STATE_TTL_MS,
-          authLocale,
-        )
-        await signIn(email, password, { verificationCallbackURL })
-        if (!useAuthStore.getState().emailVerificationPending) {
-          clearOAuthState()
-        }
-      } else {
-        if (!name.trim()) {
-          setLocalError(t('onboarding.account.nameRequired'))
-          return
-        }
-        if (password.length < 8) {
-          setLocalError(t('onboarding.account.passwordTooShort'))
-          return
-        }
-        verificationCallbackURL = await createDesktopAuthCallbackURL(
-          EMAIL_VERIFICATION_STATE_TTL_MS,
-          authLocale,
-        )
-        await signUp(email, password, name, { verificationCallbackURL })
-      }
+      await signIn(email, password)
     } catch {
-      if (!useAuthStore.getState().emailVerificationPending) {
-        clearOAuthState()
-      }
       // Error already set in store
+    }
+  }
+
+  const handleBrowserAuth = async (mode: 'signup' | 'verify') => {
+    try {
+      setOauthPending('browser')
+      setLocalError(null)
+      useAuthStore.setState({ error: null })
+      await openUrl(await createDesktopWebAuthURL(
+        mode,
+        EMAIL_VERIFICATION_STATE_TTL_MS,
+        authLocale,
+      ))
+    } catch {
+      clearOAuthState()
+      setOauthPending(null)
+      setLocalError(t('onboarding.account.failedToStart'))
     }
   }
 
@@ -177,31 +165,22 @@ export function AccountStep() {
         <div className="flex flex-col items-center gap-2 w-full">
           <button
             onClick={async () => {
-              setResent(false)
-              const verificationCallbackURL = await createDesktopAuthCallbackURL(
-                EMAIL_VERIFICATION_STATE_TTL_MS,
-                authLocale,
-              )
-              await resendVerification({ verificationCallbackURL })
-              if (!useAuthStore.getState().error) {
-                setResent(true)
-              }
+              await handleBrowserAuth('verify')
             }}
-            disabled={loading}
+            disabled={loading || oauthPending === 'browser'}
             className="w-full py-2.5 rounded-[10px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:bg-accent-hover transition-colors disabled:opacity-50"
           >
-            {loading ? t('common.saving') : t('onboarding.account.resendVerification')}
+            {loading || oauthPending === 'browser'
+              ? t('common.saving')
+              : t('onboarding.account.resendVerification')}
           </button>
-          {resent && (
-            <p className="text-success text-[12px]">{t('onboarding.account.verificationResent')}</p>
-          )}
-          {error && <p className="text-error text-[12px]">{error}</p>}
+          {displayError && <p className="text-error text-[12px]">{displayError}</p>}
           <button
             onClick={() => {
               useAuthStore.setState({ emailVerificationPending: false, pendingEmail: null })
               clearOAuthState()
               setTab('signin')
-              setResent(false)
+              setOauthPending(null)
             }}
             className="w-full py-2.5 rounded-[10px] bg-bg-secondary border border-border text-text-primary text-[13px] cursor-pointer hover:bg-bg-tertiary transition-colors"
           >
@@ -237,7 +216,9 @@ export function AccountStep() {
                   'inset 0 1px 3px rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.04)',
               }}
             >
-              {oauthPending === 'google' ? (
+              {oauthPending === 'browser' ? (
+                <UserCircle size={24} className="text-accent" />
+              ) : oauthPending === 'google' ? (
                 <svg width="24" height="24" viewBox="0 0 24 24">
                   <path
                     d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
@@ -350,58 +331,54 @@ export function AccountStep() {
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {tab === 'signup' && (
+      {tab === 'signin' ? (
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="block text-[13px] font-medium text-text-secondary mb-2">
-              {t('onboarding.account.name')}
+              {t('onboarding.account.email')}
             </label>
             <input
-              type="text"
-              placeholder={t('onboarding.account.namePlaceholder')}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              type="email"
+              placeholder={t('onboarding.account.emailPlaceholder')}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              required
             />
           </div>
-        )}
-        <div>
-          <label className="block text-[13px] font-medium text-text-secondary mb-2">
-            {t('onboarding.account.email')}
-          </label>
-          <input
-            type="email"
-            placeholder={t('onboarding.account.emailPlaceholder')}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-            required
-          />
-        </div>
-        <div>
-          <label className="block text-[13px] font-medium text-text-secondary mb-2">
-            {t('onboarding.account.password')}
-          </label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
-            className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-            required
-          />
-        </div>
-        {displayError && <p className="text-error text-[12px]">{displayError}</p>}
+          <div>
+            <label className="block text-[13px] font-medium text-text-secondary mb-2">
+              {t('onboarding.account.password')}
+            </label>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              required
+            />
+          </div>
+          {displayError && <p className="text-error text-[12px]">{displayError}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2.5 rounded-[10px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+          >
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            {t('onboarding.account.signIn')}
+          </button>
+        </form>
+      ) : (
         <button
-          type="submit"
-          disabled={loading}
-          className="w-full py-2.5 rounded-[10px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-1.5"
+          type="button"
+          onClick={() => handleBrowserAuth('signup')}
+          className="w-full py-2.5 rounded-[10px] bg-accent text-white text-[13px] font-medium cursor-pointer border-none hover:bg-accent-hover transition-colors"
         >
-          {loading && <Loader2 size={14} className="animate-spin" />}
-          {tab === 'signin' ? t('onboarding.account.signIn') : t('onboarding.account.signUp')}
+          {t('onboarding.account.signUp')}
         </button>
-      </form>
+      )}
 
       {/* Divider */}
       <div className="flex items-center gap-3">

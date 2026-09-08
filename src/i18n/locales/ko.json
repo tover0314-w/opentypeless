@@ -784,6 +784,7 @@
     "forgotPassword": "Forgot password?",
     "forgotPasswordTitle": "Forgot your password?",
     "forgotPasswordDescription": "Enter your email and we will send a secure reset link.",
+    "forgotPasswordBrowserDescription": "Continue in your browser to complete human verification and request a secure reset link.",
     "sendResetLink": "Send reset link",
     "resetLinkSent": "Check your email",
     "resetLinkSentDesc": "If an account exists for that email, a password reset link is on its way.",

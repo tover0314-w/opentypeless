@@ -574,7 +574,7 @@ describe('authStore', () => {
       expect(getState().credentialCapability).toBe('present')
     })
 
-    it('resends verification instead of setting a password for an unverified account', async () => {
+    it('requires the protected browser verification flow before setting a password', async () => {
       useAuthStore.setState({
         user: {
           id: 'user-1',
@@ -585,12 +585,13 @@ describe('authStore', () => {
         credentialCapability: 'none',
       })
 
-      await expect(getState().changePassword(null, 'new-password')).rejects.toThrow()
+      await expect(getState().changePassword(null, 'new-password')).rejects.toThrow(
+        'Verify your email in the secure browser',
+      )
 
-      expect(authClient.sendVerificationEmail).toHaveBeenCalledWith({
-        email: 'person@example.com',
-      })
+      expect(authClient.sendVerificationEmail).not.toHaveBeenCalled()
       expect(setOpenTypelessPassword).not.toHaveBeenCalled()
+      expect(getState().emailVerificationPending).toBe(true)
     })
   })
 
