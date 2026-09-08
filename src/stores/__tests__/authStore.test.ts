@@ -423,6 +423,25 @@ describe('authStore', () => {
     it('stays null user when no session exists', async () => {
       await getState().initialize()
       expect(getState().user).toBeNull()
+      expect(getState().error).toBeNull()
+    })
+
+    it('surfaces session restoration failures instead of treating them as signed out', async () => {
+      vi.mocked(authClient.getSession).mockResolvedValue({
+        data: null,
+        error: { message: 'service unavailable' },
+      } as never)
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      await getState().initialize()
+
+      expect(getState().user).toBeNull()
+      expect(getState().error).toBe('service unavailable')
+      expect(warning).toHaveBeenCalledWith(
+        'Failed to restore cloud session:',
+        'service unavailable',
+      )
+      warning.mockRestore()
     })
 
     it('propagates email verification and credential capability from Better Auth', async () => {
@@ -445,6 +464,36 @@ describe('authStore', () => {
 
       expect(getState().user?.emailVerified).toBe(true)
       expect(getState().credentialCapability).toBe('present')
+    })
+
+    it('restores subscription state even when account capability lookup fails', async () => {
+      vi.mocked(authClient.getSession).mockResolvedValue({
+        data: {
+          user: {
+            id: '1',
+            email: 'person@example.com',
+            name: 'Person',
+            emailVerified: true,
+          },
+        },
+      } as never)
+      vi.mocked(authClient.listAccounts).mockResolvedValue({
+        data: null,
+        error: { message: 'account endpoint unavailable' },
+      } as never)
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      await getState().initialize()
+
+      expect(getState().user?.id).toBe('1')
+      expect(getState().credentialCapability).toBe('unknown')
+      expect(getSubscriptionStatus).toHaveBeenCalledTimes(1)
+      expect(getState().plan).toBe('pro')
+      expect(warning).toHaveBeenCalledWith(
+        'Failed to restore account security capability:',
+        expect.any(Error),
+      )
+      warning.mockRestore()
     })
   })
 

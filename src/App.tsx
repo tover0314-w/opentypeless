@@ -63,7 +63,6 @@ function AskApp() {
   const setConfig = useAppStore((s) => s.setConfig)
 
   useEffect(() => {
-    useAuthStore.getState().initialize()
     getConfig()
       .then((config) => {
         setConfig(config)

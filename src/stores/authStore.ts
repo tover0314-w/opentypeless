@@ -248,7 +248,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       set({ loading: true, error: null })
       const savedToken = await loadSessionToken()
-      const { data: session } = await authClient.getSession()
+      const { data: session, error: sessionError } = await authClient.getSession()
+      if (sessionError) {
+        throw new Error(sessionError.message ?? 'Failed to restore cloud session')
+      }
       if (session?.user) {
         set({
           user: {
@@ -261,11 +264,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (savedToken) {
           markCloudSessionAuthenticated()
         }
-        await get().refreshCredentialCapability()
+        try {
+          await get().refreshCredentialCapability()
+        } catch (error) {
+          console.warn('Failed to restore account security capability:', error)
+        }
         await get().refreshSubscription()
       }
-    } catch {
-      // Not logged in — that's fine
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn('Failed to restore cloud session:', message)
+      set({ error: message })
     } finally {
       set({ loading: false })
     }
