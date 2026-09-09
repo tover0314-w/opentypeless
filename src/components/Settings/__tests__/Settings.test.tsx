@@ -605,7 +605,7 @@ describe('Settings tab 切换', () => {
     expect(screen.queryByText('settings.hotkeyInvalid')).toBeNull()
   })
 
-  it('does not offer Windows RightAlt as a default shortcut chip', async () => {
+  it('records Windows single-key shortcuts, including distinct Alt sides', async () => {
     const originalPlatform = window.navigator.platform
     Object.defineProperty(window.navigator, 'platform', {
       value: 'Win32',
@@ -619,17 +619,26 @@ describe('Settings tab 切换', () => {
       clipboardAutoPasteReliable: true,
     })
 
+    vi.useFakeTimers()
     try {
       renderSettings()
 
-      fireEvent.click(screen.getByText('Ctrl+.'))
-      expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      fireEvent.click(screen.getByText('settings.pressKeyCombination'))
-
       fireEvent.click(screen.getByText('Ctrl+/'))
-      expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      expect(useAppStore.getState().config.hotkey).toBe('Ctrl+/')
+      fireEvent.keyDown(window, { key: 'Alt', code: 'AltRight' })
+      expect(useAppStore.getState().config.hotkey).toBe('RightAlt')
+
+      fireEvent.click(screen.getByText('RightAlt'))
+      fireEvent.keyDown(window, { key: 'Alt', code: 'AltLeft' })
+      expect(useAppStore.getState().config.hotkey).toBe('LeftAlt')
+
+      fireEvent.click(screen.getByText('LeftAlt'))
+      fireEvent.keyDown(window, { key: 'p', code: 'KeyP' })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1600)
+      })
+      expect(useAppStore.getState().config.hotkey).toBe('P')
     } finally {
+      vi.useRealTimers()
       Object.defineProperty(window.navigator, 'platform', {
         value: originalPlatform,
         configurable: true,

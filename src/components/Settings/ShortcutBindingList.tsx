@@ -6,36 +6,6 @@ import type { HotkeyRole } from '../../lib/tauri'
 import type { ShortcutBinding } from '../../stores/appStore'
 import { pauseHotkey, resumeHotkey } from '../../lib/tauri'
 
-const STANDALONE_KEYS = new Set([
-  'Space',
-  'Tab',
-  'Enter',
-  'Backspace',
-  'Escape',
-  'Delete',
-  'Insert',
-  'Home',
-  'End',
-  'PageUp',
-  'PageDown',
-  'Up',
-  'Down',
-  'Left',
-  'Right',
-  'F1',
-  'F2',
-  'F3',
-  'F4',
-  'F5',
-  'F6',
-  'F7',
-  'F8',
-  'F9',
-  'F10',
-  'F11',
-  'F12',
-])
-
 const MAX_BINDINGS = 3
 
 interface HotkeyRecorderProps {
@@ -133,6 +103,20 @@ export function HotkeyRecorder({
       event.preventDefault()
       event.stopPropagation()
 
+      // `KeyboardEvent.key` identifies either Alt key as "Alt". The physical
+      // code preserves the side for a standalone Alt binding.
+      const standaloneAlt = !isMac
+        ? event.code === 'AltLeft'
+          ? 'LeftAlt'
+          : event.code === 'AltRight'
+            ? 'RightAlt'
+            : null
+        : null
+      if (standaloneAlt) {
+        confirmHotkey(standaloneAlt)
+        return
+      }
+
       const parts: string[] = []
       if (isMac && event.metaKey) parts.push('Command')
       if (event.ctrlKey) parts.push('Ctrl')
@@ -167,8 +151,6 @@ export function HotkeyRecorder({
       }
       let keyName = keyMap[event.key] || event.key
       if (keyName.length === 1) keyName = keyName.toUpperCase()
-      if (parts.length === 0 && !STANDALONE_KEYS.has(keyName)) return
-
       parts.push(keyName)
       const combo = parts.join('+')
       setPending(combo)
