@@ -3,7 +3,14 @@ set -euo pipefail
 
 linuxdeploy_arch="${1:-}"
 case "$linuxdeploy_arch" in
-  x86_64 | aarch64) ;;
+  x86_64)
+    linuxdeploy_sha256="e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef"
+    appimage_plugin_sha256="0441769ab38009504d2678c38cd7e526955388dd30a215b4a20afaa5471652f2"
+    ;;
+  aarch64)
+    linuxdeploy_sha256="b12b5cc57bd0921e1f98d73f58aa364503bc1a27f54b7a69fd2870bce7fa2f55"
+    appimage_plugin_sha256="ce574719bcf9cc1fb12728d60b17e48cc87d9b6c40f6f48b04cff7d273b5eb24"
+    ;;
   *)
     echo "Unsupported linuxdeploy architecture: ${linuxdeploy_arch:-<empty>}" >&2
     exit 2
@@ -23,11 +30,13 @@ mkdir -p "$cache_root"
 curl --fail --location --retry 3 \
   --output "$real_path" \
   "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-${linuxdeploy_arch}.AppImage"
+printf '%s  %s\n' "$linuxdeploy_sha256" "$real_path" | sha256sum --check --strict
 chmod 0755 "$real_path"
 
 curl --fail --location --retry 3 \
   --output "$real_appimage_plugin_path" \
   "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-${linuxdeploy_arch}.AppImage"
+printf '%s  %s\n' "$appimage_plugin_sha256" "$real_appimage_plugin_path" | sha256sum --check --strict
 chmod 0755 "$real_appimage_plugin_path"
 cp "$appimage_plugin_wrapper_source" "$appimage_plugin_path"
 chmod 0755 "$appimage_plugin_path"
