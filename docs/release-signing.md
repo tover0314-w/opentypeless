@@ -3,6 +3,10 @@
 OpenTypeless releases are built in `toverwu-qaq/opentypeless` and published to
 `tover0314-w/opentypeless`.
 
+The legacy Release Drafter workflow is disabled in both repositories. If a
+same-tag draft was created before this change landed, release preflight refuses
+to mutate it automatically; inspect and remove the stale draft before retrying.
+
 ## Required GitHub Secrets
 
 Set these secrets on `toverwu-qaq/opentypeless`, because that repository runs
@@ -16,6 +20,7 @@ macOS:
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
+- `APPLE_EXPECTED_SIGNER_SHA256`: lowercase SHA-256 digest of the leaf Developer ID Application certificate
 
 Tauri updater:
 
@@ -31,6 +36,7 @@ Linux:
 - `LINUX_GPG_PRIVATE_KEY`: base64-encoded ASCII-armored private GPG key
 - `LINUX_GPG_KEY_ID`: GPG key ID or fingerprint
 - `LINUX_GPG_PASSPHRASE`: GPG key passphrase
+- `LINUX_EXPECTED_GPG_FINGERPRINT`: full primary-key fingerprint trusted by the final release gate
 
 Windows PFX fallback:
 
@@ -38,16 +44,18 @@ Windows PFX fallback:
 - `WINDOWS_CERTIFICATE_PASSWORD`: required when `WINDOWS_CERTIFICATE` is set
 - `WINDOWS_TIMESTAMP_URL`: optional timestamp server URL; defaults to DigiCert
 
-The general `Release` workflow refuses to build or publish Windows artifacts
-when the PFX signing secrets are absent. Use that workflow for Windows only when
-a trusted PFX certificate is configured. Otherwise, publish Windows through the
-dedicated `Release Windows SignPath` workflow below. Unsigned and test-signed
-installers are blocked from public releases by default.
+These PFX secrets are retained only for historical reference. The current
+production release workflow has no PFX path.
 
-For a deliberate temporary exception, a manual workflow dispatch may set
-`allow_unsigned_windows` to `true`. This opt-in is disabled by default and is
-the only path that permits the general workflow to publish unsigned Windows
-installers. Tag-triggered and ordinary manual releases still fail closed.
+Windows installers are published only through the dedicated `Release Windows`
+workflow. The general `Release macOS and Linux` workflow has no Windows path.
+`signing_mode: signpath` requires the production signer and remains the
+recommended default. `signing_mode: unsigned` is an explicit release-operator
+exception: the workflow requires both installers to be completely unsigned and
+still enforces Tauri updater signatures, checksums, pinned source provenance,
+and the final asset gate. Test-signed or invalidly signed installers are never
+accepted as unsigned. Unsigned installers may show Windows SmartScreen or
+Unknown Publisher warnings.
 
 Windows SignPath:
 
@@ -56,6 +64,7 @@ Windows SignPath:
 - `SIGNPATH_ORGANIZATION_ID`: SignPath organization ID
 - `SIGNPATH_PROJECT_SLUG`: SignPath project slug
 - `SIGNPATH_SIGNING_POLICY_SLUG`: SignPath signing policy slug
+- `WINDOWS_EXPECTED_SIGNER_THUMBPRINT`: thumbprint of the trusted production Authenticode leaf certificate
 
 The SignPath project and GitHub trusted build system must point to
 `toverwu-qaq/opentypeless`, because that repository runs the GitHub Actions
@@ -70,13 +79,23 @@ archive.
 Signing policies whose slug starts with `test-` or `test_` are dry-run only.
 They may verify the build-to-SignPath integration, but the workflow refuses to
 publish those installers to a production GitHub Release. Publishing requires a
-production SignPath policy whose Authenticode result is `Valid`.
+production SignPath policy, an Authenticode result of `Valid`, and an exact
+match with `WINDOWS_EXPECTED_SIGNER_THUMBPRINT`.
 
-For a complete release without a PFX certificate, dispatch the general
-`Release` workflow separately for `macos` and `linux`, then dispatch
-`Release Windows SignPath` with `publish_release` set to `true`. Do not use the
-general workflow's `all` option until a trusted Windows PFX certificate is
-configured, because its Windows job will intentionally fail closed.
+For a complete release, dispatch `Release macOS and Linux` separately for
+`macos` and `linux`, then dispatch `Release Windows` with the approved
+`signing_mode` and `publish_release` set to `true`. Run `Staple macOS Release Assets` if Apple
+notarization completes asynchronously. Finally, run `Finalize Release`; it
+promotes the prerelease only after all platform signatures, the exact asset
+inventory, signed build-provenance manifests, and the immutable asset digest
+snapshot pass. Each provenance manifest binds its platform assets to the exact
+official Tag SHA and CI/CD SHA used for the build.
+`Finalize Release.windows_signing_mode` must match the mode used by the Windows
+build.
+
+Freeze both repositories' `main` branches from the moment the official tag is
+created until `Finalize Release` completes. Every stage pins and rechecks both
+commit SHAs; an intervening merge intentionally stops the release.
 
 ## Windows Certificate Notes
 
