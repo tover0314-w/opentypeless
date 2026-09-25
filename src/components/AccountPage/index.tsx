@@ -99,12 +99,7 @@ function AuthForm() {
   const [mode, setMode] = useState<AuthMode>('auth')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const {
-    signIn,
-    loading,
-    error,
-    emailVerificationPending,
-  } = useAuthStore()
+  const { signIn, loading, error, emailVerificationPending } = useAuthStore()
   const [localError, setLocalError] = useState<string | null>(null)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | 'browser' | null>(null)
   const { t, i18n } = useTranslation()
@@ -131,11 +126,9 @@ function AuthForm() {
       setOauthPending('browser')
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      await openUrl(await createDesktopWebAuthURL(
-        browserMode,
-        EMAIL_VERIFICATION_STATE_TTL_MS,
-        authLocale,
-      ))
+      await openUrl(
+        await createDesktopWebAuthURL(browserMode, EMAIL_VERIFICATION_STATE_TTL_MS, authLocale),
+      )
     } catch (error) {
       clearOAuthState()
       setOauthPending(null)

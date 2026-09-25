@@ -85,9 +85,7 @@ describe('AccountPage password controls', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送重置链接' }))
 
     await waitFor(() => {
-      expect(openUrl).toHaveBeenCalledWith(
-        'https://www.opentypeless.com/zh/login?mode=forgot',
-      )
+      expect(openUrl).toHaveBeenCalledWith('https://www.opentypeless.com/zh/login?mode=forgot')
     })
     expect(requestPasswordReset).not.toHaveBeenCalled()
   })

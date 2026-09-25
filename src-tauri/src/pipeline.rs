@@ -752,9 +752,65 @@ pub(crate) struct AskVoiceDraftOutcome {
     pub execution: crate::voice_intent::executor::VoiceExecutionResult,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct HistoryOutputMetadata {
     status: Option<String>,
     error: Option<String>,
+}
+
+fn history_output_metadata_for_insert_result(
+    insert_result: &output::InsertResult,
+    intentional_clipboard_copy: bool,
+) -> HistoryOutputMetadata {
+    let status = match insert_result.status {
+        output::InsertStatus::PartiallyInserted => "partial",
+        output::InsertStatus::Failed => "failed",
+        output::InsertStatus::CopiedFallback
+            if intentional_clipboard_copy && insert_result.warning_code.is_none() =>
+        {
+            "copied"
+        }
+        output::InsertStatus::CopiedFallback => "clipboard_fallback",
+        output::InsertStatus::Inserted if insert_result.warning_code.is_some() => "fallback",
+        output::InsertStatus::Inserted => "inserted",
+    };
+
+    HistoryOutputMetadata {
+        status: Some(status.to_string()),
+        error: insert_result.message.clone(),
+    }
+}
+
+fn history_output_metadata_for_output_result(
+    output_result: std::result::Result<&output::InsertResult, &anyhow::Error>,
+    intentional_clipboard_copy: bool,
+) -> HistoryOutputMetadata {
+    match output_result {
+        Ok(insert_result) => {
+            history_output_metadata_for_insert_result(insert_result, intentional_clipboard_copy)
+        }
+        Err(error) => HistoryOutputMetadata {
+            status: Some("failed".to_string()),
+            error: Some(error.to_string()),
+        },
+    }
+}
+
+fn history_output_metadata_with_prior_error(
+    output_result: std::result::Result<&output::InsertResult, &anyhow::Error>,
+    intentional_clipboard_copy: bool,
+    prior_error: &str,
+) -> HistoryOutputMetadata {
+    let mut metadata =
+        history_output_metadata_for_output_result(output_result, intentional_clipboard_copy);
+    if matches!(metadata.status.as_deref(), Some("inserted" | "copied")) {
+        metadata.status = Some("fallback".to_string());
+    }
+    metadata.error = Some(match metadata.error {
+        Some(output_error) => format!("{prior_error}; raw output: {output_error}"),
+        None => format!("{prior_error}; output raw text"),
+    });
+    metadata
 }
 
 struct PipelineVoiceExecutionBackend<'a> {
@@ -2129,21 +2185,32 @@ impl PipelineHandle {
             }
 
             // No polishing — output raw text directly
-            if let Err(e) = self
+            let output_result = self
                 .output_text(
                     provider_text,
                     &app_ctx.profile.app_label,
                     &app_ctx.target_guard,
                     config,
                 )
-                .await
-            {
-                tracing::error!("Output failed: {}", e);
+                .await;
+            if let Err(error) = &output_result {
+                tracing::error!("Output failed: {}", error);
                 let _ = self
                     .app_handle
-                    .emit("pipeline:error", output_user_error(&e));
+                    .emit("pipeline:error", output_user_error(error));
             }
-            return PolishTextOutcome::normal(provider_text.to_string(), std::time::Duration::ZERO);
+            let output_metadata = history_output_metadata_for_output_result(
+                output_result.as_ref(),
+                output::InsertionStrategy::from_config_value(&config.insertion_strategy)
+                    == output::InsertionStrategy::ClipboardCopyOnly,
+            );
+            return PolishTextOutcome {
+                final_text: provider_text.to_string(),
+                llm_elapsed: std::time::Duration::ZERO,
+                history_output_status: output_metadata.status,
+                history_output_error: output_metadata.error,
+                voice_execution: None,
+            };
         }
 
         self.set_state(PipelineState::Polishing);
@@ -2519,26 +2586,33 @@ impl PipelineHandle {
                         "LLM generation failed; no application text was changed",
                     );
                 }
-                if let Err(e) = self
+                let output_result = self
                     .output_text(
                         provider_text,
                         &app_ctx.profile.app_label,
                         &app_ctx.target_guard,
                         config,
                     )
-                    .await
-                {
-                    tracing::error!("Output failed: {}", e);
+                    .await;
+                if let Err(output_error) = &output_result {
+                    tracing::error!("Output failed: {}", output_error);
                     let _ = self
                         .app_handle
-                        .emit("pipeline:error", output_user_error(&e));
+                        .emit("pipeline:error", output_user_error(output_error));
                 }
-                PolishTextOutcome::with_history_status(
-                    provider_text.to_string(),
-                    elapsed,
-                    "fallback",
-                    format!("LLM polish failed; output raw text: {e}"),
-                )
+                let output_metadata = history_output_metadata_with_prior_error(
+                    output_result.as_ref(),
+                    output::InsertionStrategy::from_config_value(&config.insertion_strategy)
+                        == output::InsertionStrategy::ClipboardCopyOnly,
+                    &format!("LLM polish failed: {e}"),
+                );
+                PolishTextOutcome {
+                    final_text: provider_text.to_string(),
+                    llm_elapsed: elapsed,
+                    history_output_status: output_metadata.status,
+                    history_output_error: output_metadata.error,
+                    voice_execution: None,
+                }
             }
         };
 
@@ -2770,21 +2844,22 @@ impl PipelineHandle {
     ) -> Result<output::InsertResult> {
         self.set_state(PipelineState::Outputting);
 
-        let target_warning =
-            (!self.context_detector.target_still_matches_now(target_guard)).then(|| {
-                crate::error::UserError {
-                    code: "output_target_changed".to_string(),
-                    details: Some(
-                        "The target app changed before output; the full text was copied instead."
-                            .to_string(),
-                    ),
-                    retry_count: 0,
-                }
-            });
+        let configured_strategy =
+            output::InsertionStrategy::from_config_value(&config.insertion_strategy);
+        let target_warning = (strategy_uses_automated_input(configured_strategy)
+            && !self.context_detector.target_still_matches_now(target_guard))
+        .then(|| crate::error::UserError {
+            code: "output_target_changed".to_string(),
+            details: Some(
+                "The target app changed before output; the full text was copied instead."
+                    .to_string(),
+            ),
+            retry_count: 0,
+        });
         let requested_strategy = if target_warning.is_some() {
             output::InsertionStrategy::ClipboardCopyOnly
         } else {
-            output::InsertionStrategy::from_config_value(&config.insertion_strategy)
+            configured_strategy
         };
         let (strategy, accessibility_warning) =
             effective_strategy_for_accessibility(requested_strategy, is_accessibility_trusted());
@@ -3014,6 +3089,163 @@ mod tests {
     }
 
     #[test]
+    fn history_metadata_records_successful_insert() {
+        let metadata = history_output_metadata_for_insert_result(
+            &output::InsertResult::inserted(output::InsertionStrategy::Keyboard, 5),
+            false,
+        );
+
+        assert_eq!(metadata.status.as_deref(), Some("inserted"));
+        assert!(metadata.error.is_none());
+    }
+
+    #[test]
+    fn history_metadata_records_clipboard_fallback_warning() {
+        let warning = crate::error::UserError {
+            code: "output_fallback_clipboard".to_string(),
+            details: Some("wtype failed".to_string()),
+            retry_count: 0,
+        };
+        let result =
+            output::InsertResult::copied_fallback(output::InsertionStrategy::ClipboardCopyOnly, 5)
+                .with_warning(&warning);
+
+        let metadata = history_output_metadata_for_insert_result(&result, false);
+
+        assert_eq!(metadata.status.as_deref(), Some("clipboard_fallback"));
+        assert_eq!(metadata.error.as_deref(), Some("wtype failed"));
+    }
+
+    #[test]
+    fn history_metadata_records_fallback_even_when_clipboard_paste_succeeds() {
+        let warning = crate::error::UserError {
+            code: "output_fallback_clipboard".to_string(),
+            details: Some("keyboard failed".to_string()),
+            retry_count: 0,
+        };
+        let result = output::InsertResult::inserted(output::InsertionStrategy::ClipboardPaste, 5)
+            .with_warning(&warning);
+
+        let metadata = history_output_metadata_for_insert_result(&result, false);
+
+        assert_eq!(metadata.status.as_deref(), Some("fallback"));
+        assert_eq!(metadata.error.as_deref(), Some("keyboard failed"));
+    }
+
+    #[test]
+    fn history_metadata_keeps_intentional_clipboard_copy_normal() {
+        let result =
+            output::InsertResult::copied_fallback(output::InsertionStrategy::ClipboardCopyOnly, 5);
+
+        let metadata = history_output_metadata_for_insert_result(&result, true);
+
+        assert_eq!(metadata.status.as_deref(), Some("copied"));
+        assert!(metadata.error.is_none());
+    }
+
+    #[test]
+    fn history_metadata_records_partial_insert() {
+        let metadata = history_output_metadata_for_insert_result(
+            &output::InsertResult::partially_inserted(
+                output::InsertionStrategy::WindowsSendInput,
+                2,
+            ),
+            false,
+        );
+
+        assert_eq!(metadata.status.as_deref(), Some("partial"));
+        assert!(metadata.error.is_none());
+    }
+
+    #[test]
+    fn history_metadata_records_failed_clipboard_paste_as_fallback() {
+        let result =
+            output::InsertResult::copied_fallback(output::InsertionStrategy::ClipboardPaste, 5);
+
+        let metadata = history_output_metadata_for_insert_result(&result, false);
+
+        assert_eq!(metadata.status.as_deref(), Some("clipboard_fallback"));
+        assert!(metadata.error.is_none());
+    }
+
+    #[test]
+    fn history_metadata_records_failed_output() {
+        let result = output::InsertResult::failed(output::InsertionStrategy::Keyboard);
+
+        let metadata = history_output_metadata_for_insert_result(&result, false);
+
+        assert_eq!(metadata.status.as_deref(), Some("failed"));
+        assert!(metadata.error.is_none());
+    }
+
+    #[test]
+    fn history_metadata_records_output_error() {
+        let error = anyhow::anyhow!("Both keyboard and clipboard output failed");
+
+        let metadata = history_output_metadata_for_output_result(Err(&error), false);
+
+        assert_eq!(metadata.status.as_deref(), Some("failed"));
+        assert_eq!(
+            metadata.error.as_deref(),
+            Some("Both keyboard and clipboard output failed")
+        );
+    }
+
+    #[test]
+    fn history_metadata_keeps_actual_output_status_after_an_earlier_failure() {
+        let result = output::InsertResult::partially_inserted(
+            output::InsertionStrategy::WindowsSendInput,
+            2,
+        );
+
+        let metadata = history_output_metadata_with_prior_error(
+            Ok(&result),
+            false,
+            "LLM polish failed: provider unavailable",
+        );
+
+        assert_eq!(metadata.status.as_deref(), Some("partial"));
+        assert_eq!(
+            metadata.error.as_deref(),
+            Some("LLM polish failed: provider unavailable; output raw text")
+        );
+    }
+
+    #[test]
+    fn history_metadata_keeps_prior_failure_visible_after_raw_insert_succeeds() {
+        let result = output::InsertResult::inserted(output::InsertionStrategy::Keyboard, 5);
+
+        let metadata = history_output_metadata_with_prior_error(
+            Ok(&result),
+            false,
+            "LLM polish failed: provider unavailable",
+        );
+
+        assert_eq!(metadata.status.as_deref(), Some("fallback"));
+        assert_eq!(
+            metadata.error.as_deref(),
+            Some("LLM polish failed: provider unavailable; output raw text")
+        );
+    }
+
+    #[test]
+    fn history_metadata_keeps_both_failures_when_raw_output_also_fails() {
+        let output_error = anyhow::anyhow!("clipboard unavailable");
+
+        let metadata = history_output_metadata_with_prior_error(
+            Err(&output_error),
+            false,
+            "LLM polish failed: provider unavailable",
+        );
+
+        assert_eq!(metadata.status.as_deref(), Some("failed"));
+        assert_eq!(
+            metadata.error.as_deref(),
+            Some("LLM polish failed: provider unavailable; raw output: clipboard unavailable")
+        );
+    }
+
+    #[test]
     fn accessibility_fallback_copies_when_auto_requires_accessibility() {
         let (strategy, warning) =
             effective_strategy_for_accessibility(output::InsertionStrategy::Auto, false);
@@ -3055,6 +3287,16 @@ mod tests {
 
         assert_eq!(strategy, output::InsertionStrategy::ClipboardCopyOnly);
         assert!(warning.is_none());
+    }
+
+    #[test]
+    fn copy_only_output_does_not_require_the_target_window() {
+        assert!(!strategy_uses_automated_input(
+            output::InsertionStrategy::ClipboardCopyOnly
+        ));
+        assert!(strategy_uses_automated_input(
+            output::InsertionStrategy::ClipboardPaste
+        ));
     }
 
     #[test]

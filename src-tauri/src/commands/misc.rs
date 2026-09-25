@@ -816,9 +816,10 @@ fn probe_microphone_input() -> ProbeResult {
         Ok(config) => ProbeResult::ok(format!(
             "{} / {} Hz",
             device
-                .name()
+                .description()
+                .map(|description| description.name().to_string())
                 .unwrap_or_else(|_| "Default microphone".to_string()),
-            config.sample_rate().0
+            config.sample_rate()
         )),
         Err(error) => ProbeResult::err(format!("Microphone input is unavailable: {error}")),
     }

@@ -21,8 +21,7 @@ type Tab = 'signin' | 'signup'
 
 export function AccountStep() {
   const { t, i18n } = useTranslation()
-  const { user, loading, error, emailVerificationPending, signIn } =
-    useAuthStore()
+  const { user, loading, error, emailVerificationPending, signIn } = useAuthStore()
   const [tab, setTab] = useState<Tab>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -65,11 +64,9 @@ export function AccountStep() {
       setOauthPending('browser')
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      await openUrl(await createDesktopWebAuthURL(
-        mode,
-        EMAIL_VERIFICATION_STATE_TTL_MS,
-        authLocale,
-      ))
+      await openUrl(
+        await createDesktopWebAuthURL(mode, EMAIL_VERIFICATION_STATE_TTL_MS, authLocale),
+      )
     } catch {
       clearOAuthState()
       setOauthPending(null)

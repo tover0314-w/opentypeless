@@ -1,5 +1,6 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::Sample;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -196,6 +197,107 @@ fn to_mono(samples: &[f32], channels: u16) -> Vec<f32> {
         .collect()
 }
 
+fn samples_to_f32<T>(samples: &[T]) -> Vec<f32>
+where
+    T: cpal::SizedSample,
+    f32: cpal::FromSample<T>,
+{
+    samples.iter().copied().map(f32::from_sample).collect()
+}
+
+struct InputProcessingContext {
+    device_sample_rate: u32,
+    device_channels: u16,
+    target_rate: u32,
+    target_channels: u16,
+    samples_per_chunk: usize,
+    sender: mpsc::Sender<Vec<u8>>,
+    volume: Arc<Mutex<f32>>,
+    buffer: Arc<Mutex<Vec<i16>>>,
+}
+
+fn normalized_rms(data: &[f32]) -> f32 {
+    if data.is_empty() {
+        return 0.0;
+    }
+
+    let rms = (data.iter().map(|sample| sample * sample).sum::<f32>() / data.len() as f32).sqrt();
+    if rms.is_finite() {
+        rms.min(1.0)
+    } else {
+        0.0
+    }
+}
+
+fn process_input_samples(data: &[f32], context: &InputProcessingContext) {
+    // Calculate RMS volume from raw data
+    if let Ok(mut volume) = context.volume.lock() {
+        *volume = normalized_rms(data);
+    }
+    if data.is_empty() {
+        return;
+    }
+
+    // Convert to mono if needed
+    let mono = if context.device_channels > context.target_channels {
+        to_mono(data, context.device_channels)
+    } else {
+        data.to_vec()
+    };
+
+    // Downsample to target rate if needed
+    let resampled = if context.device_sample_rate != context.target_rate {
+        downsample(&mono, context.device_sample_rate, context.target_rate)
+    } else {
+        mono
+    };
+
+    // Convert f32 to i16 PCM and buffer
+    let mut buffer = context
+        .buffer
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    for &sample in &resampled {
+        if buffer.len() >= MAX_BUFFER_SAMPLES {
+            break;
+        }
+        let sample = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
+        buffer.push(sample);
+    }
+
+    // Send complete chunks
+    while buffer.len() >= context.samples_per_chunk {
+        let chunk: Vec<i16> = buffer.drain(..context.samples_per_chunk).collect();
+        let bytes: Vec<u8> = chunk
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+        let _ = context.sender.try_send(bytes);
+    }
+}
+
+fn build_input_stream_for_sample<T>(
+    device: &cpal::Device,
+    stream_config: &cpal::StreamConfig,
+    context: InputProcessingContext,
+) -> std::result::Result<cpal::Stream, cpal::BuildStreamError>
+where
+    T: cpal::SizedSample,
+    f32: cpal::FromSample<T>,
+{
+    device.build_input_stream(
+        stream_config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            let samples = samples_to_f32(data);
+            process_input_samples(&samples, &context);
+        },
+        |error| {
+            tracing::error!("Audio capture error: {}", error);
+        },
+        None,
+    )
+}
+
 fn run_capture(
     config: AudioConfig,
     sender: mpsc::Sender<Vec<u8>>,
@@ -209,23 +311,28 @@ fn run_capture(
         .default_input_device()
         .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
 
-    tracing::info!("Using input device: {:?}", device.name());
+    let device_description = device
+        .description()
+        .map(|description| description.name().to_string())
+        .unwrap_or_else(|_| "Default microphone".to_string());
+    tracing::info!("Using input device: {}", device_description);
 
     // Use the device's default config instead of forcing 16kHz mono
     let default_config = device.default_input_config()?;
-    let device_sample_rate = default_config.sample_rate().0;
+    let device_sample_rate = default_config.sample_rate();
     let device_channels = default_config.channels();
+    let device_sample_format = default_config.sample_format();
 
     tracing::info!(
         "Device default config: {}Hz, {} channels, format: {:?}",
         device_sample_rate,
         device_channels,
-        default_config.sample_format()
+        device_sample_format
     );
 
     let stream_config = cpal::StreamConfig {
         channels: device_channels,
-        sample_rate: cpal::SampleRate(device_sample_rate),
+        sample_rate: device_sample_rate,
         buffer_size: cpal::BufferSize::Default,
     };
 
@@ -234,51 +341,65 @@ fn run_capture(
     let samples_per_chunk = (target_rate * config.chunk_duration_ms / 1000) as usize;
     let buffer: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::with_capacity(samples_per_chunk)));
 
-    let stream = device.build_input_stream(
-        &stream_config,
-        move |data: &[f32], _: &cpal::InputCallbackInfo| {
-            // Calculate RMS volume from raw data
-            let rms = (data.iter().map(|s| s * s).sum::<f32>() / data.len() as f32).sqrt();
-            if let Ok(mut v) = volume.lock() {
-                *v = rms.min(1.0);
-            }
+    let processing_context = InputProcessingContext {
+        device_sample_rate,
+        device_channels,
+        target_rate,
+        target_channels,
+        samples_per_chunk,
+        sender,
+        volume,
+        buffer,
+    };
 
-            // Convert to mono if needed
-            let mono = if device_channels > target_channels {
-                to_mono(data, device_channels)
-            } else {
-                data.to_vec()
-            };
-
-            // Downsample to target rate if needed
-            let resampled = if device_sample_rate != target_rate {
-                downsample(&mono, device_sample_rate, target_rate)
-            } else {
-                mono
-            };
-
-            // Convert f32 to i16 PCM and buffer
-            let mut buf = buffer.lock().unwrap_or_else(|e| e.into_inner());
-            for &sample in &resampled {
-                if buf.len() >= MAX_BUFFER_SAMPLES {
-                    break;
-                }
-                let s = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                buf.push(s);
-            }
-
-            // Send complete chunks
-            while buf.len() >= samples_per_chunk {
-                let chunk: Vec<i16> = buf.drain(..samples_per_chunk).collect();
-                let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
-                let _ = sender.try_send(bytes);
-            }
-        },
-        |err| {
-            tracing::error!("Audio capture error: {}", err);
-        },
-        None,
-    )?;
+    let stream = match device_sample_format {
+        cpal::SampleFormat::F32 => {
+            build_input_stream_for_sample::<f32>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::F64 => {
+            build_input_stream_for_sample::<f64>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::I8 => {
+            build_input_stream_for_sample::<i8>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::I16 => {
+            build_input_stream_for_sample::<i16>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::I24 => {
+            build_input_stream_for_sample::<cpal::I24>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::I32 => {
+            build_input_stream_for_sample::<i32>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::I64 => {
+            build_input_stream_for_sample::<i64>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::U8 => {
+            build_input_stream_for_sample::<u8>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::U16 => {
+            build_input_stream_for_sample::<u16>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::U24 => {
+            build_input_stream_for_sample::<cpal::U24>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::U32 => {
+            build_input_stream_for_sample::<u32>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::U64 => {
+            build_input_stream_for_sample::<u64>(&device, &stream_config, processing_context)
+        }
+        cpal::SampleFormat::DsdU8 | cpal::SampleFormat::DsdU16 | cpal::SampleFormat::DsdU32 => {
+            return Err(anyhow::anyhow!(
+                "Unsupported DSD input sample format: {device_sample_format}"
+            ));
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported input sample format: {device_sample_format}"
+            ));
+        }
+    }?;
 
     stream.play()?;
     let capture_ready_at = crate::recording_deadline::CaptureReadyAt::now();
@@ -315,6 +436,41 @@ mod tests {
     #[test]
     fn audio_queue_preserves_a_minute_while_the_provider_connects() {
         assert_eq!(audio_channel_capacity(&AudioConfig::default()), 3_000);
+    }
+
+    #[test]
+    fn converts_f32_input_samples_without_changing_values() {
+        assert_eq!(
+            samples_to_f32(&[-1.0_f32, 0.0, 0.5, 1.0]),
+            vec![-1.0, 0.0, 0.5, 1.0]
+        );
+    }
+
+    #[test]
+    fn converts_i16_input_samples_to_normalized_f32() {
+        assert_eq!(
+            samples_to_f32(&[i16::MIN, 0, i16::MAX]),
+            vec![-1.0, 0.0, i16::MAX as f32 / 32768.0]
+        );
+    }
+
+    #[test]
+    fn converts_u16_input_samples_around_unsigned_equilibrium() {
+        assert_eq!(
+            samples_to_f32(&[u16::MIN, 32768, u16::MAX]),
+            vec![-1.0, 0.0, (u16::MAX as f32 - 32768.0) / 32768.0]
+        );
+    }
+
+    #[test]
+    fn empty_input_reports_zero_volume() {
+        assert_eq!(normalized_rms(&[]), 0.0);
+    }
+
+    #[test]
+    fn non_finite_input_reports_zero_volume() {
+        assert_eq!(normalized_rms(&[f32::NAN]), 0.0);
+        assert_eq!(normalized_rms(&[f32::INFINITY]), 0.0);
     }
 
     #[tokio::test]
