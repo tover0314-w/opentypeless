@@ -2997,13 +2997,15 @@ impl PipelineHandle {
                     .ok()
                     .map(|endpoint| (endpoint, false))
             }
-            _ => {
-                tracing::debug!(
-                    "Unknown STT provider '{}', skipping pre-warm",
-                    config.stt_provider
-                );
-                None
-            }
+            name => stt::config::get_whisper_config(name)
+                .map(|cfg| (cfg.endpoint.to_string(), false))
+                .or_else(|| {
+                    tracing::debug!(
+                        "Unknown STT provider '{}', skipping pre-warm",
+                        config.stt_provider
+                    );
+                    None
+                }),
         };
 
         let llm_endpoint = if config.polish_enabled {

@@ -170,6 +170,15 @@ fn static_provider_capability(provider_id: &str) -> SttRecordingCapability {
             RecordingLimitSource::Provider,
             "recordingLimits.reasons.providerDuration",
         ),
+        "minimax-asr" => capability(
+            provider_id,
+            SttTransport::FileUpload,
+            500,
+            500,
+            Some(CLIENT_FILE_BUFFER_BYTES),
+            RecordingLimitSource::Provider,
+            "recordingLimits.reasons.providerDuration",
+        ),
         "apple-speech" => capability(
             provider_id,
             SttTransport::LocalBuffered,
@@ -406,6 +415,13 @@ mod tests {
                 SttTransport::FileUpload,
                 30,
                 30,
+                RecordingLimitSource::Provider,
+            ),
+            (
+                "minimax-asr",
+                SttTransport::FileUpload,
+                500,
+                500,
                 RecordingLimitSource::Provider,
             ),
             (

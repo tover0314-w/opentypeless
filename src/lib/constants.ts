@@ -113,6 +113,7 @@ export const STT_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'aliyun-qwen3-asr', labelKey: 'providers.stt.aliyunQwen3Asr' },
   { value: 'volcengine-doubao', labelKey: 'providers.stt.volcengineDoubao' },
   { value: 'glm-asr', labelKey: 'providers.stt.glmAsr' },
+  { value: 'minimax-asr', labelKey: 'providers.stt.minimaxAsr' },
   { value: 'openai-whisper', labelKey: 'providers.stt.openaiWhisper' },
   { value: 'groq-whisper', labelKey: 'providers.stt.groqWhisper' },
   { value: 'siliconflow', labelKey: 'providers.stt.siliconflow' },
@@ -146,6 +147,7 @@ export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'openai', labelKey: 'providers.llm.openai' },
   { value: 'gemini', labelKey: 'providers.llm.gemini' },
   { value: 'moonshot', labelKey: 'providers.llm.moonshot' },
+  { value: 'minimax', labelKey: 'providers.llm.minimax' },
   { value: 'doubao', labelKey: 'providers.llm.doubao' },
   { value: 'qwen', labelKey: 'providers.llm.qwen' },
   { value: 'groq', labelKey: 'providers.llm.groq' },
@@ -169,6 +171,7 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
     model: 'gemini-2.0-flash',
   },
   moonshot: { baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  minimax: { baseUrl: 'https://api.minimax.cn/v1', model: 'MiniMax-M3' },
   doubao: {
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
     model: 'doubao-seed-1-6-flash-250615',
