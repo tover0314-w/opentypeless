@@ -152,6 +152,7 @@ export const LLM_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'claude', labelKey: 'providers.llm.claude' },
   { value: 'ollama', labelKey: 'providers.llm.ollama' },
   { value: 'openrouter', labelKey: 'providers.llm.openrouter' },
+  { value: 'requesty', labelKey: 'providers.llm.requesty' },
   { value: 'cloud', labelKey: 'providers.llm.cloud' },
 ] as const
 
@@ -178,6 +179,7 @@ export const LLM_DEFAULT_CONFIG: Record<string, { baseUrl: string; model: string
   claude: { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-0' },
   ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama3.2' },
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+  requesty: { baseUrl: 'https://router.requesty.ai/v1', model: 'openai/gpt-4o-mini' },
   cloud: { baseUrl: `${API_BASE_URL}/api/proxy`, model: 'default' },
 }
 
