@@ -8,6 +8,7 @@ pub enum NativeHotkeyTrigger {
     Fn,
     FnSpace,
     FnLeftShift,
+    LeftAlt,
     RightAlt,
     RightAltSpace,
     RightAltLeftShift,
@@ -19,6 +20,7 @@ impl NativeHotkeyTrigger {
             Self::Fn => "Fn",
             Self::FnSpace => "Fn+Space",
             Self::FnLeftShift => "Fn+LeftShift",
+            Self::LeftAlt => "LeftAlt",
             Self::RightAlt => "RightAlt",
             Self::RightAltSpace => "RightAlt+Space",
             Self::RightAltLeftShift => "RightAlt+LeftShift",
@@ -29,6 +31,7 @@ impl NativeHotkeyTrigger {
     fn base(self) -> NativeHotkeyTrigger {
         match self {
             Self::Fn | Self::FnSpace | Self::FnLeftShift => Self::Fn,
+            Self::LeftAlt => Self::LeftAlt,
             Self::RightAlt | Self::RightAltSpace | Self::RightAltLeftShift => Self::RightAlt,
         }
     }
@@ -38,7 +41,7 @@ impl NativeHotkeyTrigger {
         match self {
             Self::FnSpace | Self::RightAltSpace => Some(NativeComboKey::Space),
             Self::FnLeftShift | Self::RightAltLeftShift => Some(NativeComboKey::LeftShift),
-            Self::Fn | Self::RightAlt => None,
+            Self::Fn | Self::LeftAlt | Self::RightAlt => None,
         }
     }
 
@@ -143,7 +146,7 @@ impl NativeMonitoredBinding {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[cfg(target_os = "macos")]
 fn monitored_bindings_for_base(
     bindings: Vec<NativeHotkeyBinding>,
     base: NativeHotkeyTrigger,
@@ -275,9 +278,8 @@ fn dispatch_native_combo_edge(
 #[cfg(target_os = "macos")]
 mod platform {
     use super::{
-        dispatch_native_base_edge, dispatch_native_combo_edge, monitored_bindings_for_base,
-        NativeComboKey, NativeComboState, NativeHotkeyHandler, NativeHotkeyTrigger,
-        NativeMonitoredBinding,
+        dispatch_native_base_edge, dispatch_native_combo_edge, NativeComboKey, NativeComboState,
+        NativeHotkeyHandler, NativeHotkeyTrigger, NativeMonitoredBinding,
     };
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -626,9 +628,8 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use super::{
-        dispatch_native_base_edge, dispatch_native_combo_edge, monitored_bindings_for_base,
-        NativeComboKey, NativeComboState, NativeHotkeyHandler, NativeHotkeyTrigger,
-        NativeMonitoredBinding,
+        dispatch_native_base_edge, dispatch_native_combo_edge, NativeComboKey, NativeComboState,
+        NativeHotkeyHandler, NativeHotkeyTrigger, NativeMonitoredBinding,
     };
     use std::ptr;
     use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering as AtomicOrdering};
@@ -653,6 +654,7 @@ mod platform {
     const WM_SYSKEYUP: usize = 0x0105;
     const VK_SPACE: u32 = 0x20;
     const VK_LSHIFT: u32 = 0xA0;
+    const VK_LMENU: u32 = 0xA4;
     const VK_RMENU: u32 = 0xA5;
 
     static HOOK_CONTEXT: AtomicPtr<CallbackContext> = AtomicPtr::new(ptr::null_mut());
@@ -699,9 +701,21 @@ mod platform {
             bindings: Vec<super::NativeHotkeyBinding>,
             handler: NativeHotkeyHandler,
         ) -> Result<Self, String> {
-            let bindings = monitored_bindings_for_base(bindings, NativeHotkeyTrigger::RightAlt);
+            let bindings: Vec<_> = bindings
+                .into_iter()
+                .filter(|binding| {
+                    matches!(
+                        binding.trigger,
+                        NativeHotkeyTrigger::LeftAlt
+                            | NativeHotkeyTrigger::RightAlt
+                            | NativeHotkeyTrigger::RightAltSpace
+                            | NativeHotkeyTrigger::RightAltLeftShift
+                    )
+                })
+                .map(NativeMonitoredBinding::new)
+                .collect();
             if bindings.is_empty() {
-                return Err("Windows native hotkeys currently support RightAlt only".to_string());
+                return Err("Windows native hotkeys require a supported Alt binding".to_string());
             }
 
             let (status_tx, status_rx) = mpsc::channel();
@@ -762,7 +776,8 @@ mod platform {
         bindings: Vec<NativeMonitoredBinding>,
         handler: NativeHotkeyHandler,
         hook: std::sync::Mutex<Option<HHOOK>>,
-        state: std::sync::Mutex<NativeComboState>,
+        right_alt_state: std::sync::Mutex<NativeComboState>,
+        left_alt_state: std::sync::Mutex<NativeComboState>,
     }
 
     unsafe impl Send for CallbackContext {}
@@ -792,7 +807,8 @@ mod platform {
                 bindings,
                 handler,
                 hook: std::sync::Mutex::new(None),
-                state: std::sync::Mutex::new(NativeComboState::default()),
+                right_alt_state: std::sync::Mutex::new(NativeComboState::default()),
+                left_alt_state: std::sync::Mutex::new(NativeComboState::default()),
             }));
             HOOK_CONTEXT.store(context, AtomicOrdering::SeqCst);
 
@@ -909,17 +925,32 @@ mod platform {
             return false;
         };
 
-        let mut state = context.state.lock().unwrap_or_else(|e| e.into_inner());
         match vk_code {
+            VK_LMENU => dispatch_native_base_edge(
+                &mut context
+                    .left_alt_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+                &context.bindings,
+                NativeHotkeyTrigger::LeftAlt,
+                pressed,
+                &context.handler,
+            ),
             VK_RMENU => dispatch_native_base_edge(
-                &mut state,
+                &mut context
+                    .right_alt_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
                 &context.bindings,
                 NativeHotkeyTrigger::RightAlt,
                 pressed,
                 &context.handler,
             ),
             VK_SPACE => dispatch_native_combo_edge(
-                &mut state,
+                &mut context
+                    .right_alt_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
                 &context.bindings,
                 NativeHotkeyTrigger::RightAlt,
                 NativeComboKey::Space,
@@ -927,7 +958,10 @@ mod platform {
                 &context.handler,
             ),
             VK_LSHIFT => dispatch_native_combo_edge(
-                &mut state,
+                &mut context
+                    .right_alt_state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
                 &context.bindings,
                 NativeHotkeyTrigger::RightAlt,
                 NativeComboKey::LeftShift,
