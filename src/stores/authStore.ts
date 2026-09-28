@@ -590,16 +590,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   handleDeepLinkToken: async (token: string) => {
+    set({ loading: true, error: null })
     try {
-      set({ loading: true, error: null })
-      await persistSessionToken(token)
-      markCloudSessionAuthenticated()
-      const { data: session } = await authClient.getSession({
-        fetchOptions: {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      })
-      if (session?.user) {
+      try {
+        await persistSessionToken(token)
+        const { data: session, error: sessionError } = await authClient.getSession({
+          fetchOptions: {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        })
+        if (sessionError || !session?.user) {
+          throw new Error('Desktop sign-in did not return a valid session')
+        }
+        markCloudSessionAuthenticated()
         set({
           user: {
             id: session.user.id,
@@ -608,11 +611,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             emailVerified: session.user.emailVerified === true,
           },
         })
-        await get().refreshCredentialCapability()
-        await get().refreshSubscription()
+      } catch {
+        await persistSessionToken(null).catch(() => clearSessionTokenFromMemory())
+        set({
+          error: i18n.t(
+            'account.oauthSessionInvalid',
+            'Could not complete sign in. Please try again.',
+          ),
+        })
+        throw new Error('Desktop sign-in failed')
       }
-    } catch {
-      set({ error: 'Failed to authenticate with token' })
+      try {
+        await get().refreshCredentialCapability()
+      } catch (error) {
+        console.warn('Failed to refresh account security capability:', error)
+      }
+      await get().refreshSubscription()
     } finally {
       set({ loading: false })
     }
