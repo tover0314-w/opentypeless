@@ -133,6 +133,13 @@ pub trait TextOutput: Send + Sync {
     fn mode(&self) -> OutputMode;
 }
 
+/// Remove provider-added leading whitespace and terminal line breaks before text reaches an
+/// application. Internal spacing and line breaks are preserved because they may be intentional.
+pub fn without_terminal_line_breaks(text: &str) -> &str {
+    text.trim_start_matches(char::is_whitespace)
+        .trim_end_matches(['\r', '\n'])
+}
+
 pub fn create_output(mode: OutputMode, app_handle: &tauri::AppHandle) -> Box<dyn TextOutput> {
     create_output_with_clipboard_options(
         mode,
@@ -280,6 +287,8 @@ async fn output_with_strategy_using(
     clipboard_copy: &dyn TextOutput,
     clipboard_warning: Option<UserError>,
 ) -> Result<OutputOutcome, String> {
+    let text = without_terminal_line_breaks(text);
+
     if strategy == InsertionStrategy::ClipboardCopyOnly {
         return clipboard_copy
             .type_text(text)
@@ -427,10 +436,12 @@ fn insert_result_with_optional_warning(
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::sync::Mutex;
 
     struct FakeOutput {
         mode: OutputMode,
         result: Result<InsertResult, &'static str>,
+        received_text: Mutex<Vec<String>>,
     }
 
     impl FakeOutput {
@@ -438,6 +449,7 @@ mod tests {
             Self {
                 mode,
                 result: Ok(result),
+                received_text: Mutex::new(Vec::new()),
             }
         }
 
@@ -445,13 +457,19 @@ mod tests {
             Self {
                 mode,
                 result: Err(message),
+                received_text: Mutex::new(Vec::new()),
             }
+        }
+
+        fn received_text(&self) -> Vec<String> {
+            self.received_text.lock().unwrap().clone()
         }
     }
 
     #[async_trait]
     impl TextOutput for FakeOutput {
-        async fn type_text(&self, _text: &str) -> Result<InsertResult, AppError> {
+        async fn type_text(&self, text: &str) -> Result<InsertResult, AppError> {
+            self.received_text.lock().unwrap().push(text.to_string());
             self.result
                 .clone()
                 .map_err(|message| AppError::Output(message.to_string()))
@@ -460,6 +478,27 @@ mod tests {
         fn mode(&self) -> OutputMode {
             self.mode
         }
+    }
+
+    #[tokio::test]
+    async fn output_removes_boundary_whitespace_before_insertion() {
+        let keyboard = FakeOutput::ok(
+            OutputMode::Keyboard,
+            InsertResult::inserted(InsertionStrategy::Keyboard, 5),
+        );
+        let clipboard = FakeOutput::err(OutputMode::Clipboard, "clipboard should not be used");
+
+        output_with_fallback_using(
+            " \t\r\nhello\r\n",
+            OutputMode::Keyboard,
+            &keyboard,
+            &clipboard,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(keyboard.received_text(), vec!["hello"]);
     }
 
     #[test]

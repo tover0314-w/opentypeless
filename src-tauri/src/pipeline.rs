@@ -491,6 +491,29 @@ struct StreamingInsertWorker {
     handle: tokio::task::JoinHandle<StreamingInsertReport>,
 }
 
+#[derive(Default)]
+struct StreamingLineBreakBuffer {
+    pending_line_breaks: String,
+    started: bool,
+}
+
+impl StreamingLineBreakBuffer {
+    fn push(&mut self, chunk: &str) -> String {
+        let mut combined = format!("{}{}", self.pending_line_breaks, chunk);
+        self.pending_line_breaks.clear();
+
+        if !self.started {
+            combined = combined.trim_start_matches(char::is_whitespace).to_string();
+        }
+
+        let emit_len = combined.trim_end_matches(['\r', '\n']).len();
+        let emitted = combined[..emit_len].to_string();
+        self.pending_line_breaks = combined[emit_len..].to_string();
+        self.started |= !emitted.is_empty();
+        emitted
+    }
+}
+
 impl StreamingInsertWorker {
     async fn finish(self) -> Option<StreamingInsertReport> {
         drop(self.sender);
@@ -553,11 +576,13 @@ async fn run_streaming_insert_worker(
         expected_target_label,
     } = context;
     let mut report = StreamingInsertReport::new(strategy);
+    let mut line_break_buffer = StreamingLineBreakBuffer::default();
 
     while let Some(chunk) = receiver.recv().await {
         if abort_flag.load(Ordering::SeqCst) {
             break;
         }
+        let chunk = line_break_buffer.push(&chunk);
         if chunk.is_empty() {
             continue;
         }
@@ -2295,7 +2320,9 @@ impl PipelineHandle {
         };
 
         let polish_outcome = match polish_result {
-            Ok(response) => {
+            Ok(mut response) => {
+                response.polished_text =
+                    output::without_terminal_line_breaks(&response.polished_text).to_string();
                 let elapsed = llm_start.elapsed();
                 if let Some(report) = streaming_report.as_ref() {
                     if report.has_inserted_text() {
@@ -3038,6 +3065,16 @@ impl PipelineHandle {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicU64};
+
+    #[test]
+    fn streaming_buffer_discards_boundaries_and_preserves_internal_line_breaks() {
+        let mut buffer = StreamingLineBreakBuffer::default();
+
+        assert_eq!(buffer.push("\r\n"), "");
+        assert_eq!(buffer.push("第一行\n"), "第一行");
+        assert_eq!(buffer.push("第二行\r\n"), "\n第二行");
+        assert_eq!(buffer.pending_line_breaks, "\r\n");
+    }
 
     #[test]
     fn preparing_state_serializes_for_frontend() {
