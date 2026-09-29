@@ -201,6 +201,7 @@ fn register_configured_shortcuts_guarded(
         let handle = app.clone();
         native_runtime.install(
             native_bindings,
+            hotkeys.dictation_mode == "hold",
             Arc::new(move |event| {
                 crate::hotkey::handle_hotkey_role_event(handle.clone(), event.role, event.state);
             }),
