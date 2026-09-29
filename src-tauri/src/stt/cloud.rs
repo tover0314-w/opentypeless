@@ -140,13 +140,6 @@ fn stream_serial(operation_id: Option<&str>) -> u32 {
     hash.max(1)
 }
 
-fn pcm_duration_seconds(pcm_bytes: usize, sample_rate: u32) -> u32 {
-    let bytes_per_second = u64::from(sample_rate).saturating_mul(2).max(1);
-    (pcm_bytes as u64)
-        .div_ceil(bytes_per_second)
-        .min(u64::from(u32::MAX)) as u32
-}
-
 fn wav_safe_seconds(config: &SttConfig) -> Option<u32> {
     let managed = config.managed_audio?;
     let pcm_budget = managed
@@ -158,12 +151,11 @@ fn wav_safe_seconds(config: &SttConfig) -> Option<u32> {
         .filter(|seconds| *seconds > 0)
 }
 
-fn cloud_request_timeout(duration_seconds: u32, payload_bytes: usize) -> std::time::Duration {
-    if duration_seconds <= 60 {
-        return std::time::Duration::from_secs(60);
-    }
+fn cloud_request_timeout(payload_bytes: usize) -> std::time::Duration {
+    // The cloud function can run for 210 seconds, including a provider call of
+    // up to 180 seconds. Allow for upload and response time on top of that.
     let upload_allowance = (payload_bytes as u64).div_ceil(32_000);
-    std::time::Duration::from_secs((60 + upload_allowance).clamp(60, 180))
+    std::time::Duration::from_secs((240 + upload_allowance).clamp(240, 360))
 }
 
 fn contains_quota_marker(value: &str) -> bool {
@@ -312,8 +304,12 @@ impl CloudSttProvider {
                     tracing::warn!(
                         accepted_samples = encoded.original_samples,
                         input_samples,
-                        "Managed Opus reached its negotiated byte cap; submitting one valid prefix"
+                        "Managed Opus reached its negotiated byte cap; refusing incomplete upload"
                     );
+                    return Err(AppError::Config(
+                        "The recording exceeds the cloud upload limit. No transcript was submitted. Please record a shorter clip."
+                            .to_string(),
+                    ));
                 }
                 Ok(CloudAudioPayload {
                     bytes: encoded.bytes,
@@ -422,9 +418,8 @@ impl SttProvider for CloudSttProvider {
 
         let pcm = std::mem::take(&mut self.audio_buffer);
         let audio_len_secs = pcm.len() as f64 / (config.sample_rate as f64 * 2.0);
-        let duration_seconds = pcm_duration_seconds(pcm.len(), config.sample_rate);
         let payload = self.build_payload(pcm, &config).await?;
-        let request_timeout = cloud_request_timeout(duration_seconds, payload.bytes.len());
+        let request_timeout = cloud_request_timeout(payload.bytes.len());
         tracing::info!(
             "Cloud STT: sending {:.1}s of audio for transcription as {} ({} bytes)",
             audio_len_secs,
@@ -513,16 +508,14 @@ impl SttProvider for CloudSttProvider {
                         });
                     }
                 }
-                Err(e) if e.is_timeout() && attempt < 2 => {
-                    tracing::warn!("Cloud STT timeout (attempt {}/3)", attempt + 1);
-                    attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        1000 * 2u64.pow(attempt - 1),
-                    ))
-                    .await;
-                    continue;
+                Err(e) => {
+                    // A timeout does not prove the server stopped processing.
+                    // Avoid submitting the same audio to the provider again blindly.
+                    if e.is_timeout() {
+                        tracing::warn!("Cloud STT timed out; not retrying an unknown operation");
+                    }
+                    return Err(e.into());
                 }
-                Err(e) => return Err(e.into()),
             }
         }
     }
@@ -567,13 +560,11 @@ mod tests {
     }
 
     #[test]
-    fn helper_boundaries_preserve_short_wav_and_scale_long_request_timeout() {
+    fn helper_boundaries_preserve_short_wav_and_cover_server_deadline() {
         let config = stt_config();
         assert_eq!(wav_safe_seconds(&config), Some(109));
-        assert_eq!(pcm_duration_seconds(32_000, 16_000), 1);
-        assert_eq!(pcm_duration_seconds(32_001, 16_000), 2);
-        assert_eq!(cloud_request_timeout(60, 4_000_000).as_secs(), 60);
-        assert_eq!(cloud_request_timeout(600, 4_000_000).as_secs(), 180);
+        assert_eq!(cloud_request_timeout(0).as_secs(), 240);
+        assert_eq!(cloud_request_timeout(4_000_000).as_secs(), 360);
     }
 
     #[test]
@@ -617,6 +608,28 @@ mod tests {
         assert_eq!(payload.mime_type, "audio/ogg; codecs=opus");
         assert!(payload.bytes.starts_with(b"OggS"));
         assert!(payload.bytes.len() <= managed_config().max_audio_bytes as usize);
+    }
+
+    #[tokio::test]
+    async fn managed_payload_rejects_incomplete_audio_before_upload() {
+        let mut config = stt_config();
+        config.managed_audio = Some(super::super::managed_audio::ManagedAudioEncodingConfig {
+            max_audio_bytes: 1_000,
+            preferred_wav_max_bytes: 1_000,
+            ..managed_config()
+        });
+        let pcm = vec![0; 192_000];
+        let mut provider = CloudSttProvider::new("https://example.test".to_string());
+        provider.connect(&config).await.unwrap();
+        provider.send_audio(&pcm).await.unwrap();
+
+        let error = match provider.build_payload(pcm, &config).await {
+            Err(error) => error,
+            Ok(_) => panic!("incomplete audio must not be uploaded"),
+        };
+        assert!(
+            matches!(error, AppError::Config(message) if message.contains("No transcript was submitted"))
+        );
     }
 
     #[test]
