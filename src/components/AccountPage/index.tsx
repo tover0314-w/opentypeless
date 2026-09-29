@@ -119,6 +119,10 @@ function AuthForm() {
     return () => clearTimeout(timer)
   }, [oauthPending, t])
 
+  useEffect(() => {
+    if (oauthPending && error) setOauthPending(null)
+  }, [oauthPending, error])
+
   const displayError = accountErrorMessage(localError ?? error, t)
 
   const handleBrowserAuth = async (browserMode: 'signup' | 'verify' | 'forgot') => {

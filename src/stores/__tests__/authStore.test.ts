@@ -497,6 +497,45 @@ describe('authStore', () => {
     })
   })
 
+  describe('desktop OAuth handoff', () => {
+    it('rejects a token that does not resolve to a user session and clears it', async () => {
+      vi.mocked(authClient.getSession).mockResolvedValue({ data: null, error: null } as never)
+
+      await expect(getState().handleDeepLinkToken('invalid-session-token')).rejects.toThrow(
+        'Desktop sign-in failed',
+      )
+
+      expect(getState().user).toBeNull()
+      expect(getState().error).toBeTruthy()
+      expect(getState().loading).toBe(false)
+      expect(invoke).toHaveBeenCalledWith('set_session_token', { token: '' })
+      expect(await loadSessionToken()).toBeNull()
+    })
+
+    it('accepts a handoff only after validating the cloud session', async () => {
+      vi.mocked(authClient.getSession).mockResolvedValue({
+        data: {
+          user: {
+            id: 'user-1',
+            email: 'person@example.com',
+            name: 'Person',
+            emailVerified: true,
+          },
+        },
+        error: null,
+      } as never)
+
+      await getState().handleDeepLinkToken('valid-session-token')
+
+      expect(getState().user?.id).toBe('user-1')
+      expect(getState().error).toBeNull()
+      expect(getState().loading).toBe(false)
+      expect(authClient.getSession).toHaveBeenCalledWith({
+        fetchOptions: { headers: { Authorization: 'Bearer valid-session-token' } },
+      })
+    })
+  })
+
   describe('password actions', () => {
     it('requests a reset through the canonical wrapper', async () => {
       await getState().requestPasswordReset('person@example.com', 'zh')
