@@ -9,8 +9,9 @@ import ko from '../locales/ko.json'
 import pt from '../locales/pt.json'
 import ru from '../locales/ru.json'
 import zh from '../locales/zh.json'
+import zhTW from '../locales/zh-TW.json'
 
-const locales = { de, en, es, fr, it: itLocale, ja, ko, pt, ru, zh }
+const locales = { de, en, es, fr, it: itLocale, ja, ko, pt, ru, zh, 'zh-TW': zhTW }
 
 function leafKeys(value: unknown, prefix = ''): string[] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

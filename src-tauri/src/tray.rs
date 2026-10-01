@@ -38,6 +38,19 @@ fn get_tray_labels(lang: &str) -> TrayLabels {
             about: "关于 OpenTypeless",
             quit: "退出",
         },
+        "zh-TW" => TrayLabels {
+            show_window: "顯示視窗",
+            hide_window: "隱藏視窗",
+            start_recording: "開始錄音",
+            stop_recording: "停止錄音",
+            hide_capsule_when_idle: "閒置時隱藏膠囊",
+            keep_capsule_visible: "保持膠囊顯示",
+            settings: "設定",
+            history: "歷史紀錄",
+            account: "帳戶",
+            about: "關於 OpenTypeless",
+            quit: "結束",
+        },
         "ja" => TrayLabels {
             show_window: "ウィンドウを表示",
             hide_window: "ウィンドウを隠す",
@@ -293,6 +306,15 @@ mod tests {
 
         assert_eq!(labels.hide_capsule_when_idle, "Hide Capsule When Idle");
         assert_eq!(labels.keep_capsule_visible, "Keep Capsule Visible");
+    }
+
+    #[test]
+    fn traditional_chinese_tray_labels_are_distinct_from_simplified_chinese() {
+        let labels = get_tray_labels("zh-TW");
+
+        assert_eq!(labels.show_window, "顯示視窗");
+        assert_eq!(labels.settings, "設定");
+        assert_eq!(labels.account, "帳戶");
     }
 
     #[test]
