@@ -81,6 +81,7 @@ vi.mock('react-i18next', () => ({
         'providers.stt.aliyunQwen3Asr': 'Aliyun Qwen3 Realtime ASR',
         'providers.stt.volcengineDoubao': 'Volcengine Doubao Realtime ASR',
         'providers.stt.appleSpeech': 'Apple Speech (Local)',
+        'providers.stt.minimaxAsr': 'MiniMax ASR',
       }
       return Object.entries(values ?? {}).reduce(
         (text, [name, value]) => text.replace(`{{${name}}}`, String(value)),
@@ -242,6 +243,11 @@ describe('SttPane', () => {
       expect(screen.getByRole('option', { name: 'Aliyun Qwen3 Realtime ASR' })).toHaveValue(
         'aliyun-qwen3-asr',
       )
+    })
+
+    it('lists MiniMax ASR as an STT provider', () => {
+      render(<SttPane />)
+      expect(screen.getByRole('option', { name: 'MiniMax ASR' })).toHaveValue('minimax-asr')
     })
 
     it('shows a persisted Beijing or Singapore region selector for Aliyun Qwen3', () => {

@@ -13,6 +13,9 @@ pub const CUSTOM_WHISPER_PRESET_SPEACHES: &str = "speaches";
 pub const CUSTOM_WHISPER_PRESET_CUSTOM: &str = "custom";
 pub const DEFAULT_CUSTOM_WHISPER_BASE_URL: &str = "http://localhost:8000/v1";
 pub const DEFAULT_CUSTOM_WHISPER_MODEL: &str = "Systran/faster-whisper-large-v3";
+pub const MINIMAX_ASR_PROVIDER: &str = "minimax-asr";
+pub const MINIMAX_ASR_ENDPOINT: &str = "https://api.minimax.cn/v1/speech_to_text";
+pub const MINIMAX_ASR_MODEL: &str = "asr-1.0";
 
 /// Configuration for a Whisper-compatible STT provider.
 #[allow(clippy::doc_lazy_continuation)]
@@ -44,6 +47,11 @@ pub fn get_whisper_config(provider: &str) -> Option<SttProviderConfig> {
         "siliconflow" => Some(SttProviderConfig {
             endpoint: "https://api.siliconflow.cn/v1/audio/transcriptions",
             model: "FunAudioLLM/SenseVoiceSmall",
+            extra_fields: &[],
+        }),
+        MINIMAX_ASR_PROVIDER => Some(SttProviderConfig {
+            endpoint: MINIMAX_ASR_ENDPOINT,
+            model: MINIMAX_ASR_MODEL,
             extra_fields: &[],
         }),
         _ => None,
@@ -93,6 +101,7 @@ pub fn build_custom_whisper_config(
         model: model.to_string(),
         extra_fields: vec![],
         api_key_required: false,
+        language_as_header: false,
     })
 }
 
@@ -108,6 +117,7 @@ pub fn build_known_whisper_config(provider: &str) -> Option<WhisperCompatConfig>
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         api_key_required: true,
+        language_as_header: provider == MINIMAX_ASR_PROVIDER,
     })
 }
 
@@ -152,6 +162,17 @@ mod tests {
         assert!(cfg.endpoint.contains("siliconflow"));
         assert_eq!(cfg.model, "FunAudioLLM/SenseVoiceSmall");
         assert!(cfg.extra_fields.is_empty());
+    }
+
+    #[test]
+    fn test_minimax_asr_config() {
+        let cfg = get_whisper_config(MINIMAX_ASR_PROVIDER).unwrap();
+        assert_eq!(cfg.endpoint, MINIMAX_ASR_ENDPOINT);
+        assert_eq!(cfg.model, MINIMAX_ASR_MODEL);
+        assert!(cfg.extra_fields.is_empty());
+        let known = build_known_whisper_config(MINIMAX_ASR_PROVIDER).unwrap();
+        assert!(known.language_as_header);
+        assert!(known.api_key_required);
     }
 
     #[test]

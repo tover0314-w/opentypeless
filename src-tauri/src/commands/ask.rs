@@ -1807,6 +1807,22 @@ mod tests {
     }
 
     #[test]
+    fn byok_ask_config_disables_minimax_thinking() {
+        let config = storage::AppConfig {
+            llm_provider: "minimax".to_string(),
+            llm_base_url: "https://api.minimax.cn/v1".to_string(),
+            llm_model: "MiniMax-M3".to_string(),
+            ..storage::AppConfig::default()
+        };
+
+        let body = build_byok_ask_body_for_config(&config, "What is OpenTypeless?", None).unwrap();
+
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["reasoning_split"], true);
+        assert_eq!(body["max_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+    }
+
+    #[test]
     fn byok_ask_config_uses_gpt5_compatible_fields_for_direct_openai() {
         let config = storage::AppConfig {
             llm_provider: "openai".to_string(),

@@ -14,6 +14,8 @@ pub struct WhisperCompatConfig {
     pub extra_fields: Vec<(String, String)>,
     /// Local OpenAI-compatible servers often do not require authentication.
     pub api_key_required: bool,
+    /// MiniMax ASR expects the language hint as an HTTP header, not a form field.
+    pub language_as_header: bool,
 }
 
 /// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
@@ -145,10 +147,17 @@ impl SttProvider for WhisperCompatProvider {
                 .text("model", self.provider_config.model.to_string())
                 .part("file", file_part);
 
-            // Language hint (OpenAI/Groq support `language` field, others use `prompt`)
+            let mut language_header: Option<String> = None;
+            // Language hint (OpenAI/Groq support `language` field, MiniMax uses a header)
             if let Some(ref lang) = config.language {
                 if lang != "multi" {
-                    form = form.text("language", lang.clone());
+                    if self.provider_config.language_as_header {
+                        if is_minimax_asr_language(lang) {
+                            language_header = Some(lang.clone());
+                        }
+                    } else {
+                        form = form.text("language", lang.clone());
+                    }
                 }
             }
 
@@ -165,6 +174,9 @@ impl SttProvider for WhisperCompatProvider {
 
             if !config.api_key.trim().is_empty() {
                 request = request.header("Authorization", format!("Bearer {}", config.api_key));
+            }
+            if let Some(lang) = language_header.as_ref() {
+                request = request.header("language", lang);
             }
 
             let resp_result = request.send().await;
@@ -250,6 +262,31 @@ impl SttProvider for WhisperCompatProvider {
     }
 }
 
+fn is_minimax_asr_language(lang: &str) -> bool {
+    matches!(
+        lang,
+        "zh" | "yue"
+            | "en"
+            | "ja"
+            | "ko"
+            | "th"
+            | "vi"
+            | "id"
+            | "ms"
+            | "fil"
+            | "ar"
+            | "tr"
+            | "fr"
+            | "de"
+            | "es"
+            | "it"
+            | "pt"
+            | "pl"
+            | "ru"
+            | "uk"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +299,7 @@ mod tests {
             model: "test-model".to_string(),
             extra_fields: vec![],
             api_key_required: false,
+            language_as_header: false,
         });
 
         let result = provider
@@ -288,6 +326,7 @@ mod tests {
             model: "test-model".to_string(),
             extra_fields: vec![],
             api_key_required: true,
+            language_as_header: false,
         });
 
         let result = tokio::time::timeout(
@@ -297,5 +336,14 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn minimax_language_header_accepts_supported_tags_only() {
+        assert!(is_minimax_asr_language("zh"));
+        assert!(is_minimax_asr_language("en"));
+        assert!(!is_minimax_asr_language("hi"));
+        assert!(!is_minimax_asr_language("nl"));
+        assert!(!is_minimax_asr_language("multi"));
     }
 }

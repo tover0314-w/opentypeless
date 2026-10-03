@@ -5,6 +5,12 @@ use std::time::Duration;
 const ANTHROPIC_API_HOST: &str = "api.anthropic.com";
 const OPENAI_API_HOST: &str = "api.openai.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const MINIMAX_API_HOSTS: &[&str] = &[
+    "api.minimax.cn",
+    "api.minimax.io",
+    "api.minimaxi.com",
+    "api.minimax.chat",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmApiKind {
@@ -125,9 +131,20 @@ fn is_reasoning_model_without_sampling_controls(model: &str) -> bool {
         || model.starts_with("o4-")
 }
 
+pub fn is_minimax_api(provider: &str, base_url: &str) -> bool {
+    if provider.trim().eq_ignore_ascii_case("minimax") {
+        return true;
+    }
+    url::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| MINIMAX_API_HOSTS.contains(&host.as_str()))
+}
+
 pub fn request_timeout(provider: &str, base_url: &str, model: &str) -> Duration {
     if detect_api_kind(provider, base_url) == LlmApiKind::AnthropicMessages
         || is_reasoning_model_without_sampling_controls(model)
+        || is_minimax_api(provider, base_url)
     {
         Duration::from_secs(60)
     } else {
@@ -202,6 +219,12 @@ pub fn build_chat_body(
             } else {
                 object.insert("max_tokens".to_string(), json!(max_tokens));
                 object.insert("temperature".to_string(), json!(temperature));
+            }
+            if is_minimax_api(provider, base_url) {
+                // M3 can skip thinking; M2.x ignores disable but still thinks.
+                // reasoning_split keeps think tags out of content either way.
+                object.insert("thinking".to_string(), json!({ "type": "disabled" }));
+                object.insert("reasoning_split".to_string(), json!(true));
             }
             body
         }
@@ -402,6 +425,32 @@ mod tests {
                 "gemini-2.5-flash"
             ),
             Duration::from_secs(30)
+        );
+        assert_eq!(
+            request_timeout("minimax", "https://api.minimax.cn/v1", "MiniMax-M3"),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn minimax_openai_compatible_body_disables_thinking_and_splits_reasoning() {
+        let body = build_chat_body(
+            "minimax",
+            "https://api.minimax.cn/v1",
+            "MiniMax-M3",
+            messages(),
+            256,
+            0.3,
+            true,
+        );
+
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["reasoning_split"], true);
+        assert_eq!(body["max_tokens"], 256);
+        assert_eq!(body["temperature"], 0.3);
+        assert_eq!(
+            chat_endpoint("minimax", "https://api.minimax.cn/v1").unwrap(),
+            "https://api.minimax.cn/v1/chat/completions"
         );
     }
 

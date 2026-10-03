@@ -158,6 +158,12 @@ mod tests {
     }
 
     #[test]
+    fn creates_minimax_asr_file_upload_provider() {
+        let provider = create_provider("minimax-asr", None, None).unwrap();
+        assert_eq!(provider.name(), "minimax-asr");
+    }
+
+    #[test]
     fn unknown_stt_provider_returns_error() {
         let result = create_provider("not-a-provider", None, None);
         assert!(result.is_err());
