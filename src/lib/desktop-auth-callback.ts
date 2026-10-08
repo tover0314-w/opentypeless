@@ -67,6 +67,9 @@ async function registerDesktopAuthFlow(
   if (!response.ok) {
     throw new DesktopAuthError('http', response.status, 'Unable to initiate desktop authentication')
   }
+  if (getPendingOAuthVerifier(state) !== verifier) {
+    throw new Error('Desktop authentication was cancelled or expired')
+  }
   return callbackURLForState(state, locale)
 }
 
@@ -78,7 +81,7 @@ export async function createDesktopAuthCallbackURL(
   try {
     return await registerDesktopAuthFlow(state, stateTtlMs, locale)
   } catch (error) {
-    clearOAuthState()
+    clearOAuthState(state)
     throw error
   }
 }
@@ -104,7 +107,6 @@ export async function createDesktopWebAuthURL(
   const callbackURL = await createDesktopAuthCallbackURL(stateTtlMs, locale)
   const state = new URL(callbackURL).searchParams.get('desktop')
   if (!state) {
-    clearOAuthState()
     throw new Error('Desktop authentication state is unavailable')
   }
   url.searchParams.set(mode === 'signup' ? 'tab' : 'mode', mode)
@@ -122,7 +124,7 @@ export async function claimDesktopAuthCallbackURL(
   try {
     return await registerDesktopAuthFlow(state, stateTtlMs, locale)
   } catch (error) {
-    clearOAuthState()
+    clearOAuthState(state)
     throw error
   }
 }
