@@ -102,16 +102,25 @@ function AuthForm() {
   const { signIn, loading, error, emailVerificationPending } = useAuthStore()
   const [localError, setLocalError] = useState<string | null>(null)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | 'browser' | null>(null)
+  const loginAttemptRef = useRef(0)
   const { t, i18n } = useTranslation()
   const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const pendingCheckout = readPendingDesktopCheckout(localStorage)
   const pendingPlan =
     pendingCheckout?.product === 'lifetime_starter' ? t('upgrade.lifetime') : t('upgrade.pro')
 
+  useEffect(
+    () => () => {
+      loginAttemptRef.current += 1
+    },
+    [],
+  )
+
   // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
   useEffect(() => {
     if (!oauthPending) return
     const timer = setTimeout(() => {
+      loginAttemptRef.current += 1
       setOauthPending(null)
       clearOAuthState()
       setLocalError(t('account.oauthTimeout', 'Sign in timed out. Please try again.'))
@@ -122,14 +131,20 @@ function AuthForm() {
   const displayError = accountErrorMessage(localError ?? error, t)
 
   const handleBrowserAuth = async (browserMode: 'signup' | 'verify' | 'forgot') => {
+    const attempt = ++loginAttemptRef.current
     try {
       setOauthPending('browser')
       setLocalError(null)
       useAuthStore.setState({ error: null })
-      await openUrl(
-        await createDesktopWebAuthURL(browserMode, EMAIL_VERIFICATION_STATE_TTL_MS, authLocale),
+      const url = await createDesktopWebAuthURL(
+        browserMode,
+        EMAIL_VERIFICATION_STATE_TTL_MS,
+        authLocale,
       )
+      if (loginAttemptRef.current !== attempt) return
+      await openUrl(url)
     } catch (error) {
+      if (loginAttemptRef.current !== attempt) return
       clearOAuthState()
       setOauthPending(null)
       setLocalError(
@@ -185,6 +200,7 @@ function AuthForm() {
           {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
           <button
             onClick={() => {
+              loginAttemptRef.current += 1
               useAuthStore.setState({ emailVerificationPending: false, pendingEmail: null })
               clearOAuthState()
               setTab('signin')
@@ -200,12 +216,13 @@ function AuthForm() {
   }
 
   const handleOAuth = async (provider: 'google' | 'github') => {
+    const attempt = ++loginAttemptRef.current
     try {
       setOauthPending(provider)
       setLocalError(null)
       useAuthStore.setState({ error: null })
       const callbackURL = await claimDesktopAuthCallbackURL(OAUTH_STATE_TTL_MS, authLocale)
-      if (!callbackURL) return
+      if (!callbackURL || loginAttemptRef.current !== attempt) return
       // Open the desktop-oauth bridge route in the system browser. The server
       // internally POSTs to Better Auth, then 302-redirects the browser to the
       // OAuth provider while forwarding the state cookie — keeping cookie and
@@ -213,6 +230,7 @@ function AuthForm() {
       const url = `${API_BASE_URL}/api/auth/desktop-oauth?provider=${provider}&callbackURL=${encodeURIComponent(callbackURL)}`
       await openUrl(url)
     } catch (error) {
+      if (loginAttemptRef.current !== attempt) return
       clearOAuthState()
       setOauthPending(null)
       setLocalError(
@@ -331,6 +349,7 @@ function AuthForm() {
             </button>
             <button
               onClick={() => {
+                loginAttemptRef.current += 1
                 setOauthPending(null)
                 clearOAuthState()
               }}

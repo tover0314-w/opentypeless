@@ -132,4 +132,103 @@ describe('deep-link OAuth callback', () => {
     expect(body.verifier).toMatch(/^[A-Za-z0-9._~-]{43,128}$/)
     expect(url).not.toContain(body.verifier)
   })
+
+  it('ignores a cancelled flow callback without destroying a newer login', async () => {
+    const module = await import('../deep-link')
+    const oldState = module.generateOAuthState()
+    module.clearOAuthState()
+    vi.mocked(crypto.randomUUID).mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+    const newState = module.generateOAuthState()
+    const verifier = module.getPendingOAuthVerifier(newState)
+
+    await expect(
+      module.handleDeepLinkUrl(
+        `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${oldState}`,
+      ),
+    ).resolves.toBe(false)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(module.getPendingOAuthVerifier(newState)).toBe(verifier)
+    await expect(
+      module.handleDeepLinkUrl(
+        `opentypeless://auth/callback?code=${'d'.repeat(43)}&state=${newState}`,
+      ),
+    ).resolves.toBe(true)
+    expect(mocks.handleDeepLinkToken).toHaveBeenCalledOnce()
+  })
+
+  it('ignores an exchange response arriving after a new flow starts', async () => {
+    let finish!: (response: Response) => void
+    mocks.fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const module = await import('../deep-link')
+    const oldState = module.generateOAuthState()
+    const pending = module.handleDeepLinkUrl(
+      `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${oldState}`,
+    )
+    module.clearOAuthState()
+    vi.mocked(crypto.randomUUID).mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+    const newState = module.generateOAuthState()
+    const verifier = module.getPendingOAuthVerifier(newState)
+    finish(Response.json({ token: 'valid-old-token-12345' }))
+
+    await expect(pending).resolves.toBe(false)
+    expect(mocks.handleDeepLinkToken).not.toHaveBeenCalled()
+    expect(module.getPendingOAuthVerifier(newState)).toBe(verifier)
+    expect(window.location.hash).toBe('')
+  })
+
+  it('shares one exchange when the same callback arrives twice concurrently', async () => {
+    let finish!: (response: Response) => void
+    mocks.fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const module = await import('../deep-link')
+    const state = module.generateOAuthState()
+    const callback = `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${state}`
+    const first = module.handleDeepLinkUrl(callback)
+    const second = module.handleDeepLinkUrl(callback)
+    finish(Response.json({ token: 'valid-token-12345' }))
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.handleDeepLinkToken).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a different code while the current code is being exchanged', async () => {
+    let finish!: (response: Response) => void
+    mocks.fetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const module = await import('../deep-link')
+    const state = module.generateOAuthState()
+    const pending = module.handleDeepLinkUrl(
+      `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${state}`,
+    )
+    await expect(
+      module.handleDeepLinkUrl(
+        `opentypeless://auth/callback?code=${'d'.repeat(43)}&state=${state}`,
+      ),
+    ).resolves.toBe(false)
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    finish(Response.json({ token: 'valid-token-12345' }))
+    await expect(pending).resolves.toBe(true)
+  })
+
+  it('does not clear another flow when cleanup belongs to an older state', async () => {
+    const module = await import('../deep-link')
+    const state = module.generateOAuthState()
+    const verifier = module.getPendingOAuthVerifier(state)
+    module.clearOAuthState('22222222-2222-4222-8222-222222222222')
+    expect(module.getPendingOAuthVerifier(state)).toBe(verifier)
+  })
 })
