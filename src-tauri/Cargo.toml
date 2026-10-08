@@ -1,6 +1,6 @@
 [package]
 name = "opentypeless"
-version = "1.1.62"
+version = "1.1.63"
 description = "AI-powered speech-to-text and text polishing desktop app"
 authors = ["OpenTypeless Contributors"]
 license = "MIT"
