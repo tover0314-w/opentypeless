@@ -2,14 +2,16 @@
 set -euo pipefail
 
 linuxdeploy_arch="${1:-}"
+# Use a dated upstream release: continuous assets can change under a fixed hash.
+appimage_plugin_release="1-alpha-20250213-1"
 case "$linuxdeploy_arch" in
   x86_64)
     linuxdeploy_sha256="e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef"
-    appimage_plugin_sha256="0441769ab38009504d2678c38cd7e526955388dd30a215b4a20afaa5471652f2"
+    appimage_plugin_sha256="992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3"
     ;;
   aarch64)
     linuxdeploy_sha256="b12b5cc57bd0921e1f98d73f58aa364503bc1a27f54b7a69fd2870bce7fa2f55"
-    appimage_plugin_sha256="ce574719bcf9cc1fb12728d60b17e48cc87d9b6c40f6f48b04cff7d273b5eb24"
+    appimage_plugin_sha256="83c292149274965a865dcd44c135cfca8ba28c6b7de3eb628d4b8b5f248af17c"
     ;;
   *)
     echo "Unsupported linuxdeploy architecture: ${linuxdeploy_arch:-<empty>}" >&2
@@ -35,7 +37,7 @@ chmod 0755 "$real_path"
 
 curl --fail --location --retry 3 \
   --output "$real_appimage_plugin_path" \
-  "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-${linuxdeploy_arch}.AppImage"
+  "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/${appimage_plugin_release}/linuxdeploy-plugin-appimage-${linuxdeploy_arch}.AppImage"
 printf '%s  %s\n' "$appimage_plugin_sha256" "$real_appimage_plugin_path" | sha256sum --check --strict
 chmod 0755 "$real_appimage_plugin_path"
 cp "$appimage_plugin_wrapper_source" "$appimage_plugin_path"
