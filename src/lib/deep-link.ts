@@ -6,6 +6,7 @@ import { API_BASE_URL } from './constants'
 let pendingOAuthState: string | null = null
 let pendingOAuthVerifier: string | null = null
 let pendingOAuthTimer: ReturnType<typeof setTimeout> | null = null
+let pendingOAuthExchange: { state: string; code: string; result: Promise<boolean> } | null = null
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
 export const EMAIL_VERIFICATION_STATE_TTL_MS = 60 * 60 * 1000
 
@@ -16,7 +17,7 @@ export function generateOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string {
   const verifier = `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`
   pendingOAuthState = state
   pendingOAuthVerifier = verifier
-  pendingOAuthTimer = setTimeout(clearOAuthState, ttlMs)
+  pendingOAuthTimer = setTimeout(() => clearOAuthState(state), ttlMs)
   return state
 }
 
@@ -38,9 +39,11 @@ export function getPendingOAuthVerifier(state: string): string | null {
 }
 
 /** Clear pending OAuth state (e.g. user cancelled or timed out). */
-export function clearOAuthState(): void {
+export function clearOAuthState(expectedState?: string): void {
+  if (expectedState !== undefined && pendingOAuthState !== expectedState) return
   pendingOAuthState = null
   pendingOAuthVerifier = null
+  pendingOAuthExchange = null
   if (pendingOAuthTimer) {
     clearTimeout(pendingOAuthTimer)
     pendingOAuthTimer = null
@@ -90,28 +93,24 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
     if (!expectedState) {
       return false
     }
-    // Validate CSRF state
+    // A cancelled browser flow may arrive after a new one has started.
+    // Reject it without destroying the new flow's CSRF/PKCE proof.
     if (state !== expectedState) {
-      clearOAuthState()
       return false
     }
     if (!code || !verifier) return false
+    if (pendingOAuthExchange) {
+      return pendingOAuthExchange.state === state && pendingOAuthExchange.code === code
+        ? pendingOAuthExchange.result
+        : false
+    }
+    const result = exchangeOAuthCode(code, expectedState, verifier)
+    const exchange = { state: expectedState, code, result }
+    pendingOAuthExchange = exchange
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/exchange`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, verifier }),
-      })
-      if (!response.ok) return false
-      const result = (await response.json()) as { token?: unknown }
-      const token = result.token
-      if (typeof token !== 'string' || !isValidToken(token)) return false
-      clearOAuthState()
-      await useAuthStore.getState().handleDeepLinkToken(token)
-      window.location.hash = '#/account'
-      return true
-    } catch {
-      return false
+      return await result
+    } finally {
+      if (pendingOAuthExchange === exchange) pendingOAuthExchange = null
     }
   }
 
@@ -123,4 +122,26 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
   }
 
   return false
+}
+
+async function exchangeOAuthCode(code: string, state: string, verifier: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, verifier }),
+    })
+    if (!response.ok) return false
+    const result = (await response.json()) as { token?: unknown }
+    const token = result.token
+    if (typeof token !== 'string' || !isValidToken(token)) return false
+    // Ignore an exchange that finished after cancellation, expiry, or a new login.
+    if (pendingOAuthState !== state || pendingOAuthVerifier !== verifier) return false
+    clearOAuthState(state)
+    await useAuthStore.getState().handleDeepLinkToken(token)
+    window.location.hash = '#/account'
+    return true
+  } catch {
+    return false
+  }
 }

@@ -40,7 +40,7 @@ base64 = "0.22"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"
-async-trait = "0.1"
+async-trait = "0.1.92"
 arboard = "3"
 http = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }

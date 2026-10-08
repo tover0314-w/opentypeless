@@ -5,7 +5,7 @@ import {
   createDesktopWebAuthURL,
   DesktopAuthError,
 } from '../desktop-auth-callback'
-import { clearOAuthState } from '../deep-link'
+import { clearOAuthState, getPendingOAuthVerifier } from '../deep-link'
 
 describe('createDesktopAuthCallbackURL', () => {
   const fetchMock = vi.fn()
@@ -96,5 +96,27 @@ describe('createDesktopAuthCallbackURL', () => {
     expect(error).toBeInstanceOf(DesktopAuthError)
     expect((error as DesktopAuthError).reason).toBe('network')
     expect((error as DesktopAuthError).status).toBeNull()
+  })
+
+  it('does not cancel a new login when an older registration fails late', async () => {
+    clearOAuthState()
+    let fail!: (error: Error) => void
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+    )
+    const oldRegistration = createDesktopAuthCallbackURL().catch((error: unknown) => error)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    clearOAuthState()
+    vi.mocked(crypto.randomUUID).mockReturnValueOnce('22222222-2222-4222-8222-222222222222')
+    const newCallback = await claimDesktopAuthCallbackURL()
+    const newState = new URL(newCallback!).searchParams.get('desktop')!
+    const verifier = getPendingOAuthVerifier(newState)
+    fail(new TypeError('fetch failed'))
+    await expect(oldRegistration).resolves.toBeInstanceOf(DesktopAuthError)
+    expect(getPendingOAuthVerifier(newState)).toBe(verifier)
+    clearOAuthState()
   })
 })
