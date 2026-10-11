@@ -198,7 +198,7 @@ impl LlmProvider for CloudLlmProvider {
             .header("Authorization", format!("Bearer {}", config.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
-            .timeout(std::time::Duration::from_secs(15))
+            .timeout(crate::cloud_request::LLM_TIMEOUT)
             .send()
             .await
             {

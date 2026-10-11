@@ -15,6 +15,13 @@ pub const DEFAULT_MAX_AUDIO_BYTES: u64 = 4_000_000;
 const OGG_CONTAINER_HEADROOM_BYTES: u64 = 256;
 const OGG_BOUNDED_BYTES_PER_FRAME: u64 = 128;
 
+pub fn max_managed_audio_seconds(max_audio_bytes: u64) -> u32 {
+    let frames =
+        max_audio_bytes.saturating_sub(OGG_CONTAINER_HEADROOM_BYTES) / OGG_BOUNDED_BYTES_PER_FRAME;
+    (frames.saturating_mul(u64::from(MANAGED_OPUS_FRAME_MS)) / 1_000).min(u64::from(u32::MAX))
+        as u32
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ManagedAudioEncodingConfig {
     pub preferred_wav_max_bytes: u64,
@@ -340,9 +347,10 @@ impl OggOpusEncoder {
             if self.pending_samples.is_empty()
                 && u64::from(self.packet_count) >= self.max_audio_frames
             {
-                // Preserve a complete, decodable prefix instead of corrupting
-                // the Ogg tail when an unexpected negotiated byte cap is hit.
-                break;
+                return Err(ManagedAudioError::new(
+                    "managed_audio_too_large",
+                    "recording exceeds the supported audio limit",
+                ));
             }
             self.pending_samples
                 .push(u16::from_le_bytes([bytes[0], bytes[1]]));
@@ -607,22 +615,29 @@ mod tests {
     }
 
     #[test]
-    fn encoder_returns_a_valid_prefix_before_reaching_the_negotiated_cap() {
+    fn encoder_rejects_excess_audio_instead_of_returning_a_truncated_prefix() {
         let input_samples = MANAGED_OPUS_INPUT_SAMPLES_PER_FRAME * 100;
         let config = ManagedAudioEncodingConfig {
             max_audio_bytes: 1_000,
             ..ManagedAudioEncodingConfig::default()
         };
-        let encoded = encode_pcm_to_ogg_opus(&silent_pcm(input_samples), 13, config).unwrap();
-        let packets = read_packets(&encoded.bytes);
+        let error = encode_pcm_to_ogg_opus(&silent_pcm(input_samples), 13, config).unwrap_err();
+        assert_eq!(error.code, "managed_audio_too_large");
+    }
 
-        assert!(encoded.original_samples < input_samples as u64);
+    #[test]
+    fn negotiated_duration_preserves_every_sample_with_container_headroom() {
+        let config = ManagedAudioEncodingConfig {
+            max_audio_bytes: 700_000,
+            ..ManagedAudioEncodingConfig::default()
+        };
+        let seconds = max_managed_audio_seconds(config.max_audio_bytes);
+        assert_eq!(seconds, 109);
+        let samples = seconds as usize * 16_000;
+        let encoded = encode_pcm_to_ogg_opus(&silent_pcm(samples), 17, config).unwrap();
+        assert_eq!(encoded.original_samples, samples as u64);
         assert!(encoded.bytes.len() <= config.max_audio_bytes as usize);
-        assert!(packets.last().unwrap().last_in_stream());
-        assert_eq!(
-            encoded.final_granule,
-            u64::from(encoded.pre_skip) + encoded.original_samples * 3
-        );
+        assert_eq!(max_managed_audio_seconds(DEFAULT_MAX_AUDIO_BYTES), 624);
     }
 
     #[tokio::test]

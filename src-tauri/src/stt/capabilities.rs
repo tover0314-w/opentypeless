@@ -257,10 +257,7 @@ fn compatible_managed_limits(
         .max_audio_bytes
         .min(multipart_audio_budget)
         .min(MANAGED_AUDIO_BYTES);
-    let byte_limited_seconds = max_audio_bytes
-        .saturating_mul(8)
-        .checked_div(48_000)?
-        .min(u64::from(u32::MAX)) as u32;
+    let byte_limited_seconds = super::managed_audio::max_managed_audio_seconds(max_audio_bytes);
     let hard_max_seconds = state
         .capability
         .max_recording_seconds
@@ -604,6 +601,20 @@ mod tests {
             NOW - MANAGED_CAPABILITY_TTL_SECONDS - 1,
         ));
         assert_eq!(managed_audio_encoding_config(&cloud, NOW), None);
+    }
+
+    #[test]
+    fn negotiated_small_cap_includes_container_overhead_in_recording_limit() {
+        let mut state = managed_state(2, 600, NOW);
+        for format in &mut state.capability.formats {
+            format.max_audio_bytes = 700_000;
+            if format.preferred_client_switch_bytes.is_some() {
+                format.preferred_client_switch_bytes = Some(650_000);
+            }
+        }
+        let limits = compatible_managed_limits(&state, NOW).unwrap();
+        assert_eq!(limits.hard_max_seconds, 109);
+        assert_eq!(limits.max_audio_bytes, 700_000);
     }
 
     #[test]

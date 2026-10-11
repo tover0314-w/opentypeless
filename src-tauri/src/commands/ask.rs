@@ -930,7 +930,7 @@ async fn ask_via_cloud(
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .json(&body)
-            .timeout(std::time::Duration::from_secs(45))
+            .timeout(crate::cloud_request::ASK_TIMEOUT)
             .send()
             .await
             .map_err(AppError::from)?;
