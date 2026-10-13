@@ -2,8 +2,10 @@ pub mod cloud;
 pub mod context_policy;
 pub mod model_capabilities;
 pub mod openai;
+mod output;
 pub mod prompt;
 pub mod protocol;
+mod sse;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

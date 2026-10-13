@@ -197,66 +197,16 @@ impl LlmProvider for OpenAiProvider {
 
         if let Some(callback) = on_chunk {
             // Streaming mode
-            let mut full_text = String::new();
-            let mut reasoning_text = String::new();
             let mut stream = response.bytes_stream();
-
-            let mut buffer = String::new();
-            let mut stream_done = false;
-            while !stream_done {
+            let mut output = super::output::FinalStream::new(api_kind);
+            while !output.is_done() {
                 let Some(chunk) = stream.next().await else {
                     break;
                 };
                 let chunk = chunk?;
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-                // Process SSE lines
-                while let Some(line_end) = buffer.find('\n') {
-                    let line = buffer[..line_end].trim().to_string();
-                    buffer = buffer[line_end + 1..].to_string();
-
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            stream_done = true;
-                            break;
-                        }
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
-                            let event = protocol::parse_stream_event(api_kind, &v);
-                            if let Some(error) = event.error {
-                                return Err(AppError::Config(error));
-                            }
-                            if let Some(content) = event.text {
-                                if !content.is_empty() {
-                                    full_text.push_str(&content);
-                                    callback(&content);
-                                }
-                            }
-
-                            // Collect reasoning_content as fallback for thinking-mode models
-                            // where all output may land in this field instead of content
-                            if let Some(rc) = event.reasoning {
-                                if !rc.is_empty() {
-                                    reasoning_text.push_str(&rc);
-                                }
-                            }
-                            stream_done = event.done;
-                        }
-                    }
-                }
+                output.push(&chunk, callback).map_err(AppError::Config)?;
             }
-
-            // If content was empty but reasoning_content had text, use it as output.
-            // This handles GLM thinking-mode where the API puts all output in reasoning_content.
-            if full_text.is_empty() && !reasoning_text.is_empty() {
-                tracing::warn!(
-                    "LLM content empty, using reasoning_content ({} chars) as output",
-                    reasoning_text.len()
-                );
-                callback(&reasoning_text);
-                full_text = reasoning_text;
-            } else if full_text.is_empty() {
-                tracing::error!("LLM streaming returned no content and no reasoning_content");
-            }
+            let full_text = output.finish().map_err(AppError::Config)?;
 
             Ok(PolishResponse {
                 polished_text: full_text,
@@ -264,14 +214,8 @@ impl LlmProvider for OpenAiProvider {
         } else {
             // Non-streaming mode
             let v: serde_json::Value = response.json().await?;
-            let text = protocol::response_text(api_kind, &v);
-
-            if text.is_empty() {
-                tracing::warn!(
-                    "LLM non-streaming returned empty content, full response: {}",
-                    v
-                );
-            }
+            let text =
+                super::output::non_streaming_final(api_kind, &v).map_err(AppError::Config)?;
 
             Ok(PolishResponse {
                 polished_text: text,
