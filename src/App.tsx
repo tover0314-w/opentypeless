@@ -16,6 +16,7 @@ import {
   getHotkeyRegistrationError,
 } from './lib/tauri'
 import { initDeepLinkListener } from './lib/deep-link'
+import { retryUntilLoaded } from './lib/retryUntilLoaded'
 import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnFocus } from './lib/subscription-refresh-policy'
 import { Capsule } from './components/Capsule'
@@ -38,18 +39,21 @@ function CapsuleApp() {
 
   useEffect(() => {
     // Load config so DurationTimer gets the correct max_recording_seconds
-    getConfig()
-      .then((config) => {
+    // and the idle capsule honours capsule_auto_hide
+    return retryUntilLoaded(
+      getConfig,
+      (config) => {
         setConfig(config)
         // Restore UI language from config
         if (config.ui_language && config.ui_language !== i18n.language) {
           i18n.changeLanguage(config.ui_language)
           localStorage.setItem('ui_language', config.ui_language)
         }
-      })
-      .catch((e) => {
-        console.error('Failed to load config in capsule:', e)
-      })
+      },
+      (e) => {
+        console.error('Failed to load config in capsule, retrying:', e)
+      },
+    )
   }, [setConfig])
 
   // Window show is handled by useCapsuleResize (setSize → setPosition → show),
@@ -63,17 +67,19 @@ function AskApp() {
   const setConfig = useAppStore((s) => s.setConfig)
 
   useEffect(() => {
-    getConfig()
-      .then((config) => {
+    return retryUntilLoaded(
+      getConfig,
+      (config) => {
         setConfig(config)
         if (config.ui_language && config.ui_language !== i18n.language) {
           i18n.changeLanguage(config.ui_language)
           localStorage.setItem('ui_language', config.ui_language)
         }
-      })
-      .catch((e) => {
-        console.error('Failed to load config in Ask app:', e)
-      })
+      },
+      (e) => {
+        console.error('Failed to load config in Ask app, retrying:', e)
+      },
+    )
   }, [setConfig])
 
   return (
