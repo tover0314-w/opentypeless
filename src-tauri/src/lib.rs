@@ -1,5 +1,6 @@
 pub mod app_detector;
 pub mod audio;
+pub mod capsule_topmost;
 pub mod cloud_request;
 pub mod commands;
 pub mod credentials;

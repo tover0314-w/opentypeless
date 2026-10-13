@@ -283,6 +283,7 @@ pub enum PendingAskMessage {
 
 fn emit_capsule_state(app: &tauri::AppHandle, state: PipelineState) {
     let _ = app.emit("pipeline:state", state);
+    crate::capsule_topmost::raise(app);
 }
 
 pub(crate) fn show_answer_window(

@@ -1000,6 +1000,7 @@ impl PipelineHandle {
             );
         }
         let _ = self.app_handle.emit("pipeline:state", new_state);
+        crate::capsule_topmost::raise(&self.app_handle);
 
         // Update tray tooltip + menu to reflect pipeline state
         if let Some(tray_handle) = self.app_handle.try_state::<crate::TrayHandle>() {
