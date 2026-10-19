@@ -105,7 +105,7 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 |---|---|---|---|---|
 | AI 文本润色 | ✅ 多种 LLM | ❌ | ❌ | ❌ |
 | Ask Anything 语音问答 | ✅ | ❌ | ❌ | ❌ |
-| STT 服务商选择 | ✅ Cloud、Deepgram、AssemblyAI、Whisper 兼容、Doubao 等 | ❌ 仅 Apple | ❌ 仅 Microsoft | ❌ 仅 Whisper |
+| STT 服务商选择 | ✅ Cloud、Deepgram、AssemblyAI、Whisper 兼容、Doubao、MiniMax 等 | ❌ 仅 Apple | ❌ 仅 Microsoft | ❌ 仅 Whisper |
 | 适用于任意应用 | ✅ | ✅ | ✅ | ❌ 需复制粘贴 |
 | 翻译模式 | ✅ | ❌ | ❌ | ❌ |
 | 选中文本改写 | ✅ | ❌ | ❌ | ❌ |
@@ -119,8 +119,8 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 - 🎙️ 默认对齐 Typeless 风格热键：macOS `Fn`，Windows `Right Alt`，Linux `Ctrl+/`
 - ❓ 独立 Ask Anything 热键：macOS `Fn+Space`，Windows `Right Alt+Space`，Linux `Ctrl+.`
 - 💊 浮动胶囊显示准备、录音、转写、润色、Ask thinking 等状态，空闲时可自动隐藏
-- 🗣️ 接入 6+ 语音识别服务商，并支持 macOS Apple Speech 与自托管 Whisper 兼容端点
-- 🤖 多种大模型润色文本：OpenAI、DeepSeek、Claude、Gemini、Ollama 等
+- 🗣️ 接入 6+ 语音识别服务商，并支持 macOS Apple Speech、MiniMax ASR 与自托管 Whisper 兼容端点
+- 🤖 多种大模型润色文本：OpenAI、DeepSeek、MiniMax、Claude、Gemini、Ollama 等
 - ✨ 润色风格：轻改、清爽、结构化、专业
 - ⚡ 流式输出，边生成边打字
 - ⌨️ 支持键盘模拟、剪贴板粘贴/仅复制、Windows SendInput 和输出失败诊断

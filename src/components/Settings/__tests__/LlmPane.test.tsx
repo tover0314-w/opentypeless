@@ -77,6 +77,7 @@ vi.mock('react-i18next', () => ({
         'ask.stopAndAsk': 'Stop and ask',
         'ask.send': 'Ask',
         'providers.llm.doubao': 'Doubao (Volcengine)',
+        'providers.llm.minimax': 'MiniMax',
       }
       return translations[key] || key
     },
@@ -225,6 +226,23 @@ describe('LlmPane', () => {
         llm_provider: 'doubao',
         llm_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
         llm_model: 'doubao-seed-1-6-flash-250615',
+      })
+      expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle')
+      expect(mockAppStore.setLlmLatencyMs).toHaveBeenCalledWith(null)
+      expect(mockAppStore.setLlmModels).toHaveBeenCalledWith([])
+    })
+
+    it('applies MiniMax defaults when provider changes to MiniMax', () => {
+      render(<LlmPane />)
+      const selects = screen.getAllByRole('combobox')
+      const providerSelect = selects[0]
+
+      fireEvent.change(providerSelect, { target: { value: 'minimax' } })
+
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
+        llm_provider: 'minimax',
+        llm_base_url: 'https://api.minimax.cn/v1',
+        llm_model: 'MiniMax-M3',
       })
       expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle')
       expect(mockAppStore.setLlmLatencyMs).toHaveBeenCalledWith(null)

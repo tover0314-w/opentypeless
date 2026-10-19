@@ -528,6 +528,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolves_minimax_asr_test_config() {
+        let cfg = resolve_whisper_test_config("minimax-asr", None, None).unwrap();
+        assert_eq!(cfg.endpoint, stt::config::MINIMAX_ASR_ENDPOINT);
+        assert_eq!(cfg.model, stt::config::MINIMAX_ASR_MODEL);
+        assert!(cfg.language_as_header);
+        assert!(cfg.api_key_required);
+    }
+
+    #[test]
     fn resolves_custom_whisper_test_config() {
         let cfg = resolve_whisper_test_config(
             stt::config::CUSTOM_WHISPER_PROVIDER,
