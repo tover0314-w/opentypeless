@@ -15,9 +15,33 @@ pub fn stt_timeout(payload_bytes: usize) -> Duration {
     )
 }
 
+// Includes every retry, backoff, and response-body read. Dropping the future
+// on timeout also cancels the in-flight request rather than allowing late output.
+pub async fn with_llm_deadline<T>(
+    operation: impl std::future::Future<Output = Result<T, crate::error::AppError>>,
+) -> Result<T, crate::error::AppError> {
+    tokio::time::timeout(LLM_TIMEOUT, operation)
+        .await
+        .map_err(|_| crate::error::AppError::Timeout(LLM_TIMEOUT))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn llm_total_deadline_includes_retries_and_cancels_late_output() {
+        let result = with_llm_deadline(async {
+            tokio::time::sleep(Duration::from_secs(110)).await;
+            tokio::time::sleep(Duration::from_secs(110)).await;
+            Ok::<_, crate::error::AppError>("late response")
+        })
+        .await;
+        assert!(matches!(
+            result,
+            Err(crate::error::AppError::Timeout(LLM_TIMEOUT))
+        ));
+    }
 
     #[test]
     fn budgets_cover_backend_deadlines_and_uploads() {

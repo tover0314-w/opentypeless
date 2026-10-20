@@ -118,6 +118,22 @@ impl LlmProvider for CloudLlmProvider {
         req: &PolishRequest,
         on_chunk: Option<&ChunkCallback>,
     ) -> Result<PolishResponse, AppError> {
+        crate::cloud_request::with_llm_deadline(self.polish_with_retries(config, req, on_chunk))
+            .await
+    }
+
+    fn name(&self) -> &str {
+        "Cloud"
+    }
+}
+
+impl CloudLlmProvider {
+    async fn polish_with_retries(
+        &self,
+        config: &LlmConfig,
+        req: &PolishRequest,
+        on_chunk: Option<&ChunkCallback>,
+    ) -> Result<PolishResponse, AppError> {
         if config.api_key.is_empty() {
             return Err(AppError::Auth(
                 "Cloud LLM: session token is missing. Please sign in first.".to_string(),
@@ -327,10 +343,6 @@ impl LlmProvider for CloudLlmProvider {
                 polished_text: text,
             })
         }
-    }
-
-    fn name(&self) -> &str {
-        "Cloud"
     }
 }
 
