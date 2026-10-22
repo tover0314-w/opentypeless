@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Globe2, Loader2, ShieldAlert, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -22,6 +22,8 @@ export function AccessibilityBanner() {
   const [accessibilityDismissed, setAccessibilityDismissed] = useState(false)
   const [browserDismissedTarget, setBrowserDismissedTarget] = useState<string | null>(null)
   const [requestingBrowserAccess, setRequestingBrowserAccess] = useState(false)
+  const accessibilityRecoveryStarted = useRef(false)
+  const accessibilityRecovery = useRef<Promise<void> | null>(null)
   const macAccessibilityNeeded = needsMacAccessibility(config)
 
   const showAccessibility =
@@ -40,8 +42,28 @@ export function AccessibilityBanner() {
 
   // Re-show banner when accessibility error fires (user just hit the issue)
   useEffect(() => {
-    if (!accessibilityTrusted) setAccessibilityDismissed(false)
+    if (!accessibilityTrusted) {
+      setAccessibilityDismissed(false)
+      accessibilityRecoveryStarted.current = false
+    }
   }, [accessibilityTrusted])
+
+  const applyAccessibilityPermission = useCallback(
+    async (trusted: boolean) => {
+      if (trusted && !accessibilityRecoveryStarted.current) {
+        // Permission can be granted directly in System Settings. Rebuild the
+        // native monitor too: HID may have been unavailable at first startup.
+        accessibilityRecoveryStarted.current = true
+        accessibilityRecovery.current = resumeHotkey().catch((error) => {
+          accessibilityRecoveryStarted.current = false
+          console.error('Failed to re-register hotkeys after Accessibility grant:', error)
+        })
+      }
+      if (trusted) await accessibilityRecovery.current
+      setAccessibilityTrusted(trusted)
+    },
+    [setAccessibilityTrusted],
+  )
 
   useEffect(() => {
     if (lastContext?.browserAccessStatus !== 'needs_permission') {
@@ -51,22 +73,36 @@ export function AccessibilityBanner() {
 
   useEffect(() => {
     if (macAccessibilityNeeded && !accessibilityTrusted) {
-      const onFocus = () => checkAccessibilityPermission().then(setAccessibilityTrusted)
-      window.addEventListener('focus', onFocus)
-      return () => window.removeEventListener('focus', onFocus)
+      let cancelled = false
+      let checking = false
+      const checkPermission = async () => {
+        if (checking) return
+        checking = true
+        try {
+          const trusted = await checkAccessibilityPermission()
+          if (!cancelled) await applyAccessibilityPermission(trusted)
+        } catch (error) {
+          console.error('Failed to check Accessibility permission:', error)
+        } finally {
+          checking = false
+        }
+      }
+      window.addEventListener('focus', checkPermission)
+      // The user may return directly to their editor after granting access.
+      const timer = window.setInterval(checkPermission, 1_000)
+      return () => {
+        cancelled = true
+        window.removeEventListener('focus', checkPermission)
+        window.clearInterval(timer)
+      }
     }
-  }, [macAccessibilityNeeded, accessibilityTrusted, setAccessibilityTrusted])
+  }, [macAccessibilityNeeded, accessibilityTrusted, applyAccessibilityPermission])
 
   const handleGrant = useCallback(async () => {
     await requestAccessibilityPermission()
     const trusted = await waitForAccessibilityPermission()
-    setAccessibilityTrusted(trusted)
-    if (trusted) {
-      await resumeHotkey().catch((error) => {
-        console.error('Failed to re-register hotkeys after Accessibility grant:', error)
-      })
-    }
-  }, [setAccessibilityTrusted])
+    await applyAccessibilityPermission(trusted)
+  }, [applyAccessibilityPermission])
 
   const handleBrowserGrant = useCallback(async () => {
     if (!browserTarget || !lastContext) return

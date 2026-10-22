@@ -60,6 +60,7 @@ vi.mock('../../../lib/tauri', () => ({
 }))
 
 beforeEach(() => {
+  vi.clearAllMocks()
   Object.assign(mockStore, {
     accessibilityTrusted: false,
     setAccessibilityTrusted: vi.fn((trusted: boolean) => {
@@ -85,6 +86,64 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('AccessibilityBanner', () => {
+  it('recovers after a System Settings grant without requiring the app to regain focus', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.checkAccessibilityPermission).mockResolvedValueOnce(true)
+
+    render(<AccessibilityBanner />)
+
+    await waitFor(() => expect(tauri.resumeHotkey).toHaveBeenCalledTimes(1), { timeout: 2_500 })
+    expect(mockStore.setAccessibilityTrusted).toHaveBeenCalledWith(true)
+    expect(tauri.requestAccessibilityPermission).not.toHaveBeenCalled()
+  })
+
+  it('restarts native hotkeys when access is granted directly in System Settings', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.checkAccessibilityPermission).mockResolvedValueOnce(true)
+
+    render(<AccessibilityBanner />)
+    fireEvent.focus(window)
+
+    await waitFor(() => {
+      expect(tauri.resumeHotkey).toHaveBeenCalledTimes(1)
+      expect(mockStore.setAccessibilityTrusted).toHaveBeenCalledWith(true)
+    })
+    expect(tauri.requestAccessibilityPermission).not.toHaveBeenCalled()
+  })
+
+  it('does not restart native hotkeys while access is still denied', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.checkAccessibilityPermission).mockResolvedValueOnce(false)
+
+    render(<AccessibilityBanner />)
+    fireEvent.focus(window)
+
+    await waitFor(() => expect(mockStore.setAccessibilityTrusted).toHaveBeenCalledWith(false))
+    expect(tauri.resumeHotkey).not.toHaveBeenCalled()
+  })
+
+  it('shares one recovery between focus and the grant button', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.checkAccessibilityPermission).mockResolvedValueOnce(true)
+    let finishRecovery!: () => void
+    vi.mocked(tauri.resumeHotkey).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRecovery = resolve
+        }),
+    )
+
+    render(<AccessibilityBanner />)
+    fireEvent.focus(window)
+    fireEvent.click(screen.getByRole('button', { name: 'Grant' }))
+
+    await waitFor(() => expect(tauri.resumeHotkey).toHaveBeenCalledTimes(1))
+    expect(mockStore.setAccessibilityTrusted).not.toHaveBeenCalled()
+    finishRecovery()
+    await waitFor(() => expect(mockStore.setAccessibilityTrusted).toHaveBeenCalledWith(true))
+    expect(tauri.resumeHotkey).toHaveBeenCalledTimes(1)
+  })
+
   it('re-registers hotkeys after Accessibility is granted from the banner', async () => {
     const tauri = await import('../../../lib/tauri')
 

@@ -1,6 +1,10 @@
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+#[cfg(target_os = "macos")]
+#[path = "native_hotkey/macos_fn_hid.rs"]
+mod macos_fn_hid;
 use tauri_plugin_global_shortcut::ShortcutState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -315,6 +319,7 @@ fn dispatch_native_combo_edge(
 
 #[cfg(target_os = "macos")]
 mod platform {
+    use super::macos_fn_hid::FnHidMonitor;
     use super::{
         activate_pending_hold_base, dispatch_native_base_edge, dispatch_native_combo_edge,
         monitored_bindings_for_base, NativeComboKey, NativeComboState, NativeHotkeyHandler,
@@ -403,6 +408,8 @@ mod platform {
         ) -> CfRunLoopSourceRef;
         fn CFRunLoopGetCurrent() -> CfRunLoopRef;
         fn CFRunLoopAddSource(rl: CfRunLoopRef, source: CfRunLoopSourceRef, mode: CfStringRef);
+        fn CFRunLoopRemoveSource(rl: CfRunLoopRef, source: CfRunLoopSourceRef, mode: CfStringRef);
+        fn CFMachPortInvalidate(port: CfMachPortRef);
         fn CFRunLoopRun();
         fn CFRunLoopStop(rl: CfRunLoopRef);
         fn CFRelease(cf: *const c_void);
@@ -505,6 +512,7 @@ mod platform {
         handler: NativeHotkeyHandler,
         handles: Arc<MacShutdownHandles>,
         state: Arc<Mutex<NativeComboState>>,
+        hid_fn_authoritative: Arc<AtomicBool>,
     }
 
     fn run_event_tap_loop(
@@ -527,6 +535,7 @@ mod platform {
                 hold_base,
                 ..NativeComboState::default()
             })),
+            hid_fn_authoritative: Arc::new(AtomicBool::new(false)),
         }));
         let mask: CgEventMask = (1u64 << FLAGS_CHANGED) | (1u64 << KEY_DOWN) | (1u64 << KEY_UP);
 
@@ -553,6 +562,7 @@ mod platform {
             if source.is_null() {
                 CGEventTapEnable(tap, false);
                 *handles.tap.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                CFMachPortInvalidate(tap);
                 CFRelease(tap as *const c_void);
                 drop(Box::from_raw(context));
                 let _ = status_tx.send(Err(
@@ -569,6 +579,7 @@ mod platform {
                 CFRelease(source as *const c_void);
                 *handles.tap.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 *handles.runloop.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                CFMachPortInvalidate(tap);
                 CFRelease(tap as *const c_void);
                 drop(Box::from_raw(context));
                 let _ = status_tx.send(Err(
@@ -578,8 +589,20 @@ mod platform {
             }
 
             CFRunLoopAddSource(runloop, source, kCFRunLoopCommonModes);
-            CFRelease(source as *const c_void);
             CGEventTapEnable(tap, true);
+
+            // A working Quartz tap does not guarantee that Fn reaches it. Read
+            // Apple's Fn HID element where available; retain Quartz for combo
+            // keys and as a fallback when HID consent/devices are unavailable.
+            let hid_monitor = FnHidMonitor::start(
+                runloop.cast(),
+                Arc::clone(&(*context).hid_fn_authoritative),
+                Box::new(move |pressed| handle_fn_edge(&*context, pressed)),
+            );
+            tracing::info!(
+                "macOS Fn HID source active={}",
+                (*context).hid_fn_authoritative.load(Ordering::Acquire)
+            );
 
             if status_tx.send(Ok(())).is_err() || handles.cancelled.load(Ordering::SeqCst) {
                 handles.shutdown();
@@ -589,8 +612,14 @@ mod platform {
                 CFRunLoopRun();
             }
 
+            // Stop HID callbacks while CallbackContext is still alive.
+            drop(hid_monitor);
+            CFRunLoopRemoveSource(runloop, source, kCFRunLoopCommonModes);
+            CFRelease(source as *const c_void);
+
             if let Some(tap) = handles.tap.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 CGEventTapEnable(tap, false);
+                CFMachPortInvalidate(tap);
                 CFRelease(tap as *const c_void);
             }
             *handles.runloop.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -641,45 +670,55 @@ mod platform {
         event
     }
 
+    fn handle_fn_edge(context: &CallbackContext, pressed: bool) {
+        if pressed && context.handles.cancelled.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut state = context.state.lock().unwrap_or_else(|e| e.into_inner());
+        let was_pressed = state.base_pressed;
+        let _ = dispatch_native_base_edge(
+            &mut state,
+            &context.bindings,
+            NativeHotkeyTrigger::Fn,
+            pressed,
+            &context.handler,
+        );
+        if pressed && !was_pressed && state.hold_base && state.pending_base_press {
+            let generation = state.edge_generation;
+            let state = Arc::clone(&context.state);
+            let bindings = Arc::clone(&context.bindings);
+            let handler = Arc::clone(&context.handler);
+            let handles = Arc::clone(&context.handles);
+            if let Err(error) = thread::Builder::new()
+                .name("opentypeless-fn-hold-delay".to_string())
+                .spawn(move || {
+                    thread::sleep(HOLD_COMBO_GRACE_PERIOD);
+                    if handles.cancelled.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = activate_pending_hold_base(
+                        &mut state,
+                        &bindings,
+                        NativeHotkeyTrigger::Fn,
+                        generation,
+                        &handler,
+                    );
+                })
+            {
+                tracing::warn!("Failed to schedule Fn hold hotkey: {error}");
+            }
+        }
+    }
+
     fn handle_flags_changed(context: &CallbackContext, event: CgEventRef) {
         let keycode = unsafe { CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE) };
         let flags = unsafe { CGEventGetFlags(event) };
         if keycode == FN_KEYCODE {
-            let pressed = (flags & FLAG_MASK_SECONDARY_FN) != 0;
-            let mut state = context.state.lock().unwrap_or_else(|e| e.into_inner());
-            let was_pressed = state.base_pressed;
-            let _ = dispatch_native_base_edge(
-                &mut state,
-                &context.bindings,
-                NativeHotkeyTrigger::Fn,
-                pressed,
-                &context.handler,
-            );
-            if pressed && !was_pressed && state.hold_base && state.pending_base_press {
-                let generation = state.edge_generation;
-                let state = Arc::clone(&context.state);
-                let bindings = Arc::clone(&context.bindings);
-                let handler = Arc::clone(&context.handler);
-                let handles = Arc::clone(&context.handles);
-                if let Err(error) = thread::Builder::new()
-                    .name("opentypeless-fn-hold-delay".to_string())
-                    .spawn(move || {
-                        thread::sleep(HOLD_COMBO_GRACE_PERIOD);
-                        if handles.cancelled.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
-                        let _ = activate_pending_hold_base(
-                            &mut state,
-                            &bindings,
-                            NativeHotkeyTrigger::Fn,
-                            generation,
-                            &handler,
-                        );
-                    })
-                {
-                    tracing::warn!("Failed to schedule Fn hold hotkey: {error}");
-                }
+            // Mixing both sources can replay a delayed Quartz edge after the
+            // HID release and start a second recording. Use one Fn authority.
+            if !context.hid_fn_authoritative.load(Ordering::Acquire) {
+                handle_fn_edge(context, (flags & FLAG_MASK_SECONDARY_FN) != 0);
             }
             return;
         }
