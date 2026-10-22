@@ -47,6 +47,10 @@ export function AccountStep() {
     }
   }, [user, oauthPending])
 
+  useEffect(() => {
+    if (oauthPending && error) setOauthPending(null)
+  }, [oauthPending, error])
+
   const displayError = localError ?? error
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -77,6 +77,19 @@ describe('deep-link OAuth callback', () => {
     expect(window.location.hash).toBe('#/account')
   })
 
+  it('does not report login success when the exchanged token has no valid session', async () => {
+    mocks.handleDeepLinkToken.mockRejectedValueOnce(new Error('Desktop sign-in failed'))
+    const module = await import('../deep-link')
+    const state = module.generateOAuthState()
+
+    const handled = await module.handleDeepLinkUrl(
+      `opentypeless://auth/callback?code=${'c'.repeat(43)}&state=${state}`,
+    )
+
+    expect(handled).toBe(false)
+    expect(window.location.hash).toBe('')
+  })
+
   it('does not replace the state of an active desktop callback flow', async () => {
     const module = await import('../deep-link')
 

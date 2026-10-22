@@ -757,6 +757,7 @@
     "oauthPendingHint": "If your browser shows “Load failed”, copy the browser address and use Complete from clipboard below.",
     "oauthTimeout": "Sign in timed out. Please try again.",
     "oauthFailed": "Failed to start sign in",
+    "oauthSessionInvalid": "Could not complete sign in. Please try again.",
     "signInUnavailable": "The sign-in service is temporarily unavailable. Please try again later.",
     "signInUnavailableWithStatus": "The sign-in service is temporarily unavailable (HTTP {{status}}). Please try again later.",
     "completeFromClipboard": "Complete from clipboard",
