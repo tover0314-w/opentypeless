@@ -208,6 +208,9 @@ fn no_speech_user_error() -> crate::error::UserError {
 }
 
 fn llm_polish_user_error(error: &crate::error::AppError) -> crate::error::UserError {
+    if let Some(user_error) = llm::thinking::unavailable_choice_user_error(error) {
+        return user_error;
+    }
     if matches!(error, crate::error::AppError::LlmQuota(_)) {
         return error.to_user_error();
     }
@@ -2243,6 +2246,7 @@ impl PipelineHandle {
             base_url: config.llm_base_url.clone(),
             max_tokens: 4096,
             temperature: 0.3,
+            thinking_strength: config.llm_thinking_strength,
         };
         let provider = llm::create_provider(&config.llm_provider, Some(self.shared_client.clone()));
 
@@ -3684,6 +3688,27 @@ mod tests {
         let err = no_speech_user_error();
         assert_eq!(err.code, "stt_no_speech_detected");
         assert_eq!(err.retry_count, 0);
+    }
+
+    #[test]
+    fn thinking_config_error_reaches_the_runtime_capsule_without_private_config() {
+        let reason = llm::thinking::validate(
+            "custom",
+            "https://private.invalid/v1",
+            "private-model",
+            llm::thinking::ThinkingStrength::High,
+        )
+        .unwrap_err();
+        let error = llm_polish_user_error(&crate::error::AppError::Config(reason));
+        assert_eq!(error.code, "llm_thinking_unavailable");
+        assert_eq!(error.retry_count, 0);
+        let payload = serde_json::to_value(error).unwrap();
+        assert!(payload["details"]
+            .as_str()
+            .unwrap()
+            .contains("Choose Default"));
+        assert!(!payload.to_string().contains("private.invalid"));
+        assert!(!payload.to_string().contains("private-model"));
     }
 
     #[test]

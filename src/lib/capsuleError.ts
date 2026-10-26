@@ -16,6 +16,7 @@ export type CapsuleErrorKey =
   | 'output_wayland_unsupported'
   | 'output_wayland_clipboard_copy_only'
   | 'llm_failed'
+  | 'llm_thinking_unavailable'
   | 'llm_quota_exceeded'
   | 'accessibility_required'
   | 'stt_not_configured'
@@ -34,6 +35,7 @@ const structuredCapsuleErrorKeys = new Set<CapsuleErrorKey>([
   'output_wayland_unsupported',
   'output_wayland_clipboard_copy_only',
   'llm_failed',
+  'llm_thinking_unavailable',
   'llm_quota_exceeded',
   'accessibility_required',
   'stt_not_configured',

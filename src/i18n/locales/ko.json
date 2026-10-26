@@ -50,7 +50,8 @@
     "output_streaming_partial": "스트리밍 삽입이 일찍 중지되었습니다. 삽입된 텍스트는 유지되었습니다. {{details}}",
     "llm_failed": "AI 다듬기에 실패했습니다. 대신 원문을 출력했습니다. {{details}}",
     "llm_quota_exceeded": "클라우드 AI 할당량을 모두 사용했습니다. Pro로 업그레이드하거나 BYOK 모드로 전환해 주세요.",
-    "output_wayland_clipboard_copy_only": "클립보드에 복사했습니다. Wayland에서는 직접 붙여넣으세요."
+    "output_wayland_clipboard_copy_only": "클립보드에 복사했습니다. Wayland에서는 직접 붙여넣으세요.",
+    "llm_thinking_unavailable": "저장된 사고 강도를 현재 제공업체, 모델 또는 경로에서 지원하지 않아 AI 정리를 건너뛰었습니다. 설정 → AI 다듬기 → 사고 강도에서 기본값 또는 지원되는 값을 선택하세요. 일반 받아쓰기는 원래 인식 텍스트로 돌아갑니다."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud를 일시적으로 사용할 수 없습니다",
@@ -259,7 +260,8 @@
       "audio_failed": "마이크 실패",
       "output_failed": "출력 실패",
       "unknown": "오류",
-      "output_wayland_clipboard_copy_only": "복사됨"
+      "output_wayland_clipboard_copy_only": "복사됨",
+      "llm_thinking_unavailable": "사고: 기본값으로 변경"
     },
     "menu": {
       "hideWhenIdle": "유휴 시 캡슐 숨기기",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "이 기기에만 저장된 모든 앱 연결 설정을 삭제할까요?",
     "mappingResetConfirmAction": "연결 설정 재설정",
     "mappingNoMappings": "사용자 지정 앱 연결 설정이 없습니다",
-    "dictationMode": "받아쓰기 모드"
+    "dictationMode": "받아쓰기 모드",
+    "thinkingStrength": "사고 강도",
+    "thinkingUnsupportedOption": "사용 불가",
+    "thinkingUnsupported": "저장된 선택이 지원되지 않아 AI 다듬기 요청을 보내지 않습니다. 일반 받아쓰기는 기존 대체 처리에 따라 원래 인식 텍스트를 사용할 수 있습니다. 기본값 또는 지원되는 값을 선택하세요.",
+    "thinkingUnavailable": "이 제공업체, 모델 및 API 경로에는 검증된 사고 제어가 없습니다. 기본값은 기존 동작을 유지합니다.",
+    "thinkingDefaultHint": "기본값은 제공업체별 매개변수를 포함한 기존 동작을 유지합니다.",
+    "thinkingActive": "받아쓰기 다듬기와 질문 요청에 이 선택이 적용됩니다.",
+    "thinkingHint": "같은 단계 이름이라도 제공업체별 토큰 사용량과 지연 시간은 다릅니다. 수동 예산은 기존 출력 한도를 공유합니다. 연결 테스트는 연결만 확인합니다.",
+    "thinkingOptions": {
+      "default": "기본값",
+      "off": "끄기",
+      "minimal": "최소",
+      "low": "낮음",
+      "medium": "중간",
+      "high": "높음",
+      "xhigh": "매우 높음",
+      "max": "최대",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "수동 사고 예산은 받아쓰기 정리에 사용할 수 있지만 Ask의 기존 출력 한도인 80토큰을 초과합니다. Ask를 사용하기 전에 기본값 또는 끄기를 선택하세요."
   },
   "contextFamilies": {
     "email": "이메일",

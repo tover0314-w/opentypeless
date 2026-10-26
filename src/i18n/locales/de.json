@@ -50,7 +50,8 @@
     "output_streaming_partial": "Streaming-Einfügen wurde vorzeitig beendet. Der eingefügte Text wurde beibehalten. {{details}}",
     "llm_failed": "Die KI-Glättung ist fehlgeschlagen. Stattdessen wurde der Originaltext ausgegeben. {{details}}",
     "llm_quota_exceeded": "Das Cloud-KI-Kontingent ist aufgebraucht. Wechseln Sie zu Pro oder in den BYOK-Modus.",
-    "output_wayland_clipboard_copy_only": "In die Zwischenablage kopiert. Auf Wayland bitte manuell einfügen."
+    "output_wayland_clipboard_copy_only": "In die Zwischenablage kopiert. Auf Wayland bitte manuell einfügen.",
+    "llm_thinking_unavailable": "KI-Überarbeitung übersprungen: Anbieter, Modell oder Route unterstützt die gespeicherte Denkstärke nicht. Wählen Sie in Einstellungen → KI-Glättung → Denkintensität Standard oder einen unterstützten Wert. Beim normalen Diktieren wird das Originaltranskript verwendet."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud ist vorübergehend nicht verfügbar",
@@ -259,7 +260,8 @@
       "audio_failed": "Mikrofehler",
       "output_failed": "Ausgabe-Fehler",
       "unknown": "Fehler",
-      "output_wayland_clipboard_copy_only": "Kopiert"
+      "output_wayland_clipboard_copy_only": "Kopiert",
+      "llm_thinking_unavailable": "Denkstärke: Standard"
     },
     "menu": {
       "hideWhenIdle": "Kapsel im Leerlauf ausblenden",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "Alle nur auf diesem Gerät gespeicherten App-Zuordnungen löschen?",
     "mappingResetConfirmAction": "Zuordnungen zurücksetzen",
     "mappingNoMappings": "Keine eigenen App-Zuordnungen",
-    "dictationMode": "Diktiermodus"
+    "dictationMode": "Diktiermodus",
+    "thinkingStrength": "Denkintensität",
+    "thinkingUnsupportedOption": "Nicht verfügbar",
+    "thinkingUnsupported": "Diese Auswahl wird nicht unterstützt. Es wird keine KI-Überarbeitung angefordert; normales Diktieren kann über den bestehenden Rückfall das Originaltranskript verwenden. Wählen Sie Standard oder einen unterstützten Wert.",
+    "thinkingUnavailable": "Keine bestätigte Denksteuerung für diesen Anbieter, dieses Modell und diese API-Route. Standard erhält das bisherige Verhalten.",
+    "thinkingDefaultHint": "Standard erhält das bisherige Verhalten einschließlich anbieterspezifischer Parameter.",
+    "thinkingActive": "Diese Auswahl gilt für Diktatkorrekturen und Fragen.",
+    "thinkingHint": "Gleiche Stufen bedeuten nicht gleiche Token-Nutzung oder Latenz bei allen Anbietern. Manuelle Budgets teilen das vorhandene Ausgabelimit. Verbindungstests prüfen nur die Verbindung.",
+    "thinkingOptions": {
+      "default": "Standard",
+      "off": "Aus",
+      "minimal": "Minimal",
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "xhigh": "Sehr hoch",
+      "max": "Maximum",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "Manuelle Denkbudgets funktionieren bei der Diktatüberarbeitung, überschreiten aber das bestehende Ausgabelimit von Ask (80 Token). Wählen Sie vor der Nutzung von Ask Standard oder Aus."
   },
   "contextFamilies": {
     "email": "E-Mail",

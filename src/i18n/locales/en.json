@@ -50,7 +50,8 @@
     "output_streaming_partial": "Streaming insert stopped early. The inserted text was kept. {{details}}",
     "llm_failed": "AI polishing failed. The original text was output instead. {{details}}",
     "llm_quota_exceeded": "Cloud AI quota exceeded. Upgrade to Pro or switch to BYOK mode.",
-    "output_wayland_clipboard_copy_only": "Copied to clipboard. Paste manually on Wayland."
+    "output_wayland_clipboard_copy_only": "Copied to clipboard. Paste manually on Wayland.",
+    "llm_thinking_unavailable": "AI cleanup skipped: this provider, model or route does not support the saved thinking strength. In Settings → AI Polish → Thinking strength, choose Default or a supported value. Ordinary dictation falls back to the original transcript."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud is temporarily unavailable",
@@ -259,7 +260,8 @@
       "audio_failed": "Mic failed",
       "output_failed": "Output failed",
       "unknown": "Error",
-      "output_wayland_clipboard_copy_only": "Copied"
+      "output_wayland_clipboard_copy_only": "Copied",
+      "llm_thinking_unavailable": "Thinking: use Default"
     },
     "menu": {
       "hideWhenIdle": "Hide capsule when idle",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "Delete all device-only app mappings?",
     "mappingResetConfirmAction": "Reset mappings",
     "mappingNoMappings": "No custom app mappings",
-    "dictationMode": "Dictation mode"
+    "dictationMode": "Dictation mode",
+    "thinkingStrength": "Thinking strength",
+    "thinkingUnsupportedOption": "Unavailable",
+    "thinkingUnsupported": "This saved choice is unsupported here. No AI cleanup request will be sent; ordinary dictation may use the original transcript through the existing fallback. Choose Default or a supported value.",
+    "thinkingUnavailable": "No verified thinking control for this provider, model and API route. Default preserves existing behavior.",
+    "thinkingDefaultHint": "Default preserves existing behavior, including provider-specific parameters.",
+    "thinkingActive": "This choice will be sent with dictation cleanup and Ask requests.",
+    "thinkingHint": "Equal level names do not mean equal token usage or latency across providers. Manual budgets share the existing output limit. Connection tests only check connectivity.",
+    "thinkingOptions": {
+      "default": "Default",
+      "off": "Off",
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Maximum",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "Manual thinking budgets work in dictation cleanup, but exceed Ask’s existing 80-token output cap. Choose Default or Off before using Ask."
   },
   "contextFamilies": {
     "email": "Email",

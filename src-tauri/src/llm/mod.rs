@@ -2,8 +2,11 @@ pub mod cloud;
 pub mod context_policy;
 pub mod model_capabilities;
 pub mod openai;
+mod output;
 pub mod prompt;
 pub mod protocol;
+mod sse;
+pub mod thinking;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,8 @@ pub struct LlmConfig {
     pub base_url: String,
     pub max_tokens: u32,
     pub temperature: f64,
+    #[serde(default)]
+    pub thinking_strength: thinking::ThinkingStrength,
 }
 
 impl Default for LlmConfig {
@@ -30,6 +35,7 @@ impl Default for LlmConfig {
             base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
             max_tokens: 4096,
             temperature: 0.3,
+            thinking_strength: thinking::ThinkingStrength::Default,
         }
     }
 }

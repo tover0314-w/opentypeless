@@ -622,6 +622,14 @@ fn build_byok_ask_body_for_config(
         }
     }
 
+    crate::llm::thinking::apply(
+        &mut body,
+        &config.llm_provider,
+        &config.llm_base_url,
+        &config.llm_model,
+        config.llm_thinking_strength,
+    )?;
+
     Ok(body)
 }
 
@@ -766,6 +774,13 @@ async fn answer_question(
     operation_id: Option<&str>,
     voice_intent: &VoiceIntent,
 ) -> Result<String, AppError> {
+    crate::llm::thinking::validate(
+        &config.llm_provider,
+        &config.llm_base_url,
+        &config.llm_model,
+        config.llm_thinking_strength,
+    )
+    .map_err(AppError::Config)?;
     let llm_api_key = if config.llm_provider == "cloud" {
         String::new()
     } else {
@@ -1861,6 +1876,98 @@ mod tests {
         assert_eq!(body["thinking"]["type"], "enabled");
         assert_eq!(body["temperature"], 1.0);
         assert_eq!(body["top_p"], 0.95);
+    }
+
+    #[test]
+    fn thinking_ask_body_preserves_cap_and_rejects_manual_budget() {
+        use crate::llm::thinking::ThinkingStrength;
+        let mut config = storage::AppConfig {
+            llm_provider: "deepseek".into(),
+            llm_base_url: "https://api.deepseek.com/v1".into(),
+            llm_model: "deepseek-flash".into(),
+            llm_thinking_strength: ThinkingStrength::High,
+            ..storage::AppConfig::default()
+        };
+        let body = build_byok_ask_body_for_config(&config, "Neutral question?", None).unwrap();
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["max_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+        config.llm_provider = "claude".into();
+        config.llm_base_url = "https://api.anthropic.com/v1".into();
+        config.llm_model = "claude-sonnet-4-0".into();
+        config.llm_thinking_strength = ThinkingStrength::Budget1024;
+        assert!(
+            build_byok_ask_body_for_config(&config, "Neutral question?", None)
+                .unwrap_err()
+                .contains("must be less than max_tokens")
+        );
+        config.llm_thinking_strength = ThinkingStrength::Off;
+        let body = build_byok_ask_body_for_config(&config, "Neutral question?", None).unwrap();
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert_eq!(body["max_tokens"], ASK_OUTPUT_TOKEN_LIMIT);
+    }
+
+    #[test]
+    fn thinking_ask_body_serializes_other_adapters_and_rejects_unsupported_choice() {
+        use crate::llm::thinking::ThinkingStrength;
+        for (provider, base, model, strength, expected) in [
+            (
+                "openai",
+                "https://api.openai.com/v1",
+                "gpt-5.1",
+                ThinkingStrength::Off,
+                "none",
+            ),
+            (
+                "gemini",
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "gemini-2.5-flash",
+                ThinkingStrength::Low,
+                "low",
+            ),
+            (
+                "claude",
+                "https://api.anthropic.com/v1",
+                "claude-sonnet-4-6",
+                ThinkingStrength::High,
+                "high",
+            ),
+        ] {
+            let mut config = storage::AppConfig {
+                llm_provider: provider.into(),
+                llm_base_url: base.into(),
+                llm_model: model.into(),
+                llm_thinking_strength: strength,
+                ..storage::AppConfig::default()
+            };
+            let body = build_byok_ask_body_for_config(&config, "Neutral question?", None).unwrap();
+            let serialized: serde_json::Value =
+                serde_json::from_slice(&serde_json::to_vec(&body).unwrap()).unwrap();
+            assert_eq!(serialized["stream"], false);
+            assert_eq!(
+                serialized[if provider == "openai" {
+                    "max_completion_tokens"
+                } else {
+                    "max_tokens"
+                }],
+                ASK_OUTPUT_TOKEN_LIMIT
+            );
+            if provider == "claude" {
+                assert_eq!(serialized["thinking"]["type"], "adaptive");
+                assert_eq!(serialized["output_config"]["effort"], expected);
+            } else {
+                assert_eq!(serialized["reasoning_effort"], expected);
+            }
+            config.llm_model = "future-model".into();
+            assert_eq!(
+                build_byok_ask_body_for_config(&config, "Neutral question?", None).unwrap_err(),
+                crate::llm::thinking::UNAVAILABLE_CHOICE_MESSAGE
+            );
+            config.llm_thinking_strength = ThinkingStrength::Default;
+            let default_body =
+                build_byok_ask_body_for_config(&config, "Neutral question?", None).unwrap();
+            assert!(default_body.get("thinking").is_none());
+            assert!(default_body.get("reasoning_effort").is_none());
+        }
     }
 
     #[test]

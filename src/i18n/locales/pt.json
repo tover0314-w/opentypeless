@@ -50,7 +50,8 @@
     "output_streaming_partial": "A inserção por streaming parou antes do fim. O texto inserido foi mantido. {{details}}",
     "llm_failed": "O polimento por IA falhou. O texto original foi gerado em vez disso. {{details}}",
     "llm_quota_exceeded": "A cota de IA na nuvem acabou. Atualize para Pro ou mude para o modo BYOK.",
-    "output_wayland_clipboard_copy_only": "Copiado para a área de transferência. Cole manualmente no Wayland."
+    "output_wayland_clipboard_copy_only": "Copiado para a área de transferência. Cole manualmente no Wayland.",
+    "llm_thinking_unavailable": "A revisão por IA foi ignorada: o fornecedor, modelo ou rota não suporta a intensidade de raciocínio guardada. Em Configurações → Polimento por IA → Intensidade de raciocínio, escolha Padrão ou um valor suportado. O ditado normal utiliza a transcrição original."
   },
   "cloudRecovery": {
     "title": "O OpenTypeless Cloud está temporariamente indisponível",
@@ -259,7 +260,8 @@
       "audio_failed": "Falha micro",
       "output_failed": "Falha saída",
       "unknown": "Erro",
-      "output_wayland_clipboard_copy_only": "Copiado"
+      "output_wayland_clipboard_copy_only": "Copiado",
+      "llm_thinking_unavailable": "Raciocínio: padrão"
     },
     "menu": {
       "hideWhenIdle": "Ocultar cápsula em repouso",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "Excluir todas as associações de aplicativos salvas apenas neste dispositivo?",
     "mappingResetConfirmAction": "Redefinir associações",
     "mappingNoMappings": "Nenhuma associação personalizada de aplicativo",
-    "dictationMode": "Modo de ditado"
+    "dictationMode": "Modo de ditado",
+    "thinkingStrength": "Intensidade de raciocínio",
+    "thinkingUnsupportedOption": "Indisponível",
+    "thinkingUnsupported": "Esta opção não é suportada. Não será enviado um pedido de revisão por IA; o ditado normal pode usar a transcrição original pelo mecanismo de recuperação existente. Escolha Padrão ou um valor suportado.",
+    "thinkingUnavailable": "Não há controle verificado para este provedor, modelo e rota da API. Padrão preserva o comportamento existente.",
+    "thinkingDefaultHint": "Padrão preserva o comportamento existente, incluindo os parâmetros do provedor.",
+    "thinkingActive": "Esta opção será usada na revisão de ditados e nas perguntas.",
+    "thinkingHint": "Níveis iguais não garantem os mesmos tokens ou latência entre provedores. Os orçamentos manuais compartilham o limite de saída existente. Os testes verificam apenas a conexão.",
+    "thinkingOptions": {
+      "default": "Padrão",
+      "off": "Desativado",
+      "minimal": "Mínimo",
+      "low": "Baixo",
+      "medium": "Médio",
+      "high": "Alto",
+      "xhigh": "Muito alto",
+      "max": "Máximo",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "Os orçamentos de raciocínio manuais funcionam na revisão de ditados, mas excedem o limite de saída atual do Ask de 80 tokens. Escolha Padrão ou Desativado antes de usar o Ask."
   },
   "contextFamilies": {
     "email": "E-mail",

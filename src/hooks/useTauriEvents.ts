@@ -149,6 +149,9 @@ export function useTauriEvents() {
     addListener<PipelineErrorPayload>('pipeline:error', (payload) => {
       const capsuleErrorKey = capsuleErrorKeyFromPayload(payload)
       setPipelineError(t(`capsule.errors.${capsuleErrorKey}`))
+      if (capsuleErrorKey === 'llm_thinking_unavailable') {
+        toast(t('errors.llm_thinking_unavailable'), 'info')
+      }
       if (capsuleErrorKey === 'accessibility_required') {
         setAccessibilityTrusted(false)
       }

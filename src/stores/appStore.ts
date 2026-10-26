@@ -1,3 +1,4 @@
+import type { ThinkingStrength } from '../lib/thinking'
 import { create } from 'zustand'
 import { TARGET_LANGUAGES } from '../lib/constants'
 
@@ -202,6 +203,7 @@ export interface AppConfig {
   llm_api_key: string
   llm_model: string
   llm_base_url: string
+  llm_thinking_strength: ThinkingStrength
   polish_enabled: boolean
   context_adaptation_enabled: boolean
   voice_routing_flags: VoiceRoutingFlags
@@ -734,6 +736,7 @@ const defaultConfig: AppConfig = {
   llm_api_key: '',
   llm_model: 'google/gemini-2.5-flash',
   llm_base_url: 'https://openrouter.ai/api/v1',
+  llm_thinking_strength: 'default',
   polish_enabled: true,
   context_adaptation_enabled: true,
   voice_routing_flags: {
@@ -817,7 +820,13 @@ export const useAppStore = create<AppState>((set) => ({
   setLastContext: (lastContext) => set({ lastContext }),
 
   config: defaultConfig,
-  setConfig: (config) => set((s) => ({ config: syncHotkeyConfig(s.config, config) })),
+  setConfig: (config) =>
+    set((s) => ({
+      config: syncHotkeyConfig(s.config, {
+        ...config,
+        llm_thinking_strength: config.llm_thinking_strength ?? 'default',
+      }),
+    })),
   updateConfig: (partial) => set((s) => ({ config: syncHotkeyConfig(s.config, partial) })),
   applyPersistedConfigPatch: (patch) =>
     set((s) => ({

@@ -1,3 +1,4 @@
+import type { ThinkingStrength } from '../../../lib/thinking'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { LlmPane } from '../LlmPane'
@@ -90,6 +91,7 @@ const mockAppStore = {
     llm_api_key: '',
     llm_base_url: 'https://api.openai.com/v1',
     llm_model: 'gpt-4o-mini',
+    llm_thinking_strength: 'default' as ThinkingStrength,
     polish_enabled: true,
     context_adaptation_enabled: true,
     polish_style: 'clean',
@@ -150,6 +152,17 @@ vi.mock('../../../stores/authStore', () => ({
 }))
 
 describe('LlmPane', () => {
+  it('warns that manual budgets cannot fit the existing Ask output cap', () => {
+    Object.assign(mockAppStore.config, {
+      llm_provider: 'claude',
+      llm_base_url: 'https://api.anthropic.com/v1',
+      llm_model: 'claude-sonnet-4-0',
+      llm_thinking_strength: 'budget_1024',
+    })
+    render(<LlmPane />)
+    expect(screen.getByRole('alert')).toHaveTextContent('settings.thinkingAskBudgetLimit')
+  })
+
   beforeEach(() => {
     // Reset mock store state
     mockAppStore.config = {
@@ -157,6 +170,7 @@ describe('LlmPane', () => {
       llm_api_key: '',
       llm_base_url: 'https://api.openai.com/v1',
       llm_model: 'gpt-4o-mini',
+      llm_thinking_strength: 'default' as ThinkingStrength,
       polish_enabled: true,
       context_adaptation_enabled: true,
       polish_style: 'clean',
@@ -780,6 +794,64 @@ describe('LlmPane', () => {
       render(<LlmPane />)
       expect(screen.getByText('Translate to')).toBeInTheDocument()
       expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+    })
+  })
+  describe('thinking strength settings', () => {
+    it('renders supported options and persists an explicit choice', () => {
+      Object.assign(mockAppStore.config, {
+        llm_provider: 'deepseek',
+        llm_base_url: 'https://api.deepseek.com/v1',
+        llm_model: 'deepseek-flash',
+      })
+      render(<LlmPane />)
+      const select = screen.getByRole('combobox', { name: 'settings.thinkingStrength' })
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map((o) => (o as HTMLOptionElement).value),
+      ).toEqual(['default', 'off', 'low', 'high', 'max'])
+      fireEvent.change(select, { target: { value: 'off' } })
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ llm_thinking_strength: 'off' })
+    })
+    it.each([
+      { llm_model: 'unknown-model' },
+      { llm_base_url: 'https://proxy.example/v1' },
+      { llm_provider: 'cloud' },
+      { llm_base_url: 'https://api.openai.com/v1/responses' },
+    ])('shows an unsupported retained choice after a route change: %j', (change) => {
+      Object.assign(mockAppStore.config, {
+        llm_provider: 'openai',
+        llm_base_url: 'https://api.openai.com/v1',
+        llm_model: 'gpt-5.1',
+        llm_thinking_strength: 'off',
+      })
+      const { rerender } = render(<LlmPane />)
+      expect(screen.queryByText('settings.thinkingUnsupported')).not.toBeInTheDocument()
+      Object.assign(mockAppStore.config, change)
+      rerender(<LlmPane />)
+      const select = screen.getByRole('combobox', { name: 'settings.thinkingStrength' })
+      expect(select).toHaveValue('off')
+      expect(
+        within(select).getByRole('option', { name: /settings.thinkingUnsupportedOption/ }),
+      ).toBeDisabled()
+      expect(screen.getByText('settings.thinkingUnsupported')).toHaveAttribute('role', 'alert')
+      fireEvent.change(select, { target: { value: 'default' } })
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ llm_thinking_strength: 'default' })
+    })
+    it('updates options on repeated model changes without hiding the saved choice', () => {
+      Object.assign(mockAppStore.config, { llm_model: 'gpt-5.1', llm_thinking_strength: 'off' })
+      const { rerender } = render(<LlmPane />)
+      for (let i = 0; i < 2; i++) {
+        mockAppStore.config.llm_model = 'gpt-5'
+        rerender(<LlmPane />)
+        expect(screen.getByText('settings.thinkingUnsupported')).toBeInTheDocument()
+        mockAppStore.config.llm_model = 'gpt-5.1'
+        rerender(<LlmPane />)
+        expect(screen.queryByText('settings.thinkingUnsupported')).not.toBeInTheDocument()
+        expect(screen.getByRole('combobox', { name: 'settings.thinkingStrength' })).toHaveValue(
+          'off',
+        )
+      }
     })
   })
 })

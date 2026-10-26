@@ -244,14 +244,34 @@ pub fn response_text(kind: LlmApiKind, body: &Value) -> String {
             message["content"]
                 .as_str()
                 .filter(|content| !content.is_empty())
-                .or_else(|| message["reasoning_content"].as_str())
                 .unwrap_or("")
                 .to_string()
         }
     }
 }
 
+/// A reasoning channel is never a dictation answer. Error propagation lets the
+/// pipeline preserve the recognized transcript rather than accepting empty output.
+pub fn require_final_text(text: String) -> Result<String, String> {
+    if text.trim().is_empty() {
+        Err("The model returned no final text.".to_string())
+    } else {
+        Ok(text)
+    }
+}
+
 pub fn parse_stream_event(kind: LlmApiKind, body: &Value) -> StreamEvent {
+    if let Some(error) = body.get("error").filter(|error| !error.is_null()) {
+        return StreamEvent {
+            error: Some(
+                error["message"]
+                    .as_str()
+                    .unwrap_or("Model stream reported an error")
+                    .to_string(),
+            ),
+            ..StreamEvent::default()
+        };
+    }
     match kind {
         LlmApiKind::AnthropicMessages => {
             if body["type"].as_str() == Some("error") {
@@ -452,5 +472,49 @@ mod tests {
         );
         assert_eq!(event.text.as_deref(), Some("Hello"));
         assert!(!event.done);
+    }
+}
+
+#[cfg(test)]
+mod final_channel_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn reasoning_only_is_not_a_final_answer() {
+        for content in [Value::Null, json!(""), json!("  ")] {
+            let body = json!({"choices":[{"message":{
+                "content":content,"reasoning_content":"neutral private reasoning fixture"
+            }}]});
+            assert!(
+                require_final_text(response_text(LlmApiKind::OpenAiCompatible, &body)).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn final_content_is_preserved_without_reasoning() {
+        let body = json!({"choices":[{"message":{
+            "content":"你好。", "reasoning_content":"do not output this"
+        }}]});
+        assert_eq!(
+            require_final_text(response_text(LlmApiKind::OpenAiCompatible, &body)).unwrap(),
+            "你好。"
+        );
+    }
+
+    #[test]
+    fn streaming_reasoning_never_becomes_text() {
+        let event = parse_stream_event(
+            LlmApiKind::OpenAiCompatible,
+            &json!({"choices":[{"delta":{"reasoning_content":"analysis"}}]}),
+        );
+        assert!(event.text.is_none());
+        assert!(require_final_text(String::new()).is_err());
+        let event = parse_stream_event(
+            LlmApiKind::OpenAiCompatible,
+            &json!({"choices":[{"delta":{"content":"答案","reasoning_content":"analysis"}}]}),
+        );
+        assert_eq!(event.text.as_deref(), Some("答案"));
     }
 }

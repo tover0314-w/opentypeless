@@ -50,7 +50,8 @@
     "output_streaming_partial": "ストリーミング挿入が途中で停止しました。挿入済みのテキストは保持されました。{{details}}",
     "llm_failed": "AIによる整形に失敗しました。代わりに元のテキストを出力しました。{{details}}",
     "llm_quota_exceeded": "クラウドAIの利用枠を超えました。Proにアップグレードするか、BYOKモードに切り替えてください。",
-    "output_wayland_clipboard_copy_only": "クリップボードにコピーしました。Wayland では手動で貼り付けてください。"
+    "output_wayland_clipboard_copy_only": "クリップボードにコピーしました。Wayland では手動で貼り付けてください。",
+    "llm_thinking_unavailable": "AI整形をスキップしました。現在のプロバイダー、モデル、ルートは保存された思考強度に対応していません。設定 → AI整形 → 思考の強度でデフォルトか対応する値を選んでください。通常の音声入力は元の認識テキストに戻ります。"
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud は一時的に利用できません",
@@ -259,7 +260,8 @@
       "audio_failed": "マイク失敗",
       "output_failed": "出力失敗",
       "unknown": "エラー",
-      "output_wayland_clipboard_copy_only": "コピーしました"
+      "output_wayland_clipboard_copy_only": "コピーしました",
+      "llm_thinking_unavailable": "思考：デフォルトに変更"
     },
     "menu": {
       "hideWhenIdle": "待機中はカプセルを非表示",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "この端末だけに保存されたアプリの対応設定をすべて削除しますか？",
     "mappingResetConfirmAction": "対応設定をリセット",
     "mappingNoMappings": "カスタムのアプリ対応設定はありません",
-    "dictationMode": "ディクテーションモード"
+    "dictationMode": "ディクテーションモード",
+    "thinkingStrength": "思考の強度",
+    "thinkingUnsupportedOption": "利用不可",
+    "thinkingUnsupported": "保存した選択は未対応のため、AI整形リクエストは送信されません。通常の音声入力では既存の代替処理で元の認識テキストを使う場合があります。デフォルトか対応する値を選んでください。",
+    "thinkingUnavailable": "このプロバイダー・モデル・API ルートには確認済みの思考制御がありません。既定は従来の動作を維持します。",
+    "thinkingDefaultHint": "既定はプロバイダー固有のパラメーターを含む従来の動作を維持します。",
+    "thinkingActive": "音声入力の整形と質問にこの設定を使用します。",
+    "thinkingHint": "同じ名前の強度でもプロバイダー間でトークン使用量や遅延は異なります。手動予算は既存の出力上限を共有します。接続テストは接続のみを確認します。",
+    "thinkingOptions": {
+      "default": "既定",
+      "off": "オフ",
+      "minimal": "最小",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "xhigh": "非常に高い",
+      "max": "最大",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "手動の思考予算は音声入力の整形に使えますが、Ask の既存の出力上限（80トークン）を超えます。Ask を使う前に「デフォルト」または「オフ」を選んでください。"
   },
   "contextFamilies": {
     "email": "メールアドレス",

@@ -118,6 +118,13 @@ impl LlmProvider for CloudLlmProvider {
         req: &PolishRequest,
         on_chunk: Option<&ChunkCallback>,
     ) -> Result<PolishResponse, AppError> {
+        super::thinking::validate(
+            "cloud",
+            &config.base_url,
+            &config.model,
+            config.thinking_strength,
+        )
+        .map_err(AppError::Config)?;
         if config.api_key.is_empty() {
             return Err(AppError::Auth(
                 "Cloud LLM: session token is missing. Please sign in first.".to_string(),

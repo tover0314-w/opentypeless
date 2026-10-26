@@ -50,7 +50,8 @@
     "output_streaming_partial": "L'inserimento in streaming si è interrotto in anticipo. Il testo inserito è stato mantenuto. {{details}}",
     "llm_failed": "La rifinitura con IA non è riuscita. È stato generato il testo originale. {{details}}",
     "llm_quota_exceeded": "La quota IA cloud è esaurita. Passa a Pro o usa la modalità BYOK.",
-    "output_wayland_clipboard_copy_only": "Copiato negli appunti. Incolla manualmente su Wayland."
+    "output_wayland_clipboard_copy_only": "Copiato negli appunti. Incolla manualmente su Wayland.",
+    "llm_thinking_unavailable": "Revisione IA saltata: il provider, il modello o il percorso non supporta l’intensità di ragionamento salvata. In Impostazioni → Rifinitura IA → Intensità del ragionamento, scegli Predefinito o un valore supportato. La dettatura normale usa la trascrizione originale."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud è temporaneamente non disponibile",
@@ -259,7 +260,8 @@
       "audio_failed": "Micro fallito",
       "output_failed": "Output fallito",
       "unknown": "Errore",
-      "output_wayland_clipboard_copy_only": "Copiato"
+      "output_wayland_clipboard_copy_only": "Copiato",
+      "llm_thinking_unavailable": "Ragionamento: predefinito"
     },
     "menu": {
       "hideWhenIdle": "Nascondi capsula quando inattiva",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "Eliminare tutte le associazioni delle app salvate solo su questo dispositivo?",
     "mappingResetConfirmAction": "Reimposta associazioni",
     "mappingNoMappings": "Nessuna associazione personalizzata delle app",
-    "dictationMode": "Modalita dettatura"
+    "dictationMode": "Modalita dettatura",
+    "thinkingStrength": "Intensità del ragionamento",
+    "thinkingUnsupportedOption": "Non disponibile",
+    "thinkingUnsupported": "Questa scelta non è supportata. Non verrà inviata una richiesta di revisione IA; la dettatura normale può usare la trascrizione originale tramite il meccanismo di ripiego esistente. Scegli Predefinito o un valore supportato.",
+    "thinkingUnavailable": "Nessun controllo verificato per questo fornitore, modello e percorso API. Predefinito mantiene il comportamento esistente.",
+    "thinkingDefaultHint": "Predefinito mantiene il comportamento esistente, inclusi i parametri del fornitore.",
+    "thinkingActive": "Questa scelta verrà usata per la revisione della dettatura e le domande.",
+    "thinkingHint": "Livelli uguali non garantiscono gli stessi token o la stessa latenza tra fornitori. I budget manuali condividono il limite di output esistente. I test verificano solo la connessione.",
+    "thinkingOptions": {
+      "default": "Predefinito",
+      "off": "Disattivato",
+      "minimal": "Minimo",
+      "low": "Basso",
+      "medium": "Medio",
+      "high": "Alto",
+      "xhigh": "Molto alto",
+      "max": "Massimo",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "I budget di ragionamento manuali funzionano per la revisione della dettatura, ma superano il limite di output attuale di Ask di 80 token. Scegli Predefinito o Disattivato prima di usare Ask."
   },
   "contextFamilies": {
     "email": "Email",

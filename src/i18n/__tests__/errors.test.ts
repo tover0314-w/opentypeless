@@ -23,6 +23,7 @@ const requiredErrorKeys = [
   'accessibility_required',
   'output_streaming_partial',
   'llm_failed',
+  'llm_thinking_unavailable',
   'llm_quota_exceeded',
 ] as const
 
@@ -36,6 +37,7 @@ const requiredCapsuleErrorKeys = [
   'output_wayland_unsupported',
   'accessibility_required',
   'llm_failed',
+  'llm_thinking_unavailable',
   'llm_quota_exceeded',
   'stt_not_configured',
   'stt_connection_failed',
@@ -69,6 +71,13 @@ describe('localized error messages', () => {
         expect(value?.trim(), `${locale}.capsule.errors.${key}`).not.toBe('')
       }
     }
+  })
+
+  it('explains unsupported thinking recovery without claiming the whole dictation is blocked', () => {
+    expect(en.errors.llm_thinking_unavailable).toContain('Settings → AI Polish → Thinking strength')
+    expect(en.errors.llm_thinking_unavailable).toContain('Default')
+    expect(en.errors.llm_thinking_unavailable).toContain('original transcript')
+    expect(zh.errors.llm_thinking_unavailable).toContain('默认')
   })
 
   it('describes the Wayland fallback as session-specific instead of unsupported', () => {

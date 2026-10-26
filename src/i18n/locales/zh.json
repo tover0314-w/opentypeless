@@ -50,7 +50,8 @@
     "output_streaming_partial": "流式插入提前停止，已保留插入的文本。{{details}}",
     "llm_failed": "AI 润色失败，已改为输出原始文本。{{details}}",
     "llm_quota_exceeded": "云端 AI 额度已用完。请升级到 Pro 或切换到 BYOK 模式。",
-    "output_wayland_clipboard_copy_only": "已复制到剪贴板。Wayland 下需要手动粘贴。"
+    "output_wayland_clipboard_copy_only": "已复制到剪贴板。Wayland 下需要手动粘贴。",
+    "llm_thinking_unavailable": "已跳过 AI 润色：当前供应商、模型或路由不支持已保存的思考强度。请在设置 → AI 润色 → 思考强度中选择“默认”或支持的选项。普通听写会回退到原始识别文本。"
   },
   "cloudRecovery": {
     "title": "OpenTypeless 云服务暂时不可用",
@@ -259,7 +260,8 @@
       "audio_failed": "麦克风失败",
       "output_failed": "输出失败",
       "unknown": "出错了",
-      "output_wayland_clipboard_copy_only": "已复制"
+      "output_wayland_clipboard_copy_only": "已复制",
+      "llm_thinking_unavailable": "思考设置：改为默认"
     },
     "menu": {
       "hideWhenIdle": "空闲时隐藏胶囊",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "删除所有仅保存在本机的应用映射？",
     "mappingResetConfirmAction": "重置映射",
     "mappingNoMappings": "暂无自定义应用映射",
-    "dictationMode": "听写触发方式"
+    "dictationMode": "听写触发方式",
+    "thinkingStrength": "思考强度",
+    "thinkingUnsupportedOption": "不可用",
+    "thinkingUnsupported": "已保存的选项不受当前配置支持，不会发送 AI 润色请求；普通听写可能按原有回退机制使用原始识别文本。请选择“默认”或支持的选项。",
+    "thinkingUnavailable": "此提供商、模型和 API 路由尚无已验证的思考控制。默认保留原有行为。",
+    "thinkingDefaultHint": "默认保留原有行为，包括提供商特定参数。",
+    "thinkingActive": "听写润色和提问请求将使用此选项。",
+    "thinkingHint": "不同提供商的同名档位不代表相同 token 用量或延迟。手动预算共用现有输出上限。连接测试仅检查连通性。",
+    "thinkingOptions": {
+      "default": "默认",
+      "off": "关闭",
+      "minimal": "最少",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "xhigh": "极高",
+      "max": "最大",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "手动思考预算可用于听写润色，但超过 Ask 现有的 80 token 输出上限。使用 Ask 前请选择“默认”或“关闭”。"
   },
   "contextFamilies": {
     "email": "邮件",

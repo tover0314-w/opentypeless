@@ -190,6 +190,26 @@ describe('useTauriEvents', () => {
     })
   })
 
+  it('shows unsupported thinking recovery during dictation without changing the saved choice', async () => {
+    useAppStore.setState((state) => ({
+      config: {
+        ...state.config,
+        llm_provider: 'openai',
+        llm_model: 'gpt-5',
+        llm_thinking_strength: 'off',
+      },
+    }))
+    render(<HookHarness />)
+    await waitFor(() => expect(eventListeners.has('pipeline:error')).toBe(true))
+    act(() => {
+      eventListeners.get('pipeline:error')?.({ payload: { code: 'llm_thinking_unavailable' } })
+    })
+    expect(useAppStore.getState().pipelineError).toBe('capsule.errors.llm_thinking_unavailable')
+    expect(toast).toHaveBeenCalledWith('errors.llm_thinking_unavailable', 'info')
+    expect(useAppStore.getState().config.llm_thinking_strength).toBe('off')
+    expect(useCloudServiceStore.getState().incident).toBeNull()
+  })
+
   it('does not mislabel BYOK failures or quota errors as a cloud outage', async () => {
     useAppStore.setState((state) => ({
       config: { ...state.config, stt_provider: 'openai-whisper', llm_provider: 'deepseek' },

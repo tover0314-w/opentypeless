@@ -342,6 +342,7 @@ pub struct AppConfig {
     pub llm_api_key: String,
     pub llm_model: String,
     pub llm_base_url: String,
+    pub llm_thinking_strength: crate::llm::thinking::ThinkingStrength,
     pub polish_enabled: bool,
     pub context_adaptation_enabled: bool,
     pub voice_routing_flags: crate::voice_intent::VoiceRoutingFlags,
@@ -399,6 +400,7 @@ impl Default for AppConfig {
             llm_api_key: String::new(),
             llm_model: "google/gemini-2.5-flash".to_string(),
             llm_base_url: "https://openrouter.ai/api/v1".to_string(),
+            llm_thinking_strength: crate::llm::thinking::ThinkingStrength::Default,
             polish_enabled: true,
             context_adaptation_enabled: true,
             voice_routing_flags: crate::voice_intent::VoiceRoutingFlags::default(),
@@ -2199,6 +2201,24 @@ mod tests {
             unknown.stt_aliyun_qwen_region,
             crate::stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_REGION_CHINA_MAINLAND
         );
+    }
+
+    #[test]
+    fn thinking_config_legacy_and_roundtrip() {
+        use crate::llm::thinking::ThinkingStrength;
+        let old = AppConfig::from_stored_value(serde_json::json!({})).unwrap();
+        assert_eq!(old.llm_thinking_strength, ThinkingStrength::Default);
+        let mut config = AppConfig {
+            llm_thinking_strength: ThinkingStrength::Off,
+            ..old
+        };
+        let encoded = serde_json::to_value(&config).unwrap();
+        assert_eq!(encoded["llm_thinking_strength"], "off");
+        let restored = AppConfig::from_stored_value(encoded).unwrap();
+        assert_eq!(restored.llm_thinking_strength, ThinkingStrength::Off);
+        config.llm_model = "unknown".into();
+        config.normalize_values();
+        assert_eq!(config.llm_thinking_strength, ThinkingStrength::Off);
     }
 
     #[test]

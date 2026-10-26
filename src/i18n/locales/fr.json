@@ -50,7 +50,8 @@
     "output_streaming_partial": "L'insertion en streaming s'est arrêtée trop tôt. Le texte inséré a été conservé. {{details}}",
     "llm_failed": "Le polissage IA a échoué. Le texte original a été sorti à la place. {{details}}",
     "llm_quota_exceeded": "Le quota IA cloud est dépassé. Passez à Pro ou utilisez le mode BYOK.",
-    "output_wayland_clipboard_copy_only": "Copié dans le presse-papiers. Collez manuellement sous Wayland."
+    "output_wayland_clipboard_copy_only": "Copié dans le presse-papiers. Collez manuellement sous Wayland.",
+    "llm_thinking_unavailable": "Reformulation IA ignorée : le fournisseur, le modèle ou la route ne prend pas en charge le niveau de réflexion enregistré. Dans Paramètres → Amélioration IA → Intensité de réflexion, choisissez Par défaut ou une valeur prise en charge. La dictée ordinaire utilise la transcription originale."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud est temporairement indisponible",
@@ -259,7 +260,8 @@
       "audio_failed": "Micro échoué",
       "output_failed": "Échec sortie",
       "unknown": "Erreur",
-      "output_wayland_clipboard_copy_only": "Copié"
+      "output_wayland_clipboard_copy_only": "Copié",
+      "llm_thinking_unavailable": "Réflexion : Par défaut"
     },
     "menu": {
       "hideWhenIdle": "Masquer la capsule au repos",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "Supprimer toutes les associations d’applications enregistrées uniquement sur cet appareil ?",
     "mappingResetConfirmAction": "Réinitialiser les associations",
     "mappingNoMappings": "Aucune association d’application personnalisée",
-    "dictationMode": "Mode de dictee"
+    "dictationMode": "Mode de dictee",
+    "thinkingStrength": "Intensité de réflexion",
+    "thinkingUnsupportedOption": "Indisponible",
+    "thinkingUnsupported": "Ce choix n’est pas pris en charge. Aucune requête de reformulation IA ne sera envoyée ; la dictée ordinaire peut utiliser la transcription originale selon le repli existant. Choisissez Par défaut ou une valeur compatible.",
+    "thinkingUnavailable": "Aucun contrôle vérifié pour ce fournisseur, modèle et chemin API. Par défaut conserve le comportement existant.",
+    "thinkingDefaultHint": "Par défaut conserve le comportement existant, y compris les paramètres du fournisseur.",
+    "thinkingActive": "Ce choix sera appliqué à la révision des dictées et aux questions.",
+    "thinkingHint": "Les niveaux ne garantissent pas les mêmes tokens ni la même latence entre fournisseurs. Les budgets partagent la limite de sortie existante. Le test vérifie uniquement la connexion.",
+    "thinkingOptions": {
+      "default": "Par défaut",
+      "off": "Désactivé",
+      "minimal": "Minimal",
+      "low": "Faible",
+      "medium": "Moyen",
+      "high": "Élevé",
+      "xhigh": "Très élevé",
+      "max": "Maximum",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "Les budgets de réflexion manuels fonctionnent pour la reformulation de dictée, mais dépassent la limite de sortie actuelle de 80 jetons d’Ask. Sélectionnez Par défaut ou Désactivé avant d’utiliser Ask."
   },
   "contextFamilies": {
     "email": "E-mail",

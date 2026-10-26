@@ -50,7 +50,8 @@
     "output_streaming_partial": "La inserción en streaming se detuvo antes de tiempo. Se conservó el texto insertado. {{details}}",
     "llm_failed": "Falló el pulido con IA. Se emitió el texto original en su lugar. {{details}}",
     "llm_quota_exceeded": "Se agotó la cuota de IA en la nube. Actualiza a Pro o cambia al modo BYOK.",
-    "output_wayland_clipboard_copy_only": "Copiado al portapapeles. Pega manualmente en Wayland."
+    "output_wayland_clipboard_copy_only": "Copiado al portapapeles. Pega manualmente en Wayland.",
+    "llm_thinking_unavailable": "Se omitió el pulido con IA: el proveedor, modelo o ruta no admite la intensidad de razonamiento guardada. En Configuración → Pulido con IA → Intensidad de razonamiento, elige Predeterminado o un valor compatible. El dictado normal usa la transcripción original."
   },
   "cloudRecovery": {
     "title": "OpenTypeless Cloud no está disponible temporalmente",
@@ -259,7 +260,8 @@
       "audio_failed": "Falló micro",
       "output_failed": "Falló salida",
       "unknown": "Error",
-      "output_wayland_clipboard_copy_only": "Copiado"
+      "output_wayland_clipboard_copy_only": "Copiado",
+      "llm_thinking_unavailable": "Razonamiento: predeterminado"
     },
     "menu": {
       "hideWhenIdle": "Ocultar cápsula en reposo",
@@ -472,7 +474,27 @@
     "mappingResetConfirm": "¿Eliminar todas las asignaciones de aplicaciones guardadas solo en este dispositivo?",
     "mappingResetConfirmAction": "Restablecer asignaciones",
     "mappingNoMappings": "No hay asignaciones personalizadas de aplicaciones",
-    "dictationMode": "Modo de dictado"
+    "dictationMode": "Modo de dictado",
+    "thinkingStrength": "Intensidad de razonamiento",
+    "thinkingUnsupportedOption": "No disponible",
+    "thinkingUnsupported": "Esta opción no es compatible. No se enviará la solicitud de pulido con IA; el dictado normal puede usar la transcripción original mediante el mecanismo de respaldo existente. Elige Predeterminado o un valor compatible.",
+    "thinkingUnavailable": "No hay control verificado para este proveedor, modelo y ruta API. Predeterminado conserva el comportamiento actual.",
+    "thinkingDefaultHint": "Predeterminado conserva el comportamiento actual, incluidos los parámetros del proveedor.",
+    "thinkingActive": "Esta opción se usará en la revisión de dictados y las preguntas.",
+    "thinkingHint": "Los mismos niveles no garantizan iguales tokens ni latencia entre proveedores. Los presupuestos manuales comparten el límite de salida actual. Las pruebas solo comprueban la conexión.",
+    "thinkingOptions": {
+      "default": "Predeterminado",
+      "off": "Desactivado",
+      "minimal": "Mínimo",
+      "low": "Bajo",
+      "medium": "Medio",
+      "high": "Alto",
+      "xhigh": "Muy alto",
+      "max": "Máximo",
+      "budget_1024": "1,024 tokens",
+      "budget_2048": "2,048 tokens"
+    },
+    "thinkingAskBudgetLimit": "Los presupuestos de razonamiento manuales funcionan para pulir dictados, pero superan el límite de salida actual de Ask de 80 tokens. Elige Predeterminado o Desactivado antes de usar Ask."
   },
   "contextFamilies": {
     "email": "Correo electrónico",
