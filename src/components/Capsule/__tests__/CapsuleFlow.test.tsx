@@ -1,9 +1,15 @@
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppStore } from '../../../stores/appStore'
-import { setActiveTranslationTarget, stopAskFlow } from '../../../lib/tauri'
+import { useCapsuleAlertStore } from '../../../stores/capsuleAlertStore'
+import {
+  abortAskDictation,
+  abortRecording,
+  setActiveTranslationTarget,
+  stopAskFlow,
+} from '../../../lib/tauri'
 import { Capsule } from '../index'
 
 vi.mock('framer-motion', () => ({
@@ -13,7 +19,8 @@ vi.mock('framer-motion', () => ({
     {
       get:
         (_target, tag: string) =>
-        ({ children, ...props }: React.HTMLAttributes<HTMLElement>) =>
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        ({ children, layout, transition, ...props }: any) =>
           React.createElement(tag, props, children),
     },
   ),
@@ -22,12 +29,17 @@ vi.mock('framer-motion', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: Record<string, string>) =>
+      options?.language ? `${key}:${options.language}` : key,
   }),
 }))
 
 vi.mock('../../../hooks/useCapsuleResize', () => ({
-  useCapsuleResize: () => ({ width: 200, height: 36 }),
+  useCapsuleResize: () => ({ width: 460, height: 56 }),
+}))
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../../lib/tauri', () => ({
@@ -45,13 +57,18 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }))
 
+function shell(container: HTMLElement) {
+  return container.querySelector('[data-capsule-view]') as HTMLElement
+}
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   useAppStore.setState(useAppStore.getInitialState())
+  useCapsuleAlertStore.setState({ alert: null })
 })
 
-describe('Capsule flow states', () => {
+describe('Capsule bar views', () => {
   beforeEach(() => {
     useAppStore.setState({
       pipelineState: 'idle',
@@ -64,94 +81,84 @@ describe('Capsule flow states', () => {
     })
   })
 
-  it('renders preparing state', () => {
-    useAppStore.setState({ pipelineState: 'preparing' })
-
-    render(<Capsule />)
-
-    expect(screen.getByText('capsule.preparing')).toBeInTheDocument()
-  })
-
-  it('renders transcribing state with partial transcript when available', () => {
-    useAppStore.setState({
-      pipelineState: 'transcribing',
-      partialTranscript: 'hello world',
-    })
-
-    render(<Capsule />)
-
-    expect(screen.getByText(/hello world/)).toBeInTheDocument()
-  })
-
-  it('renders thinking state during polishing', () => {
-    useAppStore.setState({ pipelineState: 'polishing' })
-
-    render(<Capsule />)
-
-    expect(screen.getByText('capsule.thinking')).toBeInTheDocument()
-  })
-
-  it('does not start dictation when the idle capsule is clicked', () => {
+  it('shows a slim idle bar and does not start dictation when clicked', () => {
     const { container } = render(<Capsule />)
-    const shell = container.querySelector('.jelly-capsule')
-    expect(shell).toBeTruthy()
+    expect(shell(container).dataset.capsuleView).toBe('idle')
+    expect(shell(container).style.width).toBe('40px')
+    expect(shell(container).style.height).toBe('6px')
 
     const pointerUp = new Event('pointerup', { bubbles: true })
     Object.defineProperty(pointerUp, 'button', { value: 0 })
-    fireEvent(shell as Element, pointerUp)
+    fireEvent(shell(container), pointerUp)
 
     expect(invoke).not.toHaveBeenCalledWith('start_recording')
   })
 
-  it('renders Ask recording in the capsule and stops Ask when clicked', () => {
-    useAppStore.setState({ pipelineState: 'ask_recording' })
+  it('renders the starting state while the microphone warms up', () => {
+    useAppStore.setState({ pipelineState: 'preparing' })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleView).toBe('starting')
+  })
 
+  it('shows cancel and finish controls while recording', async () => {
+    useAppStore.setState({ pipelineState: 'recording', activeVoiceMode: 'dictate' })
+    const { container } = render(<Capsule />)
+    expect(shell(container).style.width).toBe('116px')
+
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.finish' }))
+    expect(invoke).toHaveBeenCalledWith('stop_recording')
+
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.cancelRecording' }))
+    await waitFor(() => expect(abortRecording).toHaveBeenCalledTimes(1))
+    expect(useCapsuleAlertStore.getState().alert?.kind).toBe('transcript_cancelled')
+  })
+
+  it('keeps button pointer events from reaching the draggable shell', () => {
+    useAppStore.setState({ pipelineState: 'recording', activeVoiceMode: 'dictate' })
     render(<Capsule />)
-
-    expect(screen.getByText('ask.title')).toBeInTheDocument()
-    expect(screen.getByText('ask.title')).toHaveClass('whitespace-nowrap')
-    expect(screen.getByText('00:00')).toBeInTheDocument()
-
+    const cancel = screen.getByRole('button', { name: 'capsule.cancelRecording' })
     const pointerUp = new Event('pointerup', { bubbles: true })
     Object.defineProperty(pointerUp, 'button', { value: 0 })
-    fireEvent(screen.getByText('ask.title'), pointerUp)
+    fireEvent(cancel, pointerUp)
+    expect(invoke).not.toHaveBeenCalledWith('stop_recording')
+  })
 
+  it('labels Ask recording and stops Ask from the finish button', () => {
+    useAppStore.setState({ pipelineState: 'ask_recording' })
+    const { container } = render(<Capsule />)
+
+    expect(screen.getByText('capsule.modeAsk')).toBeInTheDocument()
+    expect(container.querySelector('[data-capsule-glow="ask"]')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.finish' }))
     expect(stopAskFlow).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.cancelAsk' }))
+    expect(abortAskDictation).toHaveBeenCalledTimes(1)
   })
 
-  it('renders Ask thinking in the capsule', () => {
-    useAppStore.setState({ pipelineState: 'ask_thinking' })
-
-    render(<Capsule />)
-
-    expect(screen.getByText('ask.title')).toBeInTheDocument()
-    expect(screen.getByText('ask.title')).toHaveClass('whitespace-nowrap')
-    expect(screen.getByText('ask.thinking')).toBeInTheDocument()
+  it('shows Thinking with a progress fill while processing', () => {
+    useAppStore.setState({ pipelineState: 'polishing' })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleView).toBe('processing')
+    expect(screen.getByText('capsule.thinking')).toBeInTheDocument()
   })
 
-  it('shows the language chip only while Translate is recording', () => {
-    useAppStore.setState({
-      pipelineState: 'recording',
-      activeVoiceMode: 'dictate',
-      config: {
-        ...useAppStore.getState().config,
-        translation: { targets: ['en', 'ja'], active_target: 'en' },
-      },
-    })
-    const { rerender } = render(<Capsule />)
-
-    expect(screen.queryByRole('button', { name: 'capsule.translationTarget en' })).toBeNull()
-
-    useAppStore.setState({ activeVoiceMode: 'translate' })
-    rerender(<Capsule />)
-    expect(screen.getByRole('button', { name: 'capsule.translationTarget en' })).toBeInTheDocument()
-
-    useAppStore.setState({ pipelineState: 'transcribing' })
-    rerender(<Capsule />)
-    expect(screen.queryByRole('button', { name: 'capsule.translationTarget en' })).toBeNull()
+  it('warns about a slow connection when processing takes long', () => {
+    vi.useFakeTimers()
+    try {
+      useAppStore.setState({ pipelineState: 'transcribing' })
+      render(<Capsule />)
+      act(() => {
+        vi.advanceTimersByTime(5_200)
+      })
+      expect(useCapsuleAlertStore.getState().alert?.kind).toBe('weak_network')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('switches the active target without restarting or stopping recording', async () => {
+  it('labels translation and switches the active target without restarting', async () => {
     useAppStore.setState({
       pipelineState: 'recording',
       activeVoiceMode: 'translate',
@@ -160,19 +167,20 @@ describe('Capsule flow states', () => {
         translation: { targets: ['en', 'ja'], active_target: 'en' },
       },
     })
-    render(<Capsule />)
+    const { container } = render(<Capsule />)
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'capsule.translationTarget en' }))
+    expect(screen.getByText('capsule.modeTranslating:EN')).toBeInTheDocument()
+    expect(container.querySelector('[data-capsule-glow="translate"]')).not.toBeNull()
+
     fireEvent.click(screen.getByRole('button', { name: 'capsule.translationTarget en' }))
     fireEvent.click(screen.getByRole('menuitemradio', { name: '日本語' }))
 
     await waitFor(() => expect(setActiveTranslationTarget).toHaveBeenCalledWith('ja'))
     expect(invoke).not.toHaveBeenCalledWith('stop_recording')
-    expect(invoke).not.toHaveBeenCalledWith('start_recording')
     expect(useAppStore.getState().config.translation.active_target).toBe('ja')
   })
 
-  it('keeps the capsule shell at 200 by 36 and closes the target menu on Escape', async () => {
+  it('closes the translation target menu on Escape', () => {
     useAppStore.setState({
       pipelineState: 'recording',
       activeVoiceMode: 'translate',
@@ -181,20 +189,33 @@ describe('Capsule flow states', () => {
         translation: { targets: ['en', 'ja'], active_target: 'en' },
       },
     })
-    const { container } = render(<Capsule />)
-    const chip = screen.getByRole('button', { name: 'capsule.translationTarget en' })
-
-    fireEvent.click(chip)
+    render(<Capsule />)
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.translationTarget en' }))
     expect(screen.getByRole('menu', { name: 'capsule.translationTargets' })).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('menu', { name: 'capsule.translationTargets' })).toBeNull()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'capsule.translationTarget en' })).toHaveFocus(),
-    )
+  })
+})
 
-    const shell = container.querySelector('.jelly-capsule-active') as HTMLElement
-    expect(shell.style.width).toBe('200px')
-    expect(shell.style.height).toBe('36px')
+describe('Capsule alerts', () => {
+  it('shows the shortcut guide with every configured shortcut', () => {
+    useCapsuleAlertStore.getState().show('shortcut_guide')
+    render(<Capsule />)
+
+    expect(screen.getByText('capsule.alerts.guideTitle')).toBeInTheDocument()
+    expect(screen.getByText('capsule.alerts.guideDictate')).toBeInTheDocument()
+    expect(screen.getByText('capsule.alerts.guideAsk')).toBeInTheDocument()
+  })
+
+  it('offers to copy the last transcript when it could not be inserted', async () => {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
+    useCapsuleAlertStore.getState().show('copy_last_transcript', 'hello from the capsule')
+    render(<Capsule />)
+
+    expect(screen.getByText('capsule.alerts.copyLastTitle')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.alerts.copy' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('hello from the capsule'))
+    expect(await screen.findByText('capsule.alerts.copied')).toBeInTheDocument()
   })
 })

@@ -236,13 +236,8 @@
     "cancelRecording": "Annulla registrazione",
     "translationTarget": "Lingua di destinazione",
     "translationTargets": "Lingue di destinazione",
-    "preparing": "Preparazione...",
-    "transcribing": "Trascrizione in corso...",
-    "cancelProcessing": "Annulla elaborazione",
-    "thinking": "Elaborazione in corso...",
-    "cancelPolishing": "Annulla rifinitura",
+    "thinking": "Sto pensando",
     "done": "Fatto",
-    "errorOccurred": "Si è verificato un errore",
     "accessibilityRequired": "Accessibilità necessaria — apri Impostazioni",
     "errors": {
       "stt_timeout": "Timeout STT",
@@ -271,6 +266,27 @@
       "account": "Account",
       "upgrade": "Aggiorna",
       "exit": "Esci"
+    },
+    "cancel": "Annulla",
+    "cancelAsk": "Annulla domanda",
+    "finish": "Fine",
+    "clickToStart": "Fai clic per iniziare a dettare",
+    "modeAsk": "Chiedi qualsiasi cosa",
+    "modeTranslating": "Traduzione in {{language}}",
+    "alerts": {
+      "guideTitle": "Scorciatoie",
+      "guidePrefix": "Tocca una volta per parlare. Premi",
+      "guideSuffix": "per finire.",
+      "guideDictate": "Detta",
+      "guideTranslate": "Traduci",
+      "guideAsk": "Chiedi qualsiasi cosa",
+      "pressToFinishPrefix": "La prossima volta, premi",
+      "pressToFinishSuffix": "per finire",
+      "weakNetwork": "Ci vuole più del solito…",
+      "copyLastTitle": "Copia l'ultima trascrizione",
+      "copy": "Copia",
+      "copied": "Copiato",
+      "cancelled": "Trascrizione annullata"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Eliminare tutte le associazioni delle app salvate solo su questo dispositivo?",
     "mappingResetConfirmAction": "Reimposta associazioni",
     "mappingNoMappings": "Nessuna associazione personalizzata delle app",
-    "dictationMode": "Modalita dettatura"
+    "dictationMode": "Modalita dettatura",
+    "autoPressMode": "Tocca per parlare",
+    "autoPressModeDesc": "Tocca una volta per iniziare e di nuovo per finire. Tenere premuto mostra la guida alle scorciatoie."
   },
   "contextFamilies": {
     "email": "Email",

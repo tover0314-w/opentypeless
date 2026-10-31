@@ -385,7 +385,8 @@ describe('useCapsuleResize async updates', () => {
       const position = windowApiMocks.setPosition.mock.lastCall?.[0]
       const size = windowApiMocks.setSize.mock.lastCall?.[0]
       expect(position.x + size.width / 2).toBe(960)
-      expect(position.y).toBe(900)
+      // The panel is bottom-anchored 80px above the work area's bottom edge (1040).
+      expect(position.y + size.height).toBe(960)
     },
   )
 
@@ -434,7 +435,7 @@ describe('useCapsuleResize async updates', () => {
     })
 
     expect(windowApiMocks.setSize.mock.calls.map(([size]) => [size.width, size.height])).toEqual([
-      [60, 60],
+      [120, 56],
     ])
     expect(windowApiMocks.setPosition).toHaveBeenCalledTimes(1)
     expect(windowApiMocks.show).not.toHaveBeenCalled()
@@ -449,8 +450,12 @@ describe('useCapsuleResize async updates', () => {
       useAppStore.setState({ pipelineState: 'recording' })
     })
 
+    // Without an outer size the previous panel height (56) is used; the bottom edge stays put
+    // while the recording panel grows to 104px.
     await waitFor(() => {
-      expect(windowApiMocks.setPosition).toHaveBeenCalledWith(expect.objectContaining({ y: 100 }))
+      expect(windowApiMocks.setPosition).toHaveBeenCalledWith(
+        expect.objectContaining({ y: 100 + 56 - 104 }),
+      )
     })
   })
 })

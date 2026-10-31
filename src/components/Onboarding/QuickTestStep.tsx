@@ -102,9 +102,7 @@ export function QuickTestStep() {
   const activeIdx = STAGES.findIndex((s) => s.key === phase)
 
   const isActive = phase !== 'idle'
-  const capsuleClass = isActive
-    ? 'jelly-capsule-active text-white'
-    : 'jelly-capsule text-neutral-700'
+  const capsuleClass = isActive ? 'capsule-active text-white' : 'capsule-idle text-neutral-700'
 
   return (
     <div className="space-y-4">

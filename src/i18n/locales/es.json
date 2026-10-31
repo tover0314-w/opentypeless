@@ -236,13 +236,8 @@
     "cancelRecording": "Cancelar grabación",
     "translationTarget": "Idioma de destino",
     "translationTargets": "Idiomas de destino",
-    "preparing": "Preparando...",
-    "transcribing": "Transcribiendo...",
-    "cancelProcessing": "Cancelar procesamiento",
-    "thinking": "Pensando...",
-    "cancelPolishing": "Cancelar pulido",
+    "thinking": "Pensando",
     "done": "Listo",
-    "errorOccurred": "Ocurrió un error",
     "accessibilityRequired": "Se necesita accesibilidad — abre Configuración",
     "errors": {
       "stt_timeout": "STT agotado",
@@ -271,6 +266,27 @@
       "account": "Cuenta",
       "upgrade": "Mejorar",
       "exit": "Salir"
+    },
+    "cancel": "Cancelar",
+    "cancelAsk": "Cancelar pregunta",
+    "finish": "Terminar",
+    "clickToStart": "Haz clic para empezar a dictar",
+    "modeAsk": "Pregunta lo que sea",
+    "modeTranslating": "Traduciendo a {{language}}",
+    "alerts": {
+      "guideTitle": "Atajos",
+      "guidePrefix": "Toca una vez para hablar. Pulsa",
+      "guideSuffix": "para terminar.",
+      "guideDictate": "Dictar",
+      "guideTranslate": "Traducir",
+      "guideAsk": "Pregunta lo que sea",
+      "pressToFinishPrefix": "La próxima vez, pulsa",
+      "pressToFinishSuffix": "para terminar",
+      "weakNetwork": "Tardando más de lo habitual…",
+      "copyLastTitle": "Copiar la última transcripción",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "cancelled": "Transcripción cancelada"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "¿Eliminar todas las asignaciones de aplicaciones guardadas solo en este dispositivo?",
     "mappingResetConfirmAction": "Restablecer asignaciones",
     "mappingNoMappings": "No hay asignaciones personalizadas de aplicaciones",
-    "dictationMode": "Modo de dictado"
+    "dictationMode": "Modo de dictado",
+    "autoPressMode": "Toca para hablar",
+    "autoPressModeDesc": "Toca una vez para empezar y otra para terminar. Mantener pulsado muestra la guía de atajos."
   },
   "contextFamilies": {
     "email": "Correo electrónico",

@@ -236,13 +236,8 @@
     "cancelRecording": "Отменить запись",
     "translationTarget": "Язык перевода",
     "translationTargets": "Языки перевода",
-    "preparing": "Подготовка...",
-    "transcribing": "Распознавание...",
-    "cancelProcessing": "Отменить обработку",
-    "thinking": "Обработка...",
-    "cancelPolishing": "Отменить обработку ИИ",
+    "thinking": "Думаю",
     "done": "Готово",
-    "errorOccurred": "Произошла ошибка",
     "accessibilityRequired": "Требуется доступность — откройте Настройки",
     "errors": {
       "stt_timeout": "STT тайм-аут",
@@ -271,6 +266,27 @@
       "account": "Аккаунт",
       "upgrade": "Обновить",
       "exit": "Выход"
+    },
+    "cancel": "Отмена",
+    "cancelAsk": "Отменить вопрос",
+    "finish": "Готово",
+    "clickToStart": "Нажмите, чтобы начать диктовку",
+    "modeAsk": "Спросить",
+    "modeTranslating": "Перевод на {{language}}",
+    "alerts": {
+      "guideTitle": "Сочетания клавиш",
+      "guidePrefix": "Нажмите один раз, чтобы говорить. Нажмите",
+      "guideSuffix": "для завершения.",
+      "guideDictate": "Диктовка",
+      "guideTranslate": "Перевод",
+      "guideAsk": "Спросить",
+      "pressToFinishPrefix": "В следующий раз нажмите",
+      "pressToFinishSuffix": "для завершения",
+      "weakNetwork": "Дольше обычного…",
+      "copyLastTitle": "Скопировать последнюю расшифровку",
+      "copy": "Копировать",
+      "copied": "Скопировано",
+      "cancelled": "Расшифровка отменена"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Удалить все сопоставления приложений, сохранённые только на этом устройстве?",
     "mappingResetConfirmAction": "Сбросить сопоставления",
     "mappingNoMappings": "Нет пользовательских сопоставлений приложений",
-    "dictationMode": "Режим диктовки"
+    "dictationMode": "Режим диктовки",
+    "autoPressMode": "Нажать и говорить",
+    "autoPressModeDesc": "Нажмите один раз, чтобы начать, и ещё раз, чтобы закончить. Удержание показывает подсказку по сочетаниям."
   },
   "contextFamilies": {
     "email": "Электронная почта",

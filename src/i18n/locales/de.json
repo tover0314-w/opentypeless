@@ -236,13 +236,8 @@
     "cancelRecording": "Aufnahme abbrechen",
     "translationTarget": "Übersetzungsziel",
     "translationTargets": "Übersetzungsziele",
-    "preparing": "Bereite vor...",
-    "transcribing": "Transkribiere...",
-    "cancelProcessing": "Verarbeitung abbrechen",
-    "thinking": "Denke nach...",
-    "cancelPolishing": "Glättung abbrechen",
+    "thinking": "Denkt nach",
     "done": "Fertig",
-    "errorOccurred": "Ein Fehler ist aufgetreten",
     "accessibilityRequired": "Bedienungshilfen erforderlich — Einstellungen öffnen",
     "errors": {
       "stt_timeout": "STT-Timeout",
@@ -271,6 +266,27 @@
       "account": "Konto",
       "upgrade": "Tarif erweitern",
       "exit": "Beenden"
+    },
+    "cancel": "Abbrechen",
+    "cancelAsk": "Frage abbrechen",
+    "finish": "Fertig",
+    "clickToStart": "Klicken, um das Diktat zu starten",
+    "modeAsk": "Frag alles",
+    "modeTranslating": "Übersetzen nach {{language}}",
+    "alerts": {
+      "guideTitle": "Tastenkürzel",
+      "guidePrefix": "Einmal tippen zum Sprechen. Drücke",
+      "guideSuffix": "zum Beenden.",
+      "guideDictate": "Diktieren",
+      "guideTranslate": "Übersetzen",
+      "guideAsk": "Frag alles",
+      "pressToFinishPrefix": "Drücke nächstes Mal",
+      "pressToFinishSuffix": "zum Beenden",
+      "weakNetwork": "Dauert länger als üblich…",
+      "copyLastTitle": "Letzte Transkription kopieren",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "cancelled": "Transkription abgebrochen"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Alle nur auf diesem Gerät gespeicherten App-Zuordnungen löschen?",
     "mappingResetConfirmAction": "Zuordnungen zurücksetzen",
     "mappingNoMappings": "Keine eigenen App-Zuordnungen",
-    "dictationMode": "Diktiermodus"
+    "dictationMode": "Diktiermodus",
+    "autoPressMode": "Tippen zum Sprechen",
+    "autoPressModeDesc": "Einmal tippen zum Starten, erneut tippen zum Beenden. Langes Drücken zeigt die Tastenkürzel."
   },
   "contextFamilies": {
     "email": "E-Mail",

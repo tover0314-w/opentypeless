@@ -236,13 +236,8 @@
     "cancelRecording": "録音をキャンセル",
     "translationTarget": "翻訳先",
     "translationTargets": "翻訳先一覧",
-    "preparing": "準備中...",
-    "transcribing": "文字起こし中...",
-    "cancelProcessing": "処理をキャンセル",
-    "thinking": "思考中...",
-    "cancelPolishing": "整形をキャンセル",
+    "thinking": "考え中",
     "done": "完了",
-    "errorOccurred": "エラーが発生しました",
     "accessibilityRequired": "アクセシビリティが必要です — 設定を開いてください",
     "errors": {
       "stt_timeout": "STT タイムアウト",
@@ -271,6 +266,27 @@
       "account": "アカウント",
       "upgrade": "アップグレード",
       "exit": "終了"
+    },
+    "cancel": "キャンセル",
+    "cancelAsk": "質問をキャンセル",
+    "finish": "完了",
+    "clickToStart": "クリックして音声入力を開始",
+    "modeAsk": "なんでも質問",
+    "modeTranslating": "{{language}} に翻訳中",
+    "alerts": {
+      "guideTitle": "ショートカット",
+      "guidePrefix": "1回タップで話し始め、",
+      "guideSuffix": "で完了します。",
+      "guideDictate": "音声入力",
+      "guideTranslate": "翻訳",
+      "guideAsk": "なんでも質問",
+      "pressToFinishPrefix": "次回は",
+      "pressToFinishSuffix": "を押して完了してみてください",
+      "weakNetwork": "通常より時間がかかっています…",
+      "copyLastTitle": "最後の文字起こしをコピー",
+      "copy": "コピー",
+      "copied": "コピーしました",
+      "cancelled": "文字起こしをキャンセルしました"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "この端末だけに保存されたアプリの対応設定をすべて削除しますか？",
     "mappingResetConfirmAction": "対応設定をリセット",
     "mappingNoMappings": "カスタムのアプリ対応設定はありません",
-    "dictationMode": "ディクテーションモード"
+    "dictationMode": "ディクテーションモード",
+    "autoPressMode": "タップで話す",
+    "autoPressModeDesc": "1回タップで開始、もう一度タップで完了。長押しするとショートカットガイドを表示します。"
   },
   "contextFamilies": {
     "email": "メールアドレス",

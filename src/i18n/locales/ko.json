@@ -236,13 +236,8 @@
     "cancelRecording": "녹음 취소",
     "translationTarget": "번역 대상",
     "translationTargets": "번역 대상 목록",
-    "preparing": "준비 중...",
-    "transcribing": "변환 중...",
-    "cancelProcessing": "처리 취소",
-    "thinking": "생각 중...",
-    "cancelPolishing": "다듬기 취소",
+    "thinking": "생각 중",
     "done": "완료",
-    "errorOccurred": "오류가 발생했습니다",
     "accessibilityRequired": "접근성 권한이 필요합니다 — 설정을 여세요",
     "errors": {
       "stt_timeout": "STT 시간 초과",
@@ -271,6 +266,27 @@
       "account": "계정",
       "upgrade": "업그레이드",
       "exit": "종료"
+    },
+    "cancel": "취소",
+    "cancelAsk": "질문 취소",
+    "finish": "완료",
+    "clickToStart": "클릭하여 받아쓰기 시작",
+    "modeAsk": "무엇이든 묻기",
+    "modeTranslating": "{{language}}(으)로 번역 중",
+    "alerts": {
+      "guideTitle": "단축키",
+      "guidePrefix": "한 번 탭하면 말하기 시작,",
+      "guideSuffix": "을(를) 눌러 완료하세요.",
+      "guideDictate": "받아쓰기",
+      "guideTranslate": "번역",
+      "guideAsk": "무엇이든 묻기",
+      "pressToFinishPrefix": "다음에는",
+      "pressToFinishSuffix": "을(를) 눌러 완료해 보세요",
+      "weakNetwork": "평소보다 오래 걸리고 있습니다…",
+      "copyLastTitle": "마지막 받아쓰기 복사",
+      "copy": "복사",
+      "copied": "복사됨",
+      "cancelled": "받아쓰기가 취소되었습니다"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "이 기기에만 저장된 모든 앱 연결 설정을 삭제할까요?",
     "mappingResetConfirmAction": "연결 설정 재설정",
     "mappingNoMappings": "사용자 지정 앱 연결 설정이 없습니다",
-    "dictationMode": "받아쓰기 모드"
+    "dictationMode": "받아쓰기 모드",
+    "autoPressMode": "탭하여 말하기",
+    "autoPressModeDesc": "한 번 탭하면 시작, 다시 탭하면 완료됩니다. 길게 누르면 단축키 안내가 표시됩니다."
   },
   "contextFamilies": {
     "email": "이메일",

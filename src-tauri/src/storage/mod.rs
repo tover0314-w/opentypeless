@@ -442,10 +442,14 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn new_install_default() -> Self {
-        Self {
+        let mut config = Self {
             capsule_auto_hide: true,
             ..Self::default()
-        }
+        };
+        // New installs get tap-to-talk with long-press guidance; existing users keep their mode.
+        config.hotkeys.dictation_mode = "auto".to_string();
+        config.hotkey_mode = "auto".to_string();
+        config
     }
 
     fn migrate_legacy_platform_hotkeys(&mut self) {
@@ -764,10 +768,10 @@ fn default_translate_hotkey() -> Option<&'static str> {
 }
 
 fn normalize_hotkey_mode(value: &str) -> &'static str {
-    if value == "toggle" {
-        "toggle"
-    } else {
-        "hold"
+    match value {
+        "toggle" => "toggle",
+        "auto" => "auto",
+        _ => "hold",
     }
 }
 
@@ -3048,15 +3052,38 @@ mod tests {
         assert!(config.auto_start);
     }
 
+    #[test]
+    fn auto_hotkey_mode_survives_load_and_existing_modes_are_kept() {
+        let auto = AppConfig::from_stored_value(serde_json::json!({
+            "hotkeys": { "dictationMode": "auto" }
+        }))
+        .unwrap();
+        assert_eq!(auto.hotkeys.dictation_mode, "auto");
+        assert_eq!(auto.hotkey_mode, "auto");
+
+        let existing = AppConfig::from_stored_value(serde_json::json!({
+            "hotkey": "Ctrl+Shift+;",
+            "hotkey_mode": "toggle"
+        }))
+        .unwrap();
+        assert_eq!(existing.hotkey_mode, "toggle");
+
+        let unknown = AppConfig::from_stored_value(serde_json::json!({
+            "hotkeys": { "dictationMode": "sometimes" }
+        }))
+        .unwrap();
+        assert_eq!(unknown.hotkeys.dictation_mode, "hold");
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
-    fn app_config_new_install_uses_fn_toggle_on_macos() {
+    fn app_config_new_install_uses_fn_auto_on_macos() {
         let config = AppConfig::new_install_default();
         assert_eq!(config.hotkey, "Fn");
         assert_eq!(config.hotkeys.dictation.primary, "Fn");
         assert_eq!(config.hotkeys.dictation.modifiers, Vec::<String>::new());
-        assert_eq!(config.hotkey_mode, "toggle");
-        assert_eq!(config.hotkeys.dictation_mode, "toggle");
+        assert_eq!(config.hotkey_mode, "auto");
+        assert_eq!(config.hotkeys.dictation_mode, "auto");
         assert_eq!(config.ask_hotkey, "Fn+Space");
         assert_eq!(
             config
@@ -3083,8 +3110,8 @@ mod tests {
         assert_eq!(config.hotkey, "Ctrl+/");
         assert_eq!(config.hotkeys.dictation.primary, "/");
         assert_eq!(config.hotkeys.dictation.modifiers, vec!["Ctrl".to_string()]);
-        assert_eq!(config.hotkey_mode, "hold");
-        assert_eq!(config.hotkeys.dictation_mode, "hold");
+        assert_eq!(config.hotkey_mode, "auto");
+        assert_eq!(config.hotkeys.dictation_mode, "auto");
         assert_eq!(config.ask_hotkey, "Ctrl+.");
         assert_eq!(
             config
@@ -3109,7 +3136,7 @@ mod tests {
     fn app_config_new_install_keeps_ctrl_slash_on_linux() {
         let config = AppConfig::new_install_default();
         assert_eq!(config.hotkey, "Ctrl+/");
-        assert_eq!(config.hotkey_mode, "hold");
+        assert_eq!(config.hotkey_mode, "auto");
         assert_eq!(config.ask_hotkey, "Ctrl+.");
         assert_eq!(
             config

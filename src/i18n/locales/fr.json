@@ -236,13 +236,8 @@
     "cancelRecording": "Annuler l'enregistrement",
     "translationTarget": "Langue cible",
     "translationTargets": "Langues cibles",
-    "preparing": "Préparation...",
-    "transcribing": "Transcription...",
-    "cancelProcessing": "Annuler le traitement",
-    "thinking": "Réflexion...",
-    "cancelPolishing": "Annuler l'amélioration",
+    "thinking": "Réflexion",
     "done": "Terminé",
-    "errorOccurred": "Une erreur s'est produite",
     "accessibilityRequired": "Accessibilité requise — ouvrez les Paramètres",
     "errors": {
       "stt_timeout": "Délai STT",
@@ -271,6 +266,27 @@
       "account": "Compte",
       "upgrade": "Passer à Pro",
       "exit": "Quitter"
+    },
+    "cancel": "Annuler",
+    "cancelAsk": "Annuler la question",
+    "finish": "Terminer",
+    "clickToStart": "Cliquez pour commencer la dictée",
+    "modeAsk": "Demander",
+    "modeTranslating": "Traduction en {{language}}",
+    "alerts": {
+      "guideTitle": "Raccourcis",
+      "guidePrefix": "Appuyez une fois pour parler. Appuyez sur",
+      "guideSuffix": "pour terminer.",
+      "guideDictate": "Dicter",
+      "guideTranslate": "Traduire",
+      "guideAsk": "Demander",
+      "pressToFinishPrefix": "La prochaine fois, appuyez sur",
+      "pressToFinishSuffix": "pour terminer",
+      "weakNetwork": "Plus long que d'habitude…",
+      "copyLastTitle": "Copier la dernière transcription",
+      "copy": "Copier",
+      "copied": "Copié",
+      "cancelled": "Transcription annulée"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Supprimer toutes les associations d’applications enregistrées uniquement sur cet appareil ?",
     "mappingResetConfirmAction": "Réinitialiser les associations",
     "mappingNoMappings": "Aucune association d’application personnalisée",
-    "dictationMode": "Mode de dictee"
+    "dictationMode": "Mode de dictee",
+    "autoPressMode": "Appuyer pour parler",
+    "autoPressModeDesc": "Appuyez une fois pour commencer, à nouveau pour terminer. Un appui long affiche le guide des raccourcis."
   },
   "contextFamilies": {
     "email": "E-mail",

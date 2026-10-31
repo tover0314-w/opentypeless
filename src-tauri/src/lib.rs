@@ -954,6 +954,7 @@ pub fn run() {
             app.manage(HotkeyModeCache(Arc::new(Mutex::new(
                 initial_config.hotkey_mode.clone(),
             ))));
+            app.manage(hotkey::AutoPressTracker::default());
             app.manage(AskHotkeyCache(Arc::new(Mutex::new(
                 initial_config.ask_hotkey.clone(),
             ))));

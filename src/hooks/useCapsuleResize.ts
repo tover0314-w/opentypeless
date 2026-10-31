@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useAppStore, type PipelineState } from '../stores/appStore'
+import { useCapsuleAlertStore } from '../stores/capsuleAlertStore'
 
 interface CapsuleSize {
   width: number
@@ -34,6 +35,18 @@ export interface CapsulePlacementMonitor {
 export interface CapsuleMonitorGeometry extends CapsuleMonitorBounds, CapsulePlacementMonitor {}
 
 export interface CapsuleWindowRect extends PhysicalPoint, PhysicalDimensions {}
+
+/** Keeps the bottom-centre of the panel fixed so the bar does not jump when the panel grows. */
+export function getCapsuleBottomAnchoredPosition(
+  previous: CapsuleWindowRect,
+  logicalSize: CapsuleSize,
+  scaleFactor: number,
+): PhysicalPoint {
+  return {
+    x: Math.round(previous.x + (previous.width - logicalSize.width * scaleFactor) / 2),
+    y: Math.round(previous.y + previous.height - logicalSize.height * scaleFactor),
+  }
+}
 
 export function getCapsuleResizePosition(
   previous: CapsuleWindowRect,
@@ -132,33 +145,35 @@ export function getCapsuleFocusable(): boolean {
   return false
 }
 
+// The capsule window is a transparent panel anchored at its bottom edge: the bar sits at the
+// bottom centre and alerts, mode labels and menus stack above it.
+const PANEL_WIDTH = 460
+const BAR_PANEL_HEIGHT = 56
+const MENU_PANEL_HEIGHT = 300
+const ALERT_PANEL_HEIGHT = 250
+
 function getSizeForState(
   state: PipelineState,
   expanded: boolean,
   hasError: boolean,
   contextMenuOpen: boolean,
   translationTargetMenuOpen = false,
+  hasAlert = false,
 ): CapsuleSize {
-  if (translationTargetMenuOpen) return { width: 360, height: 180 }
-  if (contextMenuOpen) return { width: 220, height: 220 }
-  if (hasError) return { width: 200, height: 36 }
-  if (expanded) return { width: 220, height: 90 }
+  if (translationTargetMenuOpen || contextMenuOpen) {
+    return { width: PANEL_WIDTH, height: MENU_PANEL_HEIGHT }
+  }
+  if (hasAlert) return { width: PANEL_WIDTH, height: ALERT_PANEL_HEIGHT }
+  if (hasError || expanded) return { width: PANEL_WIDTH, height: BAR_PANEL_HEIGHT }
   switch (state) {
     case 'idle':
-      return { width: 36, height: 36 }
-    case 'preparing':
-      return { width: 180, height: 36 }
+      return { width: 120, height: BAR_PANEL_HEIGHT }
     case 'recording':
-    case 'transcribing':
-    case 'polishing':
-      return { width: 200, height: 36 }
-    case 'outputting':
-      return { width: 144, height: 36 }
     case 'ask_recording':
-    case 'ask_thinking':
-      return { width: 168, height: 36 }
+      // Leaves room for the Translate/Ask mode label above the bar.
+      return { width: PANEL_WIDTH, height: 104 }
     default:
-      return { width: 36, height: 36 }
+      return { width: PANEL_WIDTH, height: BAR_PANEL_HEIGHT }
   }
 }
 
@@ -170,6 +185,7 @@ export function useCapsuleResize() {
   const translationTargetMenuOpen = useAppStore((s) => s.translationTargetMenuOpen)
   const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
+  const hasAlert = useCapsuleAlertStore((s) => s.alert !== null)
   const initialized = useRef(false)
   const prevWindowSize = useRef<{ width: number; height: number } | null>(null)
   const effectGeneration = useRef(0)
@@ -186,15 +202,16 @@ export function useCapsuleResize() {
       hasError,
       contextMenuOpen,
       translationTargetMenuOpen,
+      hasAlert,
     )
-    const windowWidth = size.width + 24
-    const windowHeight = size.height + 24
+    const windowWidth = size.width
+    const windowHeight = size.height
     const shouldShow = getCapsuleVisibility({
       capsuleAutoHide,
       contextMenuOpen,
       translationTargetMenuOpen,
       capsuleExpanded,
-      hasError,
+      hasError: hasError || hasAlert,
       pipelineState,
     })
 
@@ -305,7 +322,7 @@ export function useCapsuleResize() {
               const oldWidth = oldSize?.width ?? Math.round(prev.width * scale)
               const physicalWidth = Math.round(windowWidth * scale)
               const physicalHeight = Math.round(windowHeight * scale)
-              let { x: newX, y: newY } = getCapsuleResizePosition(
+              let { x: newX, y: newY } = getCapsuleBottomAnchoredPosition(
                 { ...pos, width: oldWidth, height: oldHeight },
                 { width: windowWidth, height: windowHeight },
                 scale,
@@ -412,6 +429,7 @@ export function useCapsuleResize() {
     pipelineState,
     capsuleExpanded,
     hasError,
+    hasAlert,
     contextMenuOpen,
     translationTargetMenuOpen,
     capsuleAutoHide,
@@ -424,5 +442,6 @@ export function useCapsuleResize() {
     hasError,
     contextMenuOpen,
     translationTargetMenuOpen,
+    hasAlert,
   )
 }

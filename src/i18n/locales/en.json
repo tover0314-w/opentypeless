@@ -236,13 +236,8 @@
     "cancelRecording": "Cancel recording",
     "translationTarget": "Translation target",
     "translationTargets": "Translation targets",
-    "preparing": "Preparing...",
-    "transcribing": "Transcribing...",
-    "cancelProcessing": "Cancel processing",
-    "thinking": "Thinking...",
-    "cancelPolishing": "Cancel polishing",
+    "thinking": "Thinking",
     "done": "Done",
-    "errorOccurred": "An error occurred",
     "accessibilityRequired": "Accessibility needed — open Settings",
     "errors": {
       "stt_timeout": "STT timeout",
@@ -271,6 +266,27 @@
       "account": "Account",
       "upgrade": "Upgrade",
       "exit": "Exit"
+    },
+    "cancel": "Cancel",
+    "cancelAsk": "Cancel question",
+    "finish": "Finish",
+    "clickToStart": "Click to start dictating",
+    "modeAsk": "Ask anything",
+    "modeTranslating": "Translating to {{language}}",
+    "alerts": {
+      "guideTitle": "Shortcuts",
+      "guidePrefix": "Tap once to start talking. Press",
+      "guideSuffix": "to finish.",
+      "guideDictate": "Dictate",
+      "guideTranslate": "Translate",
+      "guideAsk": "Ask anything",
+      "pressToFinishPrefix": "Next time, try pressing",
+      "pressToFinishSuffix": "to finish",
+      "weakNetwork": "Taking longer than usual…",
+      "copyLastTitle": "Copy last transcript",
+      "copy": "Copy",
+      "copied": "Copied",
+      "cancelled": "Transcript cancelled"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Delete all device-only app mappings?",
     "mappingResetConfirmAction": "Reset mappings",
     "mappingNoMappings": "No custom app mappings",
-    "dictationMode": "Dictation mode"
+    "dictationMode": "Dictation mode",
+    "autoPressMode": "Tap to talk",
+    "autoPressModeDesc": "Tap once to start, tap again to finish. Holding the key shows a shortcut guide."
   },
   "contextFamilies": {
     "email": "Email",

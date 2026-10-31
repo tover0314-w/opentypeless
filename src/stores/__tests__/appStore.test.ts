@@ -118,6 +118,17 @@ describe('appStore', () => {
       expect(config.hotkeys.dictationMode).toBe('toggle')
     })
 
+    it('keeps the auto press/hold mode through legacy and typed updates', () => {
+      getState().updateConfig({ hotkey_mode: 'auto' })
+      expect(getState().config.hotkeys.dictationMode).toBe('auto')
+      expect(getState().config.hotkey_mode).toBe('auto')
+
+      getState().updateConfig({
+        hotkeys: { ...getState().config.hotkeys, dictationMode: 'auto' },
+      })
+      expect(getState().config.hotkey_mode).toBe('auto')
+    })
+
     it('updateConfig keeps native single-key hotkeys in sync', () => {
       getState().updateConfig({
         hotkey: 'RightAlt',

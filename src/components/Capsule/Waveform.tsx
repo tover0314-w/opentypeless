@@ -2,58 +2,56 @@ import { useEffect, useRef } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { useAppStore } from '../../stores/appStore'
 
-const BAR_COUNT = 7
-const MIN_HEIGHT = 3
-const MAX_HEIGHT = 16
+// Typeless waveform (REA: `Ki`): 2px bars, 2px gap, 2–18px tall, white, diffused from the centre.
+const BAR_COUNT = 9
+const MIN_HEIGHT = 2
+const MAX_HEIGHT = 18
+const UPDATE_MS = 50
+const DECAY = 0.65
 
-export function Waveform() {
+export function Waveform({ dim = false }: { dim?: boolean }) {
   const barsRef = useRef<(HTMLDivElement | null)[]>([])
-  const rafRef = useRef<number>(0)
+  const levels = useRef<number[]>(Array(BAR_COUNT).fill(0))
   const reduced = useReducedMotion()
 
   useEffect(() => {
-    if (reduced) {
-      // Static bars at mid-height when reduced motion is preferred
-      barsRef.current.forEach((bar) => {
+    const apply = () => {
+      barsRef.current.forEach((bar, i) => {
         if (!bar) return
-        bar.style.height = `${(MIN_HEIGHT + MAX_HEIGHT) / 2}px`
-        bar.style.opacity = '0.7'
+        bar.style.height = `${MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * levels.current[i]}px`
       })
+    }
+
+    if (reduced) {
+      levels.current = levels.current.map(() => 0.35)
+      apply()
       return
     }
 
-    const animate = () => {
-      const volume = useAppStore.getState().audioVolume
-      barsRef.current.forEach((bar, i) => {
-        if (!bar) return
-        const offset = Math.sin(Date.now() / 200 + i * 0.9) * 0.15
-        const normalized = Math.max(0, Math.min(1, volume + offset))
-        const height = MIN_HEIGHT + (MAX_HEIGHT - MIN_HEIGHT) * normalized
-        const opacity = Math.max(0.5, normalized)
-        bar.style.height = `${height}px`
-        bar.style.opacity = `${opacity}`
+    const center = (BAR_COUNT - 1) / 2
+    const timer = window.setInterval(() => {
+      const volume = Math.min(1, Math.max(0, useAppStore.getState().audioVolume))
+      levels.current = levels.current.map((previous, i) => {
+        const distance = Math.abs(i - center) / center
+        const jitter = 0.75 + Math.random() * 0.5
+        const target = volume * (1 - distance * 0.55) * jitter
+        return target > previous ? target : previous * DECAY
       })
-      rafRef.current = requestAnimationFrame(animate)
-    }
-
-    rafRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(rafRef.current)
+      apply()
+    }, UPDATE_MS)
+    return () => window.clearInterval(timer)
   }, [reduced])
 
   return (
-    <div className="flex items-center justify-center gap-[3px] h-4">
+    <div className="flex h-[18px] items-center justify-center gap-[2px]" aria-hidden="true">
       {Array.from({ length: BAR_COUNT }).map((_, i) => (
         <div
           key={i}
           ref={(el) => {
             barsRef.current[i] = el
           }}
-          className="w-[2px] rounded-full bg-white/80"
-          style={{
-            height: `${MIN_HEIGHT}px`,
-            opacity: 0.5,
-            transition: 'height 75ms ease-out, opacity 75ms ease-out',
-          }}
+          className={`w-[2px] rounded-full transition-[height] duration-75 ${dim ? 'bg-white/50' : 'bg-white'}`}
+          style={{ height: MIN_HEIGHT }}
         />
       ))}
     </div>

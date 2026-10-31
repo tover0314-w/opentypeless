@@ -51,7 +51,7 @@ export type InsertionStrategy =
   | 'clipboardCopyOnly'
   | 'windowsSendInput'
 export type InsertStatus = 'inserted' | 'copiedFallback' | 'failed' | 'partiallyInserted'
-export type HotkeyMode = 'hold' | 'toggle'
+export type HotkeyMode = 'hold' | 'toggle' | 'auto'
 export type Theme = 'light' | 'dark' | 'system'
 export type PolishChineseScript = 'preserve' | 'simplified' | 'traditional'
 export type PolishStyle = 'minimal' | 'clean' | 'structured' | 'professional'
@@ -363,6 +363,10 @@ function defaultDictationHotkey(): string {
   return 'Ctrl+/'
 }
 
+function isHotkeyMode(value: unknown): value is HotkeyMode {
+  return value === 'hold' || value === 'toggle' || value === 'auto'
+}
+
 function defaultDictationHotkeyMode(): HotkeyMode {
   return isMacPlatform() ? 'toggle' : 'hold'
 }
@@ -562,14 +566,11 @@ function normalizeHotkeyConfig(config: AppConfig, hotkeysValue: HotkeyConfig): H
     editSelection: normalizeBinding(hotkeys.editSelection),
     switchScene: normalizeBinding(hotkeys.switchScene),
     openApp: normalizeBinding(hotkeys.openApp),
-    dictationMode:
-      hotkeys.dictationMode === 'toggle'
-        ? 'toggle'
-        : hotkeys.dictationMode === 'hold'
-          ? 'hold'
-          : config.hotkey_mode === 'toggle'
-            ? 'toggle'
-            : defaultDictationHotkeyMode(),
+    dictationMode: isHotkeyMode(hotkeys.dictationMode)
+      ? hotkeys.dictationMode
+      : isHotkeyMode(config.hotkey_mode)
+        ? config.hotkey_mode
+        : defaultDictationHotkeyMode(),
   }
 }
 
@@ -598,12 +599,9 @@ function hotkeyConfigFromLegacy(config: AppConfig): HotkeyConfig {
     editSelection: config.hotkeys?.editSelection ?? null,
     switchScene: config.hotkeys?.switchScene ?? null,
     openApp: config.hotkeys?.openApp ?? null,
-    dictationMode:
-      config.hotkey_mode === 'toggle'
-        ? 'toggle'
-        : config.hotkey_mode === 'hold'
-          ? 'hold'
-          : defaultDictationHotkeyMode(),
+    dictationMode: isHotkeyMode(config.hotkey_mode)
+      ? config.hotkey_mode
+      : defaultDictationHotkeyMode(),
   })
 }
 

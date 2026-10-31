@@ -236,13 +236,8 @@
     "cancelRecording": "Cancelar gravação",
     "translationTarget": "Idioma de destino",
     "translationTargets": "Idiomas de destino",
-    "preparing": "Preparando...",
-    "transcribing": "Transcrevendo...",
-    "cancelProcessing": "Cancelar processamento",
-    "thinking": "Pensando...",
-    "cancelPolishing": "Cancelar polimento",
+    "thinking": "Pensando",
     "done": "Pronto",
-    "errorOccurred": "Ocorreu um erro",
     "accessibilityRequired": "Acessibilidade necessária — abra as Configurações",
     "errors": {
       "stt_timeout": "STT expirou",
@@ -271,6 +266,27 @@
       "account": "Conta",
       "upgrade": "Atualizar",
       "exit": "Sair"
+    },
+    "cancel": "Cancelar",
+    "cancelAsk": "Cancelar pergunta",
+    "finish": "Concluir",
+    "clickToStart": "Clique para começar a ditar",
+    "modeAsk": "Pergunte qualquer coisa",
+    "modeTranslating": "Traduzindo para {{language}}",
+    "alerts": {
+      "guideTitle": "Atalhos",
+      "guidePrefix": "Toque uma vez para falar. Pressione",
+      "guideSuffix": "para concluir.",
+      "guideDictate": "Ditar",
+      "guideTranslate": "Traduzir",
+      "guideAsk": "Pergunte qualquer coisa",
+      "pressToFinishPrefix": "Da próxima vez, pressione",
+      "pressToFinishSuffix": "para concluir",
+      "weakNetwork": "Demorando mais que o normal…",
+      "copyLastTitle": "Copiar a última transcrição",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "cancelled": "Transcrição cancelada"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "Excluir todas as associações de aplicativos salvas apenas neste dispositivo?",
     "mappingResetConfirmAction": "Redefinir associações",
     "mappingNoMappings": "Nenhuma associação personalizada de aplicativo",
-    "dictationMode": "Modo de ditado"
+    "dictationMode": "Modo de ditado",
+    "autoPressMode": "Toque para falar",
+    "autoPressModeDesc": "Toque uma vez para começar e de novo para terminar. Manter pressionado mostra o guia de atalhos."
   },
   "contextFamilies": {
     "email": "E-mail",

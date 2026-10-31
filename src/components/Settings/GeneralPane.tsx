@@ -198,8 +198,9 @@ export function GeneralPane() {
       <Section title={t('settings.dictationMode')}>
         <SegmentedControl
           options={[
-            { value: 'hold', label: t('settings.holdToTalk') },
+            { value: 'auto', label: t('settings.autoPressMode') },
             { value: 'toggle', label: t('settings.toggleOnOff') },
+            { value: 'hold', label: t('settings.holdToTalk') },
           ]}
           value={config.hotkey_mode}
           onChange={(v) => updateConfig({ hotkey_mode: v as HotkeyMode })}

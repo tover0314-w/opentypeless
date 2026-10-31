@@ -13,6 +13,7 @@ import type {
   VoiceMode,
 } from '../stores/appStore'
 import { getHistory } from '../lib/tauri'
+import { useCapsuleAlertStore, type CapsuleAlertKind } from '../stores/capsuleAlertStore'
 import { toast } from '../components/toast-service'
 import { capsuleErrorKeyFromPayload, type PipelineErrorPayload } from '../lib/capsuleError'
 import { invalidateCloudSessionOnce } from '../lib/cloud-session'
@@ -144,7 +145,18 @@ export function useTauriEvents() {
     })
     addListener<VoiceMode | null>('pipeline:voice_mode', setActiveVoiceMode)
     addListener<string>('pipeline:target_app', setTargetApp)
-    addListener<InsertResult>('pipeline:insert_result', setLastInsertResult)
+    addListener<InsertResult>('pipeline:insert_result', (result) => {
+      setLastInsertResult(result)
+      // Typeless "Copy last transcript": the focused field did not take the text, so offer it.
+      if (result.status === 'copiedFallback' || result.status === 'failed') {
+        const { polishedText, finalTranscript } = useAppStore.getState()
+        const text = polishedText || finalTranscript
+        if (text) useCapsuleAlertStore.getState().show('copy_last_transcript', text)
+      }
+    })
+    addListener<{ kind: CapsuleAlertKind }>('capsule:alert', (payload) => {
+      useCapsuleAlertStore.getState().show(payload.kind)
+    })
     addListener<ContextProfileSummary>('pipeline:context', setLastContext)
     addListener<PipelineErrorPayload>('pipeline:error', (payload) => {
       const capsuleErrorKey = capsuleErrorKeyFromPayload(payload)

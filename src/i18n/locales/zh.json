@@ -236,13 +236,8 @@
     "cancelRecording": "取消录音",
     "translationTarget": "翻译目标",
     "translationTargets": "翻译目标列表",
-    "preparing": "准备中...",
-    "transcribing": "转录中...",
-    "cancelProcessing": "取消处理",
-    "thinking": "思考中...",
-    "cancelPolishing": "取消润色",
+    "thinking": "思考中",
     "done": "完成",
-    "errorOccurred": "发生错误",
     "accessibilityRequired": "需要辅助功能权限 — 请打开设置",
     "errors": {
       "stt_timeout": "STT 超时",
@@ -271,6 +266,27 @@
       "account": "账户",
       "upgrade": "升级",
       "exit": "退出"
+    },
+    "cancel": "取消",
+    "cancelAsk": "取消提问",
+    "finish": "完成",
+    "clickToStart": "点击开始口述",
+    "modeAsk": "随便问",
+    "modeTranslating": "翻译为 {{language}}",
+    "alerts": {
+      "guideTitle": "快捷键",
+      "guidePrefix": "轻按一次开始说话，按",
+      "guideSuffix": "完成。",
+      "guideDictate": "口述",
+      "guideTranslate": "翻译",
+      "guideAsk": "随便问",
+      "pressToFinishPrefix": "下次试试按",
+      "pressToFinishSuffix": "来完成",
+      "weakNetwork": "比平常慢一些…",
+      "copyLastTitle": "复制上一条转录",
+      "copy": "复制",
+      "copied": "已复制",
+      "cancelled": "已取消本次转录"
     }
   },
   "settings": {
@@ -473,7 +489,9 @@
     "mappingResetConfirm": "删除所有仅保存在本机的应用映射？",
     "mappingResetConfirmAction": "重置映射",
     "mappingNoMappings": "暂无自定义应用映射",
-    "dictationMode": "听写触发方式"
+    "dictationMode": "听写触发方式",
+    "autoPressMode": "轻按说话",
+    "autoPressModeDesc": "轻按一次开始，再按一次完成。按住按键会显示快捷键说明。"
   },
   "contextFamilies": {
     "email": "邮件",
