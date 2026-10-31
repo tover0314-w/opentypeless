@@ -507,6 +507,12 @@ body,
   margin: 0 0 16px;
   padding-left: 26px;
 }
+.answer-markdown ul {
+  list-style: disc;
+}
+.answer-markdown ol {
+  list-style: decimal;
+}
 .answer-markdown li + li {
   margin-top: 4px;
 }
