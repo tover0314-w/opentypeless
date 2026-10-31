@@ -12,6 +12,9 @@ import { AccountPage } from '../AccountPage'
 import { useAutoSaveConfig } from './shared/useAutoSaveConfig'
 import { SETTINGS_TABS, paneFromHash, type SettingsTabId } from './settingsTabs'
 
+/** Onboarding step where the hands-on practice ("Try it") begins. */
+const EXPLORE_START_STEP = 6
+
 interface Props {
   initialTab?: SettingsTabId
   onClose?: () => void
@@ -98,7 +101,17 @@ export function Settings({ initialTab, onClose }: Props) {
           )}
           {activeTab === 'personalization' && <ScenesPane />}
           {activeTab === 'about' && <AboutPane />}
-          {activeTab === 'help' && <HelpPane />}
+          {activeTab === 'help' && (
+            <HelpPane
+              onExploreFeatures={() => {
+                // Replays the practice steps without touching saved providers or shortcuts.
+                const { setOnboardingStep, setOnboardingCompleted } = useAppStore.getState()
+                setOnboardingStep(EXPLORE_START_STEP)
+                setOnboardingCompleted(false)
+                onClose?.()
+              }}
+            />
+          )}
         </div>
       </div>
 

@@ -487,6 +487,18 @@ describe('Settings tab 切换', () => {
     expect(useAppStore.getState().config.history_enabled).toBe(false)
   })
 
+  it('Help explore replays the onboarding practice steps and closes the modal', () => {
+    const onClose = vi.fn()
+    useAppStore.setState({ onboardingCompleted: true, onboardingStep: 0 })
+    render(<Settings initialTab="help" onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'settingsModal.help.start' }))
+
+    expect(useAppStore.getState().onboardingCompleted).toBe(false)
+    expect(useAppStore.getState().onboardingStep).toBe(6)
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('General pane picks the microphone and audio preferences', async () => {
     renderSettings()
 
