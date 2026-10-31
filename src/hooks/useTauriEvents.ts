@@ -13,7 +13,11 @@ import type {
   VoiceMode,
 } from '../stores/appStore'
 import { getHistory } from '../lib/tauri'
-import { useCapsuleAlertStore, type CapsuleAlertKind } from '../stores/capsuleAlertStore'
+import {
+  claimSelectedTextTip,
+  useCapsuleAlertStore,
+  type CapsuleAlertKind,
+} from '../stores/capsuleAlertStore'
 import { toast } from '../components/toast-service'
 import { capsuleErrorKeyFromPayload, type PipelineErrorPayload } from '../lib/capsuleError'
 import { invalidateCloudSessionOnce } from '../lib/cloud-session'
@@ -127,6 +131,11 @@ export function useTauriEvents() {
     })
     addListener<RecordingDeadlineSnapshot>('recording:deadline', setRecordingDeadline)
     addListener<RecordingDeadlineNotice>('recording:deadline-warning', (payload) => {
+      // Typeless warns once in the floating bar when a take enters its last minute.
+      if (payload.secondsRemaining === 60) {
+        useCapsuleAlertStore.getState().show('last_minute')
+        return
+      }
       toast(
         t('recordingLimits.deadlineWarning', {
           seconds: payload.secondsRemaining ?? 10,
@@ -156,6 +165,12 @@ export function useTauriEvents() {
     })
     addListener<{ kind: CapsuleAlertKind }>('capsule:alert', (payload) => {
       useCapsuleAlertStore.getState().show(payload.kind)
+    })
+    addListener<void>('capsule:selected_text', () => {
+      const askBinding = useAppStore.getState().config.hotkeys.ask
+      if (askBinding && claimSelectedTextTip()) {
+        useCapsuleAlertStore.getState().show('selected_text_tip')
+      }
     })
     addListener<{ kind: CapsuleAlertKind }>('capsule:alert_dismiss', (payload) => {
       useCapsuleAlertStore.getState().dismiss(payload.kind)

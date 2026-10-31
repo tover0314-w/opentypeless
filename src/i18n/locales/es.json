@@ -364,7 +364,15 @@
       "copied": "Copiado",
       "cancelled": "Transcripción cancelada",
       "previousPendingTitle": "Aún se está procesando tu último dictado",
-      "previousPendingDesc": "Espera un momento o cancélalo para empezar de nuevo."
+      "previousPendingDesc": "Espera un momento o cancélalo para empezar de nuevo.",
+      "readyTitle": "{{app}} está listo",
+      "readyPrefix": "En cualquier campo de texto, pulsa",
+      "readySuffix": "para empezar y terminar de dictar.",
+      "gotIt": "Entendido",
+      "lastMinuteTitle": "Queda menos de un minuto",
+      "lastMinuteDesc": "La grabación termina sola al llegar al límite. Empieza una nueva para seguir.",
+      "selectedTipPrefix": "Hay texto seleccionado: pulsa",
+      "selectedTipSuffix": "para preguntar sobre él"
     }
   },
   "settings": {

@@ -364,7 +364,15 @@
       "copied": "Copiato",
       "cancelled": "Trascrizione annullata",
       "previousPendingTitle": "Ultima dettatura ancora in elaborazione",
-      "previousPendingDesc": "Attendi un momento o annullala per ricominciare."
+      "previousPendingDesc": "Attendi un momento o annullala per ricominciare.",
+      "readyTitle": "{{app}} è pronto",
+      "readyPrefix": "In qualsiasi campo di testo, premi",
+      "readySuffix": "per avviare e terminare la dettatura.",
+      "gotIt": "Ho capito",
+      "lastMinuteTitle": "Manca meno di un minuto",
+      "lastMinuteDesc": "La registrazione termina da sola al limite. Avviane una nuova per continuare.",
+      "selectedTipPrefix": "Testo selezionato: premi",
+      "selectedTipSuffix": "per chiedere su di esso"
     }
   },
   "settings": {

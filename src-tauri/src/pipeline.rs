@@ -1873,6 +1873,10 @@ impl PipelineHandle {
             "Selected text result: len={}",
             selected_text.as_deref().map(|s| s.len()).unwrap_or(0)
         );
+        if selected_text_has_content(selected_text.as_deref()) {
+            // The capsule may use this to teach the Ask shortcut once (Typeless selected-text tip).
+            let _ = self.app_handle.emit("capsule:selected_text", ());
+        }
         *self
             .preloaded_selected_text
             .lock()

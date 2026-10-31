@@ -266,6 +266,35 @@ describe('Capsule alerts', () => {
     expect(useCapsuleAlertStore.getState().alert).toBeNull()
   })
 
+  it('greets a newly onboarded user with the dictation key and dismisses on Got it', () => {
+    setHotkeys()
+    useCapsuleAlertStore.getState().show('ready')
+    const { container } = render(<Capsule />)
+
+    expect(screen.getByText('capsule.alerts.readyTitle')).toBeInTheDocument()
+    expect(container.querySelector('[data-capsule-alert="ready"]')?.textContent).toContain(
+      'Left Shift',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.alerts.gotIt' }))
+    expect(useCapsuleAlertStore.getState().alert).toBeNull()
+  })
+
+  it('points at the Ask key when dictating over a selection', () => {
+    setHotkeys()
+    useCapsuleAlertStore.getState().show('selected_text_tip')
+    const { container } = render(<Capsule />)
+
+    expect(container.querySelector('[data-capsule-alert="selected_text_tip"]')?.textContent).toBe(
+      'capsule.alerts.selectedTipPrefixLeft ShiftSpacecapsule.alerts.selectedTipSuffix',
+    )
+  })
+
+  it('warns once a take enters its last minute', () => {
+    useCapsuleAlertStore.getState().show('last_minute')
+    render(<Capsule />)
+    expect(screen.getByText('capsule.alerts.lastMinuteTitle')).toBeInTheDocument()
+  })
+
   it('offers to cancel a take that is still processing', () => {
     useCapsuleAlertStore.getState().show('previous_pending')
     render(<Capsule />)

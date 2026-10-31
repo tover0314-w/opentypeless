@@ -364,7 +364,15 @@
       "copied": "Copié",
       "cancelled": "Transcription annulée",
       "previousPendingTitle": "Dernière dictée encore en cours",
-      "previousPendingDesc": "Patientez un instant ou annulez-la pour recommencer."
+      "previousPendingDesc": "Patientez un instant ou annulez-la pour recommencer.",
+      "readyTitle": "{{app}} est prêt",
+      "readyPrefix": "Dans n'importe quel champ de texte, appuyez sur",
+      "readySuffix": "pour démarrer et arrêter la dictée.",
+      "gotIt": "Compris",
+      "lastMinuteTitle": "Moins d'une minute restante",
+      "lastMinuteDesc": "L'enregistrement s'arrête automatiquement à la limite. Lancez-en un nouveau pour continuer.",
+      "selectedTipPrefix": "Texte sélectionné — appuyez sur",
+      "selectedTipSuffix": "pour poser une question"
     }
   },
   "settings": {

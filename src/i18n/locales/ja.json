@@ -364,7 +364,15 @@
       "copied": "コピーしました",
       "cancelled": "文字起こしをキャンセルしました",
       "previousPendingTitle": "前回の音声入力を処理中です",
-      "previousPendingDesc": "少し待つか、キャンセルしてやり直してください。"
+      "previousPendingDesc": "少し待つか、キャンセルしてやり直してください。",
+      "readyTitle": "{{app}} はいつでも使えます",
+      "readyPrefix": "どのテキスト欄でも",
+      "readySuffix": "で音声入力の開始と終了ができます。",
+      "gotIt": "OK",
+      "lastMinuteTitle": "この録音は残り 1 分未満です",
+      "lastMinuteDesc": "上限に達すると自動で終了します。続けるには新しく録音を始めてください。",
+      "selectedTipPrefix": "テキストが選択されています。",
+      "selectedTipSuffix": "で質問できます"
     }
   },
   "settings": {

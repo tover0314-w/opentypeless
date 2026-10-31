@@ -364,7 +364,15 @@
       "copied": "Copied",
       "cancelled": "Transcript cancelled",
       "previousPendingTitle": "Still finishing your last dictation",
-      "previousPendingDesc": "Wait a moment, or cancel it to start over."
+      "previousPendingDesc": "Wait a moment, or cancel it to start over.",
+      "readyTitle": "{{app}} is ready when you are",
+      "readyPrefix": "In any text box, press",
+      "readySuffix": "to start and stop dictating.",
+      "gotIt": "Got it",
+      "lastMinuteTitle": "Less than a minute left in this take",
+      "lastMinuteDesc": "Recording finishes automatically at the limit. Start a new take to keep going.",
+      "selectedTipPrefix": "Text is selected — press",
+      "selectedTipSuffix": "to ask about it"
     }
   },
   "settings": {

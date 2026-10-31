@@ -41,6 +41,66 @@ export function CapsuleAlertBubble() {
         <CopyLastTranscript text={alert.text ?? ''} onClose={() => dismiss(alert.kind)} />
       )}
       {alert.kind === 'transcript_cancelled' && <SimpleAlert textKey="capsule.alerts.cancelled" />}
+      {alert.kind === 'ready' && <ReadyAlert onClose={() => dismiss('ready')} />}
+      {alert.kind === 'last_minute' && <LastMinute />}
+      {alert.kind === 'selected_text_tip' && <SelectedTextTip />}
+    </div>
+  )
+}
+
+/** First run after onboarding: where the bar lives and which key starts dictation. */
+function ReadyAlert({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
+  const keys = useVoiceHotkeys()
+  return (
+    <div className="capsule-alert flex min-w-[360px] max-w-[440px] flex-col items-center gap-2 p-4 text-center">
+      <div className="flex items-center gap-2 text-[15px] font-semibold">
+        <BrandMark size={18} className="text-white" />
+        {t('capsule.alerts.readyTitle', { app: t('app.name') })}
+      </div>
+      <p className="m-0 flex flex-wrap items-center justify-center gap-1 text-[13px] leading-5 text-[#c9c9c9]">
+        {t('capsule.alerts.readyPrefix')}
+        {keys.dictate && <Keycaps hotkey={keys.dictate} />}
+        {t('capsule.alerts.readySuffix')}
+      </p>
+      <button
+        type="button"
+        onClick={onClose}
+        className="mt-1 h-7 rounded-full border-none bg-accent px-3 text-[12px] font-medium text-white cursor-pointer hover:bg-accent-hover"
+      >
+        {t('capsule.alerts.gotIt')}
+      </button>
+    </div>
+  )
+}
+
+/** Recording is about to hit its provider limit; the bar also shows an mm:ss countdown. */
+function LastMinute() {
+  const { t } = useTranslation()
+  return (
+    <div className="capsule-alert flex max-w-[360px] flex-col items-center gap-1 p-4 text-center">
+      <div className="flex items-center gap-2 text-[14px] font-medium leading-5">
+        <AlertTriangle size={16} className="shrink-0 text-[#ff9e6c]" />
+        {t('capsule.alerts.lastMinuteTitle')}
+      </div>
+      <p className="m-0 text-[12px] leading-4 text-[#c9c9c9]">
+        {t('capsule.alerts.lastMinuteDesc')}
+      </p>
+    </div>
+  )
+}
+
+/** Dictating over a selection: point at the Ask key, which answers about the selected text. */
+function SelectedTextTip() {
+  const { t } = useTranslation()
+  const keys = useVoiceHotkeys()
+  if (!keys.ask) return null
+  return (
+    <div className="capsule-alert flex items-center gap-1.5 px-3 py-2 text-[14px] leading-4">
+      <BrandMark size={18} className="shrink-0 text-white" />
+      <span>{t('capsule.alerts.selectedTipPrefix')}</span>
+      <Keycaps hotkey={keys.ask} />
+      <span>{t('capsule.alerts.selectedTipSuffix')}</span>
     </div>
   )
 }

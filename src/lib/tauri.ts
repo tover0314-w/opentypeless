@@ -713,4 +713,11 @@ export async function saveOnboardingCompleted(): Promise<void> {
   } catch (e) {
     console.error('Failed to persist onboarding state:', e)
   }
+  // Typeless greets a newly onboarded user from the floating bar with the dictation key.
+  try {
+    const { emit } = await import('@tauri-apps/api/event')
+    await emit('capsule:alert', { kind: 'ready' })
+  } catch {
+    // The capsule window is optional (browser preview, tests).
+  }
 }

@@ -364,7 +364,15 @@
       "copied": "복사됨",
       "cancelled": "받아쓰기가 취소되었습니다",
       "previousPendingTitle": "이전 받아쓰기를 아직 처리 중이에요",
-      "previousPendingDesc": "잠시 기다리거나 취소하고 다시 시작하세요."
+      "previousPendingDesc": "잠시 기다리거나 취소하고 다시 시작하세요.",
+      "readyTitle": "{{app}} 준비 완료",
+      "readyPrefix": "아무 입력창에서나",
+      "readySuffix": "을(를) 눌러 받아쓰기를 시작하고 끝내세요.",
+      "gotIt": "확인",
+      "lastMinuteTitle": "이번 녹음이 1분도 안 남았어요",
+      "lastMinuteDesc": "한도에 도달하면 자동으로 끝나요. 계속하려면 새로 녹음을 시작하세요.",
+      "selectedTipPrefix": "텍스트가 선택되어 있어요.",
+      "selectedTipSuffix": "을(를) 눌러 질문하세요"
     }
   },
   "settings": {

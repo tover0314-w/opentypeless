@@ -364,7 +364,15 @@
       "copied": "已复制",
       "cancelled": "已取消本次转录",
       "previousPendingTitle": "上一段口述仍在处理中",
-      "previousPendingDesc": "请稍候，或取消它重新开始。"
+      "previousPendingDesc": "请稍候，或取消它重新开始。",
+      "readyTitle": "{{app}} 随时待命",
+      "readyPrefix": "在任意输入框中，按",
+      "readySuffix": "开始和结束口述。",
+      "gotIt": "知道了",
+      "lastMinuteTitle": "本段录音剩余不到 1 分钟",
+      "lastMinuteDesc": "到达上限后会自动结束，开始新的一段即可继续。",
+      "selectedTipPrefix": "已选中文字，按",
+      "selectedTipSuffix": "可以就它提问"
     }
   },
   "settings": {

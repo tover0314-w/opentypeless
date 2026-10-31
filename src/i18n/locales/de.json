@@ -364,7 +364,15 @@
       "copied": "Kopiert",
       "cancelled": "Transkription abgebrochen",
       "previousPendingTitle": "Letzte Diktierung wird noch verarbeitet",
-      "previousPendingDesc": "Warte kurz oder brich sie ab, um neu zu beginnen."
+      "previousPendingDesc": "Warte kurz oder brich sie ab, um neu zu beginnen.",
+      "readyTitle": "{{app}} ist bereit",
+      "readyPrefix": "Drücke in einem beliebigen Textfeld",
+      "readySuffix": "zum Starten und Beenden des Diktats.",
+      "gotIt": "Verstanden",
+      "lastMinuteTitle": "Weniger als eine Minute übrig",
+      "lastMinuteDesc": "Die Aufnahme endet am Limit automatisch. Starte eine neue, um weiterzumachen.",
+      "selectedTipPrefix": "Text ausgewählt – drücke",
+      "selectedTipSuffix": "um dazu zu fragen"
     }
   },
   "settings": {

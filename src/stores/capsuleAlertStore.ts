@@ -7,6 +7,9 @@ export type CapsuleAlertKind =
   | 'weak_network'
   | 'copy_last_transcript'
   | 'transcript_cancelled'
+  | 'ready'
+  | 'last_minute'
+  | 'selected_text_tip'
 
 export interface CapsuleAlert {
   kind: CapsuleAlertKind
@@ -23,21 +26,36 @@ export const ALERT_DURATION_MS: Record<CapsuleAlertKind, number | null> = {
   weak_network: null,
   copy_last_transcript: 10000,
   transcript_cancelled: 5000,
+  ready: null,
+  last_minute: 5000,
+  selected_text_tip: 3000,
 }
 
 /** Typeless shows the "press X to finish" nudge at most once per 48 h. */
 export const PRESS_TO_FINISH_COOLDOWN_MS = 48 * 60 * 60 * 1000
 const PRESS_TO_FINISH_SHOWN_AT = 'capsule.pressToFinishShownAt'
+const SELECTED_TEXT_TIP_SHOWN = 'capsule.selectedTextTipShown'
 
-export function claimPressToFinishHint(now = Date.now()): boolean {
+function claimOnce(key: string, cooldownMs: number | null, now: number): boolean {
   try {
-    const last = Number(localStorage.getItem(PRESS_TO_FINISH_SHOWN_AT))
-    if (Number.isFinite(last) && last > 0 && now - last < PRESS_TO_FINISH_COOLDOWN_MS) return false
-    localStorage.setItem(PRESS_TO_FINISH_SHOWN_AT, String(now))
+    const last = Number(localStorage.getItem(key))
+    if (Number.isFinite(last) && last > 0 && (cooldownMs === null || now - last < cooldownMs)) {
+      return false
+    }
+    localStorage.setItem(key, String(now))
     return true
   } catch {
     return false
   }
+}
+
+export function claimPressToFinishHint(now = Date.now()): boolean {
+  return claimOnce(PRESS_TO_FINISH_SHOWN_AT, PRESS_TO_FINISH_COOLDOWN_MS, now)
+}
+
+/** Typeless teaches "press the Ask key to ask about a selection" once, the first time it applies. */
+export function claimSelectedTextTip(now = Date.now()): boolean {
+  return claimOnce(SELECTED_TEXT_TIP_SHOWN, null, now)
 }
 
 interface CapsuleAlertState {

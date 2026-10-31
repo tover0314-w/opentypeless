@@ -364,7 +364,15 @@
       "copied": "Copiado",
       "cancelled": "Transcrição cancelada",
       "previousPendingTitle": "Ainda processando seu último ditado",
-      "previousPendingDesc": "Aguarde um momento ou cancele para recomeçar."
+      "previousPendingDesc": "Aguarde um momento ou cancele para recomeçar.",
+      "readyTitle": "{{app}} está pronto",
+      "readyPrefix": "Em qualquer campo de texto, pressione",
+      "readySuffix": "para iniciar e parar o ditado.",
+      "gotIt": "Entendi",
+      "lastMinuteTitle": "Falta menos de um minuto",
+      "lastMinuteDesc": "A gravação termina sozinha no limite. Comece uma nova para continuar.",
+      "selectedTipPrefix": "Texto selecionado — pressione",
+      "selectedTipSuffix": "para perguntar sobre ele"
     }
   },
   "settings": {
