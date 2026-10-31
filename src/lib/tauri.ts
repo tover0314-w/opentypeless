@@ -229,6 +229,16 @@ export async function setCapsuleAutoHide(enabled: boolean): Promise<void> {
   return invoke('set_capsule_auto_hide', { enabled })
 }
 
+export interface MicrophoneInfo {
+  name: string
+  isDefault: boolean
+  connection: 'builtIn' | 'usb' | 'bluetooth' | 'virtual' | 'other'
+}
+
+export async function listMicrophones(): Promise<MicrophoneInfo[]> {
+  return invoke('list_microphones')
+}
+
 export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
   return invoke('get_platform_capabilities')
 }

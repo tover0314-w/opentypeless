@@ -1,5 +1,5 @@
 use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Sample;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -63,6 +63,8 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     pub channels: u16,
     pub chunk_duration_ms: u32,
+    /// Input device name chosen in settings; `None` records from the system default.
+    pub device_name: Option<String>,
 }
 
 impl Default for AudioConfig {
@@ -71,6 +73,18 @@ impl Default for AudioConfig {
             sample_rate: 16000,
             channels: 1,
             chunk_duration_ms: 20,
+            device_name: None,
+        }
+    }
+}
+
+impl AudioConfig {
+    /// Default capture format recording from the microphone selected in settings.
+    pub fn for_device(microphone_device: &str) -> Self {
+        let name = microphone_device.trim();
+        Self {
+            device_name: (!name.is_empty()).then(|| name.to_string()),
+            ..Self::default()
         }
     }
 }
@@ -306,10 +320,11 @@ fn run_capture(
     state: Arc<Mutex<CaptureState>>,
     startup_notifier: &mut CaptureStartupNotifier,
 ) -> Result<()> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
+    let (device, fell_back) = super::devices::select_input_device(config.device_name.as_deref())
         .ok_or_else(|| anyhow::anyhow!("No input device available"))?;
+    if fell_back {
+        tracing::info!("Selected microphone is unavailable; recording from the system default");
+    }
 
     let device_description = device
         .description()
@@ -431,6 +446,15 @@ mod tests {
     #[test]
     fn capture_does_not_report_recording_before_the_backend_is_ready() {
         assert_eq!(initial_capture_state(), CaptureState::Starting);
+    }
+
+    #[test]
+    fn audio_config_for_device_treats_blank_names_as_system_default() {
+        assert_eq!(AudioConfig::for_device("").device_name, None);
+        assert_eq!(AudioConfig::for_device("   ").device_name, None);
+        let usb = AudioConfig::for_device(" USB Mic ");
+        assert_eq!(usb.device_name.as_deref(), Some("USB Mic"));
+        assert_eq!(usb.sample_rate, 16000);
     }
 
     #[test]

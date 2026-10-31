@@ -569,7 +569,20 @@
     "mappingNoMappings": "暂无自定义应用映射",
     "dictationMode": "听写触发方式",
     "autoPressMode": "轻按说话",
-    "autoPressModeDesc": "轻按一次开始，再按一次完成。按住按键会显示快捷键说明。"
+    "autoPressModeDesc": "轻按一次开始，再按一次完成。按住按键会显示快捷键说明。",
+    "audio": "音频",
+    "microphone": "麦克风",
+    "micAutoDetect": "自动检测（系统默认）",
+    "micBuiltIn": "内置",
+    "micUsb": "USB",
+    "micBluetooth": "蓝牙",
+    "micVirtual": "虚拟",
+    "micOther": "外接",
+    "micSystemDefault": "系统默认",
+    "micRefresh": "刷新麦克风列表",
+    "micUnavailable": "此麦克风未连接，连接前会使用系统默认麦克风。",
+    "interactionSounds": "开始和结束录音时播放提示音",
+    "muteBackgroundAudio": "口述时静音其他音频"
   },
   "contextFamilies": {
     "email": "邮件",

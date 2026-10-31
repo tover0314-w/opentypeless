@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import i18n from './i18n'
 import { useTauriEvents } from './hooks/useTauriEvents'
+import { useInteractionSounds } from './hooks/useInteractionSounds'
 import { useTheme } from './hooks/useTheme'
 import { useAppStore } from './stores/appStore'
 import { useAuthStore } from './stores/authStore'
@@ -34,6 +35,7 @@ import { UpdatePrompt } from './components/UpdatePrompt'
 function CapsuleApp() {
   useTauriEvents()
   useTheme()
+  useInteractionSounds()
 
   const setConfig = useAppStore((s) => s.setConfig)
 

@@ -569,7 +569,20 @@
     "mappingNoMappings": "Keine eigenen App-Zuordnungen",
     "dictationMode": "Diktiermodus",
     "autoPressMode": "Tippen zum Sprechen",
-    "autoPressModeDesc": "Einmal tippen zum Starten, erneut tippen zum Beenden. Langes Drücken zeigt die Tastenkürzel."
+    "autoPressModeDesc": "Einmal tippen zum Starten, erneut tippen zum Beenden. Langes Drücken zeigt die Tastenkürzel.",
+    "audio": "Audio",
+    "microphone": "Mikrofon",
+    "micAutoDetect": "Automatisch (Systemstandard)",
+    "micBuiltIn": "Integriert",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "Virtuell",
+    "micOther": "Extern",
+    "micSystemDefault": "Systemstandard",
+    "micRefresh": "Mikrofone aktualisieren",
+    "micUnavailable": "Dieses Mikrofon ist nicht verbunden. Bis dahin wird der Systemstandard verwendet.",
+    "interactionSounds": "Töne bei Aufnahmestart und -ende abspielen",
+    "muteBackgroundAudio": "Andere Audioquellen beim Diktieren stummschalten"
   },
   "contextFamilies": {
     "email": "E-Mail",

@@ -569,7 +569,20 @@
     "mappingNoMappings": "Nenhuma associação personalizada de aplicativo",
     "dictationMode": "Modo de ditado",
     "autoPressMode": "Toque para falar",
-    "autoPressModeDesc": "Toque uma vez para começar e de novo para terminar. Manter pressionado mostra o guia de atalhos."
+    "autoPressModeDesc": "Toque uma vez para começar e de novo para terminar. Manter pressionado mostra o guia de atalhos.",
+    "audio": "Áudio",
+    "microphone": "Microfone",
+    "micAutoDetect": "Detecção automática (padrão do sistema)",
+    "micBuiltIn": "Integrado",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "Virtual",
+    "micOther": "Externo",
+    "micSystemDefault": "Padrão do sistema",
+    "micRefresh": "Atualizar microfones",
+    "micUnavailable": "Este microfone não está conectado. O padrão do sistema será usado até ele voltar.",
+    "interactionSounds": "Tocar sons ao iniciar e parar a gravação",
+    "muteBackgroundAudio": "Silenciar outros áudios durante o ditado"
   },
   "contextFamilies": {
     "email": "E-mail",

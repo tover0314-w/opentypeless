@@ -381,6 +381,12 @@ pub struct AppConfig {
     pub history_max_entries: u32,
     pub ui_language: String,
     pub capsule_auto_hide: bool,
+    /// Input device name to record from; empty follows the system default microphone.
+    pub microphone_device: String,
+    /// Short start / stop / error cues played by the floating bar.
+    pub interaction_sounds: bool,
+    /// Mute the system output while recording so playback doesn't bleed into the mic.
+    pub mute_background_audio: bool,
 }
 
 impl Default for AppConfig {
@@ -438,6 +444,9 @@ impl Default for AppConfig {
             history_max_entries: DEFAULT_HISTORY_MAX_ENTRIES,
             ui_language: "en".to_string(),
             capsule_auto_hide: false,
+            microphone_device: String::new(),
+            interaction_sounds: true,
+            mute_background_audio: false,
         }
     }
 }
@@ -446,6 +455,7 @@ impl AppConfig {
     pub fn new_install_default() -> Self {
         let mut config = Self {
             capsule_auto_hide: true,
+            mute_background_audio: true,
             ..Self::default()
         };
         // New installs get tap-to-talk with long-press guidance; existing users keep their mode.
@@ -2529,6 +2539,21 @@ mod tests {
         let config = AppConfig::from_stored_value(value).unwrap();
 
         assert!(!config.streaming_insert_enabled);
+    }
+
+    #[test]
+    fn app_config_defaults_audio_preferences_and_keeps_existing_users_unmuted() {
+        let existing = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "glm-asr"
+        }))
+        .unwrap();
+        assert_eq!(existing.microphone_device, "");
+        assert!(existing.interaction_sounds);
+        assert!(!existing.mute_background_audio);
+
+        let fresh = AppConfig::new_install_default();
+        assert!(fresh.mute_background_audio);
+        assert!(fresh.interaction_sounds);
     }
 
     #[test]

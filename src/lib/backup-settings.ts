@@ -50,6 +50,8 @@ type SafeScalarKey =
   | 'history_max_entries'
   | 'ui_language'
   | 'capsule_auto_hide'
+  | 'interaction_sounds'
+  | 'mute_background_audio'
 
 export type BackupSettings = Partial<Pick<AppConfig, SafeScalarKey>> & {
   voice_routing_flags?: VoiceRoutingFlags
@@ -179,6 +181,8 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
     history_max_entries: config.history_max_entries,
     ui_language: config.ui_language,
     capsule_auto_hide: config.capsule_auto_hide,
+    interaction_sounds: config.interaction_sounds,
+    mute_background_audio: config.mute_background_audio,
   }
 
   if (config.voice_routing_flags) {
@@ -233,6 +237,8 @@ const SAFE_SCALAR_KEYS: readonly SafeScalarKey[] = [
   'history_max_entries',
   'ui_language',
   'capsule_auto_hide',
+  'interaction_sounds',
+  'mute_background_audio',
 ]
 
 function isRecord(value: unknown): value is Record<string, unknown> {

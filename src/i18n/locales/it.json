@@ -569,7 +569,20 @@
     "mappingNoMappings": "Nessuna associazione personalizzata delle app",
     "dictationMode": "Modalita dettatura",
     "autoPressMode": "Tocca per parlare",
-    "autoPressModeDesc": "Tocca una volta per iniziare e di nuovo per finire. Tenere premuto mostra la guida alle scorciatoie."
+    "autoPressModeDesc": "Tocca una volta per iniziare e di nuovo per finire. Tenere premuto mostra la guida alle scorciatoie.",
+    "audio": "Audio",
+    "microphone": "Microfono",
+    "micAutoDetect": "Rilevamento automatico (predefinito di sistema)",
+    "micBuiltIn": "Integrato",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "Virtuale",
+    "micOther": "Esterno",
+    "micSystemDefault": "Predefinito di sistema",
+    "micRefresh": "Aggiorna microfoni",
+    "micUnavailable": "Questo microfono non è collegato. Fino ad allora si usa quello predefinito.",
+    "interactionSounds": "Riproduci suoni all'avvio e alla fine della registrazione",
+    "muteBackgroundAudio": "Silenzia altri audio durante la dettatura"
   },
   "contextFamilies": {
     "email": "Email",

@@ -569,7 +569,20 @@
     "mappingNoMappings": "No custom app mappings",
     "dictationMode": "Dictation mode",
     "autoPressMode": "Tap to talk",
-    "autoPressModeDesc": "Tap once to start, tap again to finish. Holding the key shows a shortcut guide."
+    "autoPressModeDesc": "Tap once to start, tap again to finish. Holding the key shows a shortcut guide.",
+    "audio": "Audio",
+    "microphone": "Microphone",
+    "micAutoDetect": "Auto-detect (system default)",
+    "micBuiltIn": "Built-in",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "Virtual",
+    "micOther": "External",
+    "micSystemDefault": "System default",
+    "micRefresh": "Refresh microphones",
+    "micUnavailable": "This microphone isn't connected. The system default is used until it's back.",
+    "interactionSounds": "Play sounds when recording starts and stops",
+    "muteBackgroundAudio": "Mute other audio while dictating"
   },
   "contextFamilies": {
     "email": "Email",

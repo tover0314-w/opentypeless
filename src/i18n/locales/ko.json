@@ -569,7 +569,20 @@
     "mappingNoMappings": "사용자 지정 앱 연결 설정이 없습니다",
     "dictationMode": "받아쓰기 모드",
     "autoPressMode": "탭하여 말하기",
-    "autoPressModeDesc": "한 번 탭하면 시작, 다시 탭하면 완료됩니다. 길게 누르면 단축키 안내가 표시됩니다."
+    "autoPressModeDesc": "한 번 탭하면 시작, 다시 탭하면 완료됩니다. 길게 누르면 단축키 안내가 표시됩니다.",
+    "audio": "오디오",
+    "microphone": "마이크",
+    "micAutoDetect": "자동 감지(시스템 기본값)",
+    "micBuiltIn": "내장",
+    "micUsb": "USB",
+    "micBluetooth": "블루투스",
+    "micVirtual": "가상",
+    "micOther": "외장",
+    "micSystemDefault": "시스템 기본값",
+    "micRefresh": "마이크 목록 새로고침",
+    "micUnavailable": "이 마이크가 연결되어 있지 않아요. 다시 연결될 때까지 시스템 기본 마이크를 사용해요.",
+    "interactionSounds": "녹음 시작·종료 시 효과음 재생",
+    "muteBackgroundAudio": "받아쓰기 중 다른 오디오 음소거"
   },
   "contextFamilies": {
     "email": "이메일",

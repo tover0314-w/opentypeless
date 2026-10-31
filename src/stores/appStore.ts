@@ -241,6 +241,9 @@ export interface AppConfig {
   history_max_entries: number
   ui_language: string
   capsule_auto_hide: boolean
+  microphone_device: string
+  interaction_sounds: boolean
+  mute_background_audio: boolean
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -788,6 +791,9 @@ const defaultConfig: AppConfig = {
   history_max_entries: 5000,
   ui_language: 'en',
   capsule_auto_hide: true,
+  microphone_device: '',
+  interaction_sounds: true,
+  mute_background_audio: true,
 }
 
 export const useAppStore = create<AppState>((set) => ({

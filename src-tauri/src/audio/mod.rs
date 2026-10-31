@@ -1,6 +1,9 @@
 pub mod capture;
+pub mod devices;
+pub mod output_mute;
 
 pub use capture::{AudioCaptureHandle, AudioConfig, CaptureState};
+pub use devices::{list_input_devices, InputDeviceInfo};
 
 use std::{future::Future, time::Duration};
 

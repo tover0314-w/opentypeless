@@ -84,6 +84,10 @@ vi.mock('react-i18next', async (importOriginal) => {
 
 // ─── Mock Tauri plugins / lib/tauri ──────────────────────────────────────────
 vi.mock('../../../lib/tauri', () => ({
+  listMicrophones: vi.fn().mockResolvedValue([
+    { name: 'MacBook Pro Microphone', isDefault: true, connection: 'builtIn' },
+    { name: 'Studio USB Mic', isDefault: false, connection: 'usb' },
+  ]),
   getConfig: vi.fn().mockResolvedValue(null),
   getSttRecordingCapability: vi.fn().mockResolvedValue({
     capability: {
@@ -481,6 +485,23 @@ describe('Settings tab 切换', () => {
     const historyLabel = screen.getByText('settings.saveHistory')
     fireEvent.click(historyLabel.closest('label') ?? historyLabel)
     expect(useAppStore.getState().config.history_enabled).toBe(false)
+  })
+
+  it('General pane picks the microphone and audio preferences', async () => {
+    renderSettings()
+
+    const select = screen.getByRole('combobox', { name: 'settings.microphone' })
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /Studio USB Mic/ })).toBeDefined()
+    })
+    fireEvent.change(select, { target: { value: 'Studio USB Mic' } })
+    expect(useAppStore.getState().config.microphone_device).toBe('Studio USB Mic')
+
+    fireEvent.change(select, { target: { value: '' } })
+    expect(useAppStore.getState().config.microphone_device).toBe('')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'settings.interactionSounds' }))
+    expect(useAppStore.getState().config.interaction_sounds).toBe(false)
   })
 
   it('General pane shows compact hotkey conflict status', async () => {

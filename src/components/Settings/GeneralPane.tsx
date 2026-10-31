@@ -13,6 +13,7 @@ import type { HotkeyStatus } from '../../lib/tauri'
 import { SegmentedControl } from './shared/SegmentedControl'
 import { Toggle } from './shared/Toggle'
 import { ShortcutBindingList } from './ShortcutBindingList'
+import { MicrophoneSelect } from './MicrophoneSelect'
 
 const MAC_ACCESSIBILITY_HOTKEY_ERROR = 'Accessibility permission may be denied'
 
@@ -229,6 +230,24 @@ export function GeneralPane() {
               {t('settings.waylandClipboardCopyOnly')}
             </p>
           )}
+      </Section>
+
+      <Section title={t('settings.audio')}>
+        <div className="space-y-3">
+          <MicrophoneSelect />
+          <Toggle
+            checked={config.interaction_sounds}
+            onChange={(checked) => updateConfig({ interaction_sounds: checked })}
+            label={t('settings.interactionSounds')}
+          />
+          {platformCapabilities?.os !== 'linux' && (
+            <Toggle
+              checked={config.mute_background_audio}
+              onChange={(checked) => updateConfig({ mute_background_audio: checked })}
+              label={t('settings.muteBackgroundAudio')}
+            />
+          )}
+        </div>
       </Section>
 
       <div>

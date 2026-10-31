@@ -569,7 +569,20 @@
     "mappingNoMappings": "カスタムのアプリ対応設定はありません",
     "dictationMode": "ディクテーションモード",
     "autoPressMode": "タップで話す",
-    "autoPressModeDesc": "1回タップで開始、もう一度タップで完了。長押しするとショートカットガイドを表示します。"
+    "autoPressModeDesc": "1回タップで開始、もう一度タップで完了。長押しするとショートカットガイドを表示します。",
+    "audio": "オーディオ",
+    "microphone": "マイク",
+    "micAutoDetect": "自動検出（システムのデフォルト）",
+    "micBuiltIn": "内蔵",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "仮想",
+    "micOther": "外部",
+    "micSystemDefault": "システムのデフォルト",
+    "micRefresh": "マイク一覧を更新",
+    "micUnavailable": "このマイクは接続されていません。再接続までシステムのデフォルトを使用します。",
+    "interactionSounds": "録音の開始・終了時に効果音を鳴らす",
+    "muteBackgroundAudio": "音声入力中は他の音声をミュート"
   },
   "contextFamilies": {
     "email": "メールアドレス",

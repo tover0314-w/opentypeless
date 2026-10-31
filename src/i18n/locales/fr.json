@@ -569,7 +569,20 @@
     "mappingNoMappings": "Aucune association d’application personnalisée",
     "dictationMode": "Mode de dictee",
     "autoPressMode": "Appuyer pour parler",
-    "autoPressModeDesc": "Appuyez une fois pour commencer, à nouveau pour terminer. Un appui long affiche le guide des raccourcis."
+    "autoPressModeDesc": "Appuyez une fois pour commencer, à nouveau pour terminer. Un appui long affiche le guide des raccourcis.",
+    "audio": "Audio",
+    "microphone": "Microphone",
+    "micAutoDetect": "Détection auto (par défaut du système)",
+    "micBuiltIn": "Intégré",
+    "micUsb": "USB",
+    "micBluetooth": "Bluetooth",
+    "micVirtual": "Virtuel",
+    "micOther": "Externe",
+    "micSystemDefault": "Par défaut du système",
+    "micRefresh": "Actualiser les microphones",
+    "micUnavailable": "Ce microphone n'est pas connecté. Le micro par défaut est utilisé en attendant.",
+    "interactionSounds": "Jouer un son au début et à la fin de l'enregistrement",
+    "muteBackgroundAudio": "Couper les autres sons pendant la dictée"
   },
   "contextFamilies": {
     "email": "E-mail",

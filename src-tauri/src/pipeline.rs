@@ -994,6 +994,10 @@ impl PipelineHandle {
 
     fn set_state(&self, new_state: PipelineState) {
         self.state.store(new_state.as_u8(), Ordering::SeqCst);
+        crate::audio::output_mute::on_recording_changed(
+            &self.app_handle,
+            new_state == PipelineState::Recording,
+        );
         if new_state == PipelineState::Idle {
             *self
                 .active_translation_operation
@@ -1373,7 +1377,7 @@ impl PipelineHandle {
         // Start the platform audio backend before connecting STT. Both readiness
         // operations are then polled concurrently, so speech captured while a
         // network provider connects remains queued instead of being clipped.
-        let config = AudioConfig::default();
+        let config = AudioConfig::for_device(&config_data.microphone_device);
         let (mut handle, mut audio_rx) = match AudioCaptureHandle::start(config) {
             Ok(result) => result,
             Err(e) => {

@@ -1016,6 +1016,8 @@ pub fn run() {
                 initial_config.hotkey_mode.clone(),
             ))));
             app.manage(hotkey::AutoPressTracker::default());
+            app.manage(audio::output_mute::BackgroundMute::default());
+            audio::output_mute::restore_after_unclean_exit(&app_handle);
             app.manage(AskHotkeyCache(Arc::new(Mutex::new(
                 initial_config.ask_hotkey.clone(),
             ))));
@@ -1273,6 +1275,7 @@ pub fn run() {
             commands::history::delete_history_entry,
             commands::history::get_usage_stats,
             commands::ask::show_saved_ask_answer,
+            commands::audio::list_microphones,
             commands::backup::restore_backup_data,
             commands::dictionary::get_dictionary,
             commands::dictionary::add_dictionary_entry,
@@ -1306,6 +1309,7 @@ pub fn run() {
         .run(|_app, _event| {
             if matches!(_event, tauri::RunEvent::ExitRequested { .. }) {
                 window_state::save_main_window_state(_app);
+                audio::output_mute::restore_on_exit(_app);
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
