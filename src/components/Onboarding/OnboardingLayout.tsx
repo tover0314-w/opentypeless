@@ -96,7 +96,7 @@ export function OnboardingLayout({
           whileHover={canNext ? { scale: 1.04 } : undefined}
           whileTap={canNext ? { scaleX: 1.06, scaleY: 0.94 } : undefined}
           transition={spring.jellyGentle}
-          className="px-6 py-2 text-[13px] font-medium text-white bg-accent rounded-full border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors jelly-btn-accent"
+          className="px-6 py-2 text-[13px] font-medium text-white bg-accent rounded-full border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {nextLabel}
         </motion.button>

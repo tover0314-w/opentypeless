@@ -11,7 +11,8 @@
     "account": "Account",
     "upgrade": "Aggiorna",
     "pro": "Pro",
-    "mainNavigation": "Navigazione principale"
+    "mainNavigation": "Navigazione principale",
+    "dictionary": "Dizionario"
   },
   "ask": {
     "title": "Chiedi",
@@ -827,7 +828,10 @@
     "cancel": "Annulla",
     "reset": "Reimposta",
     "connectionFail": "Connessione non riuscita",
-    "saveFailed": "Impossibile salvare le impostazioni. Riprova."
+    "saveFailed": "Impossibile salvare le impostazioni. Riprova.",
+    "loading": "Caricamento…",
+    "loadFailed": "Impossibile caricare i dati dell'app.",
+    "retry": "Riprova"
   },
   "recordingLimits": {
     "auto": "Automatica (consigliata, fino a {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (Locale)",
       "openrouter": "OpenRouter",
       "cloud": "Cloud di OpenTypeless"
+    }
+  },
+  "shell": {
+    "byokTitle": "Le tue chiavi",
+    "byokDescription": "Le richieste vocali e IA vanno direttamente ai provider che hai configurato.",
+    "manageModels": "Gestisci modelli",
+    "cloudWordsTitle": "Parole cloud",
+    "getMoreWords": "Ottieni più parole cloud",
+    "wordsUsage": "{{used}} / {{limit}} parole",
+    "planFree": "Free",
+    "planLifetime": "A vita",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "Impostazioni",
+    "tabs": {
+      "account": "Account",
+      "settings": "Impostazioni",
+      "models": "Modelli",
+      "personalization": "Personalizzazione",
+      "about": "Informazioni",
+      "help": "Aiuto"
+    },
+    "help": {
+      "exploreTitle": "Scopri le funzioni principali",
+      "exploreDescription": "Pratica guidata per Dettare, Tradurre e Chiedere qualsiasi cosa.",
+      "start": "Inizia",
+      "docs": "Documentazione",
+      "releaseNotes": "Note di rilascio",
+      "feedback": "Segnala un problema"
     }
   }
 }

@@ -11,7 +11,8 @@
     "account": "Аккаунт",
     "upgrade": "Обновить",
     "pro": "Pro",
-    "mainNavigation": "Основная навигация"
+    "mainNavigation": "Основная навигация",
+    "dictionary": "Словарь"
   },
   "ask": {
     "title": "Спросить",
@@ -827,7 +828,10 @@
     "cancel": "Отмена",
     "reset": "Сбросить",
     "connectionFail": "Не удалось подключиться",
-    "saveFailed": "Не удалось сохранить настройки. Попробуйте ещё раз."
+    "saveFailed": "Не удалось сохранить настройки. Попробуйте ещё раз.",
+    "loading": "Загрузка…",
+    "loadFailed": "Не удалось загрузить данные приложения.",
+    "retry": "Повторить"
   },
   "recordingLimits": {
     "auto": "Автоматически (рекомендуется, до {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (Локальный)",
       "openrouter": "OpenRouter",
       "cloud": "Облако OpenTypeless"
+    }
+  },
+  "shell": {
+    "byokTitle": "Свои ключи",
+    "byokDescription": "Голосовые и ИИ-запросы отправляются напрямую выбранным провайдерам.",
+    "manageModels": "Управление моделями",
+    "cloudWordsTitle": "Облачные слова",
+    "getMoreWords": "Получить больше облачных слов",
+    "wordsUsage": "{{used}} / {{limit}} слов",
+    "planFree": "Free",
+    "planLifetime": "Навсегда",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "Настройки",
+    "tabs": {
+      "account": "Аккаунт",
+      "settings": "Настройки",
+      "models": "Модели",
+      "personalization": "Персонализация",
+      "about": "О программе",
+      "help": "Справка"
+    },
+    "help": {
+      "exploreTitle": "Основные возможности",
+      "exploreDescription": "Пошаговая практика диктовки, перевода и вопросов.",
+      "start": "Начать",
+      "docs": "Документация",
+      "releaseNotes": "Примечания к выпуску",
+      "feedback": "Сообщить о проблеме"
     }
   }
 }

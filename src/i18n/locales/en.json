@@ -11,7 +11,8 @@
     "account": "Account",
     "upgrade": "Upgrade",
     "pro": "Pro",
-    "mainNavigation": "Main navigation"
+    "mainNavigation": "Main navigation",
+    "dictionary": "Dictionary"
   },
   "ask": {
     "title": "Ask",
@@ -827,7 +828,10 @@
     "cancel": "Cancel",
     "reset": "Reset",
     "connectionFail": "Connection failed",
-    "saveFailed": "Could not save settings. Please try again."
+    "saveFailed": "Could not save settings. Please try again.",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load application data.",
+    "retry": "Retry"
   },
   "recordingLimits": {
     "auto": "Auto (recommended, up to {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (Local)",
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless Cloud"
+    }
+  },
+  "shell": {
+    "byokTitle": "Your own keys",
+    "byokDescription": "Speech and AI requests go straight to the providers you configured.",
+    "manageModels": "Manage models",
+    "cloudWordsTitle": "Cloud words",
+    "getMoreWords": "Get more cloud words",
+    "wordsUsage": "{{used}} / {{limit}} words",
+    "planFree": "Free",
+    "planLifetime": "Lifetime",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "Settings",
+    "tabs": {
+      "account": "Account",
+      "settings": "Settings",
+      "models": "Models",
+      "personalization": "Personalization",
+      "about": "About",
+      "help": "Help"
+    },
+    "help": {
+      "exploreTitle": "Explore key features",
+      "exploreDescription": "Guided practice for Dictate, Translate, and Ask anything.",
+      "start": "Start",
+      "docs": "Documentation",
+      "releaseNotes": "Release notes",
+      "feedback": "Report a problem"
     }
   }
 }

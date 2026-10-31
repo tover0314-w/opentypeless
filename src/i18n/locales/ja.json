@@ -11,7 +11,8 @@
     "account": "アカウント",
     "upgrade": "アップグレード",
     "pro": "Pro",
-    "mainNavigation": "メインナビゲーション"
+    "mainNavigation": "メインナビゲーション",
+    "dictionary": "辞書"
   },
   "ask": {
     "title": "質問",
@@ -827,7 +828,10 @@
     "cancel": "キャンセル",
     "reset": "リセット",
     "connectionFail": "接続に失敗しました",
-    "saveFailed": "設定を保存できませんでした。もう一度お試しください。"
+    "saveFailed": "設定を保存できませんでした。もう一度お試しください。",
+    "loading": "読み込み中…",
+    "loadFailed": "アプリのデータを読み込めませんでした。",
+    "retry": "再試行"
   },
   "recordingLimits": {
     "auto": "自動（推奨、最大{{duration}}）",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (ローカル)",
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless クラウド"
+    }
+  },
+  "shell": {
+    "byokTitle": "自分のキーを使用",
+    "byokDescription": "音声と AI のリクエストは設定したプロバイダーに直接送信されます。",
+    "manageModels": "モデルを管理",
+    "cloudWordsTitle": "クラウド文字数",
+    "getMoreWords": "クラウド文字数を増やす",
+    "wordsUsage": "{{used}} / {{limit}} 語",
+    "planFree": "Free",
+    "planLifetime": "買い切り",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "設定",
+    "tabs": {
+      "account": "アカウント",
+      "settings": "設定",
+      "models": "モデル",
+      "personalization": "パーソナライズ",
+      "about": "情報",
+      "help": "ヘルプ"
+    },
+    "help": {
+      "exploreTitle": "主な機能を試す",
+      "exploreDescription": "音声入力・翻訳・なんでも質問をガイド付きで練習できます。",
+      "start": "開始",
+      "docs": "ドキュメント",
+      "releaseNotes": "リリースノート",
+      "feedback": "問題を報告"
     }
   }
 }

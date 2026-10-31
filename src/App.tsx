@@ -19,8 +19,9 @@ import { initDeepLinkListener } from './lib/deep-link'
 import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnFocus } from './lib/subscription-refresh-policy'
 import { Capsule } from './components/Capsule'
-import { Settings } from './components/Settings'
+import { SettingsModal, ModalFrame } from './components/Settings'
 import { History } from './components/History'
+import { DictionaryPage } from './components/Dictionary'
 import { Onboarding } from './components/Onboarding'
 import { MainLayout } from './components/MainLayout'
 import { HomePage } from './components/HomePage'
@@ -100,7 +101,7 @@ function MainApp() {
   const setHotkeyRegistrationError = useAppStore((s) => s.setHotkeyRegistrationError)
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const { route, navigate } = useRoute()
+  const { route, page, modal, navigate, closeModal } = useRoute()
 
   useEffect(() => {
     loadOnboardingCompleted().then(async (done) => {
@@ -200,18 +201,18 @@ function MainApp() {
   if (!loaded)
     return (
       <div className="flex items-center justify-center h-screen">
-        <span className="text-text-tertiary text-[13px]">Loading...</span>
+        <span className="text-text-tertiary text-[13px]">{i18n.t('common.loading')}</span>
       </div>
     )
   if (loadError)
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-3">
-        <span className="text-error text-[13px]">Failed to load application data.</span>
+        <span className="text-error text-[13px]">{i18n.t('common.loadFailed')}</span>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover transition-colors"
+          className="btn-accent px-4 py-2 text-[13px] cursor-pointer"
         >
-          Retry
+          {i18n.t('common.retry')}
         </button>
       </div>
     )
@@ -219,11 +220,24 @@ function MainApp() {
 
   return (
     <MainLayout>
-      {route === 'home' && <HomePage />}
-      {route === 'settings' && <Settings />}
-      {route === 'history' && <History />}
-      {route === 'upgrade' && <UpgradePage />}
-      {route === 'account' && <AccountPage />}
+      {page === 'home' && <HomePage />}
+      {page === 'history' && <History />}
+      {page === 'dictionary' && <DictionaryPage />}
+      {modal === 'settings' && <SettingsModal onClose={closeModal} />}
+      {modal === 'account' && (
+        <ModalFrame onClose={closeModal} maxWidth={560}>
+          <div className="h-full overflow-y-auto bg-bg-elevated">
+            <AccountPage />
+          </div>
+        </ModalFrame>
+      )}
+      {modal === 'upgrade' && (
+        <ModalFrame onClose={closeModal} maxWidth={720}>
+          <div className="h-full overflow-y-auto bg-bg-elevated">
+            <UpgradePage />
+          </div>
+        </ModalFrame>
+      )}
       <UpdatePrompt />
       <ToastContainer />
     </MainLayout>

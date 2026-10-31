@@ -11,7 +11,8 @@
     "account": "계정",
     "upgrade": "업그레이드",
     "pro": "Pro",
-    "mainNavigation": "메인 내비게이션"
+    "mainNavigation": "메인 내비게이션",
+    "dictionary": "사전"
   },
   "ask": {
     "title": "질문",
@@ -827,7 +828,10 @@
     "cancel": "취소",
     "reset": "재설정",
     "connectionFail": "연결에 실패했습니다",
-    "saveFailed": "설정을 저장하지 못했습니다. 다시 시도해 주세요."
+    "saveFailed": "설정을 저장하지 못했습니다. 다시 시도해 주세요.",
+    "loading": "불러오는 중…",
+    "loadFailed": "앱 데이터를 불러오지 못했습니다.",
+    "retry": "다시 시도"
   },
   "recordingLimits": {
     "auto": "자동(권장, 최대 {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (로컬)",
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless 클라우드"
+    }
+  },
+  "shell": {
+    "byokTitle": "내 키 사용",
+    "byokDescription": "음성 및 AI 요청은 설정한 제공업체로 바로 전송됩니다.",
+    "manageModels": "모델 관리",
+    "cloudWordsTitle": "클라우드 단어",
+    "getMoreWords": "클라우드 단어 더 받기",
+    "wordsUsage": "{{used}} / {{limit}} 단어",
+    "planFree": "Free",
+    "planLifetime": "평생",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "설정",
+    "tabs": {
+      "account": "계정",
+      "settings": "설정",
+      "models": "모델",
+      "personalization": "개인화",
+      "about": "정보",
+      "help": "도움말"
+    },
+    "help": {
+      "exploreTitle": "핵심 기능 살펴보기",
+      "exploreDescription": "받아쓰기, 번역, 무엇이든 묻기를 안내에 따라 연습하세요.",
+      "start": "시작",
+      "docs": "문서",
+      "releaseNotes": "릴리스 노트",
+      "feedback": "문제 신고"
     }
   }
 }

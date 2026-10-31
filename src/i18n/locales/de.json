@@ -11,7 +11,8 @@
     "account": "Konto",
     "upgrade": "Tarif erweitern",
     "pro": "Pro",
-    "mainNavigation": "Hauptnavigation"
+    "mainNavigation": "Hauptnavigation",
+    "dictionary": "Wörterbuch"
   },
   "ask": {
     "title": "Fragen",
@@ -827,7 +828,10 @@
     "cancel": "Abbrechen",
     "reset": "Zurücksetzen",
     "connectionFail": "Verbindung fehlgeschlagen",
-    "saveFailed": "Die Einstellungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut."
+    "saveFailed": "Die Einstellungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut.",
+    "loading": "Wird geladen…",
+    "loadFailed": "App-Daten konnten nicht geladen werden.",
+    "retry": "Erneut versuchen"
   },
   "recordingLimits": {
     "auto": "Automatisch (empfohlen, bis zu {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (lokal)",
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless-Cloud-Dienst"
+    }
+  },
+  "shell": {
+    "byokTitle": "Eigene Schlüssel",
+    "byokDescription": "Sprach- und KI-Anfragen gehen direkt an die von dir konfigurierten Anbieter.",
+    "manageModels": "Modelle verwalten",
+    "cloudWordsTitle": "Cloud-Wörter",
+    "getMoreWords": "Mehr Cloud-Wörter erhalten",
+    "wordsUsage": "{{used}} / {{limit}} Wörter",
+    "planFree": "Free",
+    "planLifetime": "Lifetime",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "Einstellungen",
+    "tabs": {
+      "account": "Konto",
+      "settings": "Einstellungen",
+      "models": "Modelle",
+      "personalization": "Personalisierung",
+      "about": "Über",
+      "help": "Hilfe"
+    },
+    "help": {
+      "exploreTitle": "Wichtige Funktionen entdecken",
+      "exploreDescription": "Geführte Übungen für Diktieren, Übersetzen und Frag alles.",
+      "start": "Starten",
+      "docs": "Dokumentation",
+      "releaseNotes": "Versionshinweise",
+      "feedback": "Problem melden"
     }
   }
 }

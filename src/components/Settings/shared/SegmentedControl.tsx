@@ -25,7 +25,7 @@ export function SegmentedControl({ options, value, onChange }: Props) {
           {value === opt.value && (
             <motion.div
               layoutId={`segment-bg-${id}`}
-              className="absolute inset-0 rounded-[8px] jelly-nav-active"
+              className="absolute inset-0 rounded-[8px] bg-bg-elevated shadow-sm"
               transition={{ type: 'spring', stiffness: 400, damping: 18 }}
             />
           )}

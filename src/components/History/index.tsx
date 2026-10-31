@@ -136,7 +136,7 @@ export function History() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('history.searchPlaceholder')}
-            className="w-full pl-8 pr-3 py-2.5 bg-bg-secondary border border-border rounded-[14px] text-[13px] text-text-primary outline-none focus:ring-2 focus:ring-jelly-primary focus:border-jelly-primary transition-all jelly-btn"
+            className="w-full pl-8 pr-3 py-2.5 bg-bg-secondary border border-border rounded-[14px] text-[13px] text-text-primary outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
             style={{ transform: 'none' }}
           />
         </div>
@@ -283,7 +283,7 @@ export function History() {
             whileHover={{ scale: 1.04 }}
             whileTap={{ scaleX: 1.06, scaleY: 0.94 }}
             transition={spring.jellyGentle}
-            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] py-2 text-[12px] text-text-tertiary transition-colors hover:text-error jelly-btn"
+            className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] py-2 text-[12px] text-text-tertiary transition-colors hover:text-error hover:bg-fill-hover"
           >
             <Trash2 size={12} />
             {t('history.clearAll')}

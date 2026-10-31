@@ -11,7 +11,8 @@
     "account": "账户",
     "upgrade": "升级",
     "pro": "Pro",
-    "mainNavigation": "主导航"
+    "mainNavigation": "主导航",
+    "dictionary": "词典"
   },
   "ask": {
     "title": "问答",
@@ -827,7 +828,10 @@
     "cancel": "取消",
     "reset": "重置",
     "connectionFail": "连接失败",
-    "saveFailed": "设置保存失败，请重试。"
+    "saveFailed": "设置保存失败，请重试。",
+    "loading": "加载中…",
+    "loadFailed": "应用数据加载失败。",
+    "retry": "重试"
   },
   "recordingLimits": {
     "auto": "自动（推荐，最长 {{duration}}）",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (本地)",
       "openrouter": "OpenRouter",
       "cloud": "OpenTypeless 云服务"
+    }
+  },
+  "shell": {
+    "byokTitle": "使用自己的密钥",
+    "byokDescription": "语音和 AI 请求直接发送到你配置的服务商。",
+    "manageModels": "管理模型",
+    "cloudWordsTitle": "云端字数",
+    "getMoreWords": "获取更多云端字数",
+    "wordsUsage": "{{used}} / {{limit}} 字",
+    "planFree": "Free",
+    "planLifetime": "终身版",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "设置",
+    "tabs": {
+      "account": "账户",
+      "settings": "设置",
+      "models": "模型",
+      "personalization": "个性化",
+      "about": "关于",
+      "help": "帮助"
+    },
+    "help": {
+      "exploreTitle": "探索核心功能",
+      "exploreDescription": "跟着引导练习口述、翻译和随便问。",
+      "start": "开始",
+      "docs": "使用文档",
+      "releaseNotes": "版本说明",
+      "feedback": "反馈问题"
     }
   }
 }

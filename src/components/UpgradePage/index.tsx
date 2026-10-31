@@ -165,7 +165,7 @@ export function UpgradePage() {
             return (
               <section
                 key={checkoutPlan.product}
-                className={`jelly-card flex rounded-[18px] p-4 ${
+                className={`surface-card flex rounded-[18px] p-4 ${
                   isLifetime ? 'ring-1 ring-accent/30' : ''
                 }`}
               >
@@ -202,7 +202,7 @@ export function UpgradePage() {
                       <button
                         onClick={() => handleSubscribe(checkoutPlan.product)}
                         disabled={loadingProduct !== null}
-                        className="jelly-btn-accent flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {isLoading ? (
                           <Loader2 size={14} className="animate-spin" />
@@ -227,7 +227,7 @@ export function UpgradePage() {
       )}
 
       {/* Cloud plan benefits */}
-      <section className="mb-4 rounded-[18px] p-4 jelly-card">
+      <section className="mb-4 rounded-[16px] p-4 surface-card">
         <div className="relative z-[1]">
           <h2 className="text-[12px] font-semibold text-text-primary">
             {t('upgrade.benefits.title')}

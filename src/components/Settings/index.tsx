@@ -1,40 +1,31 @@
-import { useState, useEffect, useRef } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { X } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
-import { SettingsSidebar, type PaneId } from './SettingsSidebar'
 import { GeneralPane } from './GeneralPane'
 import { SttPane } from './SttPane'
 import { LlmPane } from './LlmPane'
-import { DictionaryPane } from './DictionaryPane'
 import { ScenesPane } from './ScenesPane'
 import { AboutPane } from './AboutPane'
-import { DirtyBar } from './shared/DirtyBar'
-import { useDirtyConfig } from './shared/useDirtyConfig'
+import { HelpPane } from './HelpPane'
+import { AccountPage } from '../AccountPage'
+import { useAutoSaveConfig } from './shared/useAutoSaveConfig'
+import { SETTINGS_TABS, paneFromHash, type SettingsTabId } from './settingsTabs'
 
-const paneTitleKeys: Record<PaneId, string> = {
-  general: 'settings.general',
-  stt: 'settings.speechRecognition',
-  llm: 'settings.aiPolish',
-  dictionary: 'settings.dictionary',
-  scenes: 'settings.scenes',
-  about: 'settings.about',
+interface Props {
+  initialTab?: SettingsTabId
+  onClose?: () => void
 }
 
-function paneFromHash(): PaneId | null {
-  const query = window.location.hash.split('?')[1]
-  if (!query) return null
-  const requested = new URLSearchParams(query).get('pane')
-  return requested && requested in paneTitleKeys ? (requested as PaneId) : null
-}
-
-export function Settings() {
-  const [activePane, setActivePane] = useState<PaneId>(() => paneFromHash() ?? 'general')
+export function Settings({ initialTab, onClose }: Props) {
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(
+    () => paneFromHash() ?? initialTab ?? 'general',
+  )
   const contentRef = useRef<HTMLDivElement | null>(null)
   const config = useAppStore((s) => s.config)
   const setSavedConfig = useAppStore((s) => s.setSavedConfig)
-  const isDirty = useDirtyConfig()
   const { t } = useTranslation()
+  useAutoSaveConfig()
 
   // First-run onboarding may enter Settings before MainApp has established backend truth.
   useEffect(() => {
@@ -44,7 +35,7 @@ export function Settings() {
   useEffect(() => {
     const syncRequestedPane = () => {
       const requested = paneFromHash()
-      if (requested) setActivePane(requested)
+      if (requested) setActiveTab(requested)
     }
     window.addEventListener('hashchange', syncRequestedPane)
     return () => window.removeEventListener('hashchange', syncRequestedPane)
@@ -52,43 +43,126 @@ export function Settings() {
 
   useEffect(() => {
     contentRef.current?.scrollTo?.({ top: 0 })
-  }, [activePane])
+  }, [activeTab])
+
+  const activeLabel = t(SETTINGS_TABS.find((tab) => tab.id === activeTab)!.labelKey)
 
   return (
-    <div className="w-full h-full bg-bg-primary text-text-primary flex flex-col">
-      <div className="flex-1 flex min-h-0">
-        {/* Sidebar */}
-        <SettingsSidebar activePane={activePane} onSelect={setActivePane} />
-
-        {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Title bar */}
-          <div className="flex items-center justify-between px-6 pt-4 pb-3 border-b border-border bg-bg-primary/50">
-            <h2 className="text-[15px] font-medium">{t(paneTitleKeys[activePane])}</h2>
-          </div>
-
-          {/* Pane content */}
-          <div ref={contentRef} className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
-            <motion.div
-              key={activePane}
-              className="w-full"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.1, ease: 'easeOut' }}
+    <div className="relative flex h-full w-full overflow-hidden bg-bg-elevated text-text-primary">
+      <nav
+        aria-label={t('settingsModal.title')}
+        className="flex w-[202px] shrink-0 flex-col gap-0.5 bg-fill-thin px-3 py-5"
+      >
+        {SETTINGS_TABS.map((tab) => {
+          const Icon = tab.icon
+          const isActive = activeTab === tab.id
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              aria-current={isActive ? 'page' : undefined}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex w-full items-center gap-2.5 rounded-[10px] border-none px-3 py-2.5 text-left text-[14px] transition-colors cursor-pointer ${
+                isActive
+                  ? 'bg-fill-selected text-text-primary'
+                  : 'bg-transparent text-text-secondary hover:bg-fill-hover hover:text-text-primary'
+              }`}
             >
-              {activePane === 'general' && <GeneralPane />}
-              {activePane === 'stt' && <SttPane />}
-              {activePane === 'llm' && <LlmPane />}
-              {activePane === 'dictionary' && <DictionaryPane />}
-              {activePane === 'scenes' && <ScenesPane />}
-              {activePane === 'about' && <AboutPane />}
-            </motion.div>
-          </div>
+              <Icon size={16} strokeWidth={1.8} />
+              <span>{t(tab.labelKey)}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      <div ref={contentRef} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-9 py-6">
+        <h2 className="mb-6 text-[24px] font-medium leading-8 text-text-primary">{activeLabel}</h2>
+        <div key={activeTab} className="w-full">
+          {activeTab === 'account' && <AccountPage embedded />}
+          {activeTab === 'general' && <GeneralPane />}
+          {activeTab === 'models' && (
+            <div className="space-y-10">
+              <section aria-label={t('settings.speechRecognition')}>
+                <h3 className="mb-3 border-b border-border-thin pb-4 text-[16px] font-medium text-text-tertiary">
+                  {t('settings.speechRecognition')}
+                </h3>
+                <SttPane />
+              </section>
+              <section aria-label={t('settings.aiPolish')}>
+                <h3 className="mb-3 border-b border-border-thin pb-4 text-[16px] font-medium text-text-tertiary">
+                  {t('settings.aiPolish')}
+                </h3>
+                <LlmPane />
+              </section>
+            </div>
+          )}
+          {activeTab === 'personalization' && <ScenesPane />}
+          {activeTab === 'about' && <AboutPane />}
+          {activeTab === 'help' && <HelpPane />}
         </div>
       </div>
 
-      {/* Dirty bar */}
-      <AnimatePresence>{isDirty && <DirtyBar />}</AnimatePresence>
+      {onClose && (
+        <button
+          type="button"
+          aria-label={t('common.close')}
+          onClick={onClose}
+          className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full border-none bg-transparent text-text-secondary cursor-pointer hover:bg-fill-hover hover:text-text-primary"
+        >
+          <X size={18} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Settings rendered as a modal above the current page. */
+export function SettingsModal({ onClose }: { onClose: () => void }) {
+  const handleKey = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose()
+    },
+    [onClose],
+  )
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [handleKey])
+
+  return (
+    <ModalFrame onClose={onClose}>
+      <Settings onClose={onClose} />
+    </ModalFrame>
+  )
+}
+
+export function ModalFrame({
+  children,
+  onClose,
+  maxWidth = 940,
+  maxHeight = 652,
+}: {
+  children: React.ReactNode
+  onClose: () => void
+  maxWidth?: number
+  maxHeight?: number
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-10"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        className="h-[calc(100vh-80px)] w-full overflow-hidden rounded-[12px] shadow-float"
+        style={{ maxWidth, maxHeight }}
+      >
+        {children}
+      </div>
     </div>
   )
 }

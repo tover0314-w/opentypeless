@@ -47,6 +47,8 @@ vi.mock('react-i18next', () => ({
         'nav.upgrade': 'Upgrade',
         'nav.account': 'Account',
         'nav.mainNavigation': 'Main navigation',
+        'nav.dictionary': 'Dictionary',
+        'settingsModal.tabs.help': 'Help',
         'cloudRecovery.sttBody': 'Cloud speech unavailable · audio was not resent',
         'cloudRecovery.tryAgain': 'Try again',
         'cloudRecovery.openSttSettings': 'Settings',
@@ -56,8 +58,13 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../../stores/authStore', () => ({
   hasManagedCloudAccess: () => false,
-  useAuthStore: (selector: any) => (typeof selector === 'function' ? selector({}) : {}),
+  useAuthStore: Object.assign(
+    (selector: any) => (typeof selector === 'function' ? selector({}) : {}),
+    { getState: () => ({}) },
+  ),
 }))
+
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 
 afterEach(() => {
   cleanup()
@@ -66,6 +73,36 @@ afterEach(() => {
 })
 
 describe('MainLayout', () => {
+  it('shows Home, History and Dictionary as the only primary pages', () => {
+    render(
+      <MainLayout>
+        <div>content</div>
+      </MainLayout>,
+    )
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+    expect(
+      within(nav)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Home', 'History', 'Dictionary'])
+  })
+
+  it('opens Settings, Account and Help as overlays from the sidebar footer', () => {
+    render(
+      <MainLayout>
+        <div>content</div>
+      </MainLayout>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+    expect(window.location.hash).toBe('#/settings')
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }))
+    expect(window.location.hash).toBe('#/settings?pane=account')
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+    expect(window.location.hash).toBe('#/settings?pane=help')
+  })
+
   it('does not show Ask as a first-class navigation item', () => {
     render(
       <MainLayout>

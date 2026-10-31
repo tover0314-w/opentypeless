@@ -76,22 +76,23 @@ function desktopAuthErrorMessage(
   )
 }
 
-export function AccountPage() {
+export function AccountPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { user, loading } = useAuthStore()
 
+  let content: React.ReactNode
   if (loading && !user) {
-    return (
+    content = (
       <div className="flex items-center justify-center py-20">
         <Loader2 size={20} className="animate-spin text-text-tertiary" />
       </div>
     )
+  } else if (!user) {
+    content = <AuthForm />
+  } else {
+    content = <AccountDetails />
   }
 
-  if (!user) {
-    return <AuthForm />
-  }
-
-  return <AccountDetails />
+  return embedded ? <div className="account-embedded">{content}</div> : content
 }
 
 function AuthForm() {
@@ -272,7 +273,7 @@ function AuthForm() {
           {/* Provider icon with breathing animation */}
           <div className="flex justify-center">
             <div
-              className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[jelly-breathe_2s_ease-in-out_infinite]"
+              className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[soft-pulse_2s_ease-in-out_infinite]"
               style={{
                 background: 'var(--bg-secondary)',
                 boxShadow:

@@ -98,7 +98,7 @@ export function TranslateTargetMenu() {
       <div
         role="menu"
         aria-label={t('capsule.translationTargets')}
-        className="absolute left-[216px] top-1/2 z-50 w-[148px] -translate-y-1/2 py-1 rounded-[14px] jelly-card shadow-float"
+        className="absolute left-[216px] top-1/2 z-50 w-[148px] -translate-y-1/2 py-1 rounded-[14px] surface-popover"
       >
         {targets.map((code) => (
           <button

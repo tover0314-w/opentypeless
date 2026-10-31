@@ -188,7 +188,7 @@ export function useTauriEvents() {
       window.location.hash = hash
     })
     addListener<void>('tray:about', () => {
-      window.location.hash = '#/settings'
+      window.location.hash = '#/settings?pane=about'
     })
 
     return () => {

@@ -11,7 +11,8 @@
     "account": "Compte",
     "upgrade": "Passer à Pro",
     "pro": "Pro",
-    "mainNavigation": "Navigation principale"
+    "mainNavigation": "Navigation principale",
+    "dictionary": "Dictionnaire"
   },
   "ask": {
     "title": "Demander",
@@ -827,7 +828,10 @@
     "cancel": "Annuler",
     "reset": "Réinitialiser",
     "connectionFail": "Échec de la connexion",
-    "saveFailed": "Impossible d’enregistrer les paramètres. Veuillez réessayer."
+    "saveFailed": "Impossible d’enregistrer les paramètres. Veuillez réessayer.",
+    "loading": "Chargement…",
+    "loadFailed": "Impossible de charger les données de l'application.",
+    "retry": "Réessayer"
   },
   "recordingLimits": {
     "auto": "Automatique (recommandé, jusqu’à {{duration}})",
@@ -889,6 +893,36 @@
       "ollama": "Ollama (local)",
       "openrouter": "OpenRouter",
       "cloud": "Cloud OpenTypeless"
+    }
+  },
+  "shell": {
+    "byokTitle": "Vos propres clés",
+    "byokDescription": "Les requêtes vocales et IA vont directement aux fournisseurs configurés.",
+    "manageModels": "Gérer les modèles",
+    "cloudWordsTitle": "Mots cloud",
+    "getMoreWords": "Obtenir plus de mots cloud",
+    "wordsUsage": "{{used}} / {{limit}} mots",
+    "planFree": "Free",
+    "planLifetime": "À vie",
+    "github": "GitHub"
+  },
+  "settingsModal": {
+    "title": "Réglages",
+    "tabs": {
+      "account": "Compte",
+      "settings": "Réglages",
+      "models": "Modèles",
+      "personalization": "Personnalisation",
+      "about": "À propos",
+      "help": "Aide"
+    },
+    "help": {
+      "exploreTitle": "Découvrir les fonctions clés",
+      "exploreDescription": "Exercices guidés pour Dicter, Traduire et Demander.",
+      "start": "Commencer",
+      "docs": "Documentation",
+      "releaseNotes": "Notes de version",
+      "feedback": "Signaler un problème"
     }
   }
 }

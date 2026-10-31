@@ -7,12 +7,12 @@
  * 3. appStore.llmModels — 状态提升：初始值、读写、reset
  * 4. LlmPane provider 切换 — 清空 models 缓存
  * 5. LlmPane useEffect skip — 已有缓存时不再触发 debounce fetch
- * 6. DirtyBar — 配置变更后出现，Reset 后消失
+ * 6. Autosave — 配置变更自动保存，失败时回滚到后端真值
  * 7. appStore getInitialState — llmModels 在 reset 后为空数组
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, cleanup, within } from '@testing-library/react'
 import React from 'react'
 import { useAppStore } from '../../../stores/appStore'
 
@@ -324,17 +324,21 @@ function renderSettings() {
   return render(<Settings />)
 }
 
-// 侧边栏导航按钮：精确匹配 sidebar 内的 <button data-motion="button"> 子元素
+// Legacy pane labels map onto the merged settings modal tabs.
+const LEGACY_TAB_LABELS: Record<string, string> = {
+  'settings.general': 'settingsModal.tabs.settings',
+  'settings.speechRecognition': 'settingsModal.tabs.models',
+  'settings.aiPolish': 'settingsModal.tabs.models',
+  'settings.scenes': 'settingsModal.tabs.personalization',
+  'settings.about': 'settingsModal.tabs.about',
+}
+
 function clickSidebarItem(label: string) {
-  const spans = screen.getAllByText(label)
-  // sidebar button 的直接父链中有 data-motion="button"，且该 button 不含 h2
-  const sidebarSpan = spans.find((el) => {
-    const btn = el.closest('[data-motion="button"]')
-    return btn !== null && btn.querySelector('h2') === null
-  })
-  const btn = (sidebarSpan ?? spans[0]).closest('[data-motion="button"], button')
-  if (btn) fireEvent.click(btn)
-  else fireEvent.click(spans[0])
+  const tabLabel = LEGACY_TAB_LABELS[label] ?? label
+  const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
+  const tab = within(nav).getByText(tabLabel).closest('button')
+  if (!tab) throw new Error(`Settings tab not found: ${tabLabel}`)
+  fireEvent.click(tab)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,16 +392,16 @@ describe('Settings tab 切换', () => {
     expect(screen.getByText('settings.hideCapsuleWhenIdle')).toBeDefined()
   })
 
-  it('keeps unsaved drafts dirty after leaving and reopening Settings', () => {
-    const firstRender = renderSettings()
-    act(() => useAppStore.getState().updateConfig({ auto_start: false }))
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
-
-    firstRender.unmount()
+  it('saves edits automatically without a save bar', async () => {
+    vi.mocked(updateConfig).mockClear()
+    vi.mocked(setAutoStart).mockClear()
     renderSettings()
+    act(() => useAppStore.getState().updateConfig({ auto_start: false }))
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
 
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
-    expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
+    await waitFor(() => expect(useAppStore.getState().savedConfig?.auto_start).toBe(false))
+    expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
+    expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1)
   })
 
   it('does not mark an unchanged backend config dirty when object key order differs', () => {
@@ -687,7 +691,7 @@ describe('Settings tab 切换', () => {
   it('点击 Speech Recognition 后显示 STT provider 字段', () => {
     renderSettings()
     clickSidebarItem('settings.speechRecognition')
-    expect(screen.getByText('settings.provider')).toBeDefined()
+    expect(screen.getAllByText('settings.provider').length).toBeGreaterThan(0)
     // STT pane 含语言选择
     expect(screen.getByText('settings.sttLanguage')).toBeDefined()
   })
@@ -700,10 +704,11 @@ describe('Settings tab 切换', () => {
     expect(screen.queryByText('settings.askAnything')).toBeNull()
   })
 
-  it('点击 Dictionary 后显示词典输入框 placeholder', () => {
+  it('Dictionary is a top-level page, not a settings tab', () => {
     renderSettings()
-    clickSidebarItem('settings.dictionary')
-    expect(screen.getByPlaceholderText('dictionary.word')).toBeDefined()
+    const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
+    expect(within(nav).queryByText('settings.dictionary')).toBeNull()
+    expect(within(nav).getByText('settingsModal.tabs.models')).toBeDefined()
   })
 
   it('点击 Scenes 后显示本地 scenes 空状态（user=null）', () => {
@@ -750,11 +755,10 @@ describe('Settings tab 切换', () => {
 
   it('切换 tab 后 title bar 更新', () => {
     renderSettings()
-    clickSidebarItem('settings.dictionary')
-    // title bar 中的 h2 应该显示 settings.dictionary
-    const titles = screen.getAllByText('settings.dictionary')
-    // 至少出现两次：sidebar nav 和 title bar h2
-    expect(titles.length).toBeGreaterThanOrEqual(2)
+    clickSidebarItem('settings.about')
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'settingsModal.tabs.about' }),
+    ).toBeDefined()
   })
 
   it('records macOS Ask hotkey as a local draft without immediate persistence', async () => {
@@ -786,7 +790,7 @@ describe('Settings tab 切换', () => {
       expect(useAppStore.getState().config.ask_hotkey).toBe('Command+;')
       expect(mockUpdateAskHotkey).not.toHaveBeenCalled()
       expect(mockResumeHotkey).toHaveBeenCalledTimes(1)
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
+      expect(vi.mocked(updateConfig)).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -930,10 +934,8 @@ describe('Settings Scenes local custom scenes', () => {
     expect(screen.queryByText('settings.unsavedChanges')).toBeNull()
   })
 
-  it('persists only scene fields and preserves unrelated unsaved settings', async () => {
+  it('persists scene fields through the scene editor', async () => {
     renderSettings()
-    act(() => useAppStore.getState().updateConfig({ auto_start: false }))
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
     clickSidebarItem('settings.scenes')
 
     fireEvent.click(screen.getByText('scenes.newScene'))
@@ -947,10 +949,8 @@ describe('Settings Scenes local custom scenes', () => {
 
     await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
     const persistedConfig = vi.mocked(updateConfig).mock.calls[0][0]
-    expect(persistedConfig.auto_start).toBe(true)
-    expect(useAppStore.getState().config.auto_start).toBe(false)
-    expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(persistedConfig.custom_scenes.map((scene) => scene.name)).toEqual(['Focused Notes'])
+    expect(useAppStore.getState().savedConfig?.custom_scenes).toHaveLength(1)
   })
 
   it('lets existing users clear a legacy globally active scene', async () => {
@@ -1123,10 +1123,9 @@ describe('Settings 动画结构', () => {
     seedSavedConfig()
   })
 
-  it('motion wrapper 正常渲染 pane 内容', () => {
-    const { container } = renderSettings()
-    // 我们的 mock 给 motion 元素打上 data-motion 属性
-    expect(container.querySelector('[data-motion]')).not.toBeNull()
+  it('renders the active pane content', () => {
+    renderSettings()
+    expect(screen.getByText('settings.hotkey')).toBeDefined()
   })
 
   it('切换 tab 后 pane 内容正常更新（无卡死）', () => {
@@ -1190,9 +1189,9 @@ describe('LlmPane provider 切换清空 models', () => {
     renderSettings()
     clickSidebarItem('settings.aiPolish')
 
-    // provider select 是当前 pane 中的第一个 combobox
-    const selects = screen.getAllByRole('combobox')
-    const providerSelect = selects[0]
+    // The Models tab stacks STT above AI Polish; use the AI Polish section's provider select.
+    const llmSection = screen.getByRole('region', { name: 'settings.aiPolish' })
+    const providerSelect = within(llmSection).getAllByRole('combobox')[0]
 
     await act(async () => {
       fireEvent.change(providerSelect, { target: { value: 'openai' } })
@@ -1285,9 +1284,9 @@ describe('LlmPane models 缓存：已有缓存时跳过 fetch', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. DirtyBar — 配置变更后出现，Reset 后消失
+// 6. Autosave — edits persist automatically and roll back to backend truth on failure
 // ─────────────────────────────────────────────────────────────────────────────
-describe('DirtyBar 行为', () => {
+describe('Settings autosave', () => {
   beforeEach(() => {
     resetStore()
     seedSavedConfig()
@@ -1302,49 +1301,34 @@ describe('DirtyBar 行为', () => {
     vi.mocked(toast).mockClear()
   })
 
-  it('初始状态下 DirtyBar 不显示', () => {
+  it('does not save when nothing changed', async () => {
     renderSettings()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(vi.mocked(updateConfig)).not.toHaveBeenCalled()
     expect(screen.queryByText('Unsaved changes')).toBeNull()
   })
 
-  it('修改 config 后 DirtyBar 出现', async () => {
+  it('persists a changed setting and marks it saved', async () => {
     renderSettings()
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
+    await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(updateConfig).mock.calls[0][0].theme).toBe('dark')
+    await waitFor(() => expect(useAppStore.getState().savedConfig?.theme).toBe('dark'))
   })
 
-  it('点击 Reset 后 DirtyBar 消失', async () => {
+  it('coalesces rapid edits into one save', async () => {
     renderSettings()
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
+      useAppStore.getState().updateConfig({ theme: 'light' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByText('Reset'))
-
-    await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    })
+    await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(updateConfig).mock.calls[0][0].theme).toBe('light')
   })
 
-  it('DirtyBar 显示 Save 和 Reset 两个按钮', async () => {
-    renderSettings()
-    act(() => {
-      useAppStore.getState().updateConfig({ theme: 'dark' })
-    })
-    await waitFor(() => {
-      expect(screen.getByText('Save')).toBeDefined()
-      expect(screen.getByText('Reset')).toBeDefined()
-    })
-  })
-
-  it('persisted capsule visibility patch does not erase unrelated dirty settings', async () => {
+  it('persisted capsule visibility patch does not erase unrelated edits', async () => {
     renderSettings()
 
     act(() => {
@@ -1368,19 +1352,13 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(vi.mocked(getConfig)).toHaveBeenCalledTimes(1)
     })
-    expect(useAppStore.getState().config.theme).toBe('system')
+    await waitFor(() => expect(useAppStore.getState().config.theme).toBe('system'))
     expect(useAppStore.getState().savedConfig?.theme).toBe('system')
     expect(toast).toHaveBeenCalledWith('Shortcut registration failed', 'error')
-    expect(screen.queryByText('Unsaved changes')).toBeNull()
   })
 
   it('保存失败后刷新后端 hotkey 注册错误状态', async () => {
@@ -1396,11 +1374,6 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ hotkey: 'Ctrl+Shift+;' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(useAppStore.getState().hotkeyRegistrationError).toBe('Shortcut registration failed')
@@ -1419,17 +1392,12 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ auto_start: false })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
     })
+    await waitFor(() => expect(useAppStore.getState().config.auto_start).toBe(true))
     expect(vi.mocked(updateConfig)).not.toHaveBeenCalled()
-    expect(useAppStore.getState().config.auto_start).toBe(true)
     expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
     expect(toast).toHaveBeenCalledWith('Login item failed', 'error')
   })
@@ -1446,20 +1414,11 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ auto_start: false })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
-      expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
+      expect(vi.mocked(setAutoStart).mock.calls).toEqual([[false], [true]])
     })
-    await waitFor(() => {
-      expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(true)
-    })
-    expect(vi.mocked(setAutoStart).mock.calls).toEqual([[false], [true]])
-    expect(useAppStore.getState().config.auto_start).toBe(true)
+    await waitFor(() => expect(useAppStore.getState().config.auto_start).toBe(true))
     expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
     expect(toast).toHaveBeenCalledWith('Shortcut registration failed', 'error')
   })

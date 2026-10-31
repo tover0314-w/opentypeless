@@ -92,10 +92,7 @@ export function CapsuleContextMenu({ onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div
-        className="relative z-50 min-w-[140px] py-1 rounded-[14px] jelly-card shadow-float"
-        role="menu"
-      >
+      <div className="relative z-50 min-w-[140px] py-1 rounded-[14px] surface-popover" role="menu">
         {items.map((item, i) => {
           if ('type' in item && item.type === 'separator') {
             return <div key={i} className="my-1 border-t border-border" />

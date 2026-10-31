@@ -206,7 +206,7 @@ export function AccountStep() {
         >
           <div className="flex justify-center">
             <div
-              className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[jelly-breathe_2s_ease-in-out_infinite]"
+              className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[soft-pulse_2s_ease-in-out_infinite]"
               style={{
                 background: 'var(--bg-secondary)',
                 boxShadow:
