@@ -854,6 +854,7 @@
       "claude": "Claude",
       "ollama": "Ollama (로컬)",
       "openrouter": "OpenRouter",
+      "custom": "Custom (OpenAI-compatible)",
       "cloud": "OpenTypeless Cloud"
     }
   }
