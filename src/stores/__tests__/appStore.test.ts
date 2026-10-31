@@ -118,6 +118,19 @@ describe('appStore', () => {
       expect(config.hotkeys.dictationMode).toBe('toggle')
     })
 
+    it('changing hotkey mode keeps a disabled Translate hotkey disabled', () => {
+      getState().updateConfig({
+        hotkeys: { ...getState().config.hotkeys, translate: null, translateBindings: [] },
+      })
+      getState().updateConfig({ ask_hotkey: 'Ctrl+Shift+/' })
+      getState().updateConfig({ hotkey_mode: 'toggle' })
+
+      const { hotkeys } = getState().config
+      expect(hotkeys.translate).toBeNull()
+      expect(hotkeys.translateBindings).toEqual([])
+      expect(hotkeys.dictationMode).toBe('toggle')
+    })
+
     it('updateConfig keeps native single-key hotkeys in sync', () => {
       getState().updateConfig({
         hotkey: 'RightAlt',

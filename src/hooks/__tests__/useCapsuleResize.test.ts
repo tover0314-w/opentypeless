@@ -19,6 +19,7 @@ const windowApiMocks = vi.hoisted(() => ({
   primaryMonitor: vi.fn(),
   getMainWindow: vi.fn(),
   monitorFromPoint: vi.fn(),
+  cursorPosition: vi.fn(),
   setFocusable: vi.fn(),
   setSize: vi.fn(),
   setPosition: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock('@tauri-apps/api/window', () => {
     primaryMonitor: windowApiMocks.primaryMonitor,
     Window: { getByLabel: windowApiMocks.getMainWindow },
     monitorFromPoint: windowApiMocks.monitorFromPoint,
+    cursorPosition: windowApiMocks.cursorPosition,
     LogicalSize,
     PhysicalPosition,
   }
@@ -342,6 +344,7 @@ describe('useCapsuleResize async updates', () => {
     windowApiMocks.primaryMonitor.mockReset().mockResolvedValue(monitor)
     windowApiMocks.getMainWindow.mockReset().mockResolvedValue(null)
     windowApiMocks.monitorFromPoint.mockReset().mockResolvedValue(null)
+    windowApiMocks.cursorPosition.mockReset().mockRejectedValue(new Error('cursor unavailable'))
     windowApiMocks.setFocusable.mockReset().mockResolvedValue(undefined)
     windowApiMocks.setSize.mockReset().mockResolvedValue(undefined)
     windowApiMocks.setPosition.mockReset().mockResolvedValue(undefined)
@@ -388,6 +391,29 @@ describe('useCapsuleResize async updates', () => {
       expect(position.y).toBe(900)
     },
   )
+
+  it('follows the monitor under the cursor when dictation starts', async () => {
+    const secondary = {
+      ...monitor,
+      position: { x: 1920, y: 0 },
+      workArea: { position: { x: 1920, y: 0 }, size: { width: 1920, height: 1040 } },
+    }
+    windowApiMocks.availableMonitors.mockResolvedValue([monitor, secondary])
+    windowApiMocks.currentMonitor.mockResolvedValue(monitor)
+    windowApiMocks.outerPosition.mockResolvedValue({ x: 900, y: 900 })
+    windowApiMocks.cursorPosition.mockResolvedValue({ x: 2500, y: 500 })
+    windowApiMocks.monitorFromPoint.mockImplementation(async (x: number) =>
+      x >= 1920 ? secondary : monitor,
+    )
+    render(createElement(HookHarness))
+    await waitFor(() => expect(windowApiMocks.hide).toHaveBeenCalled())
+    windowApiMocks.setPosition.mockClear()
+    act(() => useAppStore.setState({ pipelineState: 'recording' }))
+    await waitFor(() => expect(windowApiMocks.show).toHaveBeenCalled())
+    const position = windowApiMocks.setPosition.mock.lastCall?.[0]
+    const size = windowApiMocks.setSize.mock.lastCall?.[0]
+    expect(position.x + size.width / 2).toBe(1920 + 960)
+  })
 
   it('prevents a superseded async resize from overwriting the latest window state', async () => {
     render(createElement(HookHarness))

@@ -578,9 +578,12 @@ function hotkeyConfigFromLegacy(config: AppConfig): HotkeyConfig {
   const ask = config.ask_hotkey.trim()
     ? (bindingFromHotkey(config.ask_hotkey) ?? bindingFromHotkey(defaultAskHotkey()))
     : null
-  const existingTranslate =
-    config.hotkeys?.translate ??
-    (defaultTranslateHotkey() ? bindingFromHotkey(defaultTranslateHotkey()!) : null)
+  // Only fall back to the default when no typed config exists; a null translate means disabled.
+  const existingTranslate = config.hotkeys
+    ? config.hotkeys.translate
+    : defaultTranslateHotkey()
+      ? bindingFromHotkey(defaultTranslateHotkey()!)
+      : null
   const translateBindings = normalizeBindingList(
     config.hotkeys?.translateBindings?.length
       ? config.hotkeys.translateBindings

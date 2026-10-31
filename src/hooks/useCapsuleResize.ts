@@ -208,11 +208,22 @@ export function useCapsuleResize() {
           currentMonitor,
           primaryMonitor,
           monitorFromPoint,
+          cursorPosition,
           Window,
         }) => {
           if (!isCurrent()) return
 
           const win = getCurrentWindow()
+          // While dictating, follow the user: the monitor under the cursor wins over the
+          // main window's monitor (the main window is often hidden in the tray).
+          const cursorMonitor = async () => {
+            try {
+              const cursor = await cursorPosition()
+              return await monitorFromPoint(cursor.x, cursor.y)
+            } catch {
+              return null
+            }
+          }
           const anchorMonitor = async () => {
             try {
               const main = await Window.getByLabel('main')
@@ -317,7 +328,7 @@ export function useCapsuleResize() {
                 pipelineState === 'ask_recording' ||
                 hasError
               ) {
-                const anchor = await anchorMonitor()
+                const anchor = (await cursorMonitor()) ?? (await anchorMonitor())
                 if (!isCurrent()) return
                 if (
                   anchor &&
