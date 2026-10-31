@@ -477,6 +477,8 @@ export interface AskDictationResult {
   requestedPlacement: VoiceOutputPlacement
   actualPlacement: VoiceOutputPlacement | null
   fallbackReason: VoiceExecutionFallbackReason | null
+  /** The selection the question was about, when Ask used selected text. */
+  selectedText?: string | null
 }
 
 export interface AskDictationStartResult {
@@ -507,6 +509,11 @@ export async function abortAskDictation(): Promise<void> {
 
 export async function takePendingAskMessage(): Promise<PendingAskMessage | null> {
   return invoke('take_pending_ask_message')
+}
+
+/** Lets the answer card size its transparent window to the rendered content height. */
+export async function resizeAskWindow(height: number): Promise<void> {
+  return invoke('resize_ask_window', { height })
 }
 
 // History

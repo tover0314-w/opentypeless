@@ -37,7 +37,14 @@
     "copiedInstead": "Copiado en lugar de insertado",
     "routeDisabled": "Esta función está desactivada",
     "searchOpened": "Búsqueda de {{provider}} abierta",
-    "send": "Preguntar"
+    "send": "Preguntar",
+    "answerTitle": "Respuesta",
+    "more": "…más",
+    "showLess": "Ver menos",
+    "copyQuestion": "Copiar pregunta",
+    "copy": "Copiar",
+    "close": "Cerrar",
+    "errorTitle": "No se pudo obtener una respuesta"
   },
   "errors": {
     "stt_timeout": "El reconocimiento de voz agotó el tiempo de espera. Inténtalo de nuevo.",

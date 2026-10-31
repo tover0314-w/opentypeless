@@ -465,3 +465,84 @@ body,
   padding-right: 0;
   padding-top: 0;
 }
+
+/* Ask anything answer body (Typeless: 17px / 28px, bold run-in labels, compact lists). */
+.answer-markdown {
+  color: var(--color-text-primary);
+  font-size: 17px;
+  line-height: 28px;
+  user-select: text;
+  word-break: break-word;
+}
+.answer-markdown > :first-child {
+  margin-top: 0;
+}
+.answer-markdown > :last-child {
+  margin-bottom: 0;
+}
+.answer-markdown p {
+  margin: 0 0 16px;
+}
+.answer-markdown h2 {
+  margin: 20px 0 8px;
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 700;
+}
+.answer-markdown h3 {
+  margin: 16px 0 8px;
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 700;
+}
+.answer-markdown h4,
+.answer-markdown h5,
+.answer-markdown h6 {
+  margin: 12px 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+}
+.answer-markdown ul,
+.answer-markdown ol {
+  margin: 0 0 16px;
+  padding-left: 26px;
+}
+.answer-markdown li + li {
+  margin-top: 4px;
+}
+.answer-markdown strong {
+  font-weight: 700;
+}
+.answer-markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-fill-tough);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+.answer-markdown pre {
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-fill-thin);
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 22px;
+}
+.answer-markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+}
+.answer-markdown blockquote {
+  margin: 0 0 16px;
+  padding-left: 12px;
+  border-left: 3px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.answer-markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}

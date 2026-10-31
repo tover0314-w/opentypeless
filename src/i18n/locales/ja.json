@@ -37,7 +37,14 @@
     "copiedInstead": "挿入せずにコピーしました",
     "routeDisabled": "この機能は無効です",
     "searchOpened": "{{provider}} 検索を開きました",
-    "send": "質問"
+    "send": "質問",
+    "answerTitle": "回答",
+    "more": "…続き",
+    "showLess": "折りたたむ",
+    "copyQuestion": "質問をコピー",
+    "copy": "コピー",
+    "close": "閉じる",
+    "errorTitle": "回答を取得できませんでした"
   },
   "errors": {
     "stt_timeout": "音声認識がタイムアウトしました。もう一度お試しください。",

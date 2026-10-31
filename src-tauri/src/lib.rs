@@ -220,8 +220,8 @@ fn build_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWi
         tauri::WebviewUrl::App("index.html#ask".into()),
     )
     .title("OpenTypeless Ask")
-    .inner_size(400.0, 220.0)
-    .min_inner_size(360.0, 180.0)
+    .inner_size(ASK_WINDOW_WIDTH, 560.0)
+    .min_inner_size(480.0, 200.0)
     .resizable(false)
     .decorations(false)
     .transparent(true)
@@ -270,6 +270,52 @@ async fn show_ask_window(
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<(), String> {
     commands::ask::start_ask_flow(app, state, config_state, token_store, client).await
+}
+
+/// The answer card is 744 px wide inside an 800 px transparent window (Typeless layout).
+const ASK_WINDOW_WIDTH: f64 = 800.0;
+const ASK_WINDOW_MAX_HEIGHT: f64 = 800.0;
+const ASK_WINDOW_MIN_HEIGHT: f64 = 200.0;
+
+/// Clamps the card's reported content height to the window bounds and the visible work area.
+fn ask_window_height(content_height: f64, work_area_height: Option<f64>) -> f64 {
+    let ceiling = work_area_height
+        .map(|available| (available - 20.0).max(ASK_WINDOW_MIN_HEIGHT))
+        .unwrap_or(ASK_WINDOW_MAX_HEIGHT)
+        .min(ASK_WINDOW_MAX_HEIGHT);
+    content_height.clamp(ASK_WINDOW_MIN_HEIGHT, ceiling).ceil()
+}
+
+/// The answer card reports its rendered height so the window hugs it, bottom-anchored.
+#[tauri::command]
+fn resize_ask_window(window: tauri::WebviewWindow, height: f64) -> Result<(), String> {
+    if window.label() != "ask" || !height.is_finite() {
+        return Ok(());
+    }
+    let monitor = window.current_monitor().ok().flatten();
+    let scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor());
+    let work_area_height = monitor
+        .as_ref()
+        .map(|m| f64::from(m.work_area().size.height) / scale);
+    let target = ask_window_height(height, work_area_height);
+    let current = window
+        .inner_size()
+        .map(|size| f64::from(size.height) / scale)
+        .unwrap_or(0.0);
+    if (current - target).abs() <= 2.0 {
+        return Ok(());
+    }
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let bottom = f64::from(position.y) / scale + current;
+    window
+        .set_size(tauri::LogicalSize::new(ASK_WINDOW_WIDTH, target))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(tauri::LogicalPosition::new(
+            f64::from(position.x) / scale,
+            (bottom - target).max(0.0),
+        ))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -389,8 +435,23 @@ mod tests {
         assert_eq!(ask["transparent"].as_bool(), Some(true));
         assert_eq!(ask["shadow"].as_bool(), Some(false));
         assert_eq!(ask["resizable"].as_bool(), Some(false));
-        assert_eq!(ask["width"].as_i64(), Some(400));
-        assert_eq!(ask["height"].as_i64(), Some(220));
+        assert_eq!(ask["width"].as_f64(), Some(ASK_WINDOW_WIDTH));
+        assert_eq!(ask["height"].as_i64(), Some(560));
+    }
+
+    #[test]
+    fn ask_window_height_clamps_to_card_bounds_and_work_area() {
+        assert_eq!(
+            ask_window_height(120.0, Some(1000.0)),
+            ASK_WINDOW_MIN_HEIGHT
+        );
+        assert_eq!(ask_window_height(512.4, Some(1000.0)), 513.0);
+        assert_eq!(
+            ask_window_height(2000.0, Some(1000.0)),
+            ASK_WINDOW_MAX_HEIGHT
+        );
+        assert_eq!(ask_window_height(2000.0, Some(620.0)), 600.0);
+        assert_eq!(ask_window_height(700.0, None), 700.0);
     }
 
     #[test]
@@ -1186,6 +1247,7 @@ pub fn run() {
             commands::app_mappings::reset_custom_app_mappings,
             commands::app_mappings::set_family_scene_assignment,
             show_ask_window,
+            resize_ask_window,
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
             commands::misc::request_browser_access,

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, Loader2, Mic, Square, X } from 'lucide-react'
+import { Check, Copy, Loader2, Mic, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import {
   abortAskDictation,
+  resizeAskWindow,
   startAskDictation,
   stopAskDictation,
   takePendingAskMessage,
 } from '../../lib/tauri'
 import type { AskDictationResult, AskDictationStartResult } from '../../lib/tauri'
+import { AskAnswerCard } from './AskAnswerCard'
 
 interface AskPanelProps {
   embedded?: boolean
@@ -237,8 +240,7 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
   useEffect(() => {
     if (embedded) return
 
-    let cancelled = false
-    let unlistenFocus: (() => void) | null = null
+    // Typeless only closes the answer card from × or Esc; losing focus keeps it on screen.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -246,26 +248,7 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
     }
 
     window.addEventListener('keydown', onKeyDown)
-    const nativeWindow = currentNativeWindow()
-    nativeWindow
-      ?.onFocusChanged((event) => {
-        if (cancelled || event.payload) return
-        dismissStandalone(true)
-      })
-      .then((unlisten) => {
-        if (cancelled) {
-          unlisten()
-        } else {
-          unlistenFocus = unlisten
-        }
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-      window.removeEventListener('keydown', onKeyDown)
-      if (unlistenFocus) safeUnlisten(unlistenFocus)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [dismissStandalone, embedded])
 
   useEffect(() => {
@@ -383,91 +366,30 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
       {dictationState === 'recording' && <Square size={13} />}
     </button>
   )
-  const standaloneCloseButton = (
-    <button
-      type="button"
-      aria-label={t('onboarding.layout.close')}
-      title={t('onboarding.layout.close')}
-      onClick={() => dismissStandalone(true)}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-bg-primary/80 text-text-tertiary transition-colors hover:border-border-focus hover:text-text-primary"
-    >
-      <X size={14} />
-    </button>
-  )
 
-  const startStandaloneDrag = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest('button')) return
-    const window = currentNativeWindow()
-    void window?.startDragging().catch(() => {})
+  const openExternalLink = useCallback((url: string) => {
+    void openUrl(url).catch((e) => console.error('Failed to open link:', e))
+  }, [])
+
+  const reportCardHeight = useCallback((height: number) => {
+    // Card height plus the 24px top / 16px bottom padding around it in the transparent window.
+    void resizeAskWindow(height + 40).catch(() => {})
   }, [])
 
   if (!embedded) {
     return (
-      <div
-        data-testid="ask-floating-note-backdrop"
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget) dismissStandalone(true)
-        }}
-        className="min-h-screen w-screen bg-transparent p-3 text-text-primary"
-      >
-        <section
-          data-testid="ask-floating-note"
-          onMouseDown={startStandaloneDrag}
-          className="flex max-h-[calc(100vh-24px)] w-full flex-col overflow-hidden rounded-[18px] border border-border/80 bg-bg-primary/95 shadow-[0_4px_14px_rgba(15,23,42,0.08)] backdrop-blur"
-        >
-          <div className="flex min-h-0 flex-col gap-2.5 p-3">
-            {!resultText && (
-              <div className="flex items-center justify-between gap-2 px-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-text-tertiary/50" />
-                  <span className="truncate text-[12px] font-medium text-text-primary">
-                    {displayTitle}
-                  </span>
-                </div>
-                {standaloneCloseButton}
-              </div>
-            )}
-            {resultText && (
-              <>
-                <div className="flex items-center justify-between gap-2 px-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        error ? 'bg-error' : 'bg-text-tertiary/50'
-                      }`}
-                    />
-                    <span className="truncate text-[12px] font-medium text-text-primary">
-                      {displayTitle}
-                    </span>
-                    {result && (
-                      <span className="truncate text-[11px] text-text-tertiary">
-                        {contextLabel}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {copyAction}
-                    {standaloneCloseButton}
-                  </div>
-                </div>
-                <div className="min-h-0 overflow-y-auto rounded-[12px] border border-border bg-bg-secondary/65 px-3 py-2">
-                  {result && !error && result.output !== 'openedSearch' && (
-                    <p className="mb-2 text-[12px] leading-5 text-text-secondary">
-                      {result.question}
-                    </p>
-                  )}
-                  <p
-                    className={`whitespace-pre-wrap text-[13px] leading-5 ${
-                      error ? 'text-error' : 'text-text-primary'
-                    }`}
-                  >
-                    {resultText}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        </section>
+      <div className="flex min-h-screen w-screen flex-col items-center justify-end bg-transparent px-2 pb-4 pt-6 text-text-primary">
+        <AskAnswerCard
+          prompt={result && result.output !== 'openedSearch' ? result.question : null}
+          selectedText={result?.selectedText}
+          answer={resultText ? answer || null : null}
+          error={error || null}
+          context={result && contextLabel !== t('ask.questionLabel') ? contextLabel : null}
+          canCopyAnswer={canCopyAnswer}
+          onClose={() => dismissStandalone(true)}
+          onOpenLink={openExternalLink}
+          onHeightChange={reportCardHeight}
+        />
       </div>
     )
   }

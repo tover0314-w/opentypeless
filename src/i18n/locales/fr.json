@@ -37,7 +37,14 @@
     "copiedInstead": "Copié au lieu d’être inséré",
     "routeDisabled": "Cette fonction est désactivée",
     "searchOpened": "Recherche {{provider}} ouverte",
-    "send": "Demander"
+    "send": "Demander",
+    "answerTitle": "Réponse",
+    "more": "…plus",
+    "showLess": "Réduire",
+    "copyQuestion": "Copier la question",
+    "copy": "Copier",
+    "close": "Fermer",
+    "errorTitle": "Impossible d'obtenir une réponse"
   },
   "errors": {
     "stt_timeout": "La reconnaissance vocale a expiré. Veuillez réessayer.",

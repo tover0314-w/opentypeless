@@ -37,7 +37,14 @@
     "copiedInstead": "Copiado em vez de inserido",
     "routeDisabled": "Esta função está desativada",
     "searchOpened": "Pesquisa do {{provider}} aberta",
-    "send": "Perguntar"
+    "send": "Perguntar",
+    "answerTitle": "Resposta",
+    "more": "…mais",
+    "showLess": "Mostrar menos",
+    "copyQuestion": "Copiar pergunta",
+    "copy": "Copiar",
+    "close": "Fechar",
+    "errorTitle": "Não foi possível obter uma resposta"
   },
   "errors": {
     "stt_timeout": "O reconhecimento de fala expirou. Tente novamente.",

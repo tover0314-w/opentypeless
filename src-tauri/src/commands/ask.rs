@@ -210,6 +210,8 @@ pub struct AskDictationResult {
     requested_placement: crate::voice_intent::VoiceOutputPlacement,
     actual_placement: Option<crate::voice_intent::VoiceOutputPlacement>,
     fallback_reason: Option<crate::voice_intent::executor::VoiceExecutionFallbackReason>,
+    /// The selection the question was about, shown under the prompt on the answer card.
+    selected_text: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -290,7 +292,13 @@ impl AskDictationResult {
             requested_placement: metadata.requested_placement,
             actual_placement: metadata.actual_placement,
             fallback_reason: metadata.fallback_reason,
+            selected_text: None,
         }
+    }
+
+    pub(crate) fn with_selected_text(mut self, selected_text: Option<String>) -> Self {
+        self.selected_text = selected_text;
+        self
     }
 
     pub(crate) fn should_show_window(&self) -> bool {
@@ -1517,7 +1525,8 @@ pub async fn stop_ask_dictation(
             answer,
             voice_intent.kind,
             AskDictationResultMetadata::popup(used_selected_text, selected_text_truncated),
-        ))
+        )
+        .with_selected_text(selected_text_metadata.map(|selected| selected.text)))
       } => result,
     };
     if !state.finish_processing(session.recording_session_id) {
@@ -1830,7 +1839,20 @@ mod tests {
         assert_eq!(value["requestedPlacement"], "popup_answer");
         assert_eq!(value["actualPlacement"], "popup_answer");
         assert!(value["fallbackReason"].is_null());
+        assert!(value["selectedText"].is_null());
         assert!(value.get("searchUrl").is_none());
+
+        let with_selection = AskDictationResult::new(
+            "Summarize this".to_string(),
+            "Short answer.".to_string(),
+            VoiceIntentKind::AskSelection,
+            AskDictationResultMetadata::popup(true, false),
+        )
+        .with_selected_text(Some("The quarterly report".to_string()));
+        assert_eq!(
+            serde_json::to_value(with_selection).unwrap()["selectedText"],
+            "The quarterly report"
+        );
     }
 
     #[test]

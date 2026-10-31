@@ -37,7 +37,14 @@
     "copiedInstead": "Copiato invece di inserito",
     "routeDisabled": "Questa funzione è disattivata",
     "searchOpened": "Ricerca {{provider}} aperta",
-    "send": "Chiedi"
+    "send": "Chiedi",
+    "answerTitle": "Risposta",
+    "more": "…altro",
+    "showLess": "Mostra meno",
+    "copyQuestion": "Copia domanda",
+    "copy": "Copia",
+    "close": "Chiudi",
+    "errorTitle": "Impossibile ottenere una risposta"
   },
   "errors": {
     "stt_timeout": "Il riconoscimento vocale è scaduto. Riprova.",

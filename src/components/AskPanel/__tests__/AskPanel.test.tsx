@@ -60,7 +60,10 @@ vi.mock('../../../lib/tauri', () => ({
   stopAskDictation: vi.fn(),
   abortAskDictation: vi.fn(),
   takePendingAskMessage: vi.fn(),
+  resizeAskWindow: vi.fn().mockResolvedValue(undefined),
 }))
+
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }))
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: tauriEventMock.listen,
@@ -121,18 +124,18 @@ describe('AskPanel', () => {
     vi.mocked(takePendingAskMessage).mockResolvedValue(null)
   })
 
-  it('renders standalone Ask as a compact floating note', async () => {
+  it('renders standalone Ask as the Typeless-style answer card shell', async () => {
     render(<AskPanel />)
 
     expect(await screen.findByTestId('ask-floating-note')).toBeDefined()
     expect(screen.getByRole('button', { name: 'Close' })).toBeDefined()
-    expect(screen.getByText('Ask')).toBeDefined()
+    expect(screen.getByText('OpenTypeless')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Record question' })).toBeNull()
     expect(screen.queryByText('Ready to ask')).toBeNull()
     expect(screen.queryByRole('textbox')).toBeNull()
   })
 
-  it('renders the hotkey result with question and answer popup content', async () => {
+  it('renders the spoken prompt and a Markdown answer under an Answer header', async () => {
     render(<AskPanel />)
 
     expect(screen.queryByRole('textbox')).toBeNull()
@@ -145,16 +148,50 @@ describe('AskPanel', () => {
       'ask:recording-started',
       expect.any(Function),
     )
-    tauriEventMock.emit('ask:result', askResult())
+    tauriEventMock.emit(
+      'ask:result',
+      askResult({
+        answer: '**Short version:** it turns speech into useful text.\n\n- Fast\n- Private',
+      }),
+    )
 
     await waitFor(() => {
       expect(screen.getByText('What is OpenTypeless?')).toBeDefined()
-      expect(screen.getByText('It turns speech into useful text.')).toBeDefined()
+      expect(screen.getByText('Short version:').tagName).toBe('STRONG')
     })
+    expect(screen.getByText('Answer')).toBeDefined()
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      'Fast',
+      'Private',
+    ])
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'Copy answer' })).toBeDefined()
-    expect(screen.queryByText('Answer')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy question' })).toBeDefined()
     expect(startAskDictation).not.toHaveBeenCalled()
+  })
+
+  it('shows the selected text under the prompt and copies both together', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window.navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    })
+    render(<AskPanel />)
+    await waitFor(() => {
+      expect(tauriEventMock.listen).toHaveBeenCalledWith('ask:result', expect.any(Function))
+    })
+    tauriEventMock.emit(
+      'ask:result',
+      askResult({
+        question: 'Summarize this',
+        usedSelectedText: true,
+        selectedText: 'Quarterly revenue grew 12%.',
+      }),
+    )
+
+    expect(await screen.findByText('Quarterly revenue grew 12%.')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy question' }))
+    expect(writeText).toHaveBeenCalledWith('Summarize this\nQuarterly revenue grew 12%.')
   })
 
   it('uses the existing compact context line for draft clipboard fallback', async () => {
@@ -229,7 +266,7 @@ describe('AskPanel', () => {
     expect(await screen.findByText('This route is disabled')).toBeDefined()
   })
 
-  it('hides the standalone floating note from its close button', async () => {
+  it('hides the standalone answer card from its close button', async () => {
     render(<AskPanel />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
@@ -239,28 +276,26 @@ describe('AskPanel', () => {
     })
   })
 
-  it('hides the standalone floating note when the empty area outside the note is clicked', async () => {
+  it('hides the standalone answer card on Escape', async () => {
     render(<AskPanel />)
 
-    fireEvent.mouseDown(screen.getByTestId('ask-floating-note-backdrop'))
+    fireEvent.keyDown(window, { key: 'Escape' })
 
     await waitFor(() => {
       expect(tauriWindowMock.hide).toHaveBeenCalledTimes(1)
     })
   })
 
-  it('hides the standalone floating note on focus loss without owning recording', async () => {
+  it('keeps the answer card open when the window loses focus', async () => {
     render(<AskPanel />)
-
-    await waitFor(() => expect(tauriWindowMock.onFocusChanged).toHaveBeenCalledTimes(1))
+    await flushAsyncEffects()
 
     await act(async () => {
       tauriWindowMock.emitFocus(false)
     })
 
-    await waitFor(() => {
-      expect(tauriWindowMock.hide).toHaveBeenCalledTimes(1)
-    })
+    await flushAsyncEffects()
+    expect(tauriWindowMock.hide).not.toHaveBeenCalled()
     expect(startAskDictation).not.toHaveBeenCalled()
     expect(abortAskDictation).not.toHaveBeenCalled()
   })
@@ -297,7 +332,7 @@ describe('AskPanel', () => {
 
     expect(writeText).toHaveBeenCalledWith('It turns speech into useful text.')
     await waitFor(() => {
-      expect(screen.getByText('Copied')).toBeDefined()
+      expect(screen.getByTitle('Copied')).toBeDefined()
     })
   })
 
@@ -359,7 +394,7 @@ describe('AskPanel', () => {
     expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull()
   })
 
-  it('renders backend errors as popup content only', async () => {
+  it('renders backend errors inside the answer card', async () => {
     render(<AskPanel />)
 
     await waitFor(() => {
@@ -372,7 +407,8 @@ describe('AskPanel', () => {
     })
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.getByRole('button', { name: 'Close' })).toBeDefined()
-    expect(screen.queryByText('Error')).toBeNull()
+    expect(screen.getByText("Couldn't get an answer")).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Copy answer' })).toBeNull()
   })
 
   it('does not abort global Ask when an idle panel unmounts', async () => {
@@ -439,5 +475,17 @@ describe('AskPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '录制问题' }))
     await waitFor(() => expect(screen.getByText('正在聆听')).toBeDefined())
     expect(screen.getByRole('button', { name: '停止并提问' })).toBeDefined()
+  })
+
+  it('uses the Typeless answer-card copy in Chinese', async () => {
+    await i18n.changeLanguage('zh')
+    render(<AskPanel />)
+    await waitFor(() => {
+      expect(tauriEventMock.listen).toHaveBeenCalledWith('ask:result', expect.any(Function))
+    })
+    tauriEventMock.emit('ask:result', askResult())
+
+    expect(await screen.findByText('回答')).toBeDefined()
+    expect(screen.getByRole('button', { name: '关闭' })).toBeDefined()
   })
 })

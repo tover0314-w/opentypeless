@@ -37,7 +37,14 @@
     "copiedInstead": "Copied instead of inserting",
     "routeDisabled": "This route is disabled",
     "searchOpened": "Opened {{provider}} search",
-    "send": "Ask"
+    "send": "Ask",
+    "answerTitle": "Answer",
+    "more": "…more",
+    "showLess": "Show less",
+    "copyQuestion": "Copy question",
+    "copy": "Copy",
+    "close": "Close",
+    "errorTitle": "Couldn't get an answer"
   },
   "errors": {
     "stt_timeout": "Speech recognition timed out. Please try again.",

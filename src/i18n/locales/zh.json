@@ -37,7 +37,14 @@
     "copiedInstead": "未插入，结果已复制",
     "routeDisabled": "此功能路径已停用",
     "searchOpened": "已打开 {{provider}} 搜索",
-    "send": "提问"
+    "send": "提问",
+    "answerTitle": "回答",
+    "more": "…更多",
+    "showLess": "收起",
+    "copyQuestion": "复制问题",
+    "copy": "复制",
+    "close": "关闭",
+    "errorTitle": "暂时无法回答"
   },
   "errors": {
     "stt_timeout": "语音识别超时，请重试。",

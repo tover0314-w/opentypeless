@@ -37,7 +37,14 @@
     "copiedInstead": "Kopiert statt eingefügt",
     "routeDisabled": "Diese Funktion ist deaktiviert",
     "searchOpened": "{{provider}}-Suche geöffnet",
-    "send": "Fragen"
+    "send": "Fragen",
+    "answerTitle": "Antwort",
+    "more": "…mehr",
+    "showLess": "Weniger anzeigen",
+    "copyQuestion": "Frage kopieren",
+    "copy": "Kopieren",
+    "close": "Schließen",
+    "errorTitle": "Keine Antwort erhalten"
   },
   "errors": {
     "stt_timeout": "Die Spracherkennung ist abgelaufen. Bitte versuchen Sie es erneut.",

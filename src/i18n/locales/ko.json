@@ -37,7 +37,14 @@
     "copiedInstead": "삽입하지 않고 복사했습니다",
     "routeDisabled": "이 기능은 비활성화되었습니다",
     "searchOpened": "{{provider}} 검색을 열었습니다",
-    "send": "질문"
+    "send": "질문",
+    "answerTitle": "답변",
+    "more": "…더 보기",
+    "showLess": "접기",
+    "copyQuestion": "질문 복사",
+    "copy": "복사",
+    "close": "닫기",
+    "errorTitle": "답변을 가져오지 못했어요"
   },
   "errors": {
     "stt_timeout": "음성 인식 시간이 초과되었습니다. 다시 시도해 주세요.",
