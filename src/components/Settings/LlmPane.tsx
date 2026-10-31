@@ -386,7 +386,7 @@ export function LlmPane() {
                   setTestErrorMessage(null)
                 }}
                 placeholder={
-                  LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl ?? 'https://api.openai.com/v1'
+                  LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl || 'https://api.openai.com/v1'
                 }
                 className="min-w-0 flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
               />

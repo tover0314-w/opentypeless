@@ -179,7 +179,7 @@ export function LlmSetupStep() {
             value={config.llm_base_url}
             onChange={(e) => updateConfig({ llm_base_url: e.target.value })}
             placeholder={
-              LLM_DEFAULT_CONFIG[selectedProvider]?.baseUrl ?? 'https://api.openai.com/v1'
+              LLM_DEFAULT_CONFIG[selectedProvider]?.baseUrl || 'https://api.openai.com/v1'
             }
             className="min-w-0 flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
           />
