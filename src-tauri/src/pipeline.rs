@@ -758,6 +758,11 @@ struct HistoryOutputMetadata {
     error: Option<String>,
 }
 
+struct HistorySaveContext {
+    voice_mode: crate::voice_intent::VoiceMode,
+    output: HistoryOutputMetadata,
+}
+
 fn history_output_metadata_for_insert_result(
     insert_result: &output::InsertResult,
     intentional_clipboard_copy: bool,
@@ -2043,10 +2048,12 @@ impl PipelineHandle {
             &app_ctx,
             duration_ms,
             &config,
-            voice_mode,
-            HistoryOutputMetadata {
-                status: polish_outcome.history_output_status,
-                error: polish_outcome.history_output_error,
+            HistorySaveContext {
+                voice_mode,
+                output: HistoryOutputMetadata {
+                    status: polish_outcome.history_output_status,
+                    error: polish_outcome.history_output_error,
+                },
             },
         )
         .await;
@@ -2722,9 +2729,9 @@ impl PipelineHandle {
         app_ctx: &RecordingContext,
         duration_ms: Option<i64>,
         config: &storage::AppConfig,
-        voice_mode: crate::voice_intent::VoiceMode,
-        output: HistoryOutputMetadata,
+        save: HistorySaveContext,
     ) {
+        let HistorySaveContext { voice_mode, output } = save;
         let policy = config.history_retention_policy();
         if !policy.enabled {
             tracing::debug!("History save skipped because history is disabled");
