@@ -45,7 +45,37 @@
 | `reconcile-javascript-runtime` | 未执行 | 运行时页面脚本源码被策略过滤，无法与静态图做脚本级对账。DOM / 截图已作为运行时证据保留 |
 | 录音、答案卡运行时 | 未观察 | 需要真实口述，会消耗额度，等你同意（见 §0 待定） |
 | 原生 helper（`libUtilHelper`、`libKeyboardHelper`、`libInputHelper`、`libContextHelper`） | 未反编译 | 只需要知道它们提供什么能力（静音、设备列表、按键监听、上下文读取），这些已从 koffi 绑定的函数签名得到。我们用 Rust 自己实现，不需要它们的实现细节 |
-| `evaluate_reconstruction_coverage` / 义务绑定 | 待实现阶段做 | 每完成一个阶段，把 OpenTypeless 的实现与测试作为 manifest binding 写回 ledger，重新生成，跟踪 open 数下降 |
+| `evaluate_reconstruction_coverage` / 义务绑定 | 已做第一轮（见 §1.4） | 每完成一个阶段，把 OpenTypeless 的实现与测试作为 manifest binding 写回 ledger，重新生成，跟踪 open 数下降 |
+
+### 1.4 义务绑定（2026-11-01，第一轮）
+
+用 `rea build-reconstruction-obligation-ledger`，以原 ledger 的同一份 Evidence bundle 加上 manifest binding 重新生成。生成脚本 `07-build-manifest.py`，输入 `07-reconstruction-manifest-input.json`，结果 `08-reconstruction-obligation-ledger-bound.json`（都在仓库外的 `rea-evidence/`）。
+
+| 指标 | 绑定前 `rol_2af8223db806…` | 绑定后 `rol_60d592ff761d…`（`ev_09984ce4fda8…`） |
+|---|---|---|
+| unowned | 365 | 327 |
+| implemented | 0 | **38**（22 个 Typeless 能力 × 主进程 / 渲染层两侧的同名通道） |
+| verified | 0 | 0 |
+| unknown（残留未知） | 27 | 27 |
+
+已绑定的能力与我们这边的归属（owner 记录了文件 SHA-256）：
+
+| Typeless 通道 / 设置 | OpenTypeless 归属 |
+|---|---|
+| `audio:mute` / `audio:unmute` / `audio:is-muted` | `src-tauri/src/audio/output_mute.rs` |
+| `audio:get-devices-async`、`microphoneDevices`、`selectedMicrophoneDevice` | `src-tauri/src/audio/devices.rs`、`commands/audio.rs` |
+| `page:open-interactive-card` / `get-interactive-card-payload` | `src-tauri/src/commands/ask.rs` |
+| `page:update-interactive-card-bounds` | `src-tauri/src/lib.rs::resize_ask_window` |
+| `page:close-interactive-card` | `src/components/AskPanel/AskPanel.tsx` |
+| `page:complete-onboarding`、`onboardingIsCompleted` | `src/lib/tauri.ts` |
+| `page:floating-bar-click` | `src/components/Capsule/index.tsx` |
+| `db:history-list / -delete / -clear / -delete-by-duration / -upsert`、`historyDurationSeconds` | `src-tauri/src/storage/mod.rs` |
+| `featureShortcutBindings`、`keyboardShortcut` | `storage/mod.rs::HotkeyConfig`、`hotkey.rs` |
+| `keyboard:type-transcript` | `src-tauri/src/output/keyboard.rs` |
+
+为什么都停在 implemented 而不是 verified：每条义务要求 Typeless 原版的 positive / negative / malformed 三种运行时样例（`missing-original-case`），以及一个列举该义务的 verifier 结果（`missing-verifier`）。原版运行时样例需要真实口述与真实静音操作，会消耗 Typeless 额度、改动系统音量，按 §0 约定没有采集。我们这边的单元测试（Rust 635 项、前端 526 项）是 OpenTypeless 自己的验证，不等于对原版行为的逐案对照，所以没有伪造成 verifier。
+
+仍然 unowned 的 327 项主要是：Typeless 云端账户 / 订阅 / 同步引擎 / Opus 分片上传 / 自动更新 / 遥测等服务端协议（我们用 BYOK 与自有云，不复刻其协议，属于 §4"明确不做"），以及原生 helper 的按键监听细节（我们用 Rust 自己的全局快捷键实现）。
 
 ### 1.3 REA 关键事实（实现需要用到的）
 
