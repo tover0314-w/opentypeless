@@ -62,22 +62,91 @@
     "openLlmSettings": "Impostazioni"
   },
   "home": {
-    "welcome": "Benvenuto in OpenTypeless",
-    "description": "Tieni premuto {{hotkey}} per avviare la registrazione vocale. Il tuo discorso verrà trascritto e, opzionalmente, rifinito dall'IA.",
-    "totalRecordings": "Registrazioni totali",
-    "today": "Oggi",
-    "proPlan": "Piano Pro",
-    "freePlan": "Piano Gratuito",
-    "upgradeToPro": "Aggiorna a Pro",
     "currentConfig": "Configurazione attuale",
     "sttProvider": "Provider STT",
     "llmProvider": "Provider LLM",
-    "aiPolish": "Rifinitura IA",
-    "enabled": "Abilitato",
     "disabled": "Disabilitato",
-    "outputMode": "Modalità di output",
-    "wordsRemaining": "Parole rimanenti",
-    "wordsReset": "Si reimposta il {{date}}"
+    "title": "Parla, non scrivere",
+    "insights": "Statistiche",
+    "shortcutOff": "Disattivato",
+    "modes": {
+      "dictate": {
+        "title": "Detta",
+        "description": "Pensieri sparsi → testo chiaro"
+      },
+      "translate": {
+        "title": "Traduci",
+        "description": "Parlato naturale → testo madrelingua"
+      },
+      "ask": {
+        "title": "Chiedi qualsiasi cosa",
+        "description": "Modifica o chiedi su un testo"
+      }
+    },
+    "stats": {
+      "words": "Parole dettate",
+      "saved": "Tempo risparmiato",
+      "wpm": "Velocità media",
+      "time": "Tempo di dettatura",
+      "wordsUnit": "parole",
+      "minutesUnit": "min",
+      "wpmUnit": "PPM"
+    },
+    "activity": {
+      "title": "Attività",
+      "activeDays": "Giorni attivi",
+      "currentStreak": "Serie attuale",
+      "longestStreak": "Serie più lunga",
+      "less": "Meno",
+      "more": "Più",
+      "days_one": "{{count}} giorno",
+      "days_other": "{{count}} giorni",
+      "words_one": "{{count}} parola",
+      "words_other": "{{count}} parole",
+      "days_few": "{{count}} giorni",
+      "days_many": "{{count}} giorni",
+      "words_few": "{{count}} parole",
+      "words_many": "{{count}} parole"
+    },
+    "useCases": {
+      "title": "Usi più comuni",
+      "gmail": {
+        "name": "Gmail",
+        "description": "Trasforma i pensieri dettati in email curate."
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "Aggiorna il team con chiarezza senza perdere il filo."
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "Detta il prompt e ottieni risposte migliori."
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "Trasforma le idee dettate in testi chiari e ordinati."
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "Cattura idee e organizzale in note pulite."
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "Sviluppa idee complesse senza scrivere."
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "Descrivi la modifica e continua a programmare."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Scrivi issue e aggiornamenti alla velocità del pensiero."
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "Rispondi a chat e documenti con messaggi naturali."
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "Parla per scrivere — trasforma la tua voce in testo rifinito in tempo reale",
@@ -655,8 +724,8 @@
     "title": "Cronologia",
     "searchPlaceholder": "Cerca nella cronologia...",
     "noResults": "Nessun risultato corrispondente",
-    "noHistory": "Nessuna cronologia ancora.",
-    "noHistoryHint": "Premi il tuo tasto rapido per avviare la registrazione e le tue trascrizioni appariranno qui.",
+    "noHistory": "Ancora nessuna dettatura",
+    "noHistoryHint": "Quando detti in qualsiasi app, la cronologia comparirà qui.",
     "today": "Oggi",
     "yesterday": "Ieri",
     "copied": "Copiato",
@@ -680,7 +749,33 @@
       "partial": "Risultato parziale",
       "fallback": "Output alternativo",
       "clipboardFallback": "Copiato negli appunti"
-    }
+    },
+    "search": "Cerca nella cronologia",
+    "copy": "Copia trascrizione",
+    "keepHistory": "Conserva cronologia",
+    "keepHistoryDesc": "Scegli per quanto tempo conservare la cronologia su questo dispositivo.",
+    "privacyTitle": "I tuoi dati restano privati",
+    "privacyDesc": "La cronologia resta su questo dispositivo. Audio e testo vanno direttamente ai provider scelti.",
+    "tabs": {
+      "all": "Tutto",
+      "dictate": "Dettature",
+      "ask": "Domande"
+    },
+    "retention": {
+      "forever": "Per sempre",
+      "year": "1 anno",
+      "month": "1 mese",
+      "week": "1 settimana",
+      "day": "24 ore",
+      "never": "Mai"
+    },
+    "neverKeepHint": "La cronologia è disattivata. Modifica la durata sopra per salvarla.",
+    "viewAnswer": "Vedi risposta",
+    "deleteEntry": "Elimina",
+    "deleteConfirm": "Eliminare questa trascrizione?",
+    "deleted": "Trascrizione eliminata",
+    "failedToDelete": "Eliminazione non riuscita",
+    "failedToOpenAnswer": "Impossibile aprire la risposta"
   },
   "upgrade": {
     "title": "Aggiorna",

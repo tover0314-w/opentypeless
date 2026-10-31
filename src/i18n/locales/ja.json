@@ -62,22 +62,91 @@
     "openLlmSettings": "設定"
   },
   "home": {
-    "welcome": "OpenTypelessへようこそ",
-    "description": "{{hotkey}}を長押しして音声録音を開始します。音声が文字起こしされ、AIによる整形が行われます。",
-    "totalRecordings": "総録音回数",
-    "today": "今日",
-    "proPlan": "Proプラン",
-    "freePlan": "無料プラン",
-    "upgradeToPro": "Proにアップグレード",
     "currentConfig": "現在の設定",
     "sttProvider": "STTプロバイダー",
     "llmProvider": "LLMプロバイダー",
-    "aiPolish": "AI整形",
-    "enabled": "有効",
     "disabled": "無効",
-    "outputMode": "出力モード",
-    "wordsRemaining": "残り words",
-    "wordsReset": "{{date}} にリセット"
+    "title": "話そう、打たずに",
+    "insights": "インサイト",
+    "shortcutOff": "オフ",
+    "modes": {
+      "dictate": {
+        "title": "音声入力",
+        "description": "まとまらない考え → 明快な文章"
+      },
+      "translate": {
+        "title": "翻訳",
+        "description": "自然な話し言葉 → ネイティブの文章"
+      },
+      "ask": {
+        "title": "なんでも質問",
+        "description": "テキストの編集や質問"
+      }
+    },
+    "stats": {
+      "words": "音声入力の語数",
+      "saved": "節約した時間",
+      "wpm": "平均速度",
+      "time": "音声入力時間",
+      "wordsUnit": "語",
+      "minutesUnit": "分",
+      "wpmUnit": "語/分"
+    },
+    "activity": {
+      "title": "アクティビティ",
+      "activeDays": "アクティブな日数",
+      "currentStreak": "現在の連続日数",
+      "longestStreak": "最長連続日数",
+      "less": "少",
+      "more": "多",
+      "days_one": "{{count}} 日",
+      "days_other": "{{count}} 日",
+      "words_one": "{{count}} 語",
+      "words_other": "{{count}} 語",
+      "days_few": "{{count}} 日",
+      "days_many": "{{count}} 日",
+      "words_few": "{{count}} 語",
+      "words_many": "{{count}} 語"
+    },
+    "useCases": {
+      "title": "人気の使い方",
+      "gmail": {
+        "name": "Gmail",
+        "description": "話した内容を、整った読みやすいメールに。"
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "流れを止めずに、わかりやすくチームへ共有。"
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "プロンプトを話して、より良い回答をすばやく。"
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "話したアイデアを、構成の整った文章に。"
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "アイデアを記録して、きれいなメモに整理。"
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "タイプせずに、複雑なアイデアを練り上げる。"
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "変更したい内容を話して、コーディングを続けよう。"
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "考えるスピードで課題や更新を書く。"
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "チャットやドキュメントに自然な文章で返信。"
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "話して書く — 音声をリアルタイムで整形されたテキストに変換します",
@@ -655,8 +724,8 @@
     "title": "履歴",
     "searchPlaceholder": "履歴を検索...",
     "noResults": "一致する結果がありません",
-    "noHistory": "履歴はまだありません。",
-    "noHistoryHint": "ホットキーを押して録音を開始すると、文字起こし結果がここに表示されます。",
+    "noHistory": "まだ音声入力がありません",
+    "noHistoryHint": "どのアプリでも音声入力すると、ここに履歴が表示されます。",
     "today": "今日",
     "yesterday": "昨日",
     "copied": "コピーしました",
@@ -680,7 +749,33 @@
       "partial": "部分的な結果",
       "fallback": "代替出力",
       "clipboardFallback": "クリップボードにコピーしました"
-    }
+    },
+    "search": "履歴を検索",
+    "copy": "文字起こしをコピー",
+    "keepHistory": "履歴の保存期間",
+    "keepHistoryDesc": "このデバイスに履歴を保存する期間を選択します。",
+    "privacyTitle": "データは非公開のまま",
+    "privacyDesc": "履歴はこのデバイスにのみ保存されます。音声とテキストは選んだプロバイダーに直接送られます。",
+    "tabs": {
+      "all": "すべて",
+      "dictate": "音声入力",
+      "ask": "なんでも質問"
+    },
+    "retention": {
+      "forever": "無期限",
+      "year": "1 年",
+      "month": "1 か月",
+      "week": "1 週間",
+      "day": "24 時間",
+      "never": "保存しない"
+    },
+    "neverKeepHint": "履歴はオフです。上の保存期間を変更すると保存を開始します。",
+    "viewAnswer": "回答を見る",
+    "deleteEntry": "削除",
+    "deleteConfirm": "この文字起こしを削除しますか？",
+    "deleted": "削除しました",
+    "failedToDelete": "削除できませんでした",
+    "failedToOpenAnswer": "回答を開けませんでした"
   },
   "upgrade": {
     "title": "アップグレード",

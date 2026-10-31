@@ -48,6 +48,10 @@ pub struct BackupHistoryEntry {
     // Pre-context backups used app_name instead of a normalized context label.
     #[serde(default)]
     app_name: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    answer_text: Option<String>,
 }
 
 impl BackupHistoryEntry {
@@ -127,6 +131,12 @@ impl BackupHistoryEntry {
                 2_000,
                 "backup_history_output_error",
             )?,
+            mode: match self.mode.as_deref() {
+                Some("ask") => "ask".to_string(),
+                Some("translate") => "translate".to_string(),
+                _ => "dictate".to_string(),
+            },
+            answer_text: optional_backup_string(self.answer_text, 20_000, "backup_history_answer")?,
         })
     }
 }

@@ -62,22 +62,91 @@
     "openLlmSettings": "Ajustes"
   },
   "home": {
-    "welcome": "Bienvenido a OpenTypeless",
-    "description": "Mantén presionado {{hotkey}} para iniciar la grabación de voz. Tu habla será transcrita y opcionalmente pulida por IA.",
-    "totalRecordings": "Grabaciones totales",
-    "today": "Hoy",
-    "proPlan": "Plan Pro",
-    "freePlan": "Plan gratuito",
-    "upgradeToPro": "Mejorar a Pro",
     "currentConfig": "Configuración actual",
     "sttProvider": "Proveedor STT",
     "llmProvider": "Proveedor LLM",
-    "aiPolish": "Pulido con IA",
-    "enabled": "Activado",
     "disabled": "Desactivado",
-    "outputMode": "Modo de salida",
-    "wordsRemaining": "Palabras restantes",
-    "wordsReset": "Se reinicia el {{date}}"
+    "title": "Habla, no escribas",
+    "insights": "Estadísticas",
+    "shortcutOff": "Desactivado",
+    "modes": {
+      "dictate": {
+        "title": "Dictar",
+        "description": "Ideas desordenadas → texto claro"
+      },
+      "translate": {
+        "title": "Traducir",
+        "description": "Habla natural → texto nativo"
+      },
+      "ask": {
+        "title": "Pregunta lo que sea",
+        "description": "Edita o pregunta sobre un texto"
+      }
+    },
+    "stats": {
+      "words": "Palabras dictadas",
+      "saved": "Tiempo ahorrado",
+      "wpm": "Velocidad media",
+      "time": "Tiempo de dictado",
+      "wordsUnit": "palabras",
+      "minutesUnit": "min",
+      "wpmUnit": "PPM"
+    },
+    "activity": {
+      "title": "Actividad",
+      "activeDays": "Días activos",
+      "currentStreak": "Racha actual",
+      "longestStreak": "Racha más larga",
+      "less": "Menos",
+      "more": "Más",
+      "days_one": "{{count}} día",
+      "days_other": "{{count}} días",
+      "words_one": "{{count}} palabra",
+      "words_other": "{{count}} palabras",
+      "days_few": "{{count}} días",
+      "days_many": "{{count}} días",
+      "words_few": "{{count}} palabras",
+      "words_many": "{{count}} palabras"
+    },
+    "useCases": {
+      "title": "Usos populares",
+      "gmail": {
+        "name": "Gmail",
+        "description": "Convierte tus ideas habladas en correos bien redactados."
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "Comparte novedades claras sin perder el ritmo."
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "Dicta tu prompt y obtén mejores respuestas."
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "Convierte ideas habladas en textos claros y ordenados."
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "Captura ideas y organízalas en notas limpias."
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "Desarrolla ideas complejas sin escribir."
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "Describe el cambio que quieres y sigue programando."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Escribe tareas y novedades tan rápido como piensas."
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "Responde chats y documentos con mensajes naturales."
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "Habla para escribir — convierte tu voz en texto pulido en tiempo real",
@@ -655,8 +724,8 @@
     "title": "Historial",
     "searchPlaceholder": "Buscar en el historial...",
     "noResults": "Sin resultados coincidentes",
-    "noHistory": "Aún no hay historial.",
-    "noHistoryHint": "Presiona tu atajo de teclado para iniciar la grabación y tus transcripciones aparecerán aquí.",
+    "noHistory": "Aún no hay dictados",
+    "noHistoryHint": "Cuando dictes en cualquier app, tu historial aparecerá aquí.",
     "today": "Hoy",
     "yesterday": "Ayer",
     "copied": "Copiado",
@@ -680,7 +749,33 @@
       "partial": "Resultado parcial",
       "fallback": "Salida alternativa",
       "clipboardFallback": "Copiado al portapapeles"
-    }
+    },
+    "search": "Buscar en el historial",
+    "copy": "Copiar transcripción",
+    "keepHistory": "Conservar historial",
+    "keepHistoryDesc": "Elige cuánto tiempo se guarda el historial en este equipo.",
+    "privacyTitle": "Tus datos siguen siendo privados",
+    "privacyDesc": "El historial solo se guarda en este equipo. El audio y el texto van directamente a los proveedores que elijas.",
+    "tabs": {
+      "all": "Todo",
+      "dictate": "Dictados",
+      "ask": "Preguntas"
+    },
+    "retention": {
+      "forever": "Siempre",
+      "year": "1 año",
+      "month": "1 mes",
+      "week": "1 semana",
+      "day": "24 horas",
+      "never": "Nunca"
+    },
+    "neverKeepHint": "El historial está desactivado. Cambia el tiempo de arriba para guardarlo.",
+    "viewAnswer": "Ver respuesta",
+    "deleteEntry": "Eliminar",
+    "deleteConfirm": "¿Eliminar esta transcripción?",
+    "deleted": "Transcripción eliminada",
+    "failedToDelete": "No se pudo eliminar",
+    "failedToOpenAnswer": "No se pudo abrir la respuesta"
   },
   "upgrade": {
     "title": "Mejorar",

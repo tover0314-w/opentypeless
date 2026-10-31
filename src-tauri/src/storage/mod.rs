@@ -1,3 +1,5 @@
+pub mod stats;
+
 use crate::app_detector::registry::AppRegistry;
 use crate::app_detector::types::{BrowserAccessStatus, ContextFamily, ContextProfile};
 use crate::credentials::{migrate_legacy_config_secrets, SystemCredentialVault};
@@ -1280,6 +1282,16 @@ pub struct HistoryEntry {
     pub active_scene_prompt_truncated: bool,
     pub output_status: Option<String>,
     pub output_error: Option<String>,
+    /// `dictate`, `translate` or `ask`; older rows default to `dictate`.
+    #[serde(default = "default_history_mode")]
+    pub mode: String,
+    /// Ask Anything answer, shown again via History > View answer.
+    #[serde(default)]
+    pub answer_text: Option<String>,
+}
+
+fn default_history_mode() -> String {
+    "dictate".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1356,7 +1368,9 @@ impl HistoryStore {
                 active_scene_prompt_chars INTEGER,
                 active_scene_prompt_truncated INTEGER NOT NULL DEFAULT 0,
                 output_status TEXT,
-                output_error TEXT
+                output_error TEXT,
+                mode TEXT NOT NULL DEFAULT 'dictate',
+                answer_text TEXT
             );",
         )?;
         ensure_history_optional_columns(&conn)?;
@@ -1404,9 +1418,11 @@ impl HistoryStore {
                     active_scene_prompt_chars,
                     active_scene_prompt_truncated,
                     output_status,
-                    output_error
+                    output_error,
+                    mode,
+                    answer_text
                 )
-             VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 rusqlite::params![
                     entry.created_at,
                     entry.context_profile_id,
@@ -1426,6 +1442,8 @@ impl HistoryStore {
                     entry.active_scene_prompt_truncated,
                     entry.output_status,
                     entry.output_error,
+                    entry.mode,
+                    entry.answer_text,
                 ],
             )?;
         }
@@ -1487,7 +1505,9 @@ impl HistoryStore {
                 active_scene_prompt_chars,
                 active_scene_prompt_truncated,
                 output_status,
-                output_error
+                output_error,
+                mode,
+                answer_text
              FROM history ORDER BY id DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
@@ -1513,6 +1533,8 @@ impl HistoryStore {
                 active_scene_prompt_truncated: row.get(16)?,
                 output_status: row.get(17)?,
                 output_error: row.get(18)?,
+                mode: row.get(19)?,
+                answer_text: row.get(20)?,
             })
         })?;
         let mut entries = Vec::new();
@@ -1526,6 +1548,43 @@ impl HistoryStore {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute("DELETE FROM history", [])?;
         Ok(())
+    }
+
+    pub async fn delete(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute("DELETE FROM history WHERE id = ?1", rusqlite::params![id])? > 0)
+    }
+
+    /// Usage insights over every stored dictation and translation (Ask questions excluded).
+    pub async fn stats(&self, today: chrono::NaiveDate) -> Result<stats::UsageStats> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(
+            "SELECT created_at, polished_text, raw_text, duration_ms FROM history
+             WHERE mode <> 'ask'",
+        )?;
+        let samples = stmt
+            .query_map([], |row| {
+                let created_at: String = row.get(0)?;
+                let polished: String = row.get(1)?;
+                let raw: String = row.get(2)?;
+                Ok((
+                    created_at,
+                    if polished.is_empty() { raw } else { polished },
+                    row.get(3)?,
+                ))
+            })?
+            .filter_map(|row| {
+                let (created_at, text, duration_ms) = row.ok()?;
+                let date =
+                    chrono::NaiveDate::parse_from_str(created_at.get(..10)?, "%Y-%m-%d").ok()?;
+                Some(stats::StatsSample {
+                    date,
+                    text,
+                    duration_ms,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(stats::compute_usage_stats(&samples, today))
     }
 
     /// Restores cloud backup sections in one SQLite transaction. Dictionary and
@@ -1750,6 +1809,11 @@ fn ensure_history_optional_columns(conn: &Connection) -> Result<()> {
             "provider_kind",
             "ALTER TABLE history ADD COLUMN provider_kind TEXT NOT NULL DEFAULT 'local'",
         ),
+        (
+            "mode",
+            "ALTER TABLE history ADD COLUMN mode TEXT NOT NULL DEFAULT 'dictate'",
+        ),
+        ("answer_text", "ALTER TABLE history ADD COLUMN answer_text TEXT"),
     ] {
         if !columns.contains(name) {
             conn.execute(ddl, [])?;
@@ -3279,7 +3343,52 @@ mod tests {
             active_scene_prompt_truncated: false,
             output_status: None,
             output_error: None,
+            mode: "dictate".to_string(),
+            answer_text: None,
         }
+    }
+
+    #[tokio::test]
+    async fn history_store_keeps_ask_answers_and_deletes_single_entries() {
+        let store = temp_history_store("ask-delete");
+        let mut ask = test_history_entry(0, "2026-10-31T10:00:00");
+        ask.mode = "ask".to_string();
+        ask.raw_text = "What is the weather?".to_string();
+        ask.answer_text = Some("Sunny.".to_string());
+        store
+            .add(test_history_entry(0, "2026-10-31T09:00:00"))
+            .await
+            .unwrap();
+        store.add(ask).await.unwrap();
+
+        let entries = store.list(10, 0).await.unwrap();
+        assert_eq!(entries[0].mode, "ask");
+        assert_eq!(entries[0].answer_text.as_deref(), Some("Sunny."));
+        assert_eq!(entries[1].mode, "dictate");
+
+        assert!(store.delete(entries[1].id).await.unwrap());
+        assert!(!store.delete(entries[1].id).await.unwrap());
+        assert_eq!(store.list(10, 0).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn history_store_stats_skip_ask_questions() {
+        let store = temp_history_store("stats");
+        let mut dictation = test_history_entry(0, "2026-10-31T09:00:00");
+        dictation.polished_text = "one two three".to_string();
+        dictation.duration_ms = Some(1_500);
+        let mut ask = test_history_entry(0, "2026-10-31T10:00:00");
+        ask.mode = "ask".to_string();
+        ask.polished_text = "ignored question words".to_string();
+        store.add(dictation).await.unwrap();
+        store.add(ask).await.unwrap();
+
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap();
+        let stats = store.stats(today).await.unwrap();
+        assert_eq!(stats.total_words, 3);
+        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.average_wpm, Some(120));
+        assert_eq!(stats.current_streak, 1);
     }
 
     fn temp_history_store(name: &str) -> HistoryStore {

@@ -1511,6 +1511,7 @@ pub async fn stop_ask_dictation(
             ask_app_error_message(error)
         })?;
 
+        save_ask_history(&app, &config, &session.recording_context, &question, &answer).await;
         Ok(AskDictationResult::new(
             question,
             answer,
@@ -1529,6 +1530,77 @@ pub async fn stop_ask_dictation(
     } else {
         result
     }
+}
+
+/// Records an answered question so History can show it under "Ask anything" with View answer.
+async fn save_ask_history(
+    app: &tauri::AppHandle,
+    config: &storage::AppConfig,
+    context: &RecordingContext,
+    question: &str,
+    answer: &str,
+) {
+    let policy = config.history_retention_policy();
+    if !policy.enabled {
+        return;
+    }
+    let provider_kind = if config.llm_provider == "cloud" {
+        storage::HistoryProviderKind::ManagedCloud
+    } else if config.llm_provider == "ollama" {
+        storage::HistoryProviderKind::Local
+    } else {
+        storage::HistoryProviderKind::Byok
+    };
+    let entry = storage::HistoryEntry {
+        id: 0,
+        created_at: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        context_profile_id: context.profile.id.clone(),
+        context_label: context.profile.app_label.clone(),
+        context_icon_key: context.profile.icon_key.clone(),
+        context_family: context.profile.family,
+        browser_access_status: context.browser_access_status,
+        provider_kind,
+        raw_text: question.to_string(),
+        polished_text: question.to_string(),
+        language: None,
+        duration_ms: None,
+        active_scene_id: None,
+        active_scene_source: None,
+        active_scene_name: None,
+        active_scene_prompt_chars: None,
+        active_scene_prompt_truncated: false,
+        output_status: None,
+        output_error: None,
+        mode: "ask".to_string(),
+        answer_text: Some(answer.to_string()),
+    };
+    if let Err(error) = app
+        .state::<storage::HistoryStore>()
+        .add_with_policy(entry, &policy)
+        .await
+    {
+        tracing::error!("Failed to save Ask history: {error}");
+    }
+}
+
+/// Reopens the answer card for an Ask entry stored in history ("View answer").
+#[tauri::command]
+pub fn show_saved_ask_answer(
+    app: tauri::AppHandle,
+    question: String,
+    answer: String,
+) -> Result<(), String> {
+    if answer.trim().is_empty() {
+        return Err("No saved answer".to_string());
+    }
+    show_answer_window_with_metadata(
+        &app,
+        question,
+        answer,
+        VoiceIntentKind::OpenQuestion,
+        false,
+        false,
+    )
 }
 
 #[tauri::command]

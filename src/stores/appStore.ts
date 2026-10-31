@@ -116,6 +116,8 @@ export interface HistoryEntry {
   active_scene_prompt_truncated: boolean
   output_status: string | null
   output_error: string | null
+  mode?: 'dictate' | 'translate' | 'ask'
+  answer_text?: string | null
 }
 
 export interface ContextProfileSummary {

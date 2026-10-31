@@ -62,22 +62,91 @@
     "openLlmSettings": "设置"
   },
   "home": {
-    "welcome": "欢迎使用 OpenTypeless",
-    "description": "使用 {{hotkey}} 开始语音录制。语音将被转录并可选择由 AI 润色。",
-    "totalRecordings": "总录音数",
-    "today": "今日",
-    "wordsRemaining": "剩余 words",
-    "wordsReset": "{{date}} 重置",
-    "proPlan": "Pro 计划",
-    "freePlan": "免费计划",
-    "upgradeToPro": "升级到 Pro",
     "currentConfig": "当前配置",
     "sttProvider": "语音识别服务",
     "llmProvider": "LLM 服务",
-    "aiPolish": "AI 润色",
-    "enabled": "已启用",
     "disabled": "已禁用",
-    "outputMode": "文字写入"
+    "title": "说话，不要打字",
+    "insights": "洞察",
+    "shortcutOff": "未设置",
+    "modes": {
+      "dictate": {
+        "title": "口述",
+        "description": "杂乱的想法 → 清晰的文字"
+      },
+      "translate": {
+        "title": "翻译",
+        "description": "自然口语 → 地道的外语"
+      },
+      "ask": {
+        "title": "随便问",
+        "description": "编辑或询问文本"
+      }
+    },
+    "stats": {
+      "words": "口述字数",
+      "saved": "节省时间",
+      "wpm": "平均速度",
+      "time": "口述时长",
+      "wordsUnit": "字",
+      "minutesUnit": "分钟",
+      "wpmUnit": "字/分"
+    },
+    "activity": {
+      "title": "活跃度",
+      "activeDays": "活跃天数",
+      "currentStreak": "当前连续",
+      "longestStreak": "最长连续",
+      "less": "少",
+      "more": "多",
+      "days_one": "{{count}} 天",
+      "days_other": "{{count}} 天",
+      "words_one": "{{count}} 字",
+      "words_other": "{{count}} 字",
+      "days_few": "{{count}} 天",
+      "days_many": "{{count}} 天",
+      "words_few": "{{count}} 字",
+      "words_many": "{{count}} 字"
+    },
+    "useCases": {
+      "title": "热门使用场景",
+      "gmail": {
+        "name": "Gmail",
+        "description": "把口述的想法变成格式整齐、措辞得体的邮件。"
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "清楚地同步团队进展，不打断思路。"
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "说出你的提示词，更快得到更好的回答。"
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "把口述的想法整理成清晰、有结构的文档。"
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "记录灵感，整理成清晰的笔记。"
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "不用打字，就能头脑风暴、打磨复杂想法。"
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "说出你想要的改动，继续专注写代码。"
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "像思考一样快地写 issue 和进展。"
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "用自然、可直接发送的消息回复聊天和文档。"
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "说话即写作 — 实时将语音转化为润色文本",
@@ -655,8 +724,8 @@
     "title": "历史记录",
     "searchPlaceholder": "搜索历史记录...",
     "noResults": "没有匹配结果",
-    "noHistory": "暂无历史记录。",
-    "noHistoryHint": "按下快捷键开始录音，转录内容将显示在这里。",
+    "noHistory": "还没有口述记录",
+    "noHistoryHint": "在任意应用中口述后，记录会出现在这里。",
     "today": "今天",
     "yesterday": "昨天",
     "copied": "已复制",
@@ -680,7 +749,33 @@
       "partial": "部分结果",
       "fallback": "已回退输出",
       "clipboardFallback": "已复制到剪贴板"
-    }
+    },
+    "search": "搜索历史",
+    "copy": "复制文字",
+    "keepHistory": "保存历史",
+    "keepHistoryDesc": "选择在此设备上保留历史记录的时间。",
+    "privacyTitle": "你的数据保持私密",
+    "privacyDesc": "历史记录只保存在本机。音频和文字只会发送给你选择的服务商。",
+    "tabs": {
+      "all": "全部",
+      "dictate": "听写",
+      "ask": "随便问"
+    },
+    "retention": {
+      "forever": "永远",
+      "year": "1 年",
+      "month": "1 个月",
+      "week": "1 周",
+      "day": "24 小时",
+      "never": "从不"
+    },
+    "neverKeepHint": "历史记录已关闭。修改上方的保存时长即可开始保存。",
+    "viewAnswer": "查看答案",
+    "deleteEntry": "删除",
+    "deleteConfirm": "删除这条记录？",
+    "deleted": "已删除",
+    "failedToDelete": "删除失败",
+    "failedToOpenAnswer": "无法打开答案"
   },
   "upgrade": {
     "title": "升级",

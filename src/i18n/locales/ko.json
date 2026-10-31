@@ -62,22 +62,91 @@
     "openLlmSettings": "설정"
   },
   "home": {
-    "welcome": "OpenTypeless에 오신 것을 환영합니다",
-    "description": "{{hotkey}}을(를) 누른 채 음성 녹음을 시작하세요. 음성이 텍스트로 변환되며, 선택적으로 AI가 다듬어 줍니다.",
-    "totalRecordings": "총 녹음 수",
-    "today": "오늘",
-    "proPlan": "Pro 플랜",
-    "freePlan": "무료 플랜",
-    "upgradeToPro": "Pro로 업그레이드",
     "currentConfig": "현재 설정",
     "sttProvider": "STT 제공자",
     "llmProvider": "LLM 제공자",
-    "aiPolish": "AI 다듬기",
-    "enabled": "활성화",
     "disabled": "비활성화",
-    "outputMode": "출력 모드",
-    "wordsRemaining": "남은 words",
-    "wordsReset": "{{date}} 재설정"
+    "title": "타이핑 대신 말하세요",
+    "insights": "인사이트",
+    "shortcutOff": "끔",
+    "modes": {
+      "dictate": {
+        "title": "받아쓰기",
+        "description": "흩어진 생각 → 명확한 글"
+      },
+      "translate": {
+        "title": "번역",
+        "description": "자연스러운 말 → 원어민 수준의 글"
+      },
+      "ask": {
+        "title": "무엇이든 묻기",
+        "description": "텍스트 편집 또는 질문"
+      }
+    },
+    "stats": {
+      "words": "받아쓴 단어",
+      "saved": "절약한 시간",
+      "wpm": "평균 속도",
+      "time": "받아쓰기 시간",
+      "wordsUnit": "단어",
+      "minutesUnit": "분",
+      "wpmUnit": "WPM"
+    },
+    "activity": {
+      "title": "활동",
+      "activeDays": "활동한 날",
+      "currentStreak": "현재 연속",
+      "longestStreak": "최장 연속",
+      "less": "적음",
+      "more": "많음",
+      "days_one": "{{count}}일",
+      "days_other": "{{count}}일",
+      "words_one": "{{count}}단어",
+      "words_other": "{{count}}단어",
+      "days_few": "{{count}}일",
+      "days_many": "{{count}}일",
+      "words_few": "{{count}}단어",
+      "words_many": "{{count}}단어"
+    },
+    "useCases": {
+      "title": "인기 활용 사례",
+      "gmail": {
+        "name": "Gmail",
+        "description": "말한 생각을 잘 다듬어진 이메일로 바꿔 보세요."
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "흐름을 끊지 않고 명확하게 팀에 공유하세요."
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "프롬프트를 말하고 더 나은 답을 빠르게 받으세요."
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "말한 아이디어를 구조적인 글로 정리하세요."
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "아이디어를 기록하고 깔끔한 노트로 정리하세요."
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "타이핑 없이 복잡한 아이디어를 다듬어 보세요."
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "원하는 변경을 말하고 계속 코딩하세요."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "생각하는 속도로 이슈와 업데이트를 작성하세요."
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "채팅과 문서에 자연스러운 메시지로 답하세요."
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "말해서 글 쓰기 — 음성을 실시간으로 다듬어진 텍스트로 변환합니다",
@@ -655,8 +724,8 @@
     "title": "기록",
     "searchPlaceholder": "기록 검색...",
     "noResults": "검색 결과가 없습니다",
-    "noHistory": "아직 기록이 없습니다.",
-    "noHistoryHint": "단축키를 눌러 녹음을 시작하면 변환 결과가 여기에 표시됩니다.",
+    "noHistory": "아직 받아쓰기가 없습니다",
+    "noHistoryHint": "어떤 앱에서든 받아쓰면 여기에 기록이 표시됩니다.",
     "today": "오늘",
     "yesterday": "어제",
     "copied": "복사됨",
@@ -680,7 +749,33 @@
       "partial": "부분 결과",
       "fallback": "대체 출력",
       "clipboardFallback": "클립보드에 복사됨"
-    }
+    },
+    "search": "기록 검색",
+    "copy": "텍스트 복사",
+    "keepHistory": "기록 보관",
+    "keepHistoryDesc": "이 기기에 기록을 보관할 기간을 선택하세요.",
+    "privacyTitle": "데이터는 비공개로 유지됩니다",
+    "privacyDesc": "기록은 이 기기에만 저장됩니다. 음성과 텍스트는 선택한 제공업체로만 전송됩니다.",
+    "tabs": {
+      "all": "전체",
+      "dictate": "받아쓰기",
+      "ask": "무엇이든 묻기"
+    },
+    "retention": {
+      "forever": "영구",
+      "year": "1년",
+      "month": "1개월",
+      "week": "1주",
+      "day": "24시간",
+      "never": "보관 안 함"
+    },
+    "neverKeepHint": "기록이 꺼져 있습니다. 위의 보관 기간을 바꾸면 저장이 시작됩니다.",
+    "viewAnswer": "답변 보기",
+    "deleteEntry": "삭제",
+    "deleteConfirm": "이 기록을 삭제할까요?",
+    "deleted": "삭제되었습니다",
+    "failedToDelete": "삭제하지 못했습니다",
+    "failedToOpenAnswer": "답변을 열 수 없습니다"
   },
   "upgrade": {
     "title": "업그레이드",

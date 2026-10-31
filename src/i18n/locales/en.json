@@ -62,22 +62,91 @@
     "openLlmSettings": "Settings"
   },
   "home": {
-    "welcome": "Welcome to OpenTypeless",
-    "description": "Use {{hotkey}} to start voice recording. Your speech will be transcribed and optionally polished by AI.",
-    "totalRecordings": "Total Recordings",
-    "today": "Today",
-    "wordsRemaining": "Words remaining",
-    "wordsReset": "Resets {{date}}",
-    "proPlan": "Pro Plan",
-    "freePlan": "Free Plan",
-    "upgradeToPro": "Upgrade to Pro",
     "currentConfig": "Current Configuration",
     "sttProvider": "STT Provider",
     "llmProvider": "LLM Provider",
-    "aiPolish": "AI Polish",
-    "enabled": "Enabled",
     "disabled": "Disabled",
-    "outputMode": "Text output"
+    "title": "Speak, don't type",
+    "insights": "Insights",
+    "shortcutOff": "Off",
+    "modes": {
+      "dictate": {
+        "title": "Dictate",
+        "description": "Messy thoughts → clear writing"
+      },
+      "translate": {
+        "title": "Translate",
+        "description": "Natural speech → native writing"
+      },
+      "ask": {
+        "title": "Ask anything",
+        "description": "Edit or ask about text"
+      }
+    },
+    "stats": {
+      "words": "Words dictated",
+      "saved": "Time saved",
+      "wpm": "Average speed",
+      "time": "Dictation time",
+      "wordsUnit": "words",
+      "minutesUnit": "min",
+      "wpmUnit": "WPM"
+    },
+    "activity": {
+      "title": "Activity",
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "less": "Less",
+      "more": "More",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "words_one": "{{count}} word",
+      "words_other": "{{count}} words",
+      "days_few": "{{count}} days",
+      "days_many": "{{count}} days",
+      "words_few": "{{count}} words",
+      "words_many": "{{count}} words"
+    },
+    "useCases": {
+      "title": "Popular use cases",
+      "gmail": {
+        "name": "Gmail",
+        "description": "Turn spoken thoughts into polished, well-formatted emails."
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "Share clear team updates without breaking your flow."
+      },
+      "chatgpt": {
+        "name": "ChatGPT",
+        "description": "Say your prompt and get better answers, faster."
+      },
+      "googleDocs": {
+        "name": "Google Docs",
+        "description": "Turn spoken ideas into clear, structured writing."
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "Capture ideas and organize them into clean notes."
+      },
+      "claude": {
+        "name": "Claude",
+        "description": "Brainstorm and refine complex ideas without typing."
+      },
+      "cursor": {
+        "name": "Cursor",
+        "description": "Describe the change you want and keep coding."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Write issues and updates as fast as you think."
+      },
+      "lark": {
+        "name": "Lark",
+        "description": "Reply to chats and docs with natural, ready-to-send messages."
+      }
+    }
   },
   "onboarding": {
     "speakToWrite": "Speak to write — turn your voice into polished text in real time",
@@ -655,8 +724,8 @@
     "title": "History",
     "searchPlaceholder": "Search history...",
     "noResults": "No matching results",
-    "noHistory": "No history yet.",
-    "noHistoryHint": "Press your hotkey to start recording and your transcriptions will appear here.",
+    "noHistory": "No dictations yet",
+    "noHistoryHint": "Once you dictate in any app, your history will appear here.",
     "today": "Today",
     "yesterday": "Yesterday",
     "copied": "Copied",
@@ -680,7 +749,33 @@
       "partial": "Partial result",
       "fallback": "Fallback output",
       "clipboardFallback": "Copied to clipboard"
-    }
+    },
+    "search": "Search history",
+    "copy": "Copy transcript",
+    "keepHistory": "Keep history",
+    "keepHistoryDesc": "Choose how long dictations stay on this device.",
+    "privacyTitle": "Your data stays private",
+    "privacyDesc": "History is stored only on this device. Audio and text go directly to the providers you choose.",
+    "tabs": {
+      "all": "All",
+      "dictate": "Dictations",
+      "ask": "Ask anything"
+    },
+    "retention": {
+      "forever": "Forever",
+      "year": "1 year",
+      "month": "1 month",
+      "week": "1 week",
+      "day": "24 hours",
+      "never": "Never"
+    },
+    "neverKeepHint": "History is off. Change Keep history above to start saving dictations.",
+    "viewAnswer": "View answer",
+    "deleteEntry": "Delete",
+    "deleteConfirm": "Delete this transcript?",
+    "deleted": "Transcript deleted",
+    "failedToDelete": "Failed to delete",
+    "failedToOpenAnswer": "Could not open the answer"
   },
   "upgrade": {
     "title": "Upgrade",

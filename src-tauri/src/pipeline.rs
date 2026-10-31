@@ -2043,6 +2043,7 @@ impl PipelineHandle {
             &app_ctx,
             duration_ms,
             &config,
+            voice_mode,
             HistoryOutputMetadata {
                 status: polish_outcome.history_output_status,
                 error: polish_outcome.history_output_error,
@@ -2721,6 +2722,7 @@ impl PipelineHandle {
         app_ctx: &RecordingContext,
         duration_ms: Option<i64>,
         config: &storage::AppConfig,
+        voice_mode: crate::voice_intent::VoiceMode,
         output: HistoryOutputMetadata,
     ) {
         let policy = config.history_retention_policy();
@@ -2751,6 +2753,13 @@ impl PipelineHandle {
             active_scene_prompt_truncated: scene_diagnostics.prompt_truncated,
             output_status: output.status,
             output_error: output.error,
+            mode: match voice_mode {
+                crate::voice_intent::VoiceMode::Translate => "translate",
+                crate::voice_intent::VoiceMode::Ask => "ask",
+                crate::voice_intent::VoiceMode::Dictate => "dictate",
+            }
+            .to_string(),
+            answer_text: None,
         };
         if let Err(e) = self
             .app_handle

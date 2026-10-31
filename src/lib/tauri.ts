@@ -518,6 +518,36 @@ export async function clearHistory(): Promise<void> {
   return invoke('clear_history')
 }
 
+export async function deleteHistoryEntry(id: number): Promise<boolean> {
+  return invoke('delete_history_entry', { id })
+}
+
+export interface DailyActivity {
+  date: string
+  words: number
+  sessions: number
+}
+
+export interface UsageStats {
+  totalWords: number
+  totalSessions: number
+  totalAudioSeconds: number
+  averageWpm: number | null
+  minutesSaved: number
+  activeDays: number
+  currentStreak: number
+  longestStreak: number
+  daily: DailyActivity[]
+}
+
+export async function getUsageStats(): Promise<UsageStats> {
+  return invoke('get_usage_stats')
+}
+
+export async function showSavedAskAnswer(question: string, answer: string): Promise<void> {
+  return invoke('show_saved_ask_answer', { question, answer })
+}
+
 export interface RestoreBackupResult {
   history: HistoryEntry[]
   dictionary: DictionaryEntry[]
