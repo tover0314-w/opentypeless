@@ -343,19 +343,21 @@
     "modeAsk": "Ask anything",
     "modeTranslating": "Translating to {{language}}",
     "alerts": {
-      "guideTitle": "Shortcuts",
+      "guideTitle": "{{app}} shortcuts",
       "guidePrefix": "Tap once to start talking. Press",
       "guideSuffix": "to finish.",
       "guideDictate": "Dictate",
       "guideTranslate": "Translate",
       "guideAsk": "Ask anything",
-      "pressToFinishPrefix": "Next time, try pressing",
-      "pressToFinishSuffix": "to finish",
+      "pressToFinishPrefix": "Tip: press",
+      "pressToFinishSuffix": "to finish faster",
       "weakNetwork": "Taking longer than usual…",
       "copyLastTitle": "Copy last transcript",
       "copy": "Copy",
       "copied": "Copied",
-      "cancelled": "Transcript cancelled"
+      "cancelled": "Transcript cancelled",
+      "previousPendingTitle": "Still finishing your last dictation",
+      "previousPendingDesc": "Wait a moment, or cancel it to start over."
     }
   },
   "settings": {

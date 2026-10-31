@@ -343,19 +343,21 @@
     "modeAsk": "なんでも質問",
     "modeTranslating": "{{language}} に翻訳中",
     "alerts": {
-      "guideTitle": "ショートカット",
+      "guideTitle": "{{app}} のショートカット",
       "guidePrefix": "1回タップで話し始め、",
       "guideSuffix": "で完了します。",
       "guideDictate": "音声入力",
       "guideTranslate": "翻訳",
       "guideAsk": "なんでも質問",
-      "pressToFinishPrefix": "次回は",
-      "pressToFinishSuffix": "を押して完了してみてください",
+      "pressToFinishPrefix": "ヒント：",
+      "pressToFinishSuffix": "を押すとすばやく完了できます",
       "weakNetwork": "通常より時間がかかっています…",
       "copyLastTitle": "最後の文字起こしをコピー",
       "copy": "コピー",
       "copied": "コピーしました",
-      "cancelled": "文字起こしをキャンセルしました"
+      "cancelled": "文字起こしをキャンセルしました",
+      "previousPendingTitle": "前回の音声入力を処理中です",
+      "previousPendingDesc": "少し待つか、キャンセルしてやり直してください。"
     }
   },
   "settings": {

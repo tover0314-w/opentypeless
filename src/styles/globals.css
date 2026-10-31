@@ -275,10 +275,41 @@ body,
 }
 
 .capsule-alert .keycap {
-  background: rgba(119, 119, 119, 0.3);
-  border-color: rgba(242, 241, 240, 0.12);
+  min-width: 20px;
+  height: auto;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.24);
   box-shadow: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+/* Typeless shortcut table: one row per voice feature, label column + keycap column */
+.capsule-shortcut-table {
+  overflow: hidden;
+  border: 1px solid rgba(242, 241, 240, 0.12);
+  border-radius: 8px;
+  background: rgba(119, 119, 119, 0.1);
+}
+
+.capsule-shortcut-table > div + div {
+  border-top: 1px solid rgba(242, 241, 240, 0.12);
+}
+
+.capsule-tooltip {
+  background: #1d1a1a;
+  border-radius: 8px;
+  padding: 6px 10px;
   color: var(--color-capsule-text);
+  box-shadow:
+    0 4px 6px -2px rgba(17, 17, 17, 0.03),
+    0 12px 16px -4px rgba(17, 17, 17, 0.1),
+    0 0 1px 0 rgba(242, 241, 240, 0.55);
+  backdrop-filter: blur(4px);
 }
 
 /* Shimmer text used by the "Thinking" capsule state */

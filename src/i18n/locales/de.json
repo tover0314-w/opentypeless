@@ -343,19 +343,21 @@
     "modeAsk": "Frag alles",
     "modeTranslating": "Übersetzen nach {{language}}",
     "alerts": {
-      "guideTitle": "Tastenkürzel",
+      "guideTitle": "{{app}}-Tastenkürzel",
       "guidePrefix": "Einmal tippen zum Sprechen. Drücke",
       "guideSuffix": "zum Beenden.",
       "guideDictate": "Diktieren",
       "guideTranslate": "Übersetzen",
       "guideAsk": "Frag alles",
-      "pressToFinishPrefix": "Drücke nächstes Mal",
-      "pressToFinishSuffix": "zum Beenden",
+      "pressToFinishPrefix": "Tipp: Drücke",
+      "pressToFinishSuffix": "zum schnelleren Beenden",
       "weakNetwork": "Dauert länger als üblich…",
       "copyLastTitle": "Letzte Transkription kopieren",
       "copy": "Kopieren",
       "copied": "Kopiert",
-      "cancelled": "Transkription abgebrochen"
+      "cancelled": "Transkription abgebrochen",
+      "previousPendingTitle": "Letzte Diktierung wird noch verarbeitet",
+      "previousPendingDesc": "Warte kurz oder brich sie ab, um neu zu beginnen."
     }
   },
   "settings": {

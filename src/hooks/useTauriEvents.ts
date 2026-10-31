@@ -157,6 +157,9 @@ export function useTauriEvents() {
     addListener<{ kind: CapsuleAlertKind }>('capsule:alert', (payload) => {
       useCapsuleAlertStore.getState().show(payload.kind)
     })
+    addListener<{ kind: CapsuleAlertKind }>('capsule:alert_dismiss', (payload) => {
+      useCapsuleAlertStore.getState().dismiss(payload.kind)
+    })
     addListener<ContextProfileSummary>('pipeline:context', setLastContext)
     addListener<PipelineErrorPayload>('pipeline:error', (payload) => {
       const capsuleErrorKey = capsuleErrorKeyFromPayload(payload)

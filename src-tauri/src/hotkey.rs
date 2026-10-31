@@ -720,31 +720,173 @@ enum RecordingShortcutAction {
         options: pipeline::PipelineStartOptions,
     },
     Stop,
-    /// Auto mode: the key was held past the long-press threshold, so the take is discarded
-    /// and the user is shown how the shortcut works.
+    /// Auto mode: the key was released after the long-press threshold but before the guide
+    /// timer fired, so the take is discarded silently.
     CancelLongPress,
+    /// Auto mode: the long-press guide is on screen and the key was released, so hide it.
+    DismissLongPressGuide,
+    /// The key was pressed while the previous take is still being processed.
+    PreviousPending,
     Ignore,
 }
 
-/// Holding the dictation key longer than this in auto mode is treated as a mistaken
-/// push-to-talk attempt rather than a tap (Typeless `LONG_PRESS_MS`).
+/// Holding a voice key longer than this in auto mode is treated as a mistaken push-to-talk
+/// attempt rather than a tap (Typeless `LONG_PRESS_MS`).
 pub const AUTO_MODE_LONG_PRESS: Duration = Duration::from_millis(600);
 
-/// Tracks the press that started an auto-mode recording so its release can be classified.
 #[derive(Default)]
-pub struct AutoPressTracker(Mutex<Option<std::time::Instant>>);
+struct AutoPress {
+    generation: u64,
+    /// Last key-down while the key is believed held; cleared on release.
+    last_key_down: Option<std::time::Instant>,
+    pressed_at: Option<std::time::Instant>,
+    long_held: bool,
+}
+
+/// OS auto-repeat fires every ~30–100 ms; a longer gap means a release was lost and the
+/// key-down is a genuine new press.
+const KEY_REPEAT_WINDOW: Duration = Duration::from_millis(1000);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PressRelease {
+    pub held: Duration,
+    /// The long-press timer fired and the shortcut guide is showing.
+    pub long_held: bool,
+}
+
+/// Tracks the press that started an auto-mode session so the long-press timer and the release
+/// are classified against the same press.
+#[derive(Default)]
+pub struct AutoPressTracker(Mutex<AutoPress>);
 
 impl AutoPressTracker {
-    pub fn mark_pressed(&self, at: std::time::Instant) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+    fn lock(&self) -> std::sync::MutexGuard<'_, AutoPress> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    pub fn take_held_for(&self, now: std::time::Instant) -> Option<Duration> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-            .map(|pressed_at| now.saturating_duration_since(pressed_at))
+    /// Records a key-down; returns true when it is an OS auto-repeat of a key still held.
+    pub fn begin_press(&self, now: std::time::Instant) -> bool {
+        let mut press = self.lock();
+        let repeat = press
+            .last_key_down
+            .is_some_and(|last| now.saturating_duration_since(last) < KEY_REPEAT_WINDOW);
+        press.last_key_down = Some(now);
+        repeat
+    }
+
+    /// Records a session-starting press and returns its generation for the long-press timer.
+    pub fn mark_pressed(&self, at: std::time::Instant) -> u64 {
+        let mut press = self.lock();
+        press.generation += 1;
+        press.pressed_at = Some(at);
+        press.long_held = false;
+        press.generation
+    }
+
+    /// Returns true exactly once when press `generation` is still held at the threshold.
+    pub fn claim_long_hold(&self, generation: u64) -> bool {
+        let mut press = self.lock();
+        if press.generation != generation || press.pressed_at.is_none() || press.long_held {
+            return false;
+        }
+        press.long_held = true;
+        true
+    }
+
+    pub fn take_release(&self, now: std::time::Instant) -> Option<PressRelease> {
+        let mut press = self.lock();
+        press.last_key_down = None;
+        let pressed_at = press.pressed_at.take()?;
+        Some(PressRelease {
+            held: now.saturating_duration_since(pressed_at),
+            long_held: std::mem::take(&mut press.long_held),
+        })
+    }
+
+    pub fn clear(&self) {
+        let mut press = self.lock();
+        press.pressed_at = None;
+        press.long_held = false;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LongPressTarget {
+    Dictation,
+    Ask,
+}
+
+fn emit_capsule_alert(handle: &tauri::AppHandle, kind: &str) {
+    let _ = handle.emit("capsule:alert", serde_json::json!({ "kind": kind }));
+}
+
+fn dismiss_capsule_alert(handle: &tauri::AppHandle, kind: &str) {
+    let _ = handle.emit("capsule:alert_dismiss", serde_json::json!({ "kind": kind }));
+}
+
+fn abort_long_press_session(handle: &tauri::AppHandle, target: LongPressTarget) {
+    match target {
+        LongPressTarget::Dictation => handle.state::<pipeline::PipelineHandle>().abort(),
+        LongPressTarget::Ask => {
+            let _ = commands::ask::abort_ask_dictation(handle.clone(), handle.state());
+        }
+    }
+}
+
+/// Typeless shows its shortcut table as soon as a hold crosses the threshold, while the key is
+/// still down, and discards the take; the table goes away on release.
+fn arm_long_press_guide(handle: tauri::AppHandle, generation: u64, target: LongPressTarget) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(AUTO_MODE_LONG_PRESS).await;
+        if handle
+            .state::<AutoPressTracker>()
+            .claim_long_hold(generation)
+        {
+            abort_long_press_session(&handle, target);
+            emit_capsule_alert(&handle, "shortcut_guide");
+        }
+    });
+}
+
+fn current_hotkey_mode(handle: &tauri::AppHandle) -> String {
+    handle
+        .state::<HotkeyModeCache>()
+        .0
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Auto-mode press bookkeeping shared by every voice shortcut.
+enum AutoPressEvent {
+    /// Another key-down while the key is still held; the OS is auto-repeating.
+    Repeat,
+    Pressed,
+    Released(Option<PressRelease>),
+}
+
+fn track_auto_press(
+    handle: &tauri::AppHandle,
+    event_state: ShortcutState,
+    starts_session: bool,
+    target: LongPressTarget,
+) -> AutoPressEvent {
+    let tracker = handle.state::<AutoPressTracker>();
+    let now = std::time::Instant::now();
+    match event_state {
+        ShortcutState::Pressed => {
+            if tracker.begin_press(now) {
+                return AutoPressEvent::Repeat;
+            }
+            if starts_session {
+                let generation = tracker.mark_pressed(now);
+                arm_long_press_guide(handle.clone(), generation, target);
+            } else {
+                tracker.clear();
+            }
+            AutoPressEvent::Pressed
+        }
+        ShortcutState::Released => AutoPressEvent::Released(tracker.take_release(now)),
     }
 }
 
@@ -778,16 +920,23 @@ fn ask_shortcut_action(
 fn auto_recording_shortcut_action(
     event_state: ShortcutState,
     pipeline_state: pipeline::PipelineState,
-    held_for: Option<Duration>,
+    release: Option<PressRelease>,
     options: pipeline::PipelineStartOptions,
 ) -> RecordingShortcutAction {
+    use pipeline::PipelineState as S;
     match (event_state, pipeline_state) {
-        (ShortcutState::Pressed, pipeline::PipelineState::Idle) => {
-            RecordingShortcutAction::Start { options }
+        (ShortcutState::Pressed, S::Idle) => RecordingShortcutAction::Start { options },
+        (ShortcutState::Pressed, S::Transcribing | S::Polishing | S::Outputting) => {
+            RecordingShortcutAction::PreviousPending
         }
         (ShortcutState::Pressed, _) => RecordingShortcutAction::Stop,
-        (ShortcutState::Released, _) => match held_for {
-            Some(held) if held >= AUTO_MODE_LONG_PRESS => RecordingShortcutAction::CancelLongPress,
+        (ShortcutState::Released, _) => match release {
+            Some(PressRelease {
+                long_held: true, ..
+            }) => RecordingShortcutAction::DismissLongPressGuide,
+            Some(PressRelease { held, .. }) if held >= AUTO_MODE_LONG_PRESS => {
+                RecordingShortcutAction::CancelLongPress
+            }
             _ => RecordingShortcutAction::Ignore,
         },
     }
@@ -926,11 +1075,13 @@ fn handle_recording_shortcut(handle: tauri::AppHandle, action: RecordingShortcut
             });
         }
         RecordingShortcutAction::CancelLongPress => {
-            handle.state::<pipeline::PipelineHandle>().abort();
-            let _ = handle.emit(
-                "capsule:alert",
-                serde_json::json!({ "kind": "shortcut_guide" }),
-            );
+            abort_long_press_session(&handle, LongPressTarget::Dictation);
+        }
+        RecordingShortcutAction::DismissLongPressGuide => {
+            dismiss_capsule_alert(&handle, "shortcut_guide");
+        }
+        RecordingShortcutAction::PreviousPending => {
+            emit_capsule_alert(&handle, "previous_pending");
         }
         RecordingShortcutAction::Ignore => {}
     }
@@ -942,31 +1093,64 @@ fn dictation_shortcut_action(
     event_state: ShortcutState,
     options: pipeline::PipelineStartOptions,
 ) -> RecordingShortcutAction {
-    let hotkey_mode = handle
-        .state::<HotkeyModeCache>()
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
+    let hotkey_mode = current_hotkey_mode(handle);
     let pipeline_state = handle.state::<pipeline::PipelineHandle>().current_state();
     if hotkey_mode != "auto" {
         return recording_shortcut_action(&hotkey_mode, event_state, pipeline_state, options);
     }
 
-    let tracker = handle.state::<AutoPressTracker>();
-    let now = std::time::Instant::now();
-    let held_for = match event_state {
-        ShortcutState::Pressed => {
-            if pipeline_state == pipeline::PipelineState::Idle {
-                tracker.mark_pressed(now);
-            } else {
-                let _ = tracker.take_held_for(now);
-            }
-            None
-        }
-        ShortcutState::Released => tracker.take_held_for(now),
+    let starts_session = pipeline_state == pipeline::PipelineState::Idle
+        && !handle.state::<commands::ask::AskDictationState>().is_busy();
+    let release = match track_auto_press(
+        handle,
+        event_state,
+        starts_session,
+        LongPressTarget::Dictation,
+    ) {
+        AutoPressEvent::Repeat => return RecordingShortcutAction::Ignore,
+        AutoPressEvent::Pressed => None,
+        AutoPressEvent::Released(release) => release,
     };
-    auto_recording_shortcut_action(event_state, pipeline_state, held_for, options)
+    auto_recording_shortcut_action(event_state, pipeline_state, release, options)
+}
+
+/// Ask shortcuts always toggle; in auto mode a long hold additionally discards the take and
+/// shows the shortcut guide, like the dictation key.
+fn handle_ask_role_event(handle: tauri::AppHandle, event_state: ShortcutState) {
+    let action = {
+        let ask_state = handle.state::<commands::ask::AskDictationState>();
+        ask_shortcut_action(
+            event_state,
+            ask_state.is_recording(),
+            ask_state.is_starting(),
+            ask_state.is_busy(),
+        )
+    };
+    if current_hotkey_mode(&handle) == "auto" {
+        match track_auto_press(
+            &handle,
+            event_state,
+            action == AskShortcutAction::Start,
+            LongPressTarget::Ask,
+        ) {
+            AutoPressEvent::Repeat => return,
+            AutoPressEvent::Pressed => {}
+            AutoPressEvent::Released(Some(PressRelease {
+                long_held: true, ..
+            })) => {
+                dismiss_capsule_alert(&handle, "shortcut_guide");
+                return;
+            }
+            AutoPressEvent::Released(Some(PressRelease { held, .. }))
+                if held >= AUTO_MODE_LONG_PRESS =>
+            {
+                abort_long_press_session(&handle, LongPressTarget::Ask);
+                return;
+            }
+            AutoPressEvent::Released(_) => {}
+        }
+    }
+    handle_ask_shortcut(handle, action);
 }
 
 fn handle_advanced_role_shortcut(
@@ -986,16 +1170,7 @@ pub fn handle_hotkey_role_event(
     event_state: ShortcutState,
 ) {
     match role {
-        HotkeyRole::Ask => {
-            let ask_state = handle.state::<commands::ask::AskDictationState>();
-            let action = ask_shortcut_action(
-                event_state,
-                ask_state.is_recording(),
-                ask_state.is_starting(),
-                ask_state.is_busy(),
-            );
-            handle_ask_shortcut(handle, action);
-        }
+        HotkeyRole::Ask => handle_ask_role_event(handle, event_state),
         HotkeyRole::TranslateSelection => {
             let action = dictation_shortcut_action(
                 &handle,
@@ -1007,23 +1182,12 @@ pub fn handle_hotkey_role_event(
             handle_recording_shortcut(handle, action);
         }
         HotkeyRole::Dictation => {
-            let ask_action = {
+            let ask_active = {
                 let ask_state = handle.state::<commands::ask::AskDictationState>();
-                let is_recording = ask_state.is_recording();
-                let is_starting = ask_state.is_starting();
-                if is_recording || is_starting {
-                    Some(ask_shortcut_action(
-                        event_state,
-                        is_recording,
-                        is_starting,
-                        ask_state.is_busy(),
-                    ))
-                } else {
-                    None
-                }
+                ask_state.is_recording() || ask_state.is_starting()
             };
-            if let Some(action) = ask_action {
-                handle_ask_shortcut(handle, action);
+            if ask_active {
+                handle_ask_role_event(handle, event_state);
                 return;
             }
 
@@ -1621,6 +1785,13 @@ mod tests {
         );
     }
 
+    fn release(held_ms: u64, long_held: bool) -> Option<PressRelease> {
+        Some(PressRelease {
+            held: Duration::from_millis(held_ms),
+            long_held,
+        })
+    }
+
     #[test]
     fn auto_mode_tap_starts_hands_free_and_next_tap_finishes() {
         let options = pipeline::PipelineStartOptions::default();
@@ -1637,7 +1808,7 @@ mod tests {
             auto_recording_shortcut_action(
                 ShortcutState::Released,
                 pipeline::PipelineState::Recording,
-                Some(Duration::from_millis(180)),
+                release(180, false),
                 options,
             ),
             RecordingShortcutAction::Ignore
@@ -1654,22 +1825,41 @@ mod tests {
     }
 
     #[test]
-    fn auto_mode_long_press_discards_the_take() {
+    fn auto_mode_press_while_processing_reports_previous_pending() {
+        for state in [
+            pipeline::PipelineState::Transcribing,
+            pipeline::PipelineState::Polishing,
+            pipeline::PipelineState::Outputting,
+        ] {
+            assert_eq!(
+                auto_recording_shortcut_action(
+                    ShortcutState::Pressed,
+                    state,
+                    None,
+                    pipeline::PipelineStartOptions::default(),
+                ),
+                RecordingShortcutAction::PreviousPending
+            );
+        }
+    }
+
+    #[test]
+    fn auto_mode_long_press_release_hides_guide_or_discards_the_take() {
         let options = pipeline::PipelineStartOptions::default();
         assert_eq!(
             auto_recording_shortcut_action(
                 ShortcutState::Released,
-                pipeline::PipelineState::Recording,
-                Some(AUTO_MODE_LONG_PRESS),
+                pipeline::PipelineState::Idle,
+                release(900, true),
                 options,
             ),
-            RecordingShortcutAction::CancelLongPress
+            RecordingShortcutAction::DismissLongPressGuide
         );
         assert_eq!(
             auto_recording_shortcut_action(
                 ShortcutState::Released,
                 pipeline::PipelineState::Preparing,
-                Some(Duration::from_millis(900)),
+                release(600, false),
                 options,
             ),
             RecordingShortcutAction::CancelLongPress
@@ -1691,16 +1881,68 @@ mod tests {
     }
 
     #[test]
-    fn auto_press_tracker_reports_hold_duration_once() {
+    fn auto_press_tracker_reports_hold_once() {
         let tracker = AutoPressTracker::default();
         let pressed = std::time::Instant::now();
         tracker.mark_pressed(pressed);
-        let held = tracker.take_held_for(pressed + Duration::from_millis(700));
-        assert_eq!(held, Some(Duration::from_millis(700)));
         assert_eq!(
-            tracker.take_held_for(pressed + Duration::from_secs(2)),
-            None
+            tracker.take_release(pressed + Duration::from_millis(700)),
+            Some(PressRelease {
+                held: Duration::from_millis(700),
+                long_held: false,
+            })
         );
+        assert_eq!(tracker.take_release(pressed + Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn auto_press_tracker_claims_long_hold_only_for_the_current_press() {
+        let tracker = AutoPressTracker::default();
+        let pressed = std::time::Instant::now();
+        let stale = tracker.mark_pressed(pressed);
+        let _ = tracker.take_release(pressed + Duration::from_millis(100));
+        let current = tracker.mark_pressed(pressed + Duration::from_millis(200));
+
+        assert!(!tracker.claim_long_hold(stale));
+        assert!(tracker.claim_long_hold(current));
+        assert!(!tracker.claim_long_hold(current));
+        assert_eq!(
+            tracker
+                .take_release(pressed + Duration::from_millis(1000))
+                .map(|r| r.long_held),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn auto_press_tracker_flags_os_key_repeat_until_release() {
+        let tracker = AutoPressTracker::default();
+        let t0 = std::time::Instant::now();
+        assert!(!tracker.begin_press(t0));
+        assert!(tracker.begin_press(t0 + Duration::from_millis(50)));
+        let _ = tracker.take_release(t0 + Duration::from_millis(80));
+        assert!(!tracker.begin_press(t0 + Duration::from_millis(120)));
+    }
+
+    #[test]
+    fn auto_press_tracker_recovers_from_a_lost_release() {
+        let tracker = AutoPressTracker::default();
+        let t0 = std::time::Instant::now();
+        assert!(!tracker.begin_press(t0));
+        assert!(!tracker.begin_press(t0 + Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn auto_press_tracker_released_press_cannot_claim_long_hold() {
+        let tracker = AutoPressTracker::default();
+        let pressed = std::time::Instant::now();
+        let generation = tracker.mark_pressed(pressed);
+        let _ = tracker.take_release(pressed + Duration::from_millis(150));
+        assert!(!tracker.claim_long_hold(generation));
+
+        let generation = tracker.mark_pressed(pressed);
+        tracker.clear();
+        assert!(!tracker.claim_long_hold(generation));
     }
 
     #[test]

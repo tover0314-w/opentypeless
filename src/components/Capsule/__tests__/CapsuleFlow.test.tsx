@@ -199,13 +199,81 @@ describe('Capsule bar views', () => {
 })
 
 describe('Capsule alerts', () => {
-  it('shows the shortcut guide with every configured shortcut', () => {
+  function setHotkeys() {
+    const config = useAppStore.getState().config
+    useAppStore.setState({
+      config: {
+        ...config,
+        hotkeys: {
+          ...config.hotkeys,
+          dictation: { primary: 'LeftShift', modifiers: [] },
+          dictationBindings: [{ primary: 'LeftShift', modifiers: [] }],
+          translate: { primary: 'LeftShift', modifiers: ['Fn'] },
+          translateBindings: [{ primary: 'LeftShift', modifiers: ['Fn'] }],
+          ask: { primary: 'Space', modifiers: ['LeftShift'] },
+          askBindings: [{ primary: 'Space', modifiers: ['LeftShift'] }],
+        },
+      },
+    })
+  }
+
+  it('shows the Typeless shortcut table with one row per voice feature', () => {
+    setHotkeys()
     useCapsuleAlertStore.getState().show('shortcut_guide')
-    render(<Capsule />)
+    const { container } = render(<Capsule />)
 
     expect(screen.getByText('capsule.alerts.guideTitle')).toBeInTheDocument()
-    expect(screen.getByText('capsule.alerts.guideDictate')).toBeInTheDocument()
-    expect(screen.getByText('capsule.alerts.guideAsk')).toBeInTheDocument()
+    const rows = container.querySelectorAll('[data-guide-row]')
+    expect([...rows].map((row) => row.getAttribute('data-guide-row'))).toEqual([
+      'dictate',
+      'translate',
+      'ask',
+    ])
+    expect(rows[1].textContent).toBe('capsule.alerts.guideTranslateFnLeft Shift')
+    expect(rows[2].textContent).toBe('capsule.alerts.guideAskLeft ShiftSpace')
+  })
+
+  it('hides the shortcut table when the backend dismisses it on key release', async () => {
+    useCapsuleAlertStore.getState().show('shortcut_guide')
+    render(<Capsule />)
+    expect(screen.getByText('capsule.alerts.guideTitle')).toBeInTheDocument()
+
+    act(() => useCapsuleAlertStore.getState().dismiss('shortcut_guide'))
+    expect(screen.queryByText('capsule.alerts.guideTitle')).toBeNull()
+  })
+
+  it('shows a Finish tooltip with the dictation key while hovering the check button', () => {
+    setHotkeys()
+    useAppStore.setState({ pipelineState: 'recording' })
+    render(<Capsule />)
+
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'capsule.finish' }))
+    expect(screen.getByRole('tooltip').textContent).toBe('capsule.finishLeft Shift')
+    fireEvent.pointerLeave(screen.getByRole('button', { name: 'capsule.finish' }))
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('nudges toward the keyboard finish once after clicking the check button', () => {
+    localStorage.removeItem('capsule.pressToFinishShownAt')
+    useAppStore.setState({ pipelineState: 'ask_recording' })
+    render(<Capsule />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.finish' }))
+    expect(useCapsuleAlertStore.getState().alert?.kind).toBe('press_to_finish')
+
+    act(() => useCapsuleAlertStore.getState().dismiss())
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.finish' }))
+    expect(useCapsuleAlertStore.getState().alert).toBeNull()
+  })
+
+  it('offers to cancel a take that is still processing', () => {
+    useCapsuleAlertStore.getState().show('previous_pending')
+    render(<Capsule />)
+
+    expect(screen.getByText('capsule.alerts.previousPendingTitle')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'capsule.cancel' }))
+    expect(abortRecording).toHaveBeenCalled()
+    expect(useCapsuleAlertStore.getState().alert).toBeNull()
   })
 
   it('offers to copy the last transcript when it could not be inserted', async () => {

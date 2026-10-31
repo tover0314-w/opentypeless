@@ -343,19 +343,21 @@
     "modeAsk": "Pergunte qualquer coisa",
     "modeTranslating": "Traduzindo para {{language}}",
     "alerts": {
-      "guideTitle": "Atalhos",
+      "guideTitle": "Atalhos do {{app}}",
       "guidePrefix": "Toque uma vez para falar. Pressione",
       "guideSuffix": "para concluir.",
       "guideDictate": "Ditar",
       "guideTranslate": "Traduzir",
       "guideAsk": "Pergunte qualquer coisa",
-      "pressToFinishPrefix": "Da próxima vez, pressione",
-      "pressToFinishSuffix": "para concluir",
+      "pressToFinishPrefix": "Dica: pressione",
+      "pressToFinishSuffix": "para concluir mais rápido",
       "weakNetwork": "Demorando mais que o normal…",
       "copyLastTitle": "Copiar a última transcrição",
       "copy": "Copiar",
       "copied": "Copiado",
-      "cancelled": "Transcrição cancelada"
+      "cancelled": "Transcrição cancelada",
+      "previousPendingTitle": "Ainda processando seu último ditado",
+      "previousPendingDesc": "Aguarde um momento ou cancele para recomeçar."
     }
   },
   "settings": {

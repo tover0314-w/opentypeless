@@ -343,19 +343,21 @@
     "modeAsk": "무엇이든 묻기",
     "modeTranslating": "{{language}}(으)로 번역 중",
     "alerts": {
-      "guideTitle": "단축키",
+      "guideTitle": "{{app}} 단축키",
       "guidePrefix": "한 번 탭하면 말하기 시작,",
       "guideSuffix": "을(를) 눌러 완료하세요.",
       "guideDictate": "받아쓰기",
       "guideTranslate": "번역",
       "guideAsk": "무엇이든 묻기",
-      "pressToFinishPrefix": "다음에는",
-      "pressToFinishSuffix": "을(를) 눌러 완료해 보세요",
+      "pressToFinishPrefix": "팁:",
+      "pressToFinishSuffix": "을(를) 누르면 더 빠르게 완료돼요",
       "weakNetwork": "평소보다 오래 걸리고 있습니다…",
       "copyLastTitle": "마지막 받아쓰기 복사",
       "copy": "복사",
       "copied": "복사됨",
-      "cancelled": "받아쓰기가 취소되었습니다"
+      "cancelled": "받아쓰기가 취소되었습니다",
+      "previousPendingTitle": "이전 받아쓰기를 아직 처리 중이에요",
+      "previousPendingDesc": "잠시 기다리거나 취소하고 다시 시작하세요."
     }
   },
   "settings": {

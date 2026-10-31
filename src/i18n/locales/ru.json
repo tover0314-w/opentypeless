@@ -343,19 +343,21 @@
     "modeAsk": "Спросить",
     "modeTranslating": "Перевод на {{language}}",
     "alerts": {
-      "guideTitle": "Сочетания клавиш",
+      "guideTitle": "Сочетания клавиш {{app}}",
       "guidePrefix": "Нажмите один раз, чтобы говорить. Нажмите",
       "guideSuffix": "для завершения.",
       "guideDictate": "Диктовка",
       "guideTranslate": "Перевод",
       "guideAsk": "Спросить",
-      "pressToFinishPrefix": "В следующий раз нажмите",
-      "pressToFinishSuffix": "для завершения",
+      "pressToFinishPrefix": "Совет: нажмите",
+      "pressToFinishSuffix": "чтобы завершить быстрее",
       "weakNetwork": "Дольше обычного…",
       "copyLastTitle": "Скопировать последнюю расшифровку",
       "copy": "Копировать",
       "copied": "Скопировано",
-      "cancelled": "Расшифровка отменена"
+      "cancelled": "Расшифровка отменена",
+      "previousPendingTitle": "Предыдущая диктовка ещё обрабатывается",
+      "previousPendingDesc": "Подождите немного или отмените её, чтобы начать заново."
     }
   },
   "settings": {

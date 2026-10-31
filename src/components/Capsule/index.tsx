@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { useTranslation } from 'react-i18next'
 import { X, Check } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
-import { useCapsuleAlertStore } from '../../stores/capsuleAlertStore'
+import { claimPressToFinishHint, useCapsuleAlertStore } from '../../stores/capsuleAlertStore'
 import { useRecording } from '../../hooks/useRecording'
 import { useCapsuleResize } from '../../hooks/useCapsuleResize'
 import { abortAskDictation, abortRecording, stopAskFlow } from '../../lib/tauri'
@@ -18,6 +18,8 @@ import {
 } from '../../lib/capsuleView'
 import { CapsuleContextMenu } from './CapsuleContextMenu'
 import { CapsuleAlertBubble } from './CapsuleAlertBubble'
+import { useVoiceHotkeys } from '../../lib/hotkeyLabels'
+import { Keycaps } from '../shared/Keycaps'
 import { TranslateTargetChip, TranslateTargetMenu } from './TranslateTargetChip'
 import { Waveform } from './Waveform'
 import { DurationTimer } from './DurationTimer'
@@ -38,6 +40,7 @@ export function Capsule() {
   const { stopRecording, isRecording } = useRecording()
   const { t } = useTranslation()
   const [hovered, setHovered] = useState(false)
+  const [finishHover, setFinishHover] = useState(false)
   const hoverTimer = useRef<number | null>(null)
 
   const dragStart = useRef<{ x: number; y: number } | null>(null)
@@ -152,6 +155,7 @@ export function Capsule() {
       {view === 'recording' && tone !== 'dictate' && <ModeLabel tone={tone} />}
 
       <div className="relative">
+        {view === 'recording' && finishHover && <FinishTooltip />}
         {(view === 'recording' || view === 'processing') && tone !== 'dictate' && (
           <ModeGlow tone={tone} />
         )}
@@ -173,7 +177,13 @@ export function Capsule() {
           {view === 'recording' && (
             <RecordingControls
               isAsk={isAsk}
-              onFinish={finish}
+              onFinishHover={setFinishHover}
+              onFinish={() => {
+                setFinishHover(false)
+                finish()
+                if (claimPressToFinishHint())
+                  useCapsuleAlertStore.getState().show('press_to_finish')
+              }}
               onCancel={() => {
                 const abort = isAsk ? abortAskDictation : abortRecording
                 abort().catch((error) => console.error('Failed to cancel recording:', error))
@@ -203,10 +213,12 @@ function HoverDots() {
 function RecordingControls({
   isAsk,
   onFinish,
+  onFinishHover,
   onCancel,
 }: {
   isAsk: boolean
   onFinish: () => void
+  onFinishHover: (hovered: boolean) => void
   onCancel: () => void
 }) {
   const { t } = useTranslation()
@@ -236,17 +248,33 @@ function RecordingControls({
       <button
         type="button"
         aria-label={t('capsule.finish')}
-        title={t('capsule.finish')}
         onPointerDown={stop}
         onPointerUp={stop}
+        onPointerEnter={() => onFinishHover(true)}
+        onPointerLeave={() => onFinishHover(false)}
         onClick={(event) => {
           event.stopPropagation()
           onFinish()
         }}
-        className="grid h-6 w-6 place-items-center rounded-full border-none bg-white text-black cursor-pointer hover:bg-white/85"
+        className="relative z-[2] grid h-6 w-6 place-items-center rounded-full border-none bg-white text-black cursor-pointer hover:bg-white/85"
       >
         <Check size={14} strokeWidth={3} />
       </button>
+    </div>
+  )
+}
+
+/** Typeless "Finish [key]" tooltip above the ✓ button, teaching the faster keyboard finish. */
+function FinishTooltip() {
+  const { t } = useTranslation()
+  const { dictate } = useVoiceHotkeys()
+  return (
+    <div
+      role="tooltip"
+      className="capsule-tooltip pointer-events-none absolute bottom-[calc(100%+8px)] right-[-14px] z-10 flex items-center gap-1.5 whitespace-nowrap text-[12px] leading-[18px]"
+    >
+      {t('capsule.finish')}
+      {dictate && <Keycaps hotkey={dictate} />}
     </div>
   )
 }

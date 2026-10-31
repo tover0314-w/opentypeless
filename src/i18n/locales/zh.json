@@ -343,19 +343,21 @@
     "modeAsk": "随便问",
     "modeTranslating": "翻译为 {{language}}",
     "alerts": {
-      "guideTitle": "快捷键",
+      "guideTitle": "{{app}} 快捷键",
       "guidePrefix": "轻按一次开始说话，按",
       "guideSuffix": "完成。",
       "guideDictate": "口述",
       "guideTranslate": "翻译",
       "guideAsk": "随便问",
-      "pressToFinishPrefix": "下次试试按",
-      "pressToFinishSuffix": "来完成",
+      "pressToFinishPrefix": "小提示：按",
+      "pressToFinishSuffix": "可以更快完成",
       "weakNetwork": "比平常慢一些…",
       "copyLastTitle": "复制上一条转录",
       "copy": "复制",
       "copied": "已复制",
-      "cancelled": "已取消本次转录"
+      "cancelled": "已取消本次转录",
+      "previousPendingTitle": "上一段口述仍在处理中",
+      "previousPendingDesc": "请稍候，或取消它重新开始。"
     }
   },
   "settings": {
