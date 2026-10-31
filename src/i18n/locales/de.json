@@ -305,7 +305,21 @@
       "skip": "Überspringen",
       "back": "Zurück",
       "next": "Weiter",
-      "close": "Schließen"
+      "close": "Schließen",
+      "progress": "Einrichtungsfortschritt"
+    },
+    "stages": {
+      "signUp": "Registrieren",
+      "setUp": "Einrichten",
+      "tryIt": "Ausprobieren"
+    },
+    "art": {
+      "welcome": "Sprich natürlich und erhalte in jeder App sauberen, versandfertigen Text.",
+      "speech": "Spracherkennung",
+      "polish": "KI-Feinschliff",
+      "privacy": "Datenschutz & Sicherheit",
+      "privacyDesc": "Erlaube {{app}}, in die aktive App zu schreiben. Jederzeit änderbar.",
+      "sample": "Hallo zusammen, kurzes Update: Das Release am Freitag liegt im Plan."
     }
   },
   "capsule": {

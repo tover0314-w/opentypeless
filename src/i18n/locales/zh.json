@@ -305,7 +305,21 @@
       "skip": "跳过",
       "back": "上一步",
       "next": "下一步",
-      "close": "关闭"
+      "close": "关闭",
+      "progress": "设置进度"
+    },
+    "stages": {
+      "signUp": "注册",
+      "setUp": "设置",
+      "tryIt": "体验一下"
+    },
+    "art": {
+      "welcome": "自然地说话，在任何应用里得到干净、可直接发送的文字。",
+      "speech": "语音识别",
+      "polish": "AI 润色",
+      "privacy": "隐私与安全性",
+      "privacyDesc": "允许 {{app}} 把文字输入到你正在使用的应用中，随时可以更改。",
+      "sample": "大家好，同步一下：本周五的发布进度正常。"
     }
   },
   "capsule": {

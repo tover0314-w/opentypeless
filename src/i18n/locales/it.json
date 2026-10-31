@@ -305,7 +305,21 @@
       "skip": "Salta",
       "back": "Indietro",
       "next": "Avanti",
-      "close": "Chiudi"
+      "close": "Chiudi",
+      "progress": "Avanzamento della configurazione"
+    },
+    "stages": {
+      "signUp": "Registrazione",
+      "setUp": "Configurazione",
+      "tryIt": "Prova"
+    },
+    "art": {
+      "welcome": "Parla in modo naturale e ottieni testo pulito, pronto da inviare, in qualsiasi app.",
+      "speech": "Riconoscimento vocale",
+      "polish": "Rifinitura IA",
+      "privacy": "Privacy e sicurezza",
+      "privacyDesc": "Consenti a {{app}} di scrivere nell'app che stai usando. Puoi cambiarlo quando vuoi.",
+      "sample": "Ciao a tutti, aggiornamento veloce: il rilascio di venerdì è nei tempi."
     }
   },
   "capsule": {

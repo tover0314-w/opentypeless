@@ -305,7 +305,21 @@
       "skip": "Skip",
       "back": "Back",
       "next": "Next",
-      "close": "Close"
+      "close": "Close",
+      "progress": "Setup progress"
+    },
+    "stages": {
+      "signUp": "Sign up",
+      "setUp": "Set up",
+      "tryIt": "Try it"
+    },
+    "art": {
+      "welcome": "Speak naturally. Get clean, ready-to-send text in any app.",
+      "speech": "Speech recognition",
+      "polish": "AI polish",
+      "privacy": "Privacy & Security",
+      "privacyDesc": "Allow {{app}} to type into the app you are using. You can change this any time.",
+      "sample": "Hi team, quick update: the release is on track for Friday."
     }
   },
   "capsule": {

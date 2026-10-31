@@ -305,7 +305,21 @@
       "skip": "Pular",
       "back": "Voltar",
       "next": "Próximo",
-      "close": "Fechar"
+      "close": "Fechar",
+      "progress": "Progresso da configuração"
+    },
+    "stages": {
+      "signUp": "Cadastro",
+      "setUp": "Configuração",
+      "tryIt": "Experimente"
+    },
+    "art": {
+      "welcome": "Fale naturalmente e tenha texto limpo, pronto para enviar, em qualquer app.",
+      "speech": "Reconhecimento de voz",
+      "polish": "Polimento com IA",
+      "privacy": "Privacidade e segurança",
+      "privacyDesc": "Permita que o {{app}} digite no app que você está usando. Dá para mudar quando quiser.",
+      "sample": "Oi, pessoal, atualização rápida: o lançamento de sexta está no prazo."
     }
   },
   "capsule": {

@@ -305,7 +305,21 @@
       "skip": "Ignorer",
       "back": "Retour",
       "next": "Suivant",
-      "close": "Fermer"
+      "close": "Fermer",
+      "progress": "Progression de la configuration"
+    },
+    "stages": {
+      "signUp": "Inscription",
+      "setUp": "Configuration",
+      "tryIt": "Essayer"
+    },
+    "art": {
+      "welcome": "Parlez naturellement. Obtenez un texte propre, prêt à envoyer, dans n'importe quelle app.",
+      "speech": "Reconnaissance vocale",
+      "polish": "Correction IA",
+      "privacy": "Confidentialité et sécurité",
+      "privacyDesc": "Autorisez {{app}} à écrire dans l'app que vous utilisez. Modifiable à tout moment.",
+      "sample": "Bonjour à tous, point rapide : la sortie de vendredi est dans les temps."
     }
   },
   "capsule": {

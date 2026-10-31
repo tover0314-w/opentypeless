@@ -305,7 +305,21 @@
       "skip": "Omitir",
       "back": "Atrás",
       "next": "Siguiente",
-      "close": "Cerrar"
+      "close": "Cerrar",
+      "progress": "Progreso de la configuración"
+    },
+    "stages": {
+      "signUp": "Registro",
+      "setUp": "Configuración",
+      "tryIt": "Pruébalo"
+    },
+    "art": {
+      "welcome": "Habla con naturalidad y obtén texto limpio y listo para enviar en cualquier app.",
+      "speech": "Reconocimiento de voz",
+      "polish": "Pulido con IA",
+      "privacy": "Privacidad y seguridad",
+      "privacyDesc": "Permite que {{app}} escriba en la app que estás usando. Puedes cambiarlo cuando quieras.",
+      "sample": "Hola equipo, una actualización rápida: el lanzamiento del viernes va según lo previsto."
     }
   },
   "capsule": {
