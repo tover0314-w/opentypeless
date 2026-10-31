@@ -9,6 +9,7 @@ pub mod hotkey;
 #[cfg(target_os = "linux")]
 mod linux_x11;
 pub mod llm;
+pub mod media_control;
 pub mod native_hotkey;
 pub mod output;
 pub mod pipeline;
