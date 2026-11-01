@@ -343,6 +343,8 @@ describe('LlmPane', () => {
       mockAppStore.config.llm_model = 'llama3.2'
 
       render(<LlmPane />)
+      // Keyless providers test from the Base URL row inside the advanced section.
+      fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
       const button = screen.getByRole('button', { name: /test/i })
 
       expect(screen.queryByPlaceholderText('Enter API Key')).not.toBeInTheDocument()
@@ -576,8 +578,14 @@ describe('LlmPane', () => {
   })
 
   describe('Base URL input', () => {
+    it('keeps the base URL inside advanced settings', () => {
+      render(<LlmPane />)
+      expect(screen.queryByPlaceholderText('https://api.openai.com/v1')).not.toBeInTheDocument()
+    })
+
     it('updates config when base URL changes', () => {
       render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
       const input = screen.getByPlaceholderText('https://api.openai.com/v1')
 
       fireEvent.change(input, { target: { value: 'https://custom.api.com/v1' } })
@@ -593,21 +601,14 @@ describe('LlmPane', () => {
       mockAppStore.config.polish_enabled = false
       render(<LlmPane />)
 
-      const contextSwitch = screen
-        .getByText('Adapt writing to the current app')
-        .closest('label')
-        ?.querySelector('[role="switch"]')
+      const contextSwitch = screen.getByRole('switch', { name: 'Adapt writing to the current app' })
       expect(contextSwitch).toBeDisabled()
     })
 
     it('updates the context adaptation preference', () => {
       render(<LlmPane />)
-      const contextSwitch = screen
-        .getByText('Adapt writing to the current app')
-        .closest('label')
-        ?.querySelector('[role="switch"]')
-      expect(contextSwitch).not.toBeNull()
-      fireEvent.click(contextSwitch!)
+      const contextSwitch = screen.getByRole('switch', { name: 'Adapt writing to the current app' })
+      fireEvent.click(contextSwitch)
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         context_adaptation_enabled: false,
       })

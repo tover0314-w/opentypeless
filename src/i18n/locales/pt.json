@@ -12,7 +12,8 @@
     "upgrade": "Atualizar",
     "pro": "Pro",
     "mainNavigation": "Navegação principal",
-    "dictionary": "Dicionário"
+    "dictionary": "Dicionário",
+    "models": "Modelos"
   },
   "ask": {
     "title": "Perguntar",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "Responda chats e documentos com mensagens naturais."
       }
-    }
+    },
+    "editShortcut": "Alterar atalho",
+    "recordShortcut": "Pressione o novo atalho…",
+    "shortcutHint": "Clique em um atalho para alterá-lo"
   },
   "onboarding": {
     "speakToWrite": "Fale para escrever — transforme sua voz em texto polido em tempo real",
@@ -327,7 +331,6 @@
     "translationTarget": "Idioma de destino",
     "translationTargets": "Idiomas de destino",
     "thinking": "Pensando",
-    "done": "Pronto",
     "accessibilityRequired": "Acessibilidade necessária — abra as Configurações",
     "errors": {
       "stt_timeout": "STT expirou",
@@ -361,8 +364,6 @@
     "cancelAsk": "Cancelar pergunta",
     "finish": "Concluir",
     "clickToStart": "Clique para começar a ditar",
-    "modeAsk": "Pergunte qualquer coisa",
-    "modeTranslating": "Traduzindo para {{language}}",
     "alerts": {
       "guideTitle": "Atalhos do {{app}}",
       "guidePrefix": "Toque uma vez para falar. Pressione",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "Notas da versão",
       "feedback": "Relatar um problema"
     }
+  },
+  "modelsPage": {
+    "description": "Escolha os serviços de reconhecimento de voz e polimento com IA usados pelo OpenTypeless: OpenTypeless Cloud ou sua própria chave.",
+    "speechDescription": "Transforma sua voz em texto.",
+    "polishDescription": "Limpa, formata e traduz a transcrição.",
+    "providerDesc": "O serviço que transforma sua voz em texto.",
+    "polishProviderDesc": "O modelo que limpa e formata seu ditado.",
+    "apiKeyDesc": "Armazenada apenas neste dispositivo.",
+    "sttLanguageDesc": "O idioma que você costuma falar. A detecção automática serve para a maioria.",
+    "durationDesc": "A duração máxima de uma gravação.",
+    "modelDesc": "Escolha na lista do provedor ou digite o nome de um modelo.",
+    "baseUrlDesc": "O endpoint da API. Altere apenas para um proxy ou servidor próprio.",
+    "polishDesc": "Remove vícios de linguagem, corrige a pontuação e ajusta o texto antes de inserir.",
+    "contextDesc": "Escreve de forma mais casual em chats e mais formal em e-mails e documentos.",
+    "translateDesc": "Traduz cada ditado para o idioma escolhido.",
+    "polishStyleDesc": "O quanto a IA reescreve o que você disse.",
+    "advanced": "Avançado",
+    "connection": "Conexão",
+    "behavior": "Escrita"
   }
 }

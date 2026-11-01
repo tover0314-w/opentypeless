@@ -255,6 +255,7 @@ vi.mock('../../../stores/authStore', () => ({
 
 // ─── Import components AFTER mocks ───────────────────────────────────────────
 import { Settings } from '../index'
+import { ModelsPage } from '../../ModelsPage'
 import {
   checkAccessibilityPermission,
   getConfig,
@@ -331,13 +332,19 @@ function renderSettings() {
 // Legacy pane labels map onto the merged settings modal tabs.
 const LEGACY_TAB_LABELS: Record<string, string> = {
   'settings.general': 'settingsModal.tabs.settings',
-  'settings.speechRecognition': 'settingsModal.tabs.models',
-  'settings.aiPolish': 'settingsModal.tabs.models',
   'settings.scenes': 'settingsModal.tabs.personalization',
   'settings.about': 'settingsModal.tabs.about',
 }
 
+// Speech recognition and AI polish moved from the Settings modal to the sidebar Models page.
+const MODEL_SECTIONS = new Set(['settings.speechRecognition', 'settings.aiPolish'])
+
 function clickSidebarItem(label: string) {
+  if (MODEL_SECTIONS.has(label)) {
+    cleanup()
+    render(<ModelsPage />)
+    return
+  }
   const tabLabel = LEGACY_TAB_LABELS[label] ?? label
   const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
   const tab = within(nav).getByText(tabLabel).closest('button')
@@ -741,7 +748,7 @@ describe('Settings tab 切换', () => {
     renderSettings()
     const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
     expect(within(nav).queryByText('settings.dictionary')).toBeNull()
-    expect(within(nav).getByText('settingsModal.tabs.models')).toBeDefined()
+    expect(within(nav).queryByText('settingsModal.tabs.models')).toBeNull()
   })
 
   it('点击 Scenes 后显示本地 scenes 空状态（user=null）', () => {
@@ -762,8 +769,8 @@ describe('Settings tab 切换', () => {
 
   it('可以在多个 tab 之间来回切换', () => {
     renderSettings()
-    clickSidebarItem('settings.aiPolish')
-    expect(screen.getByText('settings.enableAiPolish')).toBeDefined()
+    clickSidebarItem('settings.scenes')
+    expect(screen.getByText('scenes.myScenes')).toBeDefined()
 
     clickSidebarItem('settings.general')
     expect(screen.getByText('settings.hotkey')).toBeDefined()
@@ -771,8 +778,8 @@ describe('Settings tab 切换', () => {
 
   it('切换到 Scenes 后不会残留上一个设置页内容', () => {
     renderSettings()
-    clickSidebarItem('settings.aiPolish')
-    expect(screen.getByText('settings.enableAiPolish')).toBeDefined()
+    clickSidebarItem('settings.about')
+    expect(screen.getByText('settings.openSource')).toBeDefined()
 
     clickSidebarItem('settings.general')
     expect(screen.getByText('settings.hotkey')).toBeDefined()

@@ -12,7 +12,8 @@
     "upgrade": "Tarif erweitern",
     "pro": "Pro",
     "mainNavigation": "Hauptnavigation",
-    "dictionary": "Wörterbuch"
+    "dictionary": "Wörterbuch",
+    "models": "Modelle"
   },
   "ask": {
     "title": "Fragen",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "Antworte in Chats und Dokumenten mit natürlichen Nachrichten."
       }
-    }
+    },
+    "editShortcut": "Kurzbefehl ändern",
+    "recordShortcut": "Neuen Kurzbefehl drücken…",
+    "shortcutHint": "Klicke auf einen Kurzbefehl, um ihn zu ändern"
   },
   "onboarding": {
     "speakToWrite": "Sprechen Sie, um zu schreiben — verwandeln Sie Ihre Stimme in Echtzeit in geglätteten Text",
@@ -327,7 +331,6 @@
     "translationTarget": "Übersetzungsziel",
     "translationTargets": "Übersetzungsziele",
     "thinking": "Denkt nach",
-    "done": "Fertig",
     "accessibilityRequired": "Bedienungshilfen erforderlich — Einstellungen öffnen",
     "errors": {
       "stt_timeout": "STT-Timeout",
@@ -361,8 +364,6 @@
     "cancelAsk": "Frage abbrechen",
     "finish": "Fertig",
     "clickToStart": "Klicken, um das Diktat zu starten",
-    "modeAsk": "Frag alles",
-    "modeTranslating": "Übersetzen nach {{language}}",
     "alerts": {
       "guideTitle": "{{app}}-Tastenkürzel",
       "guidePrefix": "Einmal tippen zum Sprechen. Drücke",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "Versionshinweise",
       "feedback": "Problem melden"
     }
+  },
+  "modelsPage": {
+    "description": "Wähle die Spracherkennungs- und KI-Dienste, die OpenTypeless nutzt – OpenTypeless Cloud oder dein eigener Schlüssel.",
+    "speechDescription": "Wandelt deine Stimme in Text um.",
+    "polishDescription": "Bereinigt, formatiert und übersetzt das Transkript.",
+    "providerDesc": "Der Dienst, der deine Stimme in Text umwandelt.",
+    "polishProviderDesc": "Das Modell, das dein Diktat bereinigt und formatiert.",
+    "apiKeyDesc": "Wird nur auf diesem Gerät gespeichert.",
+    "sttLanguageDesc": "Die Sprache, die du meistens sprichst. Automatische Erkennung passt für die meisten.",
+    "durationDesc": "Wie lange eine einzelne Aufnahme höchstens dauern darf.",
+    "modelDesc": "Aus der Liste des Anbieters wählen oder einen Modellnamen eingeben.",
+    "baseUrlDesc": "Der API-Endpunkt. Nur für einen Proxy oder eigenen Server ändern.",
+    "polishDesc": "Entfernt Füllwörter, korrigiert Satzzeichen und glättet Formulierungen vor dem Einfügen.",
+    "contextDesc": "Schreibt in Chat-Apps lockerer und in E-Mails und Dokumenten förmlicher.",
+    "translateDesc": "Übersetzt jedes Diktat in die gewählte Sprache.",
+    "polishStyleDesc": "Wie stark die KI das Gesagte umschreibt.",
+    "advanced": "Erweitert",
+    "connection": "Verbindung",
+    "behavior": "Schreiben"
   }
 }

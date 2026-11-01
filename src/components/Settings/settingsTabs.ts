@@ -1,9 +1,8 @@
-import { CircleUser, Settings as SettingsIcon, Cpu, PenLine, Info, CircleHelp } from 'lucide-react'
+import { CircleUser, Settings as SettingsIcon, PenLine, Info, CircleHelp } from 'lucide-react'
 
 export const SETTINGS_TABS = [
   { id: 'account', labelKey: 'settingsModal.tabs.account', icon: CircleUser },
   { id: 'general', labelKey: 'settingsModal.tabs.settings', icon: SettingsIcon },
-  { id: 'models', labelKey: 'settingsModal.tabs.models', icon: Cpu },
   { id: 'personalization', labelKey: 'settingsModal.tabs.personalization', icon: PenLine },
   { id: 'about', labelKey: 'settingsModal.tabs.about', icon: Info },
   { id: 'help', labelKey: 'settingsModal.tabs.help', icon: CircleHelp },
@@ -12,10 +11,9 @@ export const SETTINGS_TABS = [
 export type SettingsTabId = (typeof SETTINGS_TABS)[number]['id']
 export type PaneId = SettingsTabId
 
-// Older deep links (`#/settings?pane=stt`) keep working after panes were merged.
+// Older deep links keep working after panes were merged. Model panes now live on the
+// sidebar Models page; the router redirects those before Settings opens.
 const LEGACY_PANES: Record<string, SettingsTabId> = {
-  stt: 'models',
-  llm: 'models',
   scenes: 'personalization',
 }
 

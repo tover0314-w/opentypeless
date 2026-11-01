@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 
-export type Page = 'home' | 'history' | 'dictionary'
+export type Page = 'home' | 'history' | 'dictionary' | 'models'
 export type Modal = 'settings' | 'account' | 'upgrade'
 export type Route = Page | Modal
 
-const PAGES: readonly string[] = ['home', 'history', 'dictionary']
+const PAGES: readonly string[] = ['home', 'history', 'dictionary', 'models']
 const MODALS: readonly string[] = ['settings', 'account', 'upgrade']
 
 export interface AppLocation {
@@ -16,7 +16,15 @@ export interface AppLocation {
 let lastPage: Page = 'home'
 
 function routeFromHash(): Route {
-  const path = window.location.hash.replace('#/', '').split('?')[0]
+  const [path, query] = window.location.hash.replace('#/', '').split('?')
+  // Model settings moved from the Settings modal to their own page; keep old deep links working.
+  if (
+    path === 'settings' &&
+    query &&
+    ['models', 'stt', 'llm'].includes(new URLSearchParams(query).get('pane') ?? '')
+  ) {
+    return 'models'
+  }
   if (PAGES.includes(path) || MODALS.includes(path)) return path as Route
   return 'home'
 }

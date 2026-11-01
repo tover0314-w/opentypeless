@@ -1,4 +1,13 @@
-import { Home, History, BookOpen, CircleUser, Settings, CircleHelp, Github } from 'lucide-react'
+import {
+  Home,
+  History,
+  BookOpen,
+  Cpu,
+  CircleUser,
+  Settings,
+  CircleHelp,
+  Github,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { useRoute, type Page } from '../../lib/router'
@@ -13,6 +22,7 @@ const NAV_ITEMS: { id: Page; labelKey: string; icon: typeof Home }[] = [
   { id: 'home', labelKey: 'nav.home', icon: Home },
   { id: 'history', labelKey: 'nav.history', icon: History },
   { id: 'dictionary', labelKey: 'nav.dictionary', icon: BookOpen },
+  { id: 'models', labelKey: 'nav.models', icon: Cpu },
 ]
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
@@ -84,7 +94,7 @@ export function MainLayout({ children }: Props) {
           <div className="mt-auto space-y-3 pb-3">
             <UsageCard
               onUpgrade={() => navigate('upgrade')}
-              onOpenModels={() => navigate('settings', { pane: 'models' })}
+              onOpenModels={() => navigate('models')}
             />
             <div className="flex items-center border-t border-border-thin pt-3">
               <IconButton

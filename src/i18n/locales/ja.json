@@ -12,7 +12,8 @@
     "upgrade": "アップグレード",
     "pro": "Pro",
     "mainNavigation": "メインナビゲーション",
-    "dictionary": "辞書"
+    "dictionary": "辞書",
+    "models": "モデル"
   },
   "ask": {
     "title": "質問",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "チャットやドキュメントに自然な文章で返信。"
       }
-    }
+    },
+    "editShortcut": "ショートカットを変更",
+    "recordShortcut": "新しいショートカットを押してください…",
+    "shortcutHint": "ショートカットをクリックして変更"
   },
   "onboarding": {
     "speakToWrite": "話して書く — 音声をリアルタイムで整形されたテキストに変換します",
@@ -327,7 +331,6 @@
     "translationTarget": "翻訳先",
     "translationTargets": "翻訳先一覧",
     "thinking": "考え中",
-    "done": "完了",
     "accessibilityRequired": "アクセシビリティが必要です — 設定を開いてください",
     "errors": {
       "stt_timeout": "STT タイムアウト",
@@ -361,8 +364,6 @@
     "cancelAsk": "質問をキャンセル",
     "finish": "完了",
     "clickToStart": "クリックして音声入力を開始",
-    "modeAsk": "なんでも質問",
-    "modeTranslating": "{{language}} に翻訳中",
     "alerts": {
       "guideTitle": "{{app}} のショートカット",
       "guidePrefix": "1回タップで話し始め、",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "リリースノート",
       "feedback": "問題を報告"
     }
+  },
+  "modelsPage": {
+    "description": "OpenTypeless が使う音声認識と AI 校正のサービスを選びます。OpenTypeless クラウドか、自分の API キーを使えます。",
+    "speechDescription": "声をテキストに変換します。",
+    "polishDescription": "文字起こしを整え、書式を整え、翻訳します。",
+    "providerDesc": "音声をテキストに変換するサービスです。",
+    "polishProviderDesc": "音声入力を整えて書式を整えるモデルです。",
+    "apiKeyDesc": "このデバイスにのみ保存されます。",
+    "sttLanguageDesc": "普段話す言語です。多くの場合は自動検出で十分です。",
+    "durationDesc": "1 回の録音の最大の長さです。",
+    "modelDesc": "サービスの一覧から選ぶか、モデル名を入力します。",
+    "baseUrlDesc": "API のエンドポイントです。プロキシや自前のサーバーを使う場合のみ変更します。",
+    "polishDesc": "挿入前にフィラーを取り除き、句読点や言い回しを整えます。",
+    "contextDesc": "チャットではくだけた文体に、メールや文書ではより丁寧な文体にします。",
+    "translateDesc": "すべての音声入力を選んだ言語に翻訳します。",
+    "polishStyleDesc": "AI が話した内容をどの程度書き直すかです。",
+    "advanced": "詳細",
+    "connection": "接続",
+    "behavior": "文章"
   }
 }

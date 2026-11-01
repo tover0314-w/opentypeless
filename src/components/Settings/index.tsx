@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import { GeneralPane } from './GeneralPane'
-import { SttPane } from './SttPane'
-import { LlmPane } from './LlmPane'
 import { ScenesPane } from './ScenesPane'
 import { AboutPane } from './AboutPane'
 import { HelpPane } from './HelpPane'
@@ -83,22 +81,6 @@ export function Settings({ initialTab, onClose }: Props) {
         <div key={activeTab} className="w-full">
           {activeTab === 'account' && <AccountPage embedded />}
           {activeTab === 'general' && <GeneralPane />}
-          {activeTab === 'models' && (
-            <div className="space-y-10">
-              <section aria-label={t('settings.speechRecognition')}>
-                <h3 className="mb-3 border-b border-border-thin pb-4 text-[16px] font-medium text-text-tertiary">
-                  {t('settings.speechRecognition')}
-                </h3>
-                <SttPane />
-              </section>
-              <section aria-label={t('settings.aiPolish')}>
-                <h3 className="mb-3 border-b border-border-thin pb-4 text-[16px] font-medium text-text-tertiary">
-                  {t('settings.aiPolish')}
-                </h3>
-                <LlmPane />
-              </section>
-            </div>
-          )}
           {activeTab === 'personalization' && <ScenesPane />}
           {activeTab === 'about' && <AboutPane />}
           {activeTab === 'help' && (

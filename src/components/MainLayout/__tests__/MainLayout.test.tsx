@@ -48,6 +48,7 @@ vi.mock('react-i18next', () => ({
         'nav.account': 'Account',
         'nav.mainNavigation': 'Main navigation',
         'nav.dictionary': 'Dictionary',
+        'nav.models': 'Models',
         'settingsModal.tabs.help': 'Help',
         'cloudRecovery.sttBody': 'Cloud speech unavailable · audio was not resent',
         'cloudRecovery.tryAgain': 'Try again',
@@ -73,7 +74,7 @@ afterEach(() => {
 })
 
 describe('MainLayout', () => {
-  it('shows Home, History and Dictionary as the only primary pages', () => {
+  it('shows Home, History, Dictionary and Models as the primary pages', () => {
     render(
       <MainLayout>
         <div>content</div>
@@ -85,7 +86,7 @@ describe('MainLayout', () => {
       within(nav)
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['Home', 'History', 'Dictionary'])
+    ).toEqual(['Home', 'History', 'Dictionary', 'Models'])
   })
 
   it('opens Settings, Account and Help as overlays from the sidebar footer', () => {

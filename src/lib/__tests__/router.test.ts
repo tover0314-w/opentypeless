@@ -6,11 +6,18 @@ afterEach(() => {
 })
 
 describe('desktop route parsing', () => {
-  it('keeps direct recovery links inside Settings', () => {
-    window.location.hash = '#/settings?pane=stt'
+  it('redirects old model deep links to the sidebar Models page', () => {
+    for (const pane of ['stt', 'llm', 'models']) {
+      window.location.hash = `#/settings?pane=${pane}`
+      expect(parseHash()).toBe('models')
+    }
+    window.location.hash = '#/settings?pane=help'
     expect(parseHash()).toBe('settings')
-    window.location.hash = '#/settings?pane=llm'
-    expect(parseHash()).toBe('settings')
+  })
+
+  it('treats models as a first-class page', () => {
+    window.location.hash = '#/models'
+    expect(parseLocation()).toEqual({ page: 'models', modal: null })
   })
 
   it('treats dictionary as a first-class page', () => {
@@ -22,7 +29,7 @@ describe('desktop route parsing', () => {
     window.location.hash = '#/history'
     expect(parseLocation()).toEqual({ page: 'history', modal: null })
 
-    window.location.hash = '#/settings?pane=models'
+    window.location.hash = '#/settings?pane=general'
     expect(parseLocation()).toEqual({ page: 'history', modal: 'settings' })
 
     window.location.hash = '#/account'

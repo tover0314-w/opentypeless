@@ -12,7 +12,8 @@
     "upgrade": "업그레이드",
     "pro": "Pro",
     "mainNavigation": "메인 내비게이션",
-    "dictionary": "사전"
+    "dictionary": "사전",
+    "models": "모델"
   },
   "ask": {
     "title": "질문",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "채팅과 문서에 자연스러운 메시지로 답하세요."
       }
-    }
+    },
+    "editShortcut": "단축키 변경",
+    "recordShortcut": "새 단축키를 누르세요…",
+    "shortcutHint": "단축키를 클릭해 변경하세요"
   },
   "onboarding": {
     "speakToWrite": "말해서 글 쓰기 — 음성을 실시간으로 다듬어진 텍스트로 변환합니다",
@@ -327,7 +331,6 @@
     "translationTarget": "번역 대상",
     "translationTargets": "번역 대상 목록",
     "thinking": "생각 중",
-    "done": "완료",
     "accessibilityRequired": "접근성 권한이 필요합니다 — 설정을 여세요",
     "errors": {
       "stt_timeout": "STT 시간 초과",
@@ -361,8 +364,6 @@
     "cancelAsk": "질문 취소",
     "finish": "완료",
     "clickToStart": "클릭하여 받아쓰기 시작",
-    "modeAsk": "무엇이든 묻기",
-    "modeTranslating": "{{language}}(으)로 번역 중",
     "alerts": {
       "guideTitle": "{{app}} 단축키",
       "guidePrefix": "한 번 탭하면 말하기 시작,",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "릴리스 노트",
       "feedback": "문제 신고"
     }
+  },
+  "modelsPage": {
+    "description": "OpenTypeless가 사용할 음성 인식과 AI 다듬기 서비스를 선택하세요. OpenTypeless 클라우드나 직접 발급한 키를 쓸 수 있어요.",
+    "speechDescription": "목소리를 텍스트로 바꿔요.",
+    "polishDescription": "받아쓴 내용을 다듬고, 정리하고, 번역해요.",
+    "providerDesc": "음성을 텍스트로 바꾸는 서비스입니다.",
+    "polishProviderDesc": "받아쓰기 내용을 다듬고 서식을 정리하는 모델입니다.",
+    "apiKeyDesc": "이 기기에만 저장됩니다.",
+    "sttLanguageDesc": "평소에 말하는 언어입니다. 대부분은 자동 감지로 충분합니다.",
+    "durationDesc": "한 번 녹음할 수 있는 최대 길이입니다.",
+    "modelDesc": "서비스 목록에서 고르거나 모델 이름을 입력하세요.",
+    "baseUrlDesc": "API 엔드포인트입니다. 프록시나 자체 서버를 쓸 때만 바꾸세요.",
+    "polishDesc": "입력 전에 군더더기 말을 없애고 문장 부호와 표현을 다듬습니다.",
+    "contextDesc": "채팅 앱에서는 편하게, 이메일과 문서에서는 더 격식 있게 씁니다.",
+    "translateDesc": "모든 받아쓰기를 선택한 언어로 번역합니다.",
+    "polishStyleDesc": "AI가 말한 내용을 얼마나 고쳐 쓸지 정합니다.",
+    "advanced": "고급",
+    "connection": "연결",
+    "behavior": "글쓰기"
   }
 }

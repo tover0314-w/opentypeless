@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, MessageCircle } from 'lucide-react'
 import { isMacPlatform, useAppStore } from '../../stores/appStore'
-import type { HotkeyMode, OutputMode, ShortcutBinding } from '../../stores/appStore'
+import type { HotkeyMode, OutputMode } from '../../stores/appStore'
+import { useVoiceShortcuts } from '../../hooks/useVoiceShortcuts'
 import {
   getPlatformCapabilities,
   getHotkeyStatus,
@@ -97,44 +98,7 @@ export function GeneralPane() {
     !accessibilityTrusted &&
     hotkeyRegistrationError?.includes('Accessibility permission may be denied'),
   )
-  const dictationSpecialOptions = isMac ? [{ value: 'Fn', label: 'Fn' }] : []
-  const askSpecialOptions = isMac ? [{ value: 'Fn+Space', label: 'Fn + Space' }] : []
-  const translateSpecialOptions = isMac ? [{ value: 'Fn+LeftShift', label: 'Fn + Left Shift' }] : []
-  const dictationBindings = config.hotkeys.dictationBindings?.length
-    ? config.hotkeys.dictationBindings
-    : [config.hotkeys.dictation]
-  const askBindings = config.hotkeys.askBindings ?? (config.hotkeys.ask ? [config.hotkeys.ask] : [])
-  const translateBindings =
-    config.hotkeys.translateBindings ?? (config.hotkeys.translate ? [config.hotkeys.translate] : [])
-  const secondaryBindings = [
-    config.hotkeys.editSelection,
-    config.hotkeys.switchScene,
-    config.hotkeys.openApp,
-  ].filter((binding): binding is ShortcutBinding => Boolean(binding))
-  const otherBindingsFor = (role: 'dictation' | 'ask' | 'translate') => [
-    ...(role === 'dictation' ? [] : dictationBindings),
-    ...(role === 'ask' ? [] : askBindings),
-    ...(role === 'translate' ? [] : translateBindings),
-    ...secondaryBindings,
-  ]
-  const updateCoreBindings = (
-    role: 'dictation' | 'ask' | 'translate',
-    bindings: ShortcutBinding[],
-  ) => {
-    const nextHotkeys = { ...config.hotkeys }
-    if (role === 'dictation') {
-      if (bindings.length === 0) return
-      nextHotkeys.dictationBindings = bindings
-      nextHotkeys.dictation = bindings[0]
-    } else if (role === 'ask') {
-      nextHotkeys.askBindings = bindings
-      nextHotkeys.ask = bindings[0] ?? null
-    } else {
-      nextHotkeys.translateBindings = bindings
-      nextHotkeys.translate = bindings[0] ?? null
-    }
-    updateConfig({ hotkeys: nextHotkeys })
-  }
+  const { bindings, otherBindings, specialOptions, setBindings } = useVoiceShortcuts()
 
   return (
     <div className="space-y-6">
@@ -143,20 +107,20 @@ export function GeneralPane() {
           <ShortcutBindingList
             role="dictation"
             label={t('settings.dictationHotkey')}
-            bindings={dictationBindings}
-            otherBindings={otherBindingsFor('dictation')}
+            bindings={bindings.dictation}
+            otherBindings={otherBindings('dictation')}
             required
-            specialOptions={dictationSpecialOptions}
-            onChange={(bindings) => updateCoreBindings('dictation', bindings)}
+            specialOptions={specialOptions.dictation}
+            onChange={(next) => setBindings('dictation', next)}
           />
           <ShortcutBindingList
             role="ask"
             label={t('settings.askHotkey')}
-            bindings={askBindings}
-            otherBindings={otherBindingsFor('ask')}
+            bindings={bindings.ask}
+            otherBindings={otherBindings('ask')}
             required={false}
-            specialOptions={askSpecialOptions}
-            onChange={(bindings) => updateCoreBindings('ask', bindings)}
+            specialOptions={specialOptions.ask}
+            onChange={(next) => setBindings('ask', next)}
             trailingAction={
               <button
                 type="button"
@@ -172,11 +136,11 @@ export function GeneralPane() {
           <ShortcutBindingList
             role="translate"
             label={t('settings.translateHotkey')}
-            bindings={translateBindings}
-            otherBindings={otherBindingsFor('translate')}
+            bindings={bindings.translate}
+            otherBindings={otherBindings('translate')}
             required={false}
-            specialOptions={translateSpecialOptions}
-            onChange={(bindings) => updateCoreBindings('translate', bindings)}
+            specialOptions={specialOptions.translate}
+            onChange={(next) => setBindings('translate', next)}
           />
         </div>
         {platformCapabilities && !platformCapabilities.globalHotkeyReliable && (

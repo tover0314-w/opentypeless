@@ -12,7 +12,8 @@
     "upgrade": "Upgrade",
     "pro": "Pro",
     "mainNavigation": "Main navigation",
-    "dictionary": "Dictionary"
+    "dictionary": "Dictionary",
+    "models": "Models"
   },
   "ask": {
     "title": "Ask",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "Reply to chats and docs with natural, ready-to-send messages."
       }
-    }
+    },
+    "editShortcut": "Change shortcut",
+    "recordShortcut": "Press the new shortcut…",
+    "shortcutHint": "Click a shortcut to change it"
   },
   "onboarding": {
     "speakToWrite": "Speak to write — turn your voice into polished text in real time",
@@ -327,7 +331,6 @@
     "translationTarget": "Translation target",
     "translationTargets": "Translation targets",
     "thinking": "Thinking",
-    "done": "Done",
     "accessibilityRequired": "Accessibility needed — open Settings",
     "errors": {
       "stt_timeout": "STT timeout",
@@ -361,8 +364,6 @@
     "cancelAsk": "Cancel question",
     "finish": "Finish",
     "clickToStart": "Click to start dictating",
-    "modeAsk": "Ask anything",
-    "modeTranslating": "Translating to {{language}}",
     "alerts": {
       "guideTitle": "{{app}} shortcuts",
       "guidePrefix": "Tap once to start talking. Press",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "Release notes",
       "feedback": "Report a problem"
     }
+  },
+  "modelsPage": {
+    "description": "Choose the speech recognition and AI polish services OpenTypeless uses. Use OpenTypeless Cloud, or bring your own key.",
+    "speechDescription": "Turns your voice into text.",
+    "polishDescription": "Cleans up, formats and translates the transcript.",
+    "providerDesc": "The service that turns your voice into text.",
+    "polishProviderDesc": "The model that cleans up and formats your dictation.",
+    "apiKeyDesc": "Stored on this device only.",
+    "sttLanguageDesc": "The language you usually speak. Auto-detect works for most people.",
+    "durationDesc": "The longest a single recording can run.",
+    "modelDesc": "Pick from the provider's list or type a model name.",
+    "baseUrlDesc": "The API endpoint. Change it only for a proxy or a self-hosted server.",
+    "polishDesc": "Removes filler words, fixes punctuation and tidies wording before the text is inserted.",
+    "contextDesc": "Writes more casually in chat apps and more formally in email and documents.",
+    "translateDesc": "Translate every dictation into your chosen language.",
+    "polishStyleDesc": "How much the AI rewrites what you said.",
+    "advanced": "Advanced",
+    "connection": "Connection",
+    "behavior": "Writing"
   }
 }

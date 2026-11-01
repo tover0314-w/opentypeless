@@ -13,7 +13,7 @@ import {
   setCredential,
 } from '../../lib/tauri'
 import type { CustomAppMappingView, MappingCandidateView } from '../../lib/tauri'
-import { FormField } from './shared/FormField'
+import { SettingsRow } from './shared/SettingsRow'
 import { Toggle } from './shared/Toggle'
 import {
   CheckCircle2,
@@ -228,35 +228,46 @@ export function LlmPane() {
     }
   }
 
-  const renderConnectionFeedback = (includeCredentialStatus: boolean) => (
+  const resetTest = () => {
+    setLlmTestStatus('idle')
+    setLlmLatencyMs(null)
+    setTestErrorMessage(null)
+  }
+
+  const testButton = (disabled: boolean) => (
+    <button
+      type="button"
+      onClick={handleTest}
+      disabled={disabled || llmTestStatus === 'testing'}
+      className="btn-outline flex h-10 shrink-0 cursor-pointer items-center gap-1.5 px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
+      {t('settings.test')}
+    </button>
+  )
+
+  const connectionFeedback = (
     <>
       {llmTestStatus === 'success' && (
-        <p className="flex items-center gap-1 text-[12px] text-success mt-2">
+        <p className="m-0 flex items-center gap-1 text-[12px] text-success">
           <CheckCircle2 size={13} />{' '}
           {llmLatencyMs !== null ? `${llmLatencyMs}ms` : t('settings.connectionSuccess')}
         </p>
       )}
       {(llmTestStatus === 'error' || testErrorMessage) && (
-        <div className="flex items-start gap-1 text-[12px] text-error mt-2">
+        <div className="flex items-start gap-1 text-[12px] text-error">
           <XCircle size={13} className="mt-[1px] flex-shrink-0" />
           <span>{testErrorMessage || t('settings.connectionFailed')}</span>
         </div>
       )}
-      {includeCredentialStatus &&
-        (credentialErrorMessage ? (
-          <p className="text-[11px] text-error mt-1.5">
-            {t('settings.credentialSaveFailed', { details: credentialErrorMessage })}
-          </p>
-        ) : (
-          <p className="text-[11px] text-text-tertiary mt-1.5">{t('settings.storedLocally')}</p>
-        ))}
     </>
   )
 
   return (
-    <div className="space-y-4">
-      <FormField label={t('settings.provider')}>
+    <div>
+      <SettingsRow title={t('settings.provider')} description={t('modelsPage.polishProviderDesc')}>
         <select
+          aria-label={t('settings.provider')}
           value={config.llm_provider}
           onChange={(e) => {
             const provider = e.target.value as typeof config.llm_provider
@@ -266,12 +277,10 @@ export function LlmPane() {
               llm_base_url: defaults?.baseUrl ?? config.llm_base_url,
               llm_model: defaults?.model ?? config.llm_model,
             })
-            setLlmTestStatus('idle')
-            setLlmLatencyMs(null)
+            resetTest()
             setModels([])
-            setTestErrorMessage(null)
           }}
-          className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+          className="field-control"
         >
           {LLM_PROVIDERS.map((p) => (
             <option key={p.value} value={p.value}>
@@ -279,294 +288,303 @@ export function LlmPane() {
             </option>
           ))}
         </select>
-      </FormField>
-
-      {isCloud && (
-        <div className="border border-border rounded-[10px] px-3 py-3 space-y-2">
-          <div className="flex items-center gap-2 text-[13px]">
-            <Crown size={14} className="text-accent" />
-            <span className="text-text-primary font-medium">{t('settings.cloudLlmPro')}</span>
+        {isCloud && (
+          <div className="flex flex-col items-start gap-1.5 text-[12px] leading-[18px]">
+            <span className="flex items-center gap-1.5 font-medium text-text-primary">
+              <Crown size={13} className="text-accent" />
+              {t('settings.cloudLlmPro')}
+            </span>
+            {!user ? (
+              <span className="text-text-tertiary">{t('settings.llmSignInHint')}</span>
+            ) : !hasCloudAccess ? (
+              <>
+                <span className="text-text-tertiary">{t('settings.llmUpgradeHint')}</span>
+                <button
+                  type="button"
+                  onClick={goUpgrade}
+                  className="btn-accent cursor-pointer px-3 py-1 text-[12px] font-medium"
+                >
+                  {t('nav.upgrade')}
+                </button>
+              </>
+            ) : (
+              <span className="text-success">{t('settings.llmProActive')}</span>
+            )}
           </div>
-          {!user ? (
-            <p className="text-[12px] text-text-secondary">{t('settings.llmSignInHint')}</p>
-          ) : !hasCloudAccess ? (
-            <div className="space-y-2">
-              <p className="text-[12px] text-text-secondary">{t('settings.llmUpgradeHint')}</p>
-              <button
-                type="button"
-                onClick={goUpgrade}
-                className="rounded-[8px] border border-accent bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover"
-              >
-                {t('nav.upgrade')}
-              </button>
-            </div>
-          ) : (
-            <p className="text-[12px] text-green-500">{t('settings.llmProActive')}</p>
+        )}
+      </SettingsRow>
+
+      {!isCloud && requiresApiKey && (
+        <SettingsRow title={t('settings.apiKey')} description={t('modelsPage.apiKeyDesc')}>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              aria-label={t('settings.apiKey')}
+              value={llmApiKey}
+              onChange={(e) => {
+                setLlmApiKey(e.target.value)
+                persistLlmCredential(e.target.value)
+                resetTest()
+                setCredentialErrorMessage(null)
+              }}
+              onBlur={() => persistLlmCredential(llmApiKey, 0)}
+              placeholder={t('settings.enterApiKey')}
+              className="field-control flex-1"
+            />
+            {testButton(!llmApiKey)}
+          </div>
+          {connectionFeedback}
+          {credentialErrorMessage && (
+            <p className="m-0 text-[11px] text-error">
+              {t('settings.credentialSaveFailed', { details: credentialErrorMessage })}
+            </p>
           )}
-        </div>
+        </SettingsRow>
       )}
 
       {!isCloud && (
-        <>
-          {requiresApiKey && (
-            <FormField label={t('settings.apiKey')}>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={llmApiKey}
-                  onChange={(e) => {
-                    setLlmApiKey(e.target.value)
-                    persistLlmCredential(e.target.value)
-                    setLlmTestStatus('idle')
-                    setLlmLatencyMs(null)
-                    setTestErrorMessage(null)
-                    setCredentialErrorMessage(null)
-                  }}
-                  onBlur={() => persistLlmCredential(llmApiKey, 0)}
-                  placeholder={t('settings.enterApiKey')}
-                  className="flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-                />
-                <button
-                  onClick={handleTest}
-                  disabled={!llmApiKey || llmTestStatus === 'testing'}
-                  className="px-4 py-2.5 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                >
-                  {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
-                  {t('settings.test')}
-                </button>
-              </div>
-              {renderConnectionFeedback(true)}
-            </FormField>
+        <SettingsRow title={t('settings.model')} description={t('modelsPage.modelDesc')}>
+          <div className="flex gap-2">
+            <input
+              list="llm-model-list"
+              aria-label={t('settings.model')}
+              value={config.llm_model}
+              onChange={(e) => {
+                updateConfig({ llm_model: e.target.value })
+                setLlmLatencyMs(null)
+                setTestErrorMessage(null)
+              }}
+              placeholder={t('settings.llmModelPlaceholder')}
+              className="field-control flex-1"
+            />
+            <datalist id="llm-model-list">
+              {models.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <button
+              type="button"
+              onClick={() => doFetchModels(llmApiKey, config.llm_provider, config.llm_base_url)}
+              disabled={fetchingModels || !config.llm_base_url || (requiresApiKey && !llmApiKey)}
+              className="btn-outline grid h-10 w-10 shrink-0 cursor-pointer place-items-center text-text-secondary disabled:cursor-not-allowed disabled:opacity-40"
+              title={t('settings.fetchModels')}
+              aria-label={t('settings.fetchModels')}
+            >
+              <RefreshCw size={14} className={fetchingModels ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {models.length > 0 && (
+            <p className="m-0 text-[11px] text-text-tertiary">
+              {t('settings.modelsAvailable', { count: models.length })}
+            </p>
           )}
-
-          <FormField label={t('settings.model')}>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  list="llm-model-list"
-                  value={config.llm_model}
-                  onChange={(e) => {
-                    updateConfig({ llm_model: e.target.value })
-                    setLlmLatencyMs(null)
-                    setTestErrorMessage(null)
-                  }}
-                  placeholder={t('settings.llmModelPlaceholder')}
-                  className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-                />
-                <datalist id="llm-model-list">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
-              </div>
-              <button
-                onClick={() => doFetchModels(llmApiKey, config.llm_provider, config.llm_base_url)}
-                disabled={fetchingModels || !config.llm_base_url || (requiresApiKey && !llmApiKey)}
-                className="px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-secondary cursor-pointer hover:border-border-focus disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                title={t('settings.fetchModels')}
-              >
-                <RefreshCw size={14} className={fetchingModels ? 'animate-spin' : ''} />
-              </button>
-            </div>
-            {models.length > 0 && (
-              <p className="text-[11px] text-text-tertiary mt-1">
-                {t('settings.modelsAvailable', { count: models.length })}
-              </p>
-            )}
-          </FormField>
-
-          <FormField label={t('settings.baseUrl')}>
-            <div className="flex gap-2">
-              <input
-                value={config.llm_base_url}
-                onChange={(e) => {
-                  updateConfig({ llm_base_url: e.target.value })
-                  setLlmTestStatus('idle')
-                  setLlmLatencyMs(null)
-                  setTestErrorMessage(null)
-                }}
-                placeholder={
-                  LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl ?? 'https://api.openai.com/v1'
-                }
-                className="min-w-0 flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-              />
-              {!requiresApiKey && (
-                <button
-                  type="button"
-                  onClick={handleTest}
-                  disabled={!config.llm_base_url || llmTestStatus === 'testing'}
-                  className="px-4 py-2.5 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
-                >
-                  {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
-                  {t('settings.test')}
-                </button>
-              )}
-            </div>
-            {!requiresApiKey && renderConnectionFeedback(false)}
-          </FormField>
-        </>
+        </SettingsRow>
       )}
 
-      <div className="space-y-3 pt-1">
-        <div>
+      <SettingsRow title={t('settings.enableAiPolish')} description={t('modelsPage.polishDesc')}>
+        <div className="flex justify-end">
           <Toggle
             checked={config.polish_enabled}
             onChange={(checked) => updateConfig({ polish_enabled: checked })}
-            label={t('settings.enableAiPolish')}
+            ariaLabel={t('settings.enableAiPolish')}
           />
         </div>
-        <div>
-          <Toggle
-            checked={config.context_adaptation_enabled}
-            disabled={!config.polish_enabled}
-            onChange={(checked) => updateConfig({ context_adaptation_enabled: checked })}
-            label={t('settings.contextAdaptation')}
-          />
-          <ContextAdaptationApps
-            disabled={!config.polish_enabled || !config.context_adaptation_enabled}
-          />
-          {lastContext && (
-            <div className="mt-2 ml-[52px] min-w-0">
-              <p className="text-[11px] leading-relaxed text-text-tertiary">
-                {t('settings.lastDictationContext')}
-              </p>
-              <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-text-secondary">
-                <AppLogo iconKey={lastContext.iconKey} family={lastContext.family} />
-                <span className="min-w-0 truncate">{lastContext.appLabel}</span>
-                {(mappingCandidate || appMappings.length > 0) && (
-                  <div className="relative ml-auto flex-none">
-                    <button
-                      ref={appStyleMenuButtonRef}
-                      type="button"
-                      aria-label={t('settings.appStyleMenu')}
-                      title={t('settings.appStyleMenu')}
-                      aria-expanded={appStyleMenuOpen}
-                      onClick={() => setAppStyleMenuOpen((open) => !open)}
-                      className="grid h-7 w-7 place-items-center rounded-[6px] border-none bg-transparent text-text-tertiary hover:bg-bg-hover hover:text-text-primary"
-                    >
-                      <MoreHorizontal size={15} />
-                    </button>
-                    {appStyleMenuOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-30"
-                          onClick={() => closeAppStyleMenu(true)}
-                        />
-                        <div className="absolute right-0 top-8 z-40 min-w-[210px] rounded-[8px] border border-border bg-bg-primary py-1 shadow-float">
-                          {mappingCandidate && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                closeAppStyleMenu()
-                                setEditingMapping(null)
-                                setAppStyleDialogOpen(true)
-                              }}
-                              className="block w-full px-3 py-2 text-left text-[12px] text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                            >
-                              {t('settings.useDifferentWritingStyle')}
-                            </button>
-                          )}
-                          {appMappings.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                closeAppStyleMenu()
-                                setManageMappingsOpen(true)
-                              }}
-                              className="block w-full px-3 py-2 text-left text-[12px] text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                            >
-                              {t('settings.manageAppMappings')}
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-              {showBrowserAccessHint && (
-                <p className="mt-1 text-[11px] leading-relaxed text-amber-600">
-                  {t('settings.browserAccessHint')}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-        <div>
-          <Toggle
-            checked={config.translate_enabled}
-            onChange={(checked) => updateConfig({ translate_enabled: checked })}
-            label={t('settings.translationMode')}
-          />
-          {config.translate_enabled && (
-            <div className="mt-2 ml-[52px] min-w-0">
-              <TranslationTargets
-                value={config.translation}
-                onChange={(translation) => updateConfig({ translation })}
-              />
-            </div>
-          )}
-        </div>
-      </div>
+      </SettingsRow>
 
       {config.polish_enabled && (
-        <FormField label={t('settings.polishStyle')}>
+        <SettingsRow
+          title={t('settings.polishStyle')}
+          description={t('modelsPage.polishStyleDesc')}
+        >
           <select
+            aria-label={t('settings.polishStyle')}
             value={config.polish_style}
             onChange={(e) => updateConfig({ polish_style: e.target.value as PolishStyle })}
-            className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+            className="field-control"
           >
             <option value="minimal">{t('settings.polishStyleMinimal')}</option>
             <option value="clean">{t('settings.polishStyleClean')}</option>
             <option value="structured">{t('settings.polishStyleStructured')}</option>
             <option value="professional">{t('settings.polishStyleProfessional')}</option>
           </select>
-        </FormField>
+        </SettingsRow>
       )}
 
-      <div>
+      <SettingsRow
+        title={t('settings.contextAdaptation')}
+        description={
+          <>
+            {t('modelsPage.contextDesc')}
+            <ContextAdaptationApps
+              disabled={!config.polish_enabled || !config.context_adaptation_enabled}
+            />
+            {lastContext && (
+              <div className="mt-2 min-w-0">
+                <p className="m-0 text-[12px] leading-relaxed text-text-tertiary">
+                  {t('settings.lastDictationContext')}
+                </p>
+                <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-text-secondary">
+                  <AppLogo iconKey={lastContext.iconKey} family={lastContext.family} />
+                  <span className="min-w-0 truncate">{lastContext.appLabel}</span>
+                  {(mappingCandidate || appMappings.length > 0) && (
+                    <div className="relative flex-none">
+                      <button
+                        ref={appStyleMenuButtonRef}
+                        type="button"
+                        aria-label={t('settings.appStyleMenu')}
+                        title={t('settings.appStyleMenu')}
+                        aria-expanded={appStyleMenuOpen}
+                        onClick={() => setAppStyleMenuOpen((open) => !open)}
+                        className="btn-ghost grid h-7 w-7 cursor-pointer place-items-center"
+                      >
+                        <MoreHorizontal size={15} />
+                      </button>
+                      {appStyleMenuOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-30"
+                            onClick={() => closeAppStyleMenu(true)}
+                          />
+                          <div className="surface-popover absolute left-0 top-8 z-40 min-w-[210px] py-1">
+                            {mappingCandidate && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  closeAppStyleMenu()
+                                  setEditingMapping(null)
+                                  setAppStyleDialogOpen(true)
+                                }}
+                                className="block w-full border-none bg-transparent px-3 py-2 text-left text-[12px] text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+                              >
+                                {t('settings.useDifferentWritingStyle')}
+                              </button>
+                            )}
+                            {appMappings.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  closeAppStyleMenu()
+                                  setManageMappingsOpen(true)
+                                }}
+                                className="block w-full border-none bg-transparent px-3 py-2 text-left text-[12px] text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+                              >
+                                {t('settings.manageAppMappings')}
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {showBrowserAccessHint && (
+                  <p className="mt-1 text-[12px] leading-relaxed text-warning">
+                    {t('settings.browserAccessHint')}
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        }
+      >
+        <div className="flex justify-end">
+          <Toggle
+            checked={config.context_adaptation_enabled}
+            disabled={!config.polish_enabled}
+            onChange={(checked) => updateConfig({ context_adaptation_enabled: checked })}
+            ariaLabel={t('settings.contextAdaptation')}
+          />
+        </div>
+      </SettingsRow>
+
+      <SettingsRow
+        title={t('settings.translationMode')}
+        description={t('modelsPage.translateDesc')}
+      >
+        <div className="flex justify-end">
+          <Toggle
+            checked={config.translate_enabled}
+            onChange={(checked) => updateConfig({ translate_enabled: checked })}
+            ariaLabel={t('settings.translationMode')}
+          />
+        </div>
+        {config.translate_enabled && (
+          <TranslationTargets
+            value={config.translation}
+            onChange={(translation) => updateConfig({ translation })}
+          />
+        )}
+      </SettingsRow>
+
+      <div className="pt-2">
         <button
           type="button"
           aria-expanded={polishAdvancedOpen}
           onClick={() => setPolishAdvancedOpen((open) => !open)}
-          className="flex w-full items-center justify-between rounded-[10px] border border-border bg-bg-secondary/40 px-3 py-2 text-left text-[13px] font-medium text-text-primary transition-colors hover:border-border-focus"
+          className="flex cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-[14px] font-medium text-text-secondary hover:text-text-primary"
         >
-          <span>{t('settings.advancedPolishSettings')}</span>
+          {t('settings.advancedPolishSettings')}
           <ChevronDown
-            size={14}
-            className={`text-text-tertiary transition-transform ${
-              polishAdvancedOpen ? 'rotate-180' : ''
-            }`}
+            size={15}
+            className={`transition-transform ${polishAdvancedOpen ? 'rotate-180' : ''}`}
           />
         </button>
 
         {polishAdvancedOpen && (
-          <div className="mt-3 space-y-3">
-            <div>
-              <Toggle
-                checked={config.selected_text_enabled}
-                onChange={(checked) => updateConfig({ selected_text_enabled: checked })}
-                label={t('settings.selectedTextContext')}
-              />
-              <p className="mt-1 ml-[52px] text-[11px] leading-relaxed text-text-tertiary">
-                {t('settings.selectedTextContextDesc')}
-              </p>
-            </div>
+          <div className="mt-2">
+            {!isCloud && (
+              <SettingsRow title={t('settings.baseUrl')} description={t('modelsPage.baseUrlDesc')}>
+                <div className="flex gap-2">
+                  <input
+                    aria-label={t('settings.baseUrl')}
+                    value={config.llm_base_url}
+                    onChange={(e) => {
+                      updateConfig({ llm_base_url: e.target.value })
+                      resetTest()
+                    }}
+                    placeholder={
+                      LLM_DEFAULT_CONFIG[config.llm_provider]?.baseUrl ??
+                      'https://api.openai.com/v1'
+                    }
+                    className="field-control flex-1"
+                  />
+                  {!requiresApiKey && testButton(!config.llm_base_url)}
+                </div>
+                {!requiresApiKey && connectionFeedback}
+              </SettingsRow>
+            )}
+
+            <SettingsRow
+              title={t('settings.selectedTextContext')}
+              description={t('settings.selectedTextContextDesc')}
+            >
+              <div className="flex justify-end">
+                <Toggle
+                  checked={config.selected_text_enabled}
+                  onChange={(checked) => updateConfig({ selected_text_enabled: checked })}
+                  ariaLabel={t('settings.selectedTextContext')}
+                />
+              </div>
+            </SettingsRow>
 
             {config.polish_enabled && (
-              <FormField label={t('settings.customPolishInstructions')}>
+              <SettingsRow
+                stacked
+                title={t('settings.customPolishInstructions')}
+                description={t('settings.customPolishInstructionsCount', {
+                  count: polishPromptLength,
+                })}
+              >
                 <textarea
+                  aria-label={t('settings.customPolishInstructions')}
                   value={config.polish_custom_prompt}
                   onChange={(e) => updateConfig({ polish_custom_prompt: e.target.value })}
                   maxLength={2000}
                   rows={4}
                   placeholder={t('settings.customPolishInstructionsPlaceholder')}
-                  className="w-full resize-y px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+                  className="field-control resize-y"
                 />
-                <p className="text-[11px] text-text-tertiary mt-1.5">
-                  {t('settings.customPolishInstructionsCount', { count: polishPromptLength })}
-                </p>
-              </FormField>
+              </SettingsRow>
             )}
           </div>
         )}

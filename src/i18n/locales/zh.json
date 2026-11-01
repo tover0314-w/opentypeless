@@ -12,7 +12,8 @@
     "upgrade": "升级",
     "pro": "Pro",
     "mainNavigation": "主导航",
-    "dictionary": "词典"
+    "dictionary": "词典",
+    "models": "模型"
   },
   "ask": {
     "title": "问答",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "用自然、可直接发送的消息回复聊天和文档。"
       }
-    }
+    },
+    "editShortcut": "修改快捷键",
+    "recordShortcut": "按下新的快捷键…",
+    "shortcutHint": "点击快捷键即可修改"
   },
   "onboarding": {
     "speakToWrite": "说话即写作 — 实时将语音转化为润色文本",
@@ -327,7 +331,6 @@
     "translationTarget": "翻译目标",
     "translationTargets": "翻译目标列表",
     "thinking": "思考中",
-    "done": "完成",
     "accessibilityRequired": "需要辅助功能权限 — 请打开设置",
     "errors": {
       "stt_timeout": "STT 超时",
@@ -361,8 +364,6 @@
     "cancelAsk": "取消提问",
     "finish": "完成",
     "clickToStart": "点击开始口述",
-    "modeAsk": "随便问",
-    "modeTranslating": "翻译为 {{language}}",
     "alerts": {
       "guideTitle": "{{app}} 快捷键",
       "guidePrefix": "轻按一次开始说话，按",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "版本说明",
       "feedback": "反馈问题"
     }
+  },
+  "modelsPage": {
+    "description": "选择 OpenTypeless 使用的语音识别和 AI 润色服务。可以用 OpenTypeless 云服务，也可以填自己的密钥。",
+    "speechDescription": "把你的声音转成文字。",
+    "polishDescription": "整理、排版并翻译转写出的文字。",
+    "providerDesc": "把你的声音转成文字的服务。",
+    "polishProviderDesc": "负责整理和排版口述内容的模型。",
+    "apiKeyDesc": "只保存在这台设备上。",
+    "sttLanguageDesc": "你平时说的语言，大多数情况下自动检测即可。",
+    "durationDesc": "单次录音最长可以持续多久。",
+    "modelDesc": "从服务商列表里选，或者直接输入模型名。",
+    "baseUrlDesc": "接口地址。只有用代理或自建服务时才需要修改。",
+    "polishDesc": "在写入前去掉口头禅、修正标点、理顺语句。",
+    "contextDesc": "在聊天软件里更口语，在邮件和文档里更正式。",
+    "translateDesc": "把每次口述都翻译成你选择的语言。",
+    "polishStyleDesc": "AI 改写你原话的程度。",
+    "advanced": "高级",
+    "connection": "连接",
+    "behavior": "写作"
   }
 }

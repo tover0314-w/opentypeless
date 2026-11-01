@@ -12,7 +12,8 @@
     "upgrade": "Passer à Pro",
     "pro": "Pro",
     "mainNavigation": "Navigation principale",
-    "dictionary": "Dictionnaire"
+    "dictionary": "Dictionnaire",
+    "models": "Modèles"
   },
   "ask": {
     "title": "Demander",
@@ -153,7 +154,10 @@
         "name": "Lark",
         "description": "Répondez aux discussions avec des messages naturels."
       }
-    }
+    },
+    "editShortcut": "Modifier le raccourci",
+    "recordShortcut": "Appuyez sur le nouveau raccourci…",
+    "shortcutHint": "Cliquez sur un raccourci pour le modifier"
   },
   "onboarding": {
     "speakToWrite": "Parlez pour écrire — transformez votre voix en texte amélioré en temps réel",
@@ -327,7 +331,6 @@
     "translationTarget": "Langue cible",
     "translationTargets": "Langues cibles",
     "thinking": "Réflexion",
-    "done": "Terminé",
     "accessibilityRequired": "Accessibilité requise — ouvrez les Paramètres",
     "errors": {
       "stt_timeout": "Délai STT",
@@ -361,8 +364,6 @@
     "cancelAsk": "Annuler la question",
     "finish": "Terminer",
     "clickToStart": "Cliquez pour commencer la dictée",
-    "modeAsk": "Demander",
-    "modeTranslating": "Traduction en {{language}}",
     "alerts": {
       "guideTitle": "Raccourcis {{app}}",
       "guidePrefix": "Appuyez une fois pour parler. Appuyez sur",
@@ -1081,5 +1082,24 @@
       "releaseNotes": "Notes de version",
       "feedback": "Signaler un problème"
     }
+  },
+  "modelsPage": {
+    "description": "Choisissez les services de reconnaissance vocale et de correction IA utilisés par OpenTypeless : OpenTypeless Cloud ou votre propre clé.",
+    "speechDescription": "Transforme votre voix en texte.",
+    "polishDescription": "Nettoie, met en forme et traduit la transcription.",
+    "providerDesc": "Le service qui transforme votre voix en texte.",
+    "polishProviderDesc": "Le modèle qui nettoie et met en forme votre dictée.",
+    "apiKeyDesc": "Stockée uniquement sur cet appareil.",
+    "sttLanguageDesc": "La langue que vous parlez habituellement. La détection automatique convient à la plupart des gens.",
+    "durationDesc": "La durée maximale d'un enregistrement.",
+    "modelDesc": "Choisissez dans la liste du fournisseur ou saisissez un nom de modèle.",
+    "baseUrlDesc": "Le point d'accès de l'API. À modifier seulement pour un proxy ou un serveur auto-hébergé.",
+    "polishDesc": "Supprime les mots parasites, corrige la ponctuation et clarifie la formulation avant l'insertion.",
+    "contextDesc": "Écrit de façon plus détendue dans les messageries et plus soignée dans les e-mails et documents.",
+    "translateDesc": "Traduit chaque dictée dans la langue de votre choix.",
+    "polishStyleDesc": "À quel point l'IA réécrit ce que vous avez dit.",
+    "advanced": "Avancé",
+    "connection": "Connexion",
+    "behavior": "Rédaction"
   }
 }

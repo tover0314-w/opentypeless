@@ -23,6 +23,7 @@ import { Capsule } from './components/Capsule'
 import { SettingsModal, ModalFrame } from './components/Settings'
 import { History } from './components/History'
 import { DictionaryPage } from './components/Dictionary'
+import { ModelsPage } from './components/ModelsPage'
 import { Onboarding } from './components/Onboarding'
 import { MainLayout } from './components/MainLayout'
 import { HomePage } from './components/HomePage'
@@ -225,6 +226,7 @@ function MainApp() {
       {page === 'home' && <HomePage />}
       {page === 'history' && <History />}
       {page === 'dictionary' && <DictionaryPage />}
+      {page === 'models' && <ModelsPage />}
       {modal === 'settings' && <SettingsModal onClose={closeModal} />}
       {modal === 'account' && (
         <ModalFrame onClose={closeModal} maxWidth={560}>
