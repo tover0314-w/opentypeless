@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { Clock3, Gauge, Hourglass, Mic, Server } from 'lucide-react'
-import { useAppStore, type HotkeyConfig, type ShortcutBinding } from '../../stores/appStore'
+import { Clock3, Gauge, Hourglass, Mic, Pencil, Server } from 'lucide-react'
+import {
+  bindingFromHotkey,
+  hotkeyFromBinding,
+  useAppStore,
+  type ShortcutBinding,
+} from '../../stores/appStore'
+import { useVoiceShortcuts, type VoiceShortcutRole } from '../../hooks/useVoiceShortcuts'
+import { HotkeyRecorder } from '../Settings/ShortcutBindingList'
 import { getUsageStats, type UsageStats } from '../../lib/tauri'
 import { buildHeatmap } from '../../lib/heatmap'
 import { LLM_PROVIDERS, STT_PROVIDERS } from '../../lib/constants'
@@ -29,18 +36,6 @@ const LEVEL_CLASS = [
   'bg-accent/75',
   'bg-accent',
 ] as const
-
-function bindingText(binding: ShortcutBinding | null | undefined) {
-  return binding ? [...binding.modifiers, binding.primary].join('+') : null
-}
-
-function shortcutRows(hotkeys: HotkeyConfig) {
-  return [
-    { key: 'dictate', hotkey: bindingText(hotkeys.dictation), accent: '' },
-    { key: 'translate', hotkey: bindingText(hotkeys.translate), accent: 'bg-accent/10' },
-    { key: 'ask', hotkey: bindingText(hotkeys.ask), accent: 'bg-[rgba(120,214,255,0.14)]' },
-  ]
-}
 
 export function HomePage() {
   const config = useAppStore((s) => s.config)
@@ -71,7 +66,7 @@ export function HomePage() {
 
       <div className="flex gap-6">
         <div className="min-w-0 flex-1 space-y-6">
-          <ShortcutsCard hotkeys={config.hotkeys} />
+          <ShortcutsCard />
           <InsightsCard stats={stats} />
           <ActivityCard stats={stats} />
           <UseCases />
@@ -119,27 +114,91 @@ function ConfigRow({
   )
 }
 
-function ShortcutsCard({ hotkeys }: { hotkeys: HotkeyConfig }) {
+const SHORTCUT_ROWS: Array<{ key: string; role: VoiceShortcutRole; accent: string }> = [
+  { key: 'dictate', role: 'dictation', accent: '' },
+  { key: 'translate', role: 'translate', accent: 'bg-accent/10' },
+  { key: 'ask', role: 'ask', accent: 'bg-[rgba(120,214,255,0.14)]' },
+]
+
+function bindingIdentity(binding: ShortcutBinding) {
+  return [
+    ...binding.modifiers.map((m) => (m === 'Option' ? 'Alt' : m === 'Command' ? 'Super' : m)),
+    binding.primary,
+  ].join('+')
+}
+
+/** Typeless home shortcuts card; each shortcut can be re-recorded in place. */
+function ShortcutsCard() {
   const { t } = useTranslation()
+  const { bindings, otherBindings, specialOptions, setBindings } = useVoiceShortcuts()
+  const [editing, setEditing] = useState<VoiceShortcutRole | null>(null)
+
   return (
-    <section className="surface-card divide-y divide-border-thin px-5">
-      {shortcutRows(hotkeys).map((row) => (
-        <div key={row.key} className="flex items-center justify-between gap-6 py-4">
-          <div>
-            <div className="text-[16px] font-semibold text-text-primary">
-              {t(`home.modes.${row.key}.title`)}
+    <section
+      aria-label={t('home.shortcutHint')}
+      className="surface-card divide-y divide-border-thin px-5"
+    >
+      {SHORTCUT_ROWS.map((row) => {
+        const current = bindings[row.role][0]
+        const hotkey = current ? hotkeyFromBinding(current) : null
+        return (
+          <div key={row.key} className="flex items-center justify-between gap-6 py-4">
+            <div>
+              <div className="text-[16px] font-semibold text-text-primary">
+                {t(`home.modes.${row.key}.title`)}
+              </div>
+              <div className="mt-0.5 text-[14px] text-text-tertiary">
+                {t(`home.modes.${row.key}.description`)}
+              </div>
             </div>
-            <div className="mt-0.5 text-[14px] text-text-tertiary">
-              {t(`home.modes.${row.key}.description`)}
-            </div>
+            {editing === row.role ? (
+              <div className="w-[260px]" data-shortcut-editor={row.role}>
+                <HotkeyRecorder
+                  value={hotkey ?? ''}
+                  autoStart
+                  specialOptions={specialOptions[row.role]}
+                  onCancel={() => setEditing(null)}
+                  validateHotkey={(next) => {
+                    const candidate = bindingFromHotkey(next)
+                    if (!candidate) return t('settings.hotkeyInvalid')
+                    const identity = bindingIdentity(candidate)
+                    const clash = [...otherBindings(row.role), ...bindings[row.role].slice(1)].some(
+                      (binding) => bindingIdentity(binding) === identity,
+                    )
+                    return clash ? t('settings.hotkeyConflict') : null
+                  }}
+                  onSaved={(next) => {
+                    const binding = bindingFromHotkey(next)
+                    setEditing(null)
+                    if (!binding) return
+                    setBindings(row.role, [binding, ...bindings[row.role].slice(1)])
+                  }}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                aria-label={`${t('home.editShortcut')}: ${t(`home.modes.${row.key}.title`)}`}
+                title={t('home.editShortcut')}
+                onClick={() => setEditing(row.role)}
+                className={`group flex cursor-pointer items-center rounded-[10px] border border-transparent bg-transparent p-1 transition-colors hover:border-border hover:bg-fill-hover ${row.accent}`}
+              >
+                {hotkey ? (
+                  <Keycaps hotkey={hotkey} />
+                ) : (
+                  <span className="px-2 text-[13px] text-text-tertiary">
+                    {t('home.shortcutOff')}
+                  </span>
+                )}
+                <Pencil
+                  size={13}
+                  className="ml-0 w-0 text-text-tertiary opacity-0 transition-all group-hover:ml-2 group-hover:mr-1 group-hover:w-[13px] group-hover:opacity-100"
+                />
+              </button>
+            )}
           </div>
-          {row.hotkey ? (
-            <Keycaps hotkey={row.hotkey} className={`rounded-[8px] p-1 ${row.accent}`} />
-          ) : (
-            <span className="text-[13px] text-text-tertiary">{t('home.shortcutOff')}</span>
-          )}
-        </div>
-      ))}
+        )
+      })}
     </section>
   )
 }
