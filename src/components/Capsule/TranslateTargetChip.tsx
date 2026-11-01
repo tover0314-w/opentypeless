@@ -22,7 +22,6 @@ export function TranslateTargetChip() {
   const activeTarget = useAppStore((state) => state.config.translation.active_target)
   const menuOpen = useAppStore((state) => state.translationTargetMenuOpen)
   const setMenuOpen = useAppStore((state) => state.setTranslationTargetMenuOpen)
-  const setContextMenuOpen = useAppStore((state) => state.setContextMenuOpen)
 
   if (pipelineState !== 'recording' || activeVoiceMode !== 'translate') return null
 
@@ -38,7 +37,6 @@ export function TranslateTargetChip() {
       onPointerUp={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation()
-        setContextMenuOpen(false)
         setMenuOpen(!menuOpen)
       }}
       className="flex h-[22px] min-w-7 flex-shrink-0 items-center justify-center rounded-[6px] border border-white/20 bg-white/10 px-1.5 text-[10px] font-semibold uppercase text-white/90 transition-colors hover:bg-white/18 hover:text-white"

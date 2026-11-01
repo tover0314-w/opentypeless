@@ -73,7 +73,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'idle',
@@ -81,24 +80,10 @@ describe('getCapsuleVisibility', () => {
     ).toBe(false)
   })
 
-  it('keeps an auto-hidden idle capsule up when hovering can reveal it', () => {
-    expect(
-      getCapsuleVisibility({
-        capsuleAutoHide: true,
-        hoverRevealsIdle: true,
-        contextMenuOpen: false,
-        capsuleExpanded: false,
-        hasError: false,
-        pipelineState: 'idle',
-      }),
-    ).toBe(true)
-  })
-
   it('shows idle capsule when an error appears', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: true,
         pipelineState: 'idle',
@@ -110,7 +95,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'recording',
@@ -122,7 +106,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'preparing',
@@ -134,7 +117,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'ask_recording',
@@ -142,11 +124,11 @@ describe('getCapsuleVisibility', () => {
     ).toBe(true)
   })
 
-  it('shows idle capsule while the context menu is open', () => {
+  it('shows idle capsule while the translation target menu is open', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: true,
+        translationTargetMenuOpen: true,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'idle',
@@ -336,8 +318,6 @@ describe('useCapsuleResize async updates', () => {
       pipelineState: 'idle',
       capsuleExpanded: false,
       pipelineError: null,
-      contextMenuOpen: false,
-      contextMenuReady: false,
       translationTargetMenuOpen: false,
       config: { ...state.config, capsule_auto_hide: true },
     }))
@@ -429,7 +409,7 @@ describe('useCapsuleResize async updates', () => {
       .mockResolvedValue(monitor)
 
     act(() => {
-      useAppStore.setState({ contextMenuOpen: true })
+      useAppStore.setState({ translationTargetMenuOpen: true })
     })
 
     await waitFor(() => {
@@ -437,7 +417,7 @@ describe('useCapsuleResize async updates', () => {
     })
 
     act(() => {
-      useAppStore.setState({ contextMenuOpen: false })
+      useAppStore.setState({ translationTargetMenuOpen: false })
     })
 
     await waitFor(() => {
@@ -456,7 +436,6 @@ describe('useCapsuleResize async updates', () => {
     expect(windowApiMocks.setPosition).toHaveBeenCalledTimes(1)
     expect(windowApiMocks.show).not.toHaveBeenCalled()
     expect(windowApiMocks.hide).toHaveBeenCalledTimes(1)
-    expect(useAppStore.getState().contextMenuReady).toBe(false)
 
     windowApiMocks.outerPosition.mockResolvedValue({ x: 100, y: 100 })
     windowApiMocks.outerSize.mockResolvedValue(null)

@@ -21,6 +21,7 @@ import {
   type SttProviderDiagnostics,
 } from '../../lib/tauri'
 import { SettingsRow } from './shared/SettingsRow'
+import { Select } from '../shared/Select'
 import { CheckCircle2, XCircle, Loader2, Crown } from 'lucide-react'
 
 const RECORDING_LIMIT_PRESETS = [30, 60, 120, 300, 600, 1800, 3600]
@@ -297,6 +298,24 @@ export function SttPane() {
         : t(recordingLimit.capability.explanationKey)
     : null
 
+  const recordingDurationOptions = recordingLimit
+    ? [
+        {
+          value: 'auto',
+          label: t('recordingLimits.auto', {
+            duration: formatRecordingDuration(recordingLimit.capability.recommendedMaxSeconds, t),
+          }),
+        },
+        ...availableRecordingPresets.map((seconds) => ({
+          value: String(seconds),
+          label: formatRecordingDuration(seconds, t),
+        })),
+        ...(canEnterCustomDuration
+          ? [{ value: 'custom', label: t('recordingLimits.numericEntry') }]
+          : []),
+      ]
+    : []
+
   const handleRecordingDurationChange = (value: string) => {
     if (value === 'auto') {
       setCustomDurationEntryRequested(false)
@@ -356,11 +375,12 @@ export function SttPane() {
   return (
     <div>
       <SettingsRow title={t('settings.provider')} description={t('modelsPage.providerDesc')}>
-        <select
+        <Select
           aria-label={t('settings.provider')}
           value={config.stt_provider}
-          onChange={(e) => {
-            const provider = e.target.value as typeof config.stt_provider
+          options={visibleSttProviders.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
+          onChange={(next) => {
+            const provider = next as typeof config.stt_provider
             updateConfig({
               stt_provider: provider,
               ...(provider === CUSTOM_WHISPER_PROVIDER
@@ -377,14 +397,7 @@ export function SttPane() {
             })
             resetTest()
           }}
-          className="field-control"
-        >
-          {visibleSttProviders.map((p) => (
-            <option key={p.value} value={p.value}>
-              {t(p.labelKey)}
-            </option>
-          ))}
-        </select>
+        />
         {isCloud && (
           <div className="flex flex-col items-start gap-1.5 text-[12px] leading-[18px]">
             <span className="flex items-center gap-1.5 font-medium text-text-primary">
@@ -447,11 +460,15 @@ export function SttPane() {
       {isCustomWhisper && (
         <>
           <SettingsRow title={t('settings.customSttPreset')}>
-            <select
+            <Select
               aria-label={t('settings.customSttPreset')}
               value={config.stt_custom_preset}
-              onChange={(e) => {
-                const preset = e.target.value as typeof config.stt_custom_preset
+              options={CUSTOM_STT_PRESETS.map((preset) => ({
+                value: preset.value,
+                label: t(preset.labelKey),
+              }))}
+              onChange={(next) => {
+                const preset = next as typeof config.stt_custom_preset
                 const selected = CUSTOM_STT_PRESETS.find((p) => p.value === preset)
                 const hasDefaults = selected && 'baseUrl' in selected && 'model' in selected
                 updateConfig({
@@ -465,14 +482,7 @@ export function SttPane() {
                 })
                 resetTest()
               }}
-              className="field-control"
-            >
-              {CUSTOM_STT_PRESETS.map((preset) => (
-                <option key={preset.value} value={preset.value}>
-                  {t(preset.labelKey)}
-                </option>
-              ))}
-            </select>
+            />
           </SettingsRow>
           <SettingsRow
             title={t('settings.customSttBaseUrl')}
@@ -530,22 +540,19 @@ export function SttPane() {
 
       {isVolcengineDoubao && (
         <SettingsRow title={t('settings.volcengineResourceId')}>
-          <select
+          <Select
             aria-label={t('settings.volcengineResourceId')}
             value={volcengineResourceId}
-            onChange={(e) => {
-              updateConfig({ stt_volcengine_resource_id: e.target.value })
+            options={VOLCENGINE_STT_RESOURCES.map((resource) => ({
+              value: resource.value,
+              label: t(resource.labelKey),
+            }))}
+            onChange={(next) => {
+              updateConfig({ stt_volcengine_resource_id: next })
               resetTest()
               setCredentialErrorMessage(null)
             }}
-            className="field-control"
-          >
-            {VOLCENGINE_STT_RESOURCES.map((resource) => (
-              <option key={resource.value} value={resource.value}>
-                {t(resource.labelKey)}
-              </option>
-            ))}
-          </select>
+          />
         </SettingsRow>
       )}
 
@@ -554,21 +561,21 @@ export function SttPane() {
           title={t('settings.aliyunQwenRegion')}
           description={t('settings.aliyunQwenRegionHint')}
         >
-          <select
+          <Select
             aria-label={t('settings.aliyunQwenRegion')}
             value={config.stt_aliyun_qwen_region}
-            onChange={(e) => {
+            options={[
+              { value: 'china-mainland', label: t('settings.aliyunQwenRegionChina') },
+              { value: 'international', label: t('settings.aliyunQwenRegionInternational') },
+            ]}
+            onChange={(next) => {
               updateConfig({
-                stt_aliyun_qwen_region: e.target.value as typeof config.stt_aliyun_qwen_region,
+                stt_aliyun_qwen_region: next as typeof config.stt_aliyun_qwen_region,
               })
               resetTest()
               setCredentialErrorMessage(null)
             }}
-            className="field-control"
-          >
-            <option value="china-mainland">{t('settings.aliyunQwenRegionChina')}</option>
-            <option value="international">{t('settings.aliyunQwenRegionInternational')}</option>
-          </select>
+          />
         </SettingsRow>
       )}
 
@@ -607,18 +614,15 @@ export function SttPane() {
       )}
 
       <SettingsRow title={t('settings.sttLanguage')} description={t('modelsPage.sttLanguageDesc')}>
-        <select
+        <Select
           aria-label={t('settings.sttLanguage')}
           value={config.stt_language}
-          onChange={(e) => updateConfig({ stt_language: e.target.value })}
-          className="field-control"
-        >
-          {LANGUAGES.map((l) => (
-            <option key={l.value} value={l.value}>
-              {l.labelKey ? t(l.labelKey) : l.label}
-            </option>
-          ))}
-        </select>
+          options={LANGUAGES.map((l) => ({
+            value: l.value,
+            label: l.labelKey ? t(l.labelKey) : (l.label ?? l.value),
+          }))}
+          onChange={(next) => updateConfig({ stt_language: next })}
+        />
       </SettingsRow>
 
       <SettingsRow
@@ -627,29 +631,12 @@ export function SttPane() {
       >
         {recordingLimit ? (
           <>
-            <select
+            <Select
               aria-label={t('settings.maxRecordingDuration')}
               value={recordingDurationValue}
-              onChange={(event) => handleRecordingDurationChange(event.target.value)}
-              className="field-control"
-            >
-              <option value="auto">
-                {t('recordingLimits.auto', {
-                  duration: formatRecordingDuration(
-                    recordingLimit.capability.recommendedMaxSeconds,
-                    t,
-                  ),
-                })}
-              </option>
-              {availableRecordingPresets.map((seconds) => (
-                <option key={seconds} value={seconds}>
-                  {formatRecordingDuration(seconds, t)}
-                </option>
-              ))}
-              {canEnterCustomDuration && (
-                <option value="custom">{t('recordingLimits.numericEntry')}</option>
-              )}
-            </select>
+              options={recordingDurationOptions}
+              onChange={(next) => handleRecordingDurationChange(next)}
+            />
 
             {showCustomDurationEntry && (
               <div className="field-control flex items-center gap-2 px-0 pr-3">

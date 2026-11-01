@@ -1,6 +1,6 @@
 import type { PipelineState, VoiceMode } from '../stores/appStore'
 
-export type CapsuleView = 'idle' | 'hover' | 'starting' | 'recording' | 'processing' | 'error'
+export type CapsuleView = 'idle' | 'starting' | 'recording' | 'processing' | 'error'
 
 export type CapsuleTone = 'dictate' | 'translate' | 'ask'
 
@@ -12,12 +12,11 @@ export interface CapsuleSize {
   height: number
 }
 
-// Typeless floating bar geometry (REA: floating-bar chunk `Sa`/`Ra`): idle 40x6, hover 70x34,
+// Typeless floating bar geometry (REA: floating-bar chunk `Sa`/`Ra`): idle 40x6,
 // push-to-talk 70x34, hands-free 116x34, starting 54x12, thinking 92x34 (170 for web search).
 // A visible last-minute countdown widens the recording bar by 40px; errors use the 70px dotted bar.
 export const CAPSULE_SIZES = {
   idle: { width: 40, height: 6 },
-  hover: { width: 70, height: 34 },
   starting: { width: 54, height: 12 },
   recording: { width: 70, height: 34 },
   recordingHandsFree: { width: 116, height: 34 },
@@ -30,11 +29,7 @@ const COUNTDOWN_EXTRA_WIDTH = 40
 /** Room for the translation target chip, an OpenTypeless addition to the hands-free bar. */
 const TARGET_CHIP_EXTRA_WIDTH = 34
 
-export function getCapsuleView(
-  pipelineState: PipelineState,
-  hasError: boolean,
-  hovered: boolean,
-): CapsuleView {
+export function getCapsuleView(pipelineState: PipelineState, hasError: boolean): CapsuleView {
   if (hasError) return 'error'
   switch (pipelineState) {
     case 'preparing':
@@ -48,7 +43,7 @@ export function getCapsuleView(
     case 'outputting':
       return 'processing'
     default:
-      return hovered ? 'hover' : 'idle'
+      return 'idle'
   }
 }
 

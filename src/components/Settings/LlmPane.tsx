@@ -14,6 +14,7 @@ import {
 } from '../../lib/tauri'
 import type { CustomAppMappingView, MappingCandidateView } from '../../lib/tauri'
 import { SettingsRow } from './shared/SettingsRow'
+import { Select } from '../shared/Select'
 import { Toggle } from './shared/Toggle'
 import {
   CheckCircle2,
@@ -266,11 +267,12 @@ export function LlmPane() {
   return (
     <div>
       <SettingsRow title={t('settings.provider')} description={t('modelsPage.polishProviderDesc')}>
-        <select
+        <Select
           aria-label={t('settings.provider')}
           value={config.llm_provider}
-          onChange={(e) => {
-            const provider = e.target.value as typeof config.llm_provider
+          options={LLM_PROVIDERS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
+          onChange={(next) => {
+            const provider = next as typeof config.llm_provider
             const defaults = LLM_DEFAULT_CONFIG[provider]
             updateConfig({
               llm_provider: provider,
@@ -280,14 +282,7 @@ export function LlmPane() {
             resetTest()
             setModels([])
           }}
-          className="field-control"
-        >
-          {LLM_PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {t(p.labelKey)}
-            </option>
-          ))}
-        </select>
+        />
         {isCloud && (
           <div className="flex flex-col items-start gap-1.5 text-[12px] leading-[18px]">
             <span className="flex items-center gap-1.5 font-medium text-text-primary">
@@ -396,17 +391,17 @@ export function LlmPane() {
           title={t('settings.polishStyle')}
           description={t('modelsPage.polishStyleDesc')}
         >
-          <select
+          <Select
             aria-label={t('settings.polishStyle')}
             value={config.polish_style}
-            onChange={(e) => updateConfig({ polish_style: e.target.value as PolishStyle })}
-            className="field-control"
-          >
-            <option value="minimal">{t('settings.polishStyleMinimal')}</option>
-            <option value="clean">{t('settings.polishStyleClean')}</option>
-            <option value="structured">{t('settings.polishStyleStructured')}</option>
-            <option value="professional">{t('settings.polishStyleProfessional')}</option>
-          </select>
+            options={[
+              { value: 'minimal', label: t('settings.polishStyleMinimal') },
+              { value: 'clean', label: t('settings.polishStyleClean') },
+              { value: 'structured', label: t('settings.polishStyleStructured') },
+              { value: 'professional', label: t('settings.polishStyleProfessional') },
+            ]}
+            onChange={(next) => updateConfig({ polish_style: next as PolishStyle })}
+          />
         </SettingsRow>
       )}
 

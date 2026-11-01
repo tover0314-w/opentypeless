@@ -73,8 +73,6 @@ describe('Capsule bar views', () => {
     useAppStore.setState({
       pipelineState: 'idle',
       pipelineError: null,
-      contextMenuOpen: false,
-      contextMenuReady: false,
       translationTargetMenuOpen: false,
       activeVoiceMode: null,
       recordingStyle: 'handsFree',
@@ -104,24 +102,10 @@ describe('Capsule bar views', () => {
     expect(shell(container).hasAttribute('data-idle-hidden')).toBe(true)
   })
 
-  it('starts dictation when the hover pill is clicked', () => {
-    vi.useFakeTimers()
-    try {
-      const { container } = render(<Capsule />)
-      fireEvent.pointerEnter(shell(container))
-      act(() => {
-        vi.advanceTimersByTime(300)
-      })
-      expect(shell(container).dataset.capsuleView).toBe('hover')
-      expect(shell(container).style.width).toBe('70px')
-
-      const pointerUp = new Event('pointerup', { bubbles: true })
-      Object.defineProperty(pointerUp, 'button', { value: 0 })
-      fireEvent(shell(container), pointerUp)
-      expect(invoke).toHaveBeenCalledWith('start_recording')
-    } finally {
-      vi.useRealTimers()
-    }
+  it('has no right-click menu, like the Typeless floating bar', () => {
+    const { container } = render(<Capsule />)
+    fireEvent.contextMenu(shell(container))
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
   it('renders the starting state while the microphone warms up', () => {

@@ -9,16 +9,15 @@ import {
 
 describe('capsule view model', () => {
   it('maps pipeline states onto Typeless-style bar views', () => {
-    expect(getCapsuleView('idle', false, false)).toBe('idle')
-    expect(getCapsuleView('idle', false, true)).toBe('hover')
-    expect(getCapsuleView('preparing', false, false)).toBe('starting')
-    expect(getCapsuleView('recording', false, false)).toBe('recording')
-    expect(getCapsuleView('ask_recording', false, false)).toBe('recording')
-    expect(getCapsuleView('transcribing', false, false)).toBe('processing')
-    expect(getCapsuleView('polishing', false, false)).toBe('processing')
-    expect(getCapsuleView('ask_thinking', false, false)).toBe('processing')
-    expect(getCapsuleView('outputting', false, false)).toBe('processing')
-    expect(getCapsuleView('recording', true, false)).toBe('error')
+    expect(getCapsuleView('idle', false)).toBe('idle')
+    expect(getCapsuleView('preparing', false)).toBe('starting')
+    expect(getCapsuleView('recording', false)).toBe('recording')
+    expect(getCapsuleView('ask_recording', false)).toBe('recording')
+    expect(getCapsuleView('transcribing', false)).toBe('processing')
+    expect(getCapsuleView('polishing', false)).toBe('processing')
+    expect(getCapsuleView('ask_thinking', false)).toBe('processing')
+    expect(getCapsuleView('outputting', false)).toBe('processing')
+    expect(getCapsuleView('recording', true)).toBe('error')
   })
 
   it('distinguishes dictate, translate and ask tones', () => {
@@ -30,7 +29,6 @@ describe('capsule view model', () => {
 
   it('uses the Typeless bar geometry', () => {
     expect(getCapsuleSize('idle')).toEqual({ width: 40, height: 6 })
-    expect(getCapsuleSize('hover')).toEqual({ width: 70, height: 34 })
     expect(getCapsuleSize('starting')).toEqual({ width: 54, height: 12 })
     expect(getCapsuleSize('recording')).toEqual({ width: 116, height: 34 })
     expect(getCapsuleSize('recording', { recordingStyle: 'pushToTalk' })).toEqual({

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { isMacPlatform, useAppStore, type PipelineState } from '../stores/appStore'
+import { useAppStore, type PipelineState } from '../stores/appStore'
 import { useCapsuleAlertStore } from '../stores/capsuleAlertStore'
 
 interface CapsuleSize {
@@ -115,10 +115,6 @@ export function getCapsuleRecoveryPosition(
 
 export interface CapsuleVisibilityInput {
   capsuleAutoHide: boolean
-  /** macOS keeps the window up and lets clicks pass through, so an invisible idle bar can still
-   * reveal itself on hover like Typeless's `idle-hidden` state. */
-  hoverRevealsIdle?: boolean
-  contextMenuOpen: boolean
   translationTargetMenuOpen?: boolean
   capsuleExpanded: boolean
   hasError: boolean
@@ -127,8 +123,6 @@ export interface CapsuleVisibilityInput {
 
 export function getCapsuleVisibility({
   capsuleAutoHide,
-  hoverRevealsIdle = false,
-  contextMenuOpen,
   translationTargetMenuOpen = false,
   capsuleExpanded,
   hasError,
@@ -136,8 +130,6 @@ export function getCapsuleVisibility({
 }: CapsuleVisibilityInput): boolean {
   return (
     !capsuleAutoHide ||
-    hoverRevealsIdle ||
-    contextMenuOpen ||
     translationTargetMenuOpen ||
     capsuleExpanded ||
     hasError ||
@@ -150,7 +142,7 @@ export function getCapsuleFocusable(): boolean {
 }
 
 // The capsule window is a transparent panel anchored at its bottom edge: the bar sits at the
-// bottom centre and alerts, mode labels and menus stack above it.
+// bottom centre and alerts and the translation target menu stack above it.
 const PANEL_WIDTH = 460
 const BAR_PANEL_HEIGHT = 56
 const MENU_PANEL_HEIGHT = 300
@@ -160,11 +152,10 @@ function getSizeForState(
   state: PipelineState,
   expanded: boolean,
   hasError: boolean,
-  contextMenuOpen: boolean,
   translationTargetMenuOpen = false,
   hasAlert = false,
 ): CapsuleSize {
-  if (translationTargetMenuOpen || contextMenuOpen) {
+  if (translationTargetMenuOpen) {
     return { width: PANEL_WIDTH, height: MENU_PANEL_HEIGHT }
   }
   if (hasAlert) return { width: PANEL_WIDTH, height: ALERT_PANEL_HEIGHT }
@@ -187,9 +178,7 @@ export function useCapsuleResize() {
   const pipelineState = useAppStore((s) => s.pipelineState)
   const capsuleExpanded = useAppStore((s) => s.capsuleExpanded)
   const pipelineError = useAppStore((s) => s.pipelineError)
-  const contextMenuOpen = useAppStore((s) => s.contextMenuOpen)
   const translationTargetMenuOpen = useAppStore((s) => s.translationTargetMenuOpen)
-  const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
   const hasAlert = useCapsuleAlertStore((s) => s.alert !== null)
   const initialized = useRef(false)
@@ -206,7 +195,6 @@ export function useCapsuleResize() {
       pipelineState,
       capsuleExpanded,
       hasError,
-      contextMenuOpen,
       translationTargetMenuOpen,
       hasAlert,
     )
@@ -214,8 +202,6 @@ export function useCapsuleResize() {
     const windowHeight = size.height
     const shouldShow = getCapsuleVisibility({
       capsuleAutoHide,
-      hoverRevealsIdle: isMacPlatform(),
-      contextMenuOpen,
       translationTargetMenuOpen,
       capsuleExpanded,
       hasError: hasError || hasAlert,
@@ -421,12 +407,6 @@ export function useCapsuleResize() {
           if (!isCurrent()) return
           prevWindowSize.current = { width: windowWidth, height: windowHeight }
 
-          // Signal that the window has finished resizing for context menu
-          if (contextMenuOpen) {
-            if (!isCurrent()) return
-            setContextMenuReady(true)
-          }
-
           if (!isCurrent()) return
           if (shouldShow) {
             await win.show().catch(() => {})
@@ -446,17 +426,14 @@ export function useCapsuleResize() {
     capsuleExpanded,
     hasError,
     hasAlert,
-    contextMenuOpen,
     translationTargetMenuOpen,
     capsuleAutoHide,
-    setContextMenuReady,
   ])
 
   return getSizeForState(
     pipelineState,
     capsuleExpanded,
     hasError,
-    contextMenuOpen,
     translationTargetMenuOpen,
     hasAlert,
   )

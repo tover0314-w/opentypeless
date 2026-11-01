@@ -256,6 +256,7 @@ vi.mock('../../../stores/authStore', () => ({
 // ─── Import components AFTER mocks ───────────────────────────────────────────
 import { Settings } from '../index'
 import { ModelsPage } from '../../ModelsPage'
+import { chooseOption } from '../../shared/__tests__/selectTestUtils'
 import {
   checkAccessibilityPermission,
   getConfig,
@@ -1233,9 +1234,9 @@ describe('LlmPane provider 切换清空 models', () => {
     const llmSection = screen.getByRole('region', { name: 'settings.aiPolish' })
     const providerSelect = within(llmSection).getAllByRole('combobox')[0]
 
-    await act(async () => {
-      fireEvent.change(providerSelect, { target: { value: 'openai' } })
-    })
+    // The seeded provider may already be OpenAI; pick a different one so the change fires.
+    const next = providerSelect.getAttribute('data-value') === 'openai' ? 'claude' : 'openai'
+    chooseOption(providerSelect, next)
 
     expect(useAppStore.getState().llmModels).toEqual([])
   })

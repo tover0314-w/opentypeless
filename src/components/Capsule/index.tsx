@@ -17,7 +17,6 @@ import {
   type CapsuleTone,
   type CapsuleView,
 } from '../../lib/capsuleView'
-import { CapsuleContextMenu } from './CapsuleContextMenu'
 import { CapsuleAlertBubble } from './CapsuleAlertBubble'
 import { useVoiceHotkeys } from '../../lib/hotkeyLabels'
 import { Keycaps } from '../shared/Keycaps'
@@ -27,7 +26,6 @@ import { DurationTimer } from './DurationTimer'
 import { useCountdownRemainingMs } from './useCountdown'
 
 const DRAG_THRESHOLD = 5
-const HOVER_DELAY_MS = 250
 
 export function Capsule() {
   const pipelineState = useAppStore((s) => s.pipelineState)
@@ -35,40 +33,20 @@ export function Capsule() {
   const activeVoiceMode = useAppStore((s) => s.activeVoiceMode)
   const recordingStyle = useAppStore((s) => s.recordingStyle)
   const capsuleAutoHide = useAppStore((s) => s.config.capsule_auto_hide)
-  const contextMenuOpen = useAppStore((s) => s.contextMenuOpen)
-  const setContextMenuOpen = useAppStore((s) => s.setContextMenuOpen)
-  const contextMenuReady = useAppStore((s) => s.contextMenuReady)
-  const setContextMenuReady = useAppStore((s) => s.setContextMenuReady)
   const translationTargetMenuOpen = useAppStore((s) => s.translationTargetMenuOpen)
   const setTranslationTargetMenuOpen = useAppStore((s) => s.setTranslationTargetMenuOpen)
-  const { startRecording, stopRecording, isRecording } = useRecording()
-  const { t } = useTranslation()
-  const [hovered, setHovered] = useState(false)
+  const { stopRecording, isRecording } = useRecording()
   const [finishHover, setFinishHover] = useState(false)
-  const hoverTimer = useRef<number | null>(null)
 
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const isDragging = useRef(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  const handlePointerEnter = useCallback(() => {
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
-    hoverTimer.current = window.setTimeout(() => setHovered(true), HOVER_DELAY_MS)
-  }, [])
-  const handlePointerLeave = useCallback(() => {
-    if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
-    setHovered(false)
-  }, [])
-  const handleBarHoverChange = useCallback(
-    (over: boolean) => (over ? handlePointerEnter() : handlePointerLeave()),
-    [handlePointerEnter, handlePointerLeave],
-  )
-
   useCapsuleResize()
-  useCapsuleClickThrough(rootRef, handleBarHoverChange)
+  useCapsuleClickThrough(rootRef)
 
   const hasError = pipelineError !== null
-  const view = getCapsuleView(pipelineState, hasError, hovered)
+  const view = getCapsuleView(pipelineState, hasError)
   const tone = getCapsuleTone(pipelineState, activeVoiceMode)
   const isAsk = pipelineState === 'ask_recording' || pipelineState === 'ask_thinking'
   // Ask always needs explicit finish/cancel controls, so it never uses the push-to-talk bar.
@@ -119,42 +97,16 @@ export function Capsule() {
         return
       }
       dragStart.current = null
-      // The hover pill advertises "click to start"; every other state finishes the take.
-      if (view === 'hover') {
-        setHovered(false)
-        startRecording().catch((error) => console.error('Failed to start dictation:', error))
-        return
-      }
       finish()
     },
-    [finish, startRecording, view],
+    [finish],
   )
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault()
-    if (!contextMenuOpen) {
-      setTranslationTargetMenuOpen(false)
-      setContextMenuOpen(true)
-    }
-  }
-
-  const handleCloseMenu = () => {
-    setContextMenuReady(false)
-    setContextMenuOpen(false)
-  }
 
   useEffect(() => {
     if (translationTargetMenuOpen && pipelineState !== 'recording') {
       setTranslationTargetMenuOpen(false)
     }
   }, [pipelineState, setTranslationTargetMenuOpen, translationTargetMenuOpen])
-
-  useEffect(
-    () => () => {
-      if (hoverTimer.current) window.clearTimeout(hoverTimer.current)
-    },
-    [],
-  )
 
   const handsFree = view === 'recording' && style === 'handsFree'
 
@@ -163,14 +115,9 @@ export function Capsule() {
       ref={rootRef}
       className="relative flex h-full w-full flex-col items-center justify-end pb-2"
       style={{ background: 'transparent' }}
-      onContextMenu={handleContextMenu}
+      onContextMenu={(event) => event.preventDefault()}
     >
       <TranslateTargetMenu />
-      {contextMenuOpen && contextMenuReady && (
-        <div className="mb-2">
-          <CapsuleContextMenu onClose={handleCloseMenu} />
-        </div>
-      )}
       <CapsuleAlertBubble />
 
       <div className="relative">
@@ -181,17 +128,14 @@ export function Capsule() {
           data-idle-hidden={view === 'idle' && capsuleAutoHide ? '' : undefined}
           className={`capsule-bar capsule-bar--${view} pointer-events-auto relative shrink-0`}
           style={size}
-          onPointerEnter={handlePointerEnter}
-          onPointerLeave={handlePointerLeave}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          title={view === 'hover' ? t('capsule.clickToStart') : undefined}
         >
           {(view === 'recording' || view === 'processing') && tone !== 'dictate' && (
             <ModeGlow tone={tone} />
           )}
-          {(view === 'hover' || view === 'error') && <IdleDots />}
+          {view === 'error' && <IdleDots />}
           {view === 'recording' && (
             <RecordingControls
               handsFree={handsFree}
@@ -218,7 +162,7 @@ export function Capsule() {
   )
 }
 
-/** Typeless hover / error filler: ten 2px grey dots. */
+/** Typeless error filler: ten 2px grey dots. */
 function IdleDots() {
   return (
     <div className="flex h-full items-center justify-center gap-[2px]" aria-hidden="true">

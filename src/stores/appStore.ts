@@ -344,10 +344,6 @@ interface AppState {
   setHotkeyRegistrationError: (error: string | null) => void
 
   // Context menu
-  contextMenuOpen: boolean
-  setContextMenuOpen: (open: boolean) => void
-  contextMenuReady: boolean
-  setContextMenuReady: (ready: boolean) => void
   translationTargetMenuOpen: boolean
   setTranslationTargetMenuOpen: (open: boolean) => void
 
@@ -877,10 +873,6 @@ export const useAppStore = create<AppState>((set) => ({
   hotkeyRegistrationError: null,
   setHotkeyRegistrationError: (hotkeyRegistrationError) => set({ hotkeyRegistrationError }),
 
-  contextMenuOpen: false,
-  setContextMenuOpen: (contextMenuOpen) => set({ contextMenuOpen }),
-  contextMenuReady: false,
-  setContextMenuReady: (contextMenuReady) => set({ contextMenuReady }),
   translationTargetMenuOpen: false,
   setTranslationTargetMenuOpen: (translationTargetMenuOpen) => set({ translationTargetMenuOpen }),
 

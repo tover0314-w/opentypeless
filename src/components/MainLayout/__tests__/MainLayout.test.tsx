@@ -86,7 +86,7 @@ describe('MainLayout', () => {
       within(nav)
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['Home', 'History', 'Dictionary', 'Models'])
+    ).toEqual(['Home', 'Models', 'History', 'Dictionary'])
   })
 
   it('opens Settings, Account and Help as overlays from the sidebar footer', () => {

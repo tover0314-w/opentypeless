@@ -20,9 +20,9 @@ import { UsageCard } from './UsageCard'
 
 const NAV_ITEMS: { id: Page; labelKey: string; icon: typeof Home }[] = [
   { id: 'home', labelKey: 'nav.home', icon: Home },
+  { id: 'models', labelKey: 'nav.models', icon: Cpu },
   { id: 'history', labelKey: 'nav.history', icon: History },
   { id: 'dictionary', labelKey: 'nav.dictionary', icon: BookOpen },
-  { id: 'models', labelKey: 'nav.models', icon: Cpu },
 ]
 
 const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)

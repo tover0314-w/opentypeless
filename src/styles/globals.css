@@ -286,7 +286,6 @@ textarea.field-control {
   transform-origin: center;
 }
 
-.capsule-bar--hover,
 .capsule-bar--error,
 .capsule-bar--starting,
 .capsule-bar--recording,
@@ -300,7 +299,6 @@ textarea.field-control {
     0 25px 30px rgba(0, 0, 0, 0.25);
 }
 
-.capsule-bar--hover,
 .capsule-bar--error {
   padding: 4px 6px;
 }

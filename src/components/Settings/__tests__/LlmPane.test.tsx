@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { LlmPane } from '../LlmPane'
+import { chooseOption, selectedValue } from '../../shared/__tests__/selectTestUtils'
 import * as tauri from '../../../lib/tauri'
 
 // Mock Tauri
@@ -198,7 +199,7 @@ describe('LlmPane', () => {
       render(<LlmPane />)
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0] // First select is provider
-      expect(providerSelect).toHaveValue('openai')
+      expect(selectedValue(providerSelect)).toBe('openai')
     })
 
     it('updates config and resets state when provider changes', () => {
@@ -206,7 +207,7 @@ describe('LlmPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'anthropic' } })
+      chooseOption(providerSelect, 'claude')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalled()
       expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle')
@@ -219,7 +220,7 @@ describe('LlmPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'doubao' } })
+      chooseOption(providerSelect, 'doubao')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         llm_provider: 'doubao',
@@ -460,13 +461,13 @@ describe('LlmPane', () => {
       render(<LlmPane />)
 
       expect(screen.getByText('Polish style')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('Clean')).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Polish style' })).toHaveTextContent('Clean')
     })
 
     it('updates the selected polish style without opening advanced settings', () => {
       render(<LlmPane />)
 
-      fireEvent.change(screen.getByDisplayValue('Clean'), { target: { value: 'structured' } })
+      chooseOption(screen.getByRole('combobox', { name: 'Polish style' }), 'structured')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ polish_style: 'structured' })
       expect(screen.queryByText('Custom polish instructions')).not.toBeInTheDocument()

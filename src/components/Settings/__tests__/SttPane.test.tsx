@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { SttPane } from '../SttPane'
+import { chooseOption, selectedValue, selectOptions } from '../../shared/__tests__/selectTestUtils'
 import * as tauri from '../../../lib/tauri'
 
 // Mock Tauri
@@ -227,21 +228,23 @@ describe('SttPane', () => {
       render(<SttPane />)
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0] // First select is provider
-      expect(providerSelect).toHaveValue('deepgram')
+      expect(selectedValue(providerSelect)).toBe('deepgram')
     })
 
     it('lists Volcengine Doubao realtime ASR as an STT provider', () => {
       render(<SttPane />)
-      expect(screen.getByRole('option', { name: 'Volcengine Doubao Realtime ASR' })).toHaveValue(
-        'volcengine-doubao',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Volcengine Doubao Realtime ASR',
+        value: 'volcengine-doubao',
+      })
     })
 
     it('lists Aliyun Qwen3 realtime ASR as an STT provider', () => {
       render(<SttPane />)
-      expect(screen.getByRole('option', { name: 'Aliyun Qwen3 Realtime ASR' })).toHaveValue(
-        'aliyun-qwen3-asr',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Aliyun Qwen3 Realtime ASR',
+        value: 'aliyun-qwen3-asr',
+      })
     })
 
     it('shows a persisted Beijing or Singapore region selector for Aliyun Qwen3', () => {
@@ -250,14 +253,14 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const region = screen.getByLabelText('Service region')
-      expect(region).toHaveValue('china-mainland')
+      expect(selectedValue(region)).toBe('china-mainland')
       expect(
         screen.getByText(
           'Use the region where your DashScope API key was created. Keys are region-specific.',
         ),
       ).toBeInTheDocument()
 
-      fireEvent.change(region, { target: { value: 'international' } })
+      chooseOption(region, 'international')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_aliyun_qwen_region: 'international',
@@ -290,9 +293,10 @@ describe('SttPane', () => {
     it('shows Apple Speech as a built-in local provider on macOS only', () => {
       render(<SttPane />)
 
-      expect(screen.getByRole('option', { name: 'Apple Speech (Local)' })).toHaveValue(
-        'apple-speech',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Apple Speech (Local)',
+        value: 'apple-speech',
+      })
 
       cleanup()
       mockAppStore.platformCapabilities = {
@@ -304,7 +308,9 @@ describe('SttPane', () => {
       }
       render(<SttPane />)
 
-      expect(screen.queryByRole('option', { name: 'Apple Speech (Local)' })).not.toBeInTheDocument()
+      expect(
+        selectOptions(screen.getAllByRole('combobox')[0]).map((option) => option.value),
+      ).not.toContain('apple-speech')
     })
 
     it('does not show API key input for Apple Speech and can test without credentials', async () => {
@@ -351,9 +357,9 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const resourceSelect = screen.getByLabelText('Volcengine ASR resource')
-      expect(resourceSelect).toHaveValue('volc.seedasr.sauc.duration')
+      expect(selectedValue(resourceSelect)).toBe('volc.seedasr.sauc.duration')
 
-      fireEvent.change(resourceSelect, { target: { value: 'volc.bigasr.sauc.duration' } })
+      chooseOption(resourceSelect, 'volc.bigasr.sauc.duration')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_volcengine_resource_id: 'volc.bigasr.sauc.duration',
@@ -367,7 +373,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'assemblyai' } })
+      chooseOption(providerSelect, 'assemblyai')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ stt_provider: 'assemblyai' })
       expect(mockAppStore.setSttTestStatus).toHaveBeenCalledWith('idle')
@@ -380,8 +386,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*10 minutes/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*10 minutes/i)
       expect(screen.getByText('Product safety limit')).toBeInTheDocument()
       expect(tauri.getSttRecordingCapability).toHaveBeenCalledWith('deepgram', 'auto', 600)
     })
@@ -409,11 +415,10 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(within(duration).getByRole('option', { name: '30 seconds' })).toBeInTheDocument()
-      expect(within(duration).queryByRole('option', { name: '1 minute' })).not.toBeInTheDocument()
-      expect(
-        within(duration).queryByRole('option', { name: 'Custom duration…' }),
-      ).not.toBeInTheDocument()
+      const labels = selectOptions(duration).map((option) => option.label)
+      expect(labels).toContain('30 seconds')
+      expect(labels).not.toContain('1 minute')
+      expect(labels).not.toContain('Custom duration…')
       expect(
         screen.getByText('This provider allows recordings up to 30 seconds.'),
       ).toBeInTheDocument()
@@ -443,7 +448,7 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(duration).toHaveValue('30')
+      expect(selectedValue(duration)).toBe('30')
       expect(screen.queryByLabelText('Recording limit presets')).not.toBeInTheDocument()
       expect(screen.queryByLabelText('Custom duration')).not.toBeInTheDocument()
       expect(
@@ -473,7 +478,7 @@ describe('SttPane', () => {
       const duration = await screen.findByLabelText('Single recording duration')
       expect(screen.queryByLabelText('Custom duration')).not.toBeInTheDocument()
 
-      fireEvent.change(duration, { target: { value: 'custom' } })
+      chooseOption(duration, 'custom')
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ recording_limit_mode: 'custom' })
 
       const input = await screen.findByLabelText('Custom duration')
@@ -545,9 +550,9 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(
-        within(duration).queryByRole('option', { name: 'Custom duration…' }),
-      ).not.toBeInTheDocument()
+      expect(selectOptions(duration).map((option) => option.label)).not.toContain(
+        'Custom duration…',
+      )
       expect(screen.getByText('Safe Cloud fallback')).toBeInTheDocument()
       expect(
         screen.queryByText('Current: 30 seconds. Cloud supports up to 30 seconds.'),
@@ -558,7 +563,7 @@ describe('SttPane', () => {
       render(<SttPane />)
       const duration = await screen.findByLabelText('Single recording duration')
 
-      fireEvent.change(duration, { target: { value: '300' } })
+      chooseOption(duration, '300')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         recording_limit_mode: 'custom',
@@ -586,8 +591,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*30 seconds/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*30 seconds/i)
       expect(screen.getByText('Safe Cloud fallback')).toBeInTheDocument()
 
       cleanup()
@@ -609,8 +614,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*10 minutes/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*10 minutes/i)
       expect(screen.getByText('Set automatically for OpenTypeless Cloud.')).toBeInTheDocument()
     })
   })
@@ -717,7 +722,7 @@ describe('SttPane', () => {
       expect(screen.getByText('Base URL')).toBeInTheDocument()
       expect(screen.getByText('Model')).toBeInTheDocument()
       expect(screen.getByText('API Key (optional)')).toBeInTheDocument()
-      expect(presetSelect).toHaveValue('speaches')
+      expect(selectedValue(presetSelect)).toBe('speaches')
       expect(screen.getByDisplayValue('http://localhost:8000/v1')).toBeInTheDocument()
       expect(screen.getByDisplayValue('Systran/faster-whisper-large-v3')).toBeInTheDocument()
     })
@@ -737,7 +742,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const presetSelect = selects[1]
 
-      fireEvent.change(presetSelect, { target: { value: 'speaches' } })
+      chooseOption(presetSelect, 'speaches')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_custom_preset: 'speaches',
@@ -751,7 +756,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const presetSelect = selects[1]
 
-      fireEvent.change(presetSelect, { target: { value: 'custom' } })
+      chooseOption(presetSelect, 'custom')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_custom_preset: 'custom',
@@ -951,7 +956,7 @@ describe('SttPane', () => {
       render(<SttPane />)
       const selects = screen.getAllByRole('combobox')
       const languageSelect = selects[1] // Second select is language
-      expect(languageSelect).toHaveValue('en')
+      expect(selectedValue(languageSelect)).toBe('en')
     })
 
     it('updates config when language changes', () => {
@@ -959,7 +964,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const languageSelect = selects[1]
 
-      fireEvent.change(languageSelect, { target: { value: 'zh' } })
+      chooseOption(languageSelect, 'zh')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ stt_language: 'zh' })
     })
@@ -997,7 +1002,7 @@ describe('SttPane', () => {
       // Change provider
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
-      fireEvent.change(providerSelect, { target: { value: 'assemblyai' } })
+      chooseOption(providerSelect, 'assemblyai')
 
       // Verify state was reset
       expect(mockAppStore.setSttLatencyMs).toHaveBeenCalledWith(null)
