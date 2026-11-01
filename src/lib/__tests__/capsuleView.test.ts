@@ -17,7 +17,7 @@ describe('capsule view model', () => {
     expect(getCapsuleView('transcribing', false, false)).toBe('processing')
     expect(getCapsuleView('polishing', false, false)).toBe('processing')
     expect(getCapsuleView('ask_thinking', false, false)).toBe('processing')
-    expect(getCapsuleView('outputting', false, false)).toBe('done')
+    expect(getCapsuleView('outputting', false, false)).toBe('processing')
     expect(getCapsuleView('recording', true, false)).toBe('error')
   })
 
@@ -31,9 +31,24 @@ describe('capsule view model', () => {
   it('uses the Typeless bar geometry', () => {
     expect(getCapsuleSize('idle')).toEqual({ width: 40, height: 6 })
     expect(getCapsuleSize('hover')).toEqual({ width: 70, height: 34 })
+    expect(getCapsuleSize('starting')).toEqual({ width: 54, height: 12 })
     expect(getCapsuleSize('recording')).toEqual({ width: 116, height: 34 })
+    expect(getCapsuleSize('recording', { recordingStyle: 'pushToTalk' })).toEqual({
+      width: 70,
+      height: 34,
+    })
     expect(getCapsuleSize('processing')).toEqual({ width: 92, height: 34 })
-    expect(getCapsuleSize('processing', true)).toEqual(CAPSULE_SIZES.processingWide)
+    expect(getCapsuleSize('processing', { wideProcessing: true })).toEqual(
+      CAPSULE_SIZES.processingWide,
+    )
+    expect(getCapsuleSize('error')).toEqual({ width: 70, height: 34 })
+  })
+
+  it('widens the recording bar for the last-minute countdown', () => {
+    expect(getCapsuleSize('recording', { countdown: true }).width).toBe(156)
+    expect(
+      getCapsuleSize('recording', { recordingStyle: 'pushToTalk', countdown: true }).width,
+    ).toBe(110)
   })
 
   it('advances thinking progress quickly then creeps without finishing', () => {

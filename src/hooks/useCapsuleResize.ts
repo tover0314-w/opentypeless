@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useAppStore, type PipelineState } from '../stores/appStore'
+import { isMacPlatform, useAppStore, type PipelineState } from '../stores/appStore'
 import { useCapsuleAlertStore } from '../stores/capsuleAlertStore'
 
 interface CapsuleSize {
@@ -59,22 +59,21 @@ export function getCapsuleResizePosition(
   }
 }
 
-const CAPSULE_BOTTOM_MARGIN = 80
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max))
 }
 
+/** Typeless pins its floating-bar window to the work-area bottom; the bar's own 8px bottom
+ * padding then leaves it 8px above the Dock or taskbar. */
 export function getCapsuleBottomCenterPosition(
   monitor: CapsulePlacementMonitor,
   logicalSize: CapsuleSize,
 ): PhysicalPoint {
   const physicalWidth = Math.round(logicalSize.width * monitor.scaleFactor)
   const physicalHeight = Math.round(logicalSize.height * monitor.scaleFactor)
-  const margin = Math.round(CAPSULE_BOTTOM_MARGIN * monitor.scaleFactor)
   const { position, size } = monitor.workArea
   const centeredX = position.x + Math.round((size.width - physicalWidth) / 2)
-  const bottomY = position.y + size.height - physicalHeight - margin
+  const bottomY = position.y + size.height - physicalHeight
 
   return {
     x: clamp(centeredX, position.x, position.x + size.width - physicalWidth),
@@ -116,6 +115,9 @@ export function getCapsuleRecoveryPosition(
 
 export interface CapsuleVisibilityInput {
   capsuleAutoHide: boolean
+  /** macOS keeps the window up and lets clicks pass through, so an invisible idle bar can still
+   * reveal itself on hover like Typeless's `idle-hidden` state. */
+  hoverRevealsIdle?: boolean
   contextMenuOpen: boolean
   translationTargetMenuOpen?: boolean
   capsuleExpanded: boolean
@@ -125,6 +127,7 @@ export interface CapsuleVisibilityInput {
 
 export function getCapsuleVisibility({
   capsuleAutoHide,
+  hoverRevealsIdle = false,
   contextMenuOpen,
   translationTargetMenuOpen = false,
   capsuleExpanded,
@@ -133,6 +136,7 @@ export function getCapsuleVisibility({
 }: CapsuleVisibilityInput): boolean {
   return (
     !capsuleAutoHide ||
+    hoverRevealsIdle ||
     contextMenuOpen ||
     translationTargetMenuOpen ||
     capsuleExpanded ||
@@ -164,13 +168,15 @@ function getSizeForState(
     return { width: PANEL_WIDTH, height: MENU_PANEL_HEIGHT }
   }
   if (hasAlert) return { width: PANEL_WIDTH, height: ALERT_PANEL_HEIGHT }
-  if (hasError || expanded) return { width: PANEL_WIDTH, height: BAR_PANEL_HEIGHT }
+  // Errors explain themselves in an alert stacked above the bar.
+  if (hasError) return { width: PANEL_WIDTH, height: 104 }
+  if (expanded) return { width: PANEL_WIDTH, height: BAR_PANEL_HEIGHT }
   switch (state) {
     case 'idle':
       return { width: 120, height: BAR_PANEL_HEIGHT }
     case 'recording':
     case 'ask_recording':
-      // Leaves room for the Translate/Ask mode label above the bar.
+      // Leaves room for the Finish tooltip above the bar.
       return { width: PANEL_WIDTH, height: 104 }
     default:
       return { width: PANEL_WIDTH, height: BAR_PANEL_HEIGHT }
@@ -208,6 +214,7 @@ export function useCapsuleResize() {
     const windowHeight = size.height
     const shouldShow = getCapsuleVisibility({
       capsuleAutoHide,
+      hoverRevealsIdle: isMacPlatform(),
       contextMenuOpen,
       translationTargetMenuOpen,
       capsuleExpanded,
@@ -223,6 +230,7 @@ export function useCapsuleResize() {
           PhysicalPosition,
           availableMonitors,
           currentMonitor,
+          cursorPosition,
           primaryMonitor,
           monitorFromPoint,
           Window,
@@ -230,7 +238,15 @@ export function useCapsuleResize() {
           if (!isCurrent()) return
 
           const win = getCurrentWindow()
+          // Typeless follows the display under the mouse, falling back to the main window's.
           const anchorMonitor = async () => {
+            try {
+              const cursor = await cursorPosition()
+              const monitor = await monitorFromPoint(cursor.x, cursor.y)
+              if (monitor) return monitor
+            } catch {
+              /* cursor position unavailable */
+            }
             try {
               const main = await Window.getByLabel('main')
               if (main) {

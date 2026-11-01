@@ -14,6 +14,7 @@ import { useAppStore } from '../../stores/appStore'
 
 const windowApiMocks = vi.hoisted(() => ({
   getCurrentWindow: vi.fn(),
+  cursorPosition: vi.fn(),
   availableMonitors: vi.fn(),
   currentMonitor: vi.fn(),
   primaryMonitor: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('@tauri-apps/api/window', () => {
     getCurrentWindow: windowApiMocks.getCurrentWindow,
     availableMonitors: windowApiMocks.availableMonitors,
     currentMonitor: windowApiMocks.currentMonitor,
+    cursorPosition: windowApiMocks.cursorPosition,
     primaryMonitor: windowApiMocks.primaryMonitor,
     Window: { getByLabel: windowApiMocks.getMainWindow },
     monitorFromPoint: windowApiMocks.monitorFromPoint,
@@ -77,6 +79,19 @@ describe('getCapsuleVisibility', () => {
         pipelineState: 'idle',
       }),
     ).toBe(false)
+  })
+
+  it('keeps an auto-hidden idle capsule up when hovering can reveal it', () => {
+    expect(
+      getCapsuleVisibility({
+        capsuleAutoHide: true,
+        hoverRevealsIdle: true,
+        contextMenuOpen: false,
+        capsuleExpanded: false,
+        hasError: false,
+        pipelineState: 'idle',
+      }),
+    ).toBe(true)
   })
 
   it('shows idle capsule when an error appears', () => {
@@ -149,22 +164,22 @@ describe('capsule monitor geometry', () => {
     {
       name: 'primary monitor',
       workArea: { position: { x: 0, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 848, y: 900 },
+      expected: { x: 848, y: 980 },
     },
     {
       name: 'monitor to the right',
       workArea: { position: { x: 3440, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 4288, y: 900 },
+      expected: { x: 4288, y: 980 },
     },
     {
       name: 'monitor to the left',
       workArea: { position: { x: -1920, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: -1072, y: 900 },
+      expected: { x: -1072, y: 980 },
     },
     {
       name: 'monitor above',
       workArea: { position: { x: 0, y: -1080 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 848, y: -180 },
+      expected: { x: 848, y: -100 },
     },
   ])('uses the global work-area origin for the $name', ({ workArea, expected }) => {
     expect(
@@ -181,7 +196,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 3032, y: 1290 })
+    ).toEqual({ x: 3032, y: 1410 })
   })
 
   it('supports a 200% scale factor without converting the global origin', () => {
@@ -193,7 +208,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: -2144, y: 1600 })
+    ).toEqual({ x: -2144, y: 1760 })
   })
 
   it('uses the work area rather than placing the capsule behind the taskbar', () => {
@@ -205,7 +220,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 848, y: 900 })
+    ).toEqual({ x: 848, y: 980 })
   })
 
   it('preserves a capsule that is even partially visible on any monitor', () => {
@@ -299,7 +314,7 @@ describe('capsule monitor geometry', () => {
         monitors[0],
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 848, y: 900 })
+    ).toEqual({ x: 848, y: 980 })
   })
 })
 
@@ -337,6 +352,7 @@ describe('useCapsuleResize async updates', () => {
       show: windowApiMocks.show,
       hide: windowApiMocks.hide,
     })
+    windowApiMocks.cursorPosition.mockReset().mockRejectedValue(new Error('no cursor'))
     windowApiMocks.availableMonitors.mockReset().mockResolvedValue([monitor])
     windowApiMocks.currentMonitor.mockReset().mockResolvedValue(monitor)
     windowApiMocks.primaryMonitor.mockReset().mockResolvedValue(monitor)
@@ -385,8 +401,8 @@ describe('useCapsuleResize async updates', () => {
       const position = windowApiMocks.setPosition.mock.lastCall?.[0]
       const size = windowApiMocks.setSize.mock.lastCall?.[0]
       expect(position.x + size.width / 2).toBe(960)
-      // The panel is bottom-anchored 80px above the work area's bottom edge (1040).
-      expect(position.y + size.height).toBe(960)
+      // The panel sits on the work area's bottom edge (1040); the bar's 8px padding lifts it.
+      expect(position.y + size.height).toBe(1040)
     },
   )
 

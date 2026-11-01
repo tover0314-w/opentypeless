@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { CapsuleRecordingStyle } from '../lib/capsuleView'
 import { TARGET_LANGUAGES } from '../lib/constants'
 
 export type PipelineState =
@@ -262,6 +263,8 @@ interface AppState {
   setPipelineState: (state: PipelineState) => void
   activeVoiceMode: VoiceMode | null
   setActiveVoiceMode: (mode: VoiceMode | null) => void
+  recordingStyle: CapsuleRecordingStyle
+  setRecordingStyle: (style: CapsuleRecordingStyle) => void
 
   // Recording
   audioVolume: number
@@ -801,6 +804,8 @@ export const useAppStore = create<AppState>((set) => ({
   setPipelineState: (pipelineState) => set({ pipelineState }),
   activeVoiceMode: null,
   setActiveVoiceMode: (activeVoiceMode) => set({ activeVoiceMode }),
+  recordingStyle: 'handsFree',
+  setRecordingStyle: (recordingStyle) => set({ recordingStyle }),
 
   audioVolume: 0,
   setAudioVolume: (audioVolume) => set({ audioVolume }),

@@ -77,6 +77,7 @@ describe('Capsule bar views', () => {
       contextMenuReady: false,
       translationTargetMenuOpen: false,
       activeVoiceMode: null,
+      recordingStyle: 'handsFree',
       partialTranscript: '',
     })
   })
@@ -94,10 +95,54 @@ describe('Capsule bar views', () => {
     expect(invoke).not.toHaveBeenCalledWith('start_recording')
   })
 
+  it('keeps an auto-hidden idle bar invisible but in place', () => {
+    useAppStore.setState({
+      config: { ...useAppStore.getState().config, capsule_auto_hide: true },
+    })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleView).toBe('idle')
+    expect(shell(container).hasAttribute('data-idle-hidden')).toBe(true)
+  })
+
+  it('starts dictation when the hover pill is clicked', () => {
+    vi.useFakeTimers()
+    try {
+      const { container } = render(<Capsule />)
+      fireEvent.pointerEnter(shell(container))
+      act(() => {
+        vi.advanceTimersByTime(300)
+      })
+      expect(shell(container).dataset.capsuleView).toBe('hover')
+      expect(shell(container).style.width).toBe('70px')
+
+      const pointerUp = new Event('pointerup', { bubbles: true })
+      Object.defineProperty(pointerUp, 'button', { value: 0 })
+      fireEvent(shell(container), pointerUp)
+      expect(invoke).toHaveBeenCalledWith('start_recording')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('renders the starting state while the microphone warms up', () => {
     useAppStore.setState({ pipelineState: 'preparing' })
     const { container } = render(<Capsule />)
     expect(shell(container).dataset.capsuleView).toBe('starting')
+    expect(shell(container).style.width).toBe('54px')
+    expect(shell(container).style.height).toBe('12px')
+  })
+
+  it('shows only the waveform for push-to-talk recordings', () => {
+    useAppStore.setState({
+      pipelineState: 'recording',
+      activeVoiceMode: 'dictate',
+      recordingStyle: 'pushToTalk',
+    })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleStyle).toBe('pushToTalk')
+    expect(shell(container).style.width).toBe('70px')
+    expect(screen.queryByRole('button', { name: 'capsule.finish' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'capsule.cancelRecording' })).toBeNull()
   })
 
   it('shows cancel and finish controls while recording', async () => {
@@ -123,12 +168,12 @@ describe('Capsule bar views', () => {
     expect(invoke).not.toHaveBeenCalledWith('stop_recording')
   })
 
-  it('labels Ask recording and stops Ask from the finish button', () => {
-    useAppStore.setState({ pipelineState: 'ask_recording' })
+  it('marks Ask recording with a green glow and stops Ask from the finish button', () => {
+    useAppStore.setState({ pipelineState: 'ask_recording', recordingStyle: 'pushToTalk' })
     const { container } = render(<Capsule />)
 
-    expect(screen.getByText('capsule.modeAsk')).toBeInTheDocument()
     expect(container.querySelector('[data-capsule-glow="ask"]')).not.toBeNull()
+    expect(shell(container).dataset.capsuleStyle).toBe('handsFree')
 
     fireEvent.click(screen.getByRole('button', { name: 'capsule.finish' }))
     expect(stopAskFlow).toHaveBeenCalledTimes(1)
@@ -141,7 +186,22 @@ describe('Capsule bar views', () => {
     useAppStore.setState({ pipelineState: 'polishing' })
     const { container } = render(<Capsule />)
     expect(shell(container).dataset.capsuleView).toBe('processing')
+    expect(shell(container).style.width).toBe('92px')
     expect(screen.getByText('capsule.thinking')).toBeInTheDocument()
+  })
+
+  it('keeps showing Thinking while the text is being inserted', () => {
+    useAppStore.setState({ pipelineState: 'outputting' })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleView).toBe('processing')
+  })
+
+  it('explains errors in an alert above the dotted bar', () => {
+    useAppStore.setState({ pipelineError: 'Microphone failed' })
+    const { container } = render(<Capsule />)
+    expect(shell(container).dataset.capsuleView).toBe('error')
+    expect(shell(container).style.width).toBe('70px')
+    expect(screen.getByRole('alert').textContent).toBe('Microphone failed')
   })
 
   it('warns about a slow connection when processing takes long', () => {
@@ -169,7 +229,6 @@ describe('Capsule bar views', () => {
     })
     const { container } = render(<Capsule />)
 
-    expect(screen.getByText('capsule.modeTranslating:EN')).toBeInTheDocument()
     expect(container.querySelector('[data-capsule-glow="translate"]')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'capsule.translationTarget en' }))

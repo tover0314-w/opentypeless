@@ -20,6 +20,7 @@ import {
 } from '../stores/capsuleAlertStore'
 import { toast } from '../components/toast-service'
 import { capsuleErrorKeyFromPayload, type PipelineErrorPayload } from '../lib/capsuleError'
+import type { CapsuleRecordingStyle } from '../lib/capsuleView'
 import { invalidateCloudSessionOnce } from '../lib/cloud-session'
 import {
   managedCloudIncidentFromPipelineError,
@@ -153,6 +154,9 @@ export function useTauriEvents() {
       )
     })
     addListener<VoiceMode | null>('pipeline:voice_mode', setActiveVoiceMode)
+    addListener<CapsuleRecordingStyle>('capsule:recording_style', (style) =>
+      useAppStore.getState().setRecordingStyle(style),
+    )
     addListener<string>('pipeline:target_app', setTargetApp)
     addListener<InsertResult>('pipeline:insert_result', (result) => {
       setLastInsertResult(result)

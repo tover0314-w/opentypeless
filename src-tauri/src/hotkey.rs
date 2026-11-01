@@ -1046,9 +1046,21 @@ fn handle_ask_shortcut(handle: tauri::AppHandle, action: AskShortcutAction) {
     }
 }
 
+/// Typeless shows a narrow waveform-only bar for push-to-talk and adds the cancel / finish
+/// buttons only for hands-free takes, where the user needs a way to end the recording.
+fn emit_recording_style(handle: &tauri::AppHandle) {
+    let style = if current_hotkey_mode(handle) == "hold" {
+        "pushToTalk"
+    } else {
+        "handsFree"
+    };
+    let _ = handle.emit("capsule:recording_style", style);
+}
+
 fn handle_recording_shortcut(handle: tauri::AppHandle, action: RecordingShortcutAction) {
     match action {
         RecordingShortcutAction::Start { options } => {
+            emit_recording_style(&handle);
             tauri::async_runtime::spawn(async move {
                 if handle.state::<commands::ask::AskDictationState>().is_busy() {
                     return;

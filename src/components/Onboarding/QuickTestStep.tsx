@@ -102,7 +102,9 @@ export function QuickTestStep() {
   const activeIdx = STAGES.findIndex((s) => s.key === phase)
 
   const isActive = phase !== 'idle'
-  const capsuleClass = isActive ? 'capsule-active text-white' : 'capsule-idle text-neutral-700'
+  const capsuleClass = isActive
+    ? 'capsule-bar capsule-bar--recording text-white'
+    : 'capsule-bar text-neutral-700'
 
   return (
     <div className="space-y-4">

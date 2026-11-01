@@ -2,8 +2,9 @@ import { useEffect, useRef } from 'react'
 import { useReducedMotion } from 'framer-motion'
 import { useAppStore } from '../../stores/appStore'
 
-// Typeless waveform (REA: `Ki`): 2px bars, 2px gap, 2–18px tall, white, diffused from the centre.
-const BAR_COUNT = 9
+// Typeless waveform (REA: `Ki`): 2px bars with 2px gaps filling a 38px slot (10 bars), 2–18px
+// tall, white, diffused from the centre.
+const BAR_COUNT = 10
 const MIN_HEIGHT = 2
 const MAX_HEIGHT = 18
 const UPDATE_MS = 50
@@ -43,7 +44,7 @@ export function Waveform({ dim = false }: { dim?: boolean }) {
   }, [reduced])
 
   return (
-    <div className="flex h-[18px] items-center justify-center gap-[2px]" aria-hidden="true">
+    <div className="flex h-6 w-full items-center justify-center gap-[2px]" aria-hidden="true">
       {Array.from({ length: BAR_COUNT }).map((_, i) => (
         <div
           key={i}
