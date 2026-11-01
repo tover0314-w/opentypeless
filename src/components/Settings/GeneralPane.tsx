@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, MessageCircle } from 'lucide-react'
+import { invoke } from '@tauri-apps/api/core'
+import { Globe, Keyboard, MessageCircle, Mic, Monitor, SlidersHorizontal } from 'lucide-react'
+import i18n from '../../i18n'
 import { isMacPlatform, useAppStore } from '../../stores/appStore'
-import type { HotkeyMode, OutputMode } from '../../stores/appStore'
-import { useVoiceShortcuts } from '../../hooks/useVoiceShortcuts'
+import type { HotkeyMode, OutputMode, Theme } from '../../stores/appStore'
+import { useVoiceShortcuts, type VoiceShortcutRole } from '../../hooks/useVoiceShortcuts'
 import {
   getPlatformCapabilities,
   getHotkeyStatus,
@@ -11,10 +13,14 @@ import {
   startAskFlow,
 } from '../../lib/tauri'
 import type { HotkeyStatus } from '../../lib/tauri'
+import { LANGUAGES, UI_LANGUAGES } from '../../lib/constants'
+import { Select } from '../shared/Select'
 import { SegmentedControl } from './shared/SegmentedControl'
+import { SettingsNotice, SettingsRow, SettingsSection } from './shared/SettingsRow'
 import { Toggle } from './shared/Toggle'
-import { ShortcutBindingList } from './ShortcutBindingList'
+import { ShortcutKeycapInput } from './ShortcutKeycapInput'
 import { MicrophoneSelect } from './MicrophoneSelect'
+import { TranslationTargets } from './TranslationTargets'
 
 const MAC_ACCESSIBILITY_HOTKEY_ERROR = 'Accessibility permission may be denied'
 
@@ -29,7 +35,6 @@ export function GeneralPane() {
   const { t } = useTranslation()
   const isMac = isMacPlatform()
   const [hotkeyStatus, setHotkeyStatus] = useState<HotkeyStatus | null>(null)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
   const accessibilityRecoveryAttemptedRef = useRef(false)
 
   useEffect(() => {
@@ -99,171 +104,278 @@ export function GeneralPane() {
     hotkeyRegistrationError?.includes('Accessibility permission may be denied'),
   )
   const { bindings, otherBindings, specialOptions, setBindings } = useVoiceShortcuts()
+  const currentLanguage = config.ui_language || i18n.language || 'en'
 
-  return (
-    <div className="space-y-6">
-      <Section title={t('settings.hotkey')}>
-        <div className="space-y-3">
-          <ShortcutBindingList
-            role="dictation"
-            label={t('settings.dictationHotkey')}
-            bindings={bindings.dictation}
-            otherBindings={otherBindings('dictation')}
-            required
-            specialOptions={specialOptions.dictation}
-            onChange={(next) => setBindings('dictation', next)}
-          />
-          <ShortcutBindingList
-            role="ask"
-            label={t('settings.askHotkey')}
-            bindings={bindings.ask}
-            otherBindings={otherBindings('ask')}
-            required={false}
-            specialOptions={specialOptions.ask}
-            onChange={(next) => setBindings('ask', next)}
-            trailingAction={
-              <button
-                type="button"
-                aria-label={t('settings.tryAsk')}
-                title={t('settings.tryAsk')}
-                onClick={handleOpenAsk}
-                className="grid h-7 w-7 place-items-center rounded-[6px] border border-transparent bg-bg-secondary text-text-tertiary hover:border-border hover:text-text-primary"
-              >
-                <MessageCircle size={13} />
-              </button>
-            }
-          />
-          <ShortcutBindingList
-            role="translate"
-            label={t('settings.translateHotkey')}
-            bindings={bindings.translate}
-            otherBindings={otherBindings('translate')}
-            required={false}
-            specialOptions={specialOptions.translate}
-            onChange={(next) => setBindings('translate', next)}
-          />
-        </div>
-        {platformCapabilities && !platformCapabilities.globalHotkeyReliable && (
-          <p className="mt-2 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-text-secondary">
-            {t('settings.waylandHotkeyLimited')}
-          </p>
-        )}
-        {hotkeyRegistrationError && !registrationErrorCoveredByAccessibilityBanner && (
-          <p className="mt-2 rounded-[8px] border border-error/30 bg-error/10 px-3 py-2 text-[12px] leading-relaxed text-error">
-            {t('settings.hotkeyRegistrationFailed')}
-          </p>
-        )}
-        {hotkeyStatusMessage && (
-          <p className="mt-2 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-text-secondary">
-            {hotkeyStatusMessage}
-          </p>
-        )}
-      </Section>
+  const shortcutRows: Array<{
+    role: VoiceShortcutRole
+    title: string
+    description: string
+    required?: boolean
+  }> = [
+    {
+      role: 'dictation',
+      title: t('shortcuts.dictateTitle'),
+      description: t('shortcuts.dictateDesc'),
+      required: true,
+    },
+    {
+      role: 'translate',
+      title: t('shortcuts.translateTitle'),
+      description: t('shortcuts.translateDesc'),
+    },
+    { role: 'ask', title: t('shortcuts.askTitle'), description: t('shortcuts.askDesc') },
+    {
+      role: 'pasteLast',
+      title: t('shortcuts.pasteLastTitle'),
+      description: t('shortcuts.pasteLastDesc'),
+    },
+  ]
 
-      <Section title={t('settings.dictationMode')}>
-        <SegmentedControl
-          options={[
-            { value: 'auto', label: t('settings.autoPressMode') },
-            { value: 'toggle', label: t('settings.toggleOnOff') },
-            { value: 'hold', label: t('settings.holdToTalk') },
-          ]}
-          value={config.hotkey_mode}
-          onChange={(v) => updateConfig({ hotkey_mode: v as HotkeyMode })}
-        />
-      </Section>
-
-      <Section title={t('settings.outputMode')}>
-        <SegmentedControl
-          options={[
-            { value: 'keyboard', label: t('settings.keyboardSimulation') },
-            { value: 'clipboard', label: t('settings.clipboardPaste') },
-          ]}
-          value={config.output_mode}
-          onChange={(v) => {
-            const outputMode = v as OutputMode
-            updateConfig({
-              output_mode: outputMode,
-              insertion_strategy: outputMode === 'clipboard' ? 'clipboardPaste' : 'auto',
-            })
-          }}
-        />
-        {config.output_mode === 'clipboard' &&
-          platformCapabilities &&
-          !platformCapabilities.clipboardAutoPasteReliable && (
-            <p className="mt-2 rounded-[8px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-text-secondary">
-              {t('settings.waylandClipboardCopyOnly')}
-            </p>
-          )}
-      </Section>
-
-      <Section title={t('settings.audio')}>
-        <div className="space-y-3">
-          <MicrophoneSelect />
-          <Toggle
-            checked={config.interaction_sounds}
-            onChange={(checked) => updateConfig({ interaction_sounds: checked })}
-            label={t('settings.interactionSounds')}
-          />
-          {platformCapabilities?.os !== 'linux' && (
-            <Toggle
-              checked={config.mute_background_audio}
-              onChange={(checked) => updateConfig({ mute_background_audio: checked })}
-              label={t('settings.muteBackgroundAudio')}
-            />
-          )}
-        </div>
-      </Section>
-
-      <div>
-        <button
-          type="button"
-          aria-expanded={advancedOpen}
-          onClick={() => setAdvancedOpen((open) => !open)}
-          className="flex w-full items-center justify-between rounded-[10px] border border-border bg-bg-secondary/40 px-3 py-2 text-[13px] font-medium text-text-primary transition-colors hover:border-border-focus"
-        >
-          <span>{t('settings.advancedGeneral')}</span>
-          <ChevronDown
-            size={14}
-            className={`text-text-tertiary transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
-          />
-        </button>
-
-        {advancedOpen && (
-          <div className="mt-4 space-y-3">
-            <Toggle
-              checked={config.auto_start}
-              onChange={(checked) => updateConfig({ auto_start: checked })}
-              label={t('settings.launchAtStartup')}
-            />
-            <Toggle
-              checked={config.start_minimized}
-              onChange={(checked) => updateConfig({ start_minimized: checked })}
-              label={t('settings.startMinimized')}
-            />
-            <Toggle
-              checked={config.history_enabled}
-              onChange={(checked) => updateConfig({ history_enabled: checked })}
-              label={t('settings.saveHistory')}
-            />
-            <Toggle
-              checked={config.capsule_auto_hide}
-              onChange={(checked) => updateConfig({ capsule_auto_hide: checked })}
-              label={t('settings.hideCapsuleWhenIdle')}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-[11px] font-medium text-text-tertiary uppercase tracking-wider mb-2.5">
-        {title}
-      </h3>
-      {children}
+      <SettingsSection icon={Keyboard} title={t('settings.hotkey')}>
+        {shortcutRows.map((row) => (
+          <SettingsRow key={row.role} title={row.title} description={row.description}>
+            <div className="flex justify-end">
+              <ShortcutKeycapInput
+                label={row.title}
+                bindings={bindings[row.role]}
+                otherBindings={otherBindings(row.role)}
+                required={row.required}
+                presets={specialOptions[row.role]}
+                onChange={(next) => setBindings(row.role, next)}
+              />
+            </div>
+          </SettingsRow>
+        ))}
+        {platformCapabilities && !platformCapabilities.globalHotkeyReliable && (
+          <SettingsNotice>{t('settings.waylandHotkeyLimited')}</SettingsNotice>
+        )}
+        {hotkeyRegistrationError && !registrationErrorCoveredByAccessibilityBanner && (
+          <SettingsNotice tone="error">{t('settings.hotkeyRegistrationFailed')}</SettingsNotice>
+        )}
+        {hotkeyStatusMessage && <SettingsNotice>{hotkeyStatusMessage}</SettingsNotice>}
+      </SettingsSection>
+
+      <SettingsSection icon={Globe} title={t('generalPane.language')}>
+        <SettingsRow
+          title={t('generalPane.interfaceLanguage')}
+          description={t('generalPane.interfaceLanguageDesc')}
+        >
+          <Select
+            aria-label={t('generalPane.interfaceLanguage')}
+            value={currentLanguage}
+            options={UI_LANGUAGES.map((lang) => ({ value: lang.value, label: lang.label }))}
+            onChange={(value) => {
+              i18n.changeLanguage(value)
+              localStorage.setItem('ui_language', value)
+              updateConfig({ ui_language: value })
+              invoke('refresh_tray_labels').catch(() => {})
+            }}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.translationTargets')}
+          description={t('generalPane.translationTargetsDesc')}
+        >
+          <TranslationTargets
+            value={config.translation}
+            onChange={(translation) => updateConfig({ translation })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.dictationLanguage')}
+          description={t('generalPane.dictationLanguageDesc')}
+        >
+          <Select
+            aria-label={t('generalPane.dictationLanguage')}
+            value={config.stt_language}
+            options={LANGUAGES.map((lang) => ({
+              value: lang.value,
+              label: lang.labelKey ? t(lang.labelKey) : (lang.label ?? lang.value),
+            }))}
+            onChange={(value) => updateConfig({ stt_language: value })}
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection icon={Mic} title={t('generalPane.audio')}>
+        <SettingsRow
+          title={t('generalPane.microphone')}
+          description={t('generalPane.microphoneDesc')}
+        >
+          <MicrophoneSelect />
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.interactionSounds')}
+          description={t('generalPane.interactionSoundsDesc')}
+        >
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('generalPane.interactionSounds')}
+              checked={config.interaction_sounds}
+              onChange={(checked) => updateConfig({ interaction_sounds: checked })}
+            />
+          </div>
+        </SettingsRow>
+        {platformCapabilities?.os !== 'linux' && (
+          <SettingsRow
+            title={t('generalPane.muteWhenDictating')}
+            description={t('generalPane.muteWhenDictatingDesc')}
+          >
+            <div className="flex justify-end">
+              <Toggle
+                ariaLabel={t('generalPane.muteWhenDictating')}
+                checked={config.mute_background_audio}
+                onChange={(checked) => updateConfig({ mute_background_audio: checked })}
+              />
+            </div>
+          </SettingsRow>
+        )}
+      </SettingsSection>
+
+      <SettingsSection icon={Monitor} title={t('generalPane.general')}>
+        <SettingsRow
+          title={t('generalPane.appearance')}
+          description={t('generalPane.appearanceDesc')}
+        >
+          <SegmentedControl
+            options={[
+              { value: 'system', label: t('generalPane.appearanceSystem') },
+              { value: 'light', label: t('generalPane.appearanceLight') },
+              { value: 'dark', label: t('generalPane.appearanceDark') },
+            ]}
+            value={config.theme}
+            onChange={(value) => updateConfig({ theme: value as Theme })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.launchAtLogin')}
+          description={t('generalPane.launchAtLoginDesc')}
+        >
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('generalPane.launchAtLogin')}
+              checked={config.auto_start}
+              onChange={(checked) => updateConfig({ auto_start: checked })}
+            />
+          </div>
+        </SettingsRow>
+        {isMac && (
+          <SettingsRow
+            title={t('generalPane.showInDock')}
+            description={t('generalPane.showInDockDesc')}
+          >
+            <div className="flex justify-end">
+              <Toggle
+                ariaLabel={t('generalPane.showInDock')}
+                checked={config.show_in_dock}
+                onChange={(checked) => updateConfig({ show_in_dock: checked })}
+              />
+            </div>
+          </SettingsRow>
+        )}
+      </SettingsSection>
+
+      {/* OpenTypeless-only preferences that Typeless has no equivalent for. */}
+      <SettingsSection icon={SlidersHorizontal} title={t('generalPane.input')}>
+        <SettingsRow
+          title={t('generalPane.triggerMode')}
+          description={t('generalPane.triggerModeDesc')}
+        >
+          <SegmentedControl
+            options={[
+              { value: 'auto', label: t('settings.autoPressMode') },
+              { value: 'toggle', label: t('settings.toggleOnOff') },
+              { value: 'hold', label: t('settings.holdToTalk') },
+            ]}
+            value={config.hotkey_mode}
+            onChange={(v) => updateConfig({ hotkey_mode: v as HotkeyMode })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.outputMode')}
+          description={t('generalPane.outputModeDesc')}
+        >
+          <SegmentedControl
+            options={[
+              { value: 'keyboard', label: t('settings.keyboardSimulation') },
+              { value: 'clipboard', label: t('settings.clipboardPaste') },
+            ]}
+            value={config.output_mode}
+            onChange={(v) => {
+              const outputMode = v as OutputMode
+              updateConfig({
+                output_mode: outputMode,
+                insertion_strategy: outputMode === 'clipboard' ? 'clipboardPaste' : 'auto',
+              })
+            }}
+          />
+          {config.output_mode === 'clipboard' &&
+            platformCapabilities &&
+            !platformCapabilities.clipboardAutoPasteReliable && (
+              <SettingsNotice>{t('settings.waylandClipboardCopyOnly')}</SettingsNotice>
+            )}
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.hideCapsule')}
+          description={t('generalPane.hideCapsuleDesc')}
+        >
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('generalPane.hideCapsule')}
+              checked={config.capsule_auto_hide}
+              onChange={(checked) => updateConfig({ capsule_auto_hide: checked })}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.closeToTray')}
+          description={t('generalPane.closeToTrayDesc')}
+        >
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('generalPane.closeToTray')}
+              checked={config.close_to_tray}
+              onChange={(checked) => updateConfig({ close_to_tray: checked })}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title={t('generalPane.startMinimized')}
+          description={t('generalPane.startMinimizedDesc')}
+        >
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('generalPane.startMinimized')}
+              checked={config.start_minimized}
+              onChange={(checked) => updateConfig({ start_minimized: checked })}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow title={t('settings.saveHistory')}>
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('settings.saveHistory')}
+              checked={config.history_enabled}
+              onChange={(checked) => updateConfig({ history_enabled: checked })}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow title={t('settings.tryAsk')} description={t('generalPane.tryAskDesc')}>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              aria-label={t('settings.tryAsk')}
+              onClick={handleOpenAsk}
+              className="btn-outline flex h-9 cursor-pointer items-center gap-1.5 px-3 text-[13px]"
+            >
+              <MessageCircle size={14} />
+              {t('settings.tryAsk')}
+            </button>
+          </div>
+        </SettingsRow>
+      </SettingsSection>
     </div>
   )
 }

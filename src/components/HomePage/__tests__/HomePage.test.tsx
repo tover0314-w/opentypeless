@@ -51,15 +51,13 @@ describe('HomePage shortcuts card', () => {
   })
 
   it('records a new primary shortcut in place and keeps the extra bindings', () => {
-    vi.useFakeTimers()
     render(<HomePage />)
     fireEvent.click(
       screen.getByRole('button', { name: 'home.editShortcut: home.modes.dictate.title' }),
     )
-    expect(screen.getByText('settings.pressKeyCombination')).toBeInTheDocument()
+    expect(document.querySelector('[data-editing]')).not.toBeNull()
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true, shiftKey: true })
-    vi.advanceTimersByTime(1600)
 
     expect(dictationBindings()).toEqual([
       { primary: 'K', modifiers: ['Ctrl', 'Shift'] },
@@ -72,15 +70,14 @@ describe('HomePage shortcuts card', () => {
   })
 
   it('refuses a shortcut already used by another voice feature', () => {
-    vi.useFakeTimers()
     render(<HomePage />)
     fireEvent.click(
       screen.getByRole('button', { name: 'home.editShortcut: home.modes.dictate.title' }),
     )
     fireEvent.keyDown(window, { key: '9', ctrlKey: true, altKey: true })
-    vi.advanceTimersByTime(1600)
 
     expect(dictationBindings()[0]).toEqual({ primary: 'Fn', modifiers: [] })
+    expect(screen.getByText('shortcuts.errorInUse')).toBeInTheDocument()
   })
 
   it('cancels editing without changing the shortcut', () => {
@@ -88,9 +85,9 @@ describe('HomePage shortcuts card', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'home.editShortcut: home.modes.translate.title' }),
     )
-    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
 
-    expect(screen.queryByText('settings.pressKeyCombination')).toBeNull()
+    expect(document.querySelector('[data-editing]')).toBeNull()
     expect(useAppStore.getState().config.hotkeys.translate).toEqual({
       primary: 'LeftShift',
       modifiers: ['Fn'],

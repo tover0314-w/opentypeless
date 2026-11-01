@@ -11,6 +11,7 @@ mod linux_x11;
 pub mod llm;
 pub mod native_hotkey;
 pub mod output;
+pub mod paste_last;
 pub mod pipeline;
 pub mod platform;
 pub mod recording_deadline;
@@ -100,6 +101,16 @@ where
 struct AutoStartSyncOutcome {
     config_auto_start: bool,
     error: Option<String>,
+}
+
+/// Shows or hides the Dock icon; the menu-bar icon and windows keep working either way.
+pub fn apply_dock_visibility(app: &tauri::AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = app.set_dock_visibility(visible) {
+        tracing::warn!("Failed to set Dock visibility: {error}");
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
 }
 
 fn reconcile_auto_start_preference(
@@ -1033,6 +1044,7 @@ pub fn run() {
             app.manage(CloseToTrayCache(Arc::new(Mutex::new(
                 initial_config.close_to_tray,
             ))));
+            apply_dock_visibility(app.handle(), initial_config.show_in_dock);
             // Register global shortcut from config
             let handler = hotkey::build_shortcut_handler(app_handle.clone());
             app.handle().plugin(

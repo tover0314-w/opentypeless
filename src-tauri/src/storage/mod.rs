@@ -138,6 +138,8 @@ pub struct HotkeyConfig {
     pub edit_selection: Option<ShortcutBinding>,
     pub switch_scene: Option<ShortcutBinding>,
     pub open_app: Option<ShortcutBinding>,
+    /// Re-inserts the most recent transcript (Typeless "Paste last transcript").
+    pub paste_last: Option<ShortcutBinding>,
     pub dictation_mode: String,
 }
 
@@ -150,6 +152,7 @@ impl Default for HotkeyConfig {
         );
         config.translate = default_translate_hotkey().and_then(ShortcutBinding::from_hotkey);
         config.translate_bindings = config.translate.clone().into_iter().collect();
+        config.paste_last = ShortcutBinding::from_hotkey(default_paste_last_hotkey());
         config
     }
 }
@@ -176,6 +179,7 @@ impl HotkeyConfig {
             edit_selection: None,
             switch_scene: None,
             open_app: None,
+            paste_last: None,
             dictation_mode,
         }
     }
@@ -219,6 +223,7 @@ impl HotkeyConfig {
         normalize_optional_binding(&mut self.edit_selection);
         normalize_optional_binding(&mut self.switch_scene);
         normalize_optional_binding(&mut self.open_app);
+        normalize_optional_binding(&mut self.paste_last);
         self.dictation_mode = normalize_hotkey_mode(&self.dictation_mode).to_string();
     }
 }
@@ -387,6 +392,8 @@ pub struct AppConfig {
     pub interaction_sounds: bool,
     /// Mute the system output while recording so playback doesn't bleed into the mic.
     pub mute_background_audio: bool,
+    /// macOS: keep the app icon in the Dock (Typeless `enableShowAppInDock`, default on).
+    pub show_in_dock: bool,
 }
 
 impl Default for AppConfig {
@@ -447,6 +454,7 @@ impl Default for AppConfig {
             microphone_device: String::new(),
             interaction_sounds: true,
             mute_background_audio: false,
+            show_in_dock: true,
         }
     }
 }
@@ -765,6 +773,18 @@ fn default_ask_hotkey() -> &'static str {
     #[cfg(not(target_os = "macos"))]
     {
         "Ctrl+."
+    }
+}
+
+/// Typeless default: Ctrl+Cmd+V on macOS, LeftCtrl+RightShift+V elsewhere.
+fn default_paste_last_hotkey() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Ctrl+Command+V"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Shift+V"
     }
 }
 

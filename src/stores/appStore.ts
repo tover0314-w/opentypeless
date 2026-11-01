@@ -86,6 +86,8 @@ export interface HotkeyConfig {
   editSelection: ShortcutBinding | null
   switchScene: ShortcutBinding | null
   openApp: ShortcutBinding | null
+  /** Re-inserts the newest transcript (Typeless "Paste last transcript"). */
+  pasteLast: ShortcutBinding | null
   dictationMode: HotkeyMode
 }
 
@@ -245,6 +247,8 @@ export interface AppConfig {
   microphone_device: string
   interaction_sounds: boolean
   mute_background_audio: boolean
+  /** macOS: keep the app icon in the Dock. */
+  show_in_dock: boolean
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -378,6 +382,11 @@ function defaultDictationHotkeyMode(): HotkeyMode {
 function defaultAskHotkey(): string {
   if (isMacPlatform()) return 'Fn+Space'
   return 'Ctrl+.'
+}
+
+/** Typeless default: Ctrl+Cmd+V on macOS, Ctrl+Shift+V elsewhere. */
+function defaultPasteLastHotkey(): string {
+  return isMacPlatform() ? 'Ctrl+Command+V' : 'Ctrl+Shift+V'
 }
 
 function defaultTranslateHotkey(): string | null {
@@ -570,6 +579,7 @@ function normalizeHotkeyConfig(config: AppConfig, hotkeysValue: HotkeyConfig): H
     editSelection: normalizeBinding(hotkeys.editSelection),
     switchScene: normalizeBinding(hotkeys.switchScene),
     openApp: normalizeBinding(hotkeys.openApp),
+    pasteLast: normalizeBinding(hotkeys.pasteLast),
     dictationMode: isHotkeyMode(hotkeys.dictationMode)
       ? hotkeys.dictationMode
       : isHotkeyMode(config.hotkey_mode)
@@ -603,6 +613,10 @@ function hotkeyConfigFromLegacy(config: AppConfig): HotkeyConfig {
     editSelection: config.hotkeys?.editSelection ?? null,
     switchScene: config.hotkeys?.switchScene ?? null,
     openApp: config.hotkeys?.openApp ?? null,
+    pasteLast:
+      config.hotkeys?.pasteLast === undefined
+        ? bindingFromHotkey(defaultPasteLastHotkey())
+        : config.hotkeys.pasteLast,
     dictationMode: isHotkeyMode(config.hotkey_mode)
       ? config.hotkey_mode
       : defaultDictationHotkeyMode(),
@@ -769,6 +783,7 @@ const defaultConfig: AppConfig = {
     editSelection: null,
     switchScene: null,
     openApp: null,
+    pasteLast: bindingFromHotkey(defaultPasteLastHotkey()),
     dictationMode: defaultDictationHotkeyMode(),
   },
   output_mode: 'keyboard',
@@ -793,6 +808,7 @@ const defaultConfig: AppConfig = {
   microphone_device: '',
   interaction_sounds: true,
   mute_background_audio: true,
+  show_in_dock: true,
 }
 
 export const useAppStore = create<AppState>((set) => ({

@@ -1,24 +1,10 @@
 import { useTranslation } from 'react-i18next'
-import { invoke } from '@tauri-apps/api/core'
-import i18n from '../../i18n'
 import { ExternalLink } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { useAppStore } from '../../stores/appStore'
-import { APP_NAME, APP_VERSION, APP_REPO_URL, UI_LANGUAGES } from '../../lib/constants'
+import { APP_NAME, APP_VERSION, APP_REPO_URL } from '../../lib/constants'
 
 export function AboutPane() {
   const { t } = useTranslation()
-  const config = useAppStore((s) => s.config)
-  const updateConfig = useAppStore((s) => s.updateConfig)
-
-  const currentLang = config.ui_language || i18n.language || 'en'
-
-  const handleSelectLanguage = (value: string) => {
-    i18n.changeLanguage(value)
-    localStorage.setItem('ui_language', value)
-    updateConfig({ ui_language: value })
-    invoke('refresh_tray_labels').catch(() => {})
-  }
 
   return (
     <div className="space-y-5 text-[13px]">
@@ -29,25 +15,6 @@ export function AboutPane() {
       </div>
 
       <p className="text-text-secondary leading-relaxed">{t('settings.aboutDescription')}</p>
-
-      {/* Language */}
-      <SectionCard title={t('settings.language')}>
-        <div className="grid grid-cols-2 gap-3 p-3">
-          {UI_LANGUAGES.map((lang) => (
-            <button
-              key={lang.value}
-              onClick={() => handleSelectLanguage(lang.value)}
-              className={`px-4 py-3 rounded-[8px] text-[13px] border cursor-pointer transition-all ${
-                currentLang === lang.value
-                  ? 'bg-accent/10 border-accent text-accent font-medium'
-                  : 'bg-bg-secondary border-border text-text-primary hover:border-text-tertiary'
-              }`}
-            >
-              <div className="font-medium">{lang.label}</div>
-            </button>
-          ))}
-        </div>
-      </SectionCard>
 
       {/* Open Source */}
       <SectionCard title={t('settings.openSource')}>

@@ -2,14 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { Clock3, Gauge, Hourglass, Mic, Pencil, Server } from 'lucide-react'
-import {
-  bindingFromHotkey,
-  hotkeyFromBinding,
-  useAppStore,
-  type ShortcutBinding,
-} from '../../stores/appStore'
+import { hotkeyFromBinding, useAppStore } from '../../stores/appStore'
 import { useVoiceShortcuts, type VoiceShortcutRole } from '../../hooks/useVoiceShortcuts'
-import { HotkeyRecorder } from '../Settings/ShortcutBindingList'
+import { ShortcutRecorderBox } from '../Settings/ShortcutKeycapInput'
 import { getUsageStats, type UsageStats } from '../../lib/tauri'
 import { buildHeatmap } from '../../lib/heatmap'
 import { LLM_PROVIDERS, STT_PROVIDERS } from '../../lib/constants'
@@ -120,13 +115,6 @@ const SHORTCUT_ROWS: Array<{ key: string; role: VoiceShortcutRole; accent: strin
   { key: 'ask', role: 'ask', accent: 'bg-[rgba(120,214,255,0.14)]' },
 ]
 
-function bindingIdentity(binding: ShortcutBinding) {
-  return [
-    ...binding.modifiers.map((m) => (m === 'Option' ? 'Alt' : m === 'Command' ? 'Super' : m)),
-    binding.primary,
-  ].join('+')
-}
-
 /** Typeless home shortcuts card; each shortcut can be re-recorded in place. */
 function ShortcutsCard() {
   const { t } = useTranslation()
@@ -153,24 +141,13 @@ function ShortcutsCard() {
             </div>
             {editing === row.role ? (
               <div className="w-[260px]" data-shortcut-editor={row.role}>
-                <HotkeyRecorder
-                  value={hotkey ?? ''}
-                  autoStart
-                  specialOptions={specialOptions[row.role]}
+                <ShortcutRecorderBox
+                  binding={current ?? null}
+                  presets={specialOptions[row.role]}
+                  otherBindings={[...otherBindings(row.role), ...bindings[row.role].slice(1)]}
                   onCancel={() => setEditing(null)}
-                  validateHotkey={(next) => {
-                    const candidate = bindingFromHotkey(next)
-                    if (!candidate) return t('settings.hotkeyInvalid')
-                    const identity = bindingIdentity(candidate)
-                    const clash = [...otherBindings(row.role), ...bindings[row.role].slice(1)].some(
-                      (binding) => bindingIdentity(binding) === identity,
-                    )
-                    return clash ? t('settings.hotkeyConflict') : null
-                  }}
-                  onSaved={(next) => {
-                    const binding = bindingFromHotkey(next)
+                  onSave={(binding) => {
                     setEditing(null)
-                    if (!binding) return
                     setBindings(row.role, [binding, ...bindings[row.role].slice(1)])
                   }}
                 />

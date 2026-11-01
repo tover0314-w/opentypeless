@@ -510,6 +510,11 @@ fn hotkey_status_for_with_capability_and_supervisor(
             0,
             hotkeys.open_app.as_ref(),
         ),
+        (
+            crate::hotkey::HotkeyRole::PasteLast.as_str(),
+            0,
+            hotkeys.paste_last.as_ref(),
+        ),
     ]);
     let roles = role_bindings
         .iter()
@@ -1165,7 +1170,7 @@ mod tests {
         assert!(status.capability.supports_global_hotkey);
         assert!(status.capability.supports_hold_mode);
         assert!(status.capability.supports_released_edge);
-        assert_eq!(status.roles.len(), 6);
+        assert_eq!(status.roles.len(), 7);
         assert_eq!(status.roles[0].role, "dictation");
         assert_eq!(status.roles[0].adapter, "tauriGlobalShortcut");
         assert_eq!(status.roles[0].state, "installed");
@@ -1237,6 +1242,7 @@ mod tests {
                 "editSelection",
                 "switchScene",
                 "openApp",
+                "pasteLast",
             ]
         );
         assert!(status.roles.iter().all(|role| role.state == "installed"));

@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TranslationConfig } from '../../../stores/appStore'
 import { TranslationTargets } from '../TranslationTargets'
+import { chooseOption, selectOptions } from '../../shared/__tests__/selectTestUtils'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -23,83 +24,44 @@ function renderTargets(
 }
 
 describe('TranslationTargets', () => {
-  it('keeps the common single-language state compact', () => {
+  it('shows one chip per target and hides remove for the last remaining one', () => {
     renderTargets({ targets: ['en'], active_target: 'en' })
 
-    expect(screen.getByRole('combobox', { name: 'settings.targetLanguage' })).toHaveValue('en')
-    expect(screen.queryByRole('radio')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /moveTranslationTarget/ })).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: /removeTranslationTarget/ }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'settings.manageTranslationTargets' }),
-    ).not.toBeInTheDocument()
+    expect(screen.getByTestId('translation-target-en')).toHaveTextContent('English')
+    expect(screen.queryByRole('button', { name: /translationTargets.remove/ })).toBeNull()
   })
 
-  it('keeps language choices unique and adds the first available target', () => {
+  it('only offers languages that are not already targets', () => {
+    renderTargets()
+
+    const values = selectOptions(
+      screen.getByRole('combobox', { name: 'translationTargets.addLanguage' }),
+    ).map((option) => option.value)
+    expect(values).not.toContain('en')
+    expect(values).not.toContain('ja')
+    expect(values).toContain('zh')
+  })
+
+  it('appends the chosen language and keeps the active target', () => {
     const onChange = renderTargets()
 
-    fireEvent.click(screen.getByRole('button', { name: 'settings.manageTranslationTargets' }))
-    const japaneseRow = screen.getByTestId('translation-target-ja')
-    expect(within(japaneseRow).queryByRole('option', { name: 'English' })).not.toBeInTheDocument()
+    chooseOption(screen.getByRole('combobox', { name: 'translationTargets.addLanguage' }), 'fr')
 
-    fireEvent.click(screen.getByRole('button', { name: 'settings.addTranslationTarget' }))
-
-    expect(onChange).toHaveBeenCalledWith({
-      targets: ['en', 'ja', 'zh'],
-      active_target: 'en',
-    })
+    expect(onChange).toHaveBeenCalledWith({ targets: ['en', 'ja', 'fr'], active_target: 'en' })
   })
 
-  it('caps the ordered target set at five', () => {
-    renderTargets({
-      targets: ['en', 'ja', 'zh', 'fr', 'de'],
-      active_target: 'en',
-    })
+  it('caps the target set at five', () => {
+    renderTargets({ targets: ['en', 'ja', 'zh', 'fr', 'de'], active_target: 'en' })
 
-    expect(screen.getByRole('button', { name: 'settings.addTranslationTarget' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: 'settings.manageTranslationTargets' }))
-    expect(screen.getAllByTestId(/^translation-target-/)).toHaveLength(5)
-  })
-
-  it('reorders targets without changing the active target', () => {
-    const onChange = renderTargets({
-      targets: ['en', 'ja', 'fr'],
-      active_target: 'ja',
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'settings.manageTranslationTargets' }))
-    fireEvent.click(screen.getByRole('button', { name: 'settings.moveTranslationTargetUp ja' }))
-
-    expect(onChange).toHaveBeenCalledWith({
-      targets: ['ja', 'en', 'fr'],
-      active_target: 'ja',
-    })
+    expect(screen.queryByRole('combobox', { name: 'translationTargets.addLanguage' })).toBeNull()
+    expect(screen.getByText('translationTargets.max')).toBeInTheDocument()
   })
 
   it('selects the nearest remaining target when removing the active target', () => {
-    const onChange = renderTargets({
-      targets: ['en', 'ja', 'fr'],
-      active_target: 'ja',
-    })
+    const onChange = renderTargets({ targets: ['en', 'ja', 'fr'], active_target: 'ja' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'settings.manageTranslationTargets' }))
-    fireEvent.click(screen.getByRole('button', { name: 'settings.removeTranslationTarget ja' }))
+    fireEvent.click(screen.getByRole('button', { name: 'translationTargets.remove 日本語' }))
 
-    expect(onChange).toHaveBeenCalledWith({
-      targets: ['en', 'fr'],
-      active_target: 'fr',
-    })
-  })
-
-  it('changes the active target from the compact selector', () => {
-    const onChange = renderTargets({ targets: ['en', 'ja'], active_target: 'en' })
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'settings.targetLanguage' }), {
-      target: { value: 'ja' },
-    })
-
-    expect(onChange).toHaveBeenCalledWith({ targets: ['en', 'ja'], active_target: 'ja' })
+    expect(onChange).toHaveBeenCalledWith({ targets: ['en', 'fr'], active_target: 'fr' })
   })
 })

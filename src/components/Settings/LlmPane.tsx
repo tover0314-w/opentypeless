@@ -27,7 +27,6 @@ import {
 } from 'lucide-react'
 import { AppLogo } from '../AppLogo'
 import { ContextAdaptationApps } from './ContextAdaptationApps'
-import { TranslationTargets } from './TranslationTargets'
 import { AppStyleMappingDialog } from './AppStyleMappingDialog'
 import { ManageAppMappingsDialog } from './ManageAppMappingsDialog'
 
@@ -503,12 +502,6 @@ export function LlmPane() {
             ariaLabel={t('settings.translationMode')}
           />
         </div>
-        {config.translate_enabled && (
-          <TranslationTargets
-            value={config.translation}
-            onChange={(translation) => updateConfig({ translation })}
-          />
-        )}
       </SettingsRow>
 
       <div className="pt-2">

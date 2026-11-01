@@ -257,7 +257,7 @@ fn strategy_uses_automated_input(strategy: output::InsertionStrategy) -> bool {
     )
 }
 
-fn effective_strategy_for_accessibility(
+pub(crate) fn effective_strategy_for_accessibility(
     strategy: output::InsertionStrategy,
     accessibility_trusted: bool,
 ) -> (output::InsertionStrategy, Option<crate::error::UserError>) {

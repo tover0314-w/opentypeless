@@ -776,12 +776,12 @@ describe('LlmPane', () => {
       expect(screen.queryByText('Gmail')).not.toBeInTheDocument()
     })
 
-    it('shows a compact translate-to control next to translation when enabled', () => {
+    it('leaves translation targets to Settings > Language', () => {
       mockAppStore.config.translate_enabled = true
 
       render(<LlmPane />)
-      expect(screen.getByText('Translate to')).toBeInTheDocument()
-      expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Always translate output' })).toBeInTheDocument()
+      expect(screen.queryByText('Translate to')).not.toBeInTheDocument()
     })
   })
 })

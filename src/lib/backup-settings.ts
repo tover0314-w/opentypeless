@@ -52,6 +52,7 @@ type SafeScalarKey =
   | 'capsule_auto_hide'
   | 'interaction_sounds'
   | 'mute_background_audio'
+  | 'show_in_dock'
 
 export type BackupSettings = Partial<Pick<AppConfig, SafeScalarKey>> & {
   voice_routing_flags?: VoiceRoutingFlags
@@ -159,6 +160,7 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
           editSelection: safeBinding(config.hotkeys.editSelection),
           switchScene: safeBinding(config.hotkeys.switchScene),
           openApp: safeBinding(config.hotkeys.openApp),
+          pasteLast: safeBinding(config.hotkeys.pasteLast),
           dictationMode: config.hotkeys.dictationMode,
         }
       : undefined,
@@ -183,6 +185,7 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
     capsule_auto_hide: config.capsule_auto_hide,
     interaction_sounds: config.interaction_sounds,
     mute_background_audio: config.mute_background_audio,
+    show_in_dock: config.show_in_dock,
   }
 
   if (config.voice_routing_flags) {
@@ -239,6 +242,7 @@ const SAFE_SCALAR_KEYS: readonly SafeScalarKey[] = [
   'capsule_auto_hide',
   'interaction_sounds',
   'mute_background_audio',
+  'show_in_dock',
 ]
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -256,7 +256,7 @@ vi.mock('../../../stores/authStore', () => ({
 // ─── Import components AFTER mocks ───────────────────────────────────────────
 import { Settings } from '../index'
 import { ModelsPage } from '../../ModelsPage'
-import { chooseOption } from '../../shared/__tests__/selectTestUtils'
+import { chooseOption, selectOptions } from '../../shared/__tests__/selectTestUtils'
 import {
   checkAccessibilityPermission,
   getConfig,
@@ -362,48 +362,37 @@ describe('Settings tab 切换', () => {
     seedSavedConfig()
   })
 
-  it('初始渲染显示简化后的常用设置', () => {
+  it('lays out Settings in the Typeless order', () => {
     renderSettings()
 
-    expect(screen.getByText('settings.hotkey')).toBeDefined()
-    expect(screen.getByText('settings.dictationHotkey')).toBeDefined()
-    expect(screen.getByText('settings.askHotkey')).toBeDefined()
-    expect(screen.getByText('settings.translateHotkey')).toBeDefined()
-    expect(screen.getByText('settings.dictationMode')).toBeDefined()
-    expect(screen.getAllByRole('button', { name: 'settings.shortcutAdd' })).toHaveLength(3)
-    expect(screen.queryByText('settings.askAnything')).toBeNull()
-    expect(screen.queryByText('settings.askAnythingDesc')).toBeNull()
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
+    expect(headings).toEqual([
+      'settings.hotkey',
+      'generalPane.language',
+      'generalPane.audio',
+      'generalPane.general',
+      'generalPane.input',
+    ])
+    expect(screen.getByText('shortcuts.dictateTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.translateTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.askTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.pasteLastTitle')).toBeDefined()
+    expect(screen.getByText('generalPane.appearance')).toBeDefined()
+    expect(screen.getByText('generalPane.launchAtLogin')).toBeDefined()
     expect(screen.getByLabelText('settings.tryAsk')).toBeDefined()
-    expect(screen.queryByText('ask.voiceQuestion')).toBeNull()
-    expect(screen.getByText('settings.outputMode')).toBeDefined()
-    expect(screen.getByText('settings.dictationMode')).toBeDefined()
     expect(screen.queryByText('settings.diagnostics')).toBeNull()
   })
-
-  it('General pane keeps Ask visible and hides low-frequency settings until More is opened', () => {
+  it('shows each shortcut as keycaps with Add another', () => {
     renderSettings()
 
-    expect(screen.getByText('settings.hotkey')).toBeDefined()
-    expect(screen.getByText('settings.askHotkey')).toBeDefined()
-    expect(screen.getByText('settings.outputMode')).toBeDefined()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(within(dictate).getByRole('button', { name: /shortcuts.change/ })).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'shortcuts.addAnother' }).length).toBeGreaterThan(
+      0,
+    )
     expect(screen.queryByText('settings.restoreClipboardAfterPaste')).toBeNull()
     expect(screen.queryByText('settings.maxRecordingDuration')).toBeNull()
-    expect(screen.queryByText('settings.historyPrivacy')).toBeNull()
-    expect(screen.queryByText('settings.launchAtStartup')).toBeNull()
-
-    fireEvent.click(screen.getByText('settings.advancedGeneral'))
-
-    expect(screen.getAllByText('settings.askHotkey')).toHaveLength(1)
-    expect(screen.getByText('settings.saveHistory')).toBeDefined()
-    expect(screen.getByText('settings.launchAtStartup')).toBeDefined()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
-    expect(screen.queryByText('settings.restoreClipboardAfterPaste')).toBeNull()
-    expect(screen.queryByText('settings.maxRecordingDuration')).toBeNull()
-    expect(screen.queryByText('settings.historyPrivacy')).toBeNull()
-    expect(screen.getByText('settings.hideCapsuleWhenIdle')).toBeDefined()
   })
-
   it('saves edits automatically without a save bar', async () => {
     vi.mocked(updateConfig).mockClear()
     vi.mocked(setAutoStart).mockClear()
@@ -471,30 +460,39 @@ describe('Settings tab 切换', () => {
     }
   })
 
-  it('More settings keeps only preference toggles visible', () => {
+  it('keeps OpenTypeless-only preferences in the Input section', () => {
     renderSettings()
-    fireEvent.click(screen.getByText('settings.advancedGeneral'))
 
-    expect(screen.getAllByText('settings.askHotkey')).toHaveLength(1)
-    expect(screen.getByText('settings.launchAtStartup')).toBeDefined()
-    expect(screen.getByText('settings.saveHistory')).toBeDefined()
-    expect(screen.getByText('settings.startMinimized')).toBeDefined()
-    const startMinimized = screen.getByRole('switch', { name: 'settings.startMinimized' })
-    fireEvent.click(startMinimized)
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.startMinimized' }))
     expect(useAppStore.getState().config.start_minimized).toBe(true)
-    expect(screen.getByText('settings.hideCapsuleWhenIdle')).toBeDefined()
-    expect(screen.queryByText('settings.outputDetails')).toBeNull()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
-    expect(screen.getByRole('switch', { name: 'settings.launchAtStartup' })).toHaveAttribute(
+    expect(screen.getByRole('switch', { name: 'generalPane.launchAtLogin' })).toHaveAttribute(
       'aria-checked',
       'true',
     )
-
-    const historyLabel = screen.getByText('settings.saveHistory')
-    fireEvent.click(historyLabel.closest('label') ?? historyLabel)
+    fireEvent.click(screen.getByRole('switch', { name: 'settings.saveHistory' }))
     expect(useAppStore.getState().config.history_enabled).toBe(false)
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.hideCapsule' }))
+    expect(useAppStore.getState().config.capsule_auto_hide).toBe(
+      !useAppStore.getInitialState().config.capsule_auto_hide,
+    )
   })
 
+  it('switches appearance and Dock visibility from General', () => {
+    const originalPlatform = window.navigator.platform
+    Object.defineProperty(window.navigator, 'platform', { value: 'MacIntel', configurable: true })
+    try {
+      renderSettings()
+      fireEvent.click(screen.getByRole('button', { name: 'generalPane.appearanceDark' }))
+      expect(useAppStore.getState().config.theme).toBe('dark')
+      fireEvent.click(screen.getByRole('switch', { name: 'generalPane.showInDock' }))
+      expect(useAppStore.getState().config.show_in_dock).toBe(false)
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      })
+    }
+  })
   it('Help explore replays the onboarding practice steps and closes the modal', () => {
     const onClose = vi.fn()
     useAppStore.setState({ onboardingCompleted: true, onboardingStep: 0 })
@@ -512,18 +510,17 @@ describe('Settings tab 切换', () => {
 
     const select = screen.getByRole('combobox', { name: 'settings.microphone' })
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: /Studio USB Mic/ })).toBeDefined()
+      expect(selectOptions(select).map((option) => option.value)).toContain('Studio USB Mic')
     })
-    fireEvent.change(select, { target: { value: 'Studio USB Mic' } })
+    chooseOption(select, 'Studio USB Mic')
     expect(useAppStore.getState().config.microphone_device).toBe('Studio USB Mic')
 
-    fireEvent.change(select, { target: { value: '' } })
+    chooseOption(screen.getByRole('combobox', { name: 'settings.microphone' }), '')
     expect(useAppStore.getState().config.microphone_device).toBe('')
 
-    fireEvent.click(screen.getByRole('switch', { name: 'settings.interactionSounds' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.interactionSounds' }))
     expect(useAppStore.getState().config.interaction_sounds).toBe(false)
   })
-
   it('General pane shows compact hotkey conflict status', async () => {
     const { getHotkeyStatus } = await import('../../../lib/tauri')
     vi.mocked(getHotkeyStatus).mockResolvedValueOnce(
@@ -649,34 +646,23 @@ describe('Settings tab 切换', () => {
 
     renderSettings()
 
-    expect(await screen.findByText('RightAlt')).toBeDefined()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(await within(dictate).findByText('Right Alt')).toBeDefined()
     expect(screen.queryByText('settings.hotkeyInvalid')).toBeNull()
   })
-
-  it('does not offer Windows RightAlt as a default shortcut chip', async () => {
+  it('does not offer macOS Fn presets on Windows', async () => {
     const originalPlatform = window.navigator.platform
     Object.defineProperty(window.navigator, 'platform', {
       value: 'Win32',
       configurable: true,
     })
-    useAppStore.getState().setPlatformCapabilities({
-      os: 'windows',
-      sessionType: 'unknown',
-      globalHotkeyReliable: true,
-      keyboardOutputReliable: true,
-      clipboardAutoPasteReliable: true,
-    })
 
     try {
       renderSettings()
-
-      fireEvent.click(screen.getByText('Ctrl+.'))
+      const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+      fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+      expect(screen.queryByRole('button', { name: 'Fn + Space' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      fireEvent.click(screen.getByText('settings.pressKeyCombination'))
-
-      fireEvent.click(screen.getByText('Ctrl+/'))
-      expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      expect(useAppStore.getState().config.hotkey).toBe('Ctrl+/')
     } finally {
       Object.defineProperty(window.navigator, 'platform', {
         value: originalPlatform,
@@ -684,51 +670,37 @@ describe('Settings tab 切换', () => {
       })
     }
   })
+  it('blocks an Ask shortcut that Dictation already uses', () => {
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true })
 
-  it('blocks local Ask hotkey drafts that conflict with Dictation', async () => {
-    vi.useFakeTimers()
-    try {
-      renderSettings()
-      fireEvent.click(screen.getByText('Ctrl+.'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: '/', ctrlKey: true })
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
-      expect(screen.getByText('settings.hotkeyConflict')).toBeDefined()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
+    expect(within(ask).getByText('shortcuts.errorInUse')).toBeDefined()
   })
 
-  it('blocks local Dictation hotkey drafts that conflict with Ask', async () => {
-    vi.useFakeTimers()
-    try {
-      renderSettings()
-      fireEvent.click(screen.getByText('Ctrl+/'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: '.', ctrlKey: true })
+  it('blocks shortcuts the system reserves', () => {
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.hotkey).toBe('Ctrl+/')
-      expect(screen.getByText('settings.hotkeyConflict')).toBeDefined()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
+    expect(within(ask).getByText('shortcuts.errorReserved')).toBeDefined()
   })
+  it('adds and removes extra shortcuts but keeps the last Dictation key', () => {
+    renderSettings()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(within(dictate).queryByRole('button', { name: 'shortcuts.remove' })).toBeNull()
 
+    fireEvent.click(within(dictate).getByRole('button', { name: 'shortcuts.addAnother' }))
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true, altKey: true })
+    expect(useAppStore.getState().config.hotkeys.dictationBindings).toHaveLength(2)
+
+    fireEvent.click(within(dictate).getAllByRole('button', { name: 'shortcuts.remove' })[1])
+    expect(useAppStore.getState().config.hotkeys.dictationBindings).toHaveLength(1)
+  })
   it('点击 Speech Recognition 后显示 STT provider 字段', () => {
     renderSettings()
     clickSidebarItem('settings.speechRecognition')
@@ -802,39 +774,27 @@ describe('Settings tab 切换', () => {
     ).toBeDefined()
   })
 
-  it('records macOS Ask hotkey as a local draft without immediate persistence', async () => {
-    vi.useFakeTimers()
-    try {
-      Object.defineProperty(window.navigator, 'platform', {
-        value: 'MacIntel',
-        configurable: true,
-      })
-      const { resumeHotkey, updateAskHotkey } = await import('../../../lib/tauri')
-      const mockUpdateAskHotkey = vi.mocked(updateAskHotkey)
-      const mockResumeHotkey = vi.mocked(resumeHotkey)
-      mockUpdateAskHotkey.mockClear()
-      mockResumeHotkey.mockClear()
-      useAppStore.getState().updateConfig({ ask_hotkey: 'Command+.' })
-      seedSavedConfig()
+  it('records a macOS Ask shortcut and resumes global hotkeys', async () => {
+    Object.defineProperty(window.navigator, 'platform', {
+      value: 'MacIntel',
+      configurable: true,
+    })
+    const { resumeHotkey, updateAskHotkey } = await import('../../../lib/tauri')
+    const mockUpdateAskHotkey = vi.mocked(updateAskHotkey)
+    const mockResumeHotkey = vi.mocked(resumeHotkey)
+    mockUpdateAskHotkey.mockClear()
+    mockResumeHotkey.mockClear()
+    useAppStore.getState().updateConfig({ ask_hotkey: 'Command+.' })
+    seedSavedConfig()
 
-      renderSettings()
-      fireEvent.click(screen.getByText('Command+.'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: ';', metaKey: true })
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    fireEvent.keyDown(window, { key: 'k', metaKey: true, shiftKey: true })
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.ask_hotkey).toBe('Command+;')
-      expect(mockUpdateAskHotkey).not.toHaveBeenCalled()
-      expect(mockResumeHotkey).toHaveBeenCalledTimes(1)
-      expect(vi.mocked(updateConfig)).toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Command+Shift+K')
+    expect(mockUpdateAskHotkey).not.toHaveBeenCalled()
+    await waitFor(() => expect(mockResumeHotkey).toHaveBeenCalledTimes(1))
   })
 })
 

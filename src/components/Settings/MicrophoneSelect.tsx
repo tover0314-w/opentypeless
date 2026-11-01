@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { RefreshCw } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import { listMicrophones, type MicrophoneInfo } from '../../lib/tauri'
+import { Select } from '../shared/Select'
 
 const CONNECTION_KEYS: Record<MicrophoneInfo['connection'], string> = {
   builtIn: 'settings.micBuiltIn',
@@ -37,27 +38,28 @@ export function MicrophoneSelect() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
-        <select
+        <Select
           aria-label={t('settings.microphone')}
           value={selected}
-          onChange={(event) => updateConfig({ microphone_device: event.target.value })}
-          className="h-9 min-w-0 flex-1 rounded-[8px] border border-border bg-bg-primary px-2.5 text-[13px] text-text-primary outline-none focus:border-border-focus"
-        >
-          <option value="">{t('settings.micAutoDetect')}</option>
-          {devices.map((device) => (
-            <option key={device.name} value={device.name}>
-              {device.name} · {t(CONNECTION_KEYS[device.connection])}
-              {device.isDefault ? ` · ${t('settings.micSystemDefault')}` : ''}
-            </option>
-          ))}
-          {missing && <option value={selected}>{selected}</option>}
-        </select>
+          className="min-w-0 flex-1"
+          options={[
+            { value: '', label: t('settings.micAutoDetect') },
+            ...devices.map((device) => ({
+              value: device.name,
+              label: `${device.name} · ${t(CONNECTION_KEYS[device.connection])}${
+                device.isDefault ? ` · ${t('settings.micSystemDefault')}` : ''
+              }`,
+            })),
+            ...(missing ? [{ value: selected, label: selected }] : []),
+          ]}
+          onChange={(value) => updateConfig({ microphone_device: value })}
+        />
         <button
           type="button"
           aria-label={t('settings.micRefresh')}
           title={t('settings.micRefresh')}
           onClick={refresh}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] border border-border bg-bg-primary text-text-tertiary cursor-pointer hover:text-text-primary"
+          className="btn-outline grid h-10 w-10 shrink-0 cursor-pointer place-items-center text-text-tertiary hover:text-text-primary"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>

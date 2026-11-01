@@ -245,6 +245,7 @@ pub enum HotkeyRole {
     EditSelection,
     SwitchScene,
     OpenApp,
+    PasteLast,
 }
 
 impl HotkeyRole {
@@ -256,6 +257,7 @@ impl HotkeyRole {
             Self::EditSelection => "editSelection",
             Self::SwitchScene => "switchScene",
             Self::OpenApp => "openApp",
+            Self::PasteLast => "pasteLast",
         }
     }
 }
@@ -519,6 +521,12 @@ pub(crate) fn hotkey_registration_plan_from_config_for_platform(
         config.open_app.as_ref(),
         platform,
     )?;
+    push_optional_registered_hotkey(
+        &mut plan,
+        HotkeyRole::PasteLast,
+        config.paste_last.as_ref(),
+        platform,
+    )?;
 
     Ok(plan)
 }
@@ -630,6 +638,7 @@ pub fn validate_hotkey_pair(
         edit_selection: None,
         switch_scene: None,
         open_app: None,
+        paste_last: None,
         dictation_mode: "hold".to_string(),
     };
 
@@ -1210,6 +1219,11 @@ pub fn handle_hotkey_role_event(
             );
             handle_recording_shortcut(handle, action);
         }
+        HotkeyRole::PasteLast => {
+            if event_state == ShortcutState::Pressed {
+                tauri::async_runtime::spawn(crate::paste_last::paste_last_transcript(handle));
+            }
+        }
         role => handle_advanced_role_shortcut(handle, role, event_state),
     }
 }
@@ -1473,6 +1487,7 @@ mod tests {
             edit_selection: None,
             switch_scene: None,
             open_app: None,
+            paste_last: None,
             dictation_mode: "toggle".to_string(),
         };
 
@@ -1503,6 +1518,7 @@ mod tests {
             edit_selection: None,
             switch_scene: None,
             open_app: None,
+            paste_last: None,
             dictation_mode: "toggle".to_string(),
         };
 
@@ -1543,6 +1559,7 @@ mod tests {
             edit_selection: None,
             switch_scene: None,
             open_app: None,
+            paste_last: None,
             dictation_mode: "toggle".to_string(),
         };
 
