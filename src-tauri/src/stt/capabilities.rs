@@ -206,6 +206,15 @@ fn static_provider_capability(provider_id: &str) -> SttRecordingCapability {
             RecordingLimitSource::ProductSafety,
             "recordingLimits.reasons.productSafety",
         ),
+        "volcengine-auc" => capability(
+            provider_id,
+            SttTransport::FileUpload,
+            600,
+            720,
+            Some(CLIENT_FILE_BUFFER_BYTES),
+            RecordingLimitSource::ClientBuffer,
+            "recordingLimits.reasons.clientBuffer",
+        ),
         _ => capability(
             provider_id,
             SttTransport::FileUpload,

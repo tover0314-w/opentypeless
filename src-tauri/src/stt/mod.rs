@@ -7,6 +7,7 @@ pub mod config;
 pub mod deepgram;
 pub mod managed_audio;
 pub mod volcengine;
+pub mod volcengine_auc;
 pub mod whisper_compat;
 
 use async_trait::async_trait;
@@ -95,6 +96,9 @@ pub fn create_provider(
         volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
             Ok(Box::new(volcengine::VolcengineDoubaoProvider::new()))
         }
+        volcengine_auc::VOLCENGINE_AUC_PROVIDER => {
+            Ok(Box::new(volcengine_auc::VolcengineAucProvider::new()))
+        }
         config::CUSTOM_WHISPER_PROVIDER => {
             let wc = custom_whisper_config.ok_or_else(|| {
                 AppError::Config("Local / Custom Whisper is missing base URL or model".to_string())
@@ -143,6 +147,12 @@ mod tests {
     fn creates_volcengine_doubao_realtime_provider() {
         let provider = create_provider("volcengine-doubao", None, None).unwrap();
         assert_eq!(provider.name(), "Volcengine Doubao Realtime ASR");
+    }
+
+    #[test]
+    fn creates_volcengine_recording_file_provider() {
+        let provider = create_provider("volcengine-auc", None, None).unwrap();
+        assert_eq!(provider.name(), "Doubao Recording File ASR");
     }
 
     #[test]

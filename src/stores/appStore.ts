@@ -18,6 +18,7 @@ export type SttProvider =
   | 'assemblyai'
   | 'aliyun-qwen3-asr'
   | 'volcengine-doubao'
+  | 'volcengine-auc'
   | 'glm-asr'
   | 'openai-whisper'
   | 'groq-whisper'

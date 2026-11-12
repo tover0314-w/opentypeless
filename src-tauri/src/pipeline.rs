@@ -1313,8 +1313,11 @@ impl PipelineHandle {
             },
             smart_format: true,
             sample_rate: 16000,
-            resource_id: if config_data.stt_provider == stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
-            {
+            resource_id: if matches!(
+                config_data.stt_provider.as_str(),
+                stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
+                    | stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER
+            ) {
                 Some(config_data.stt_volcengine_resource_id.clone())
             } else {
                 None
@@ -3010,6 +3013,10 @@ impl PipelineHandle {
             )),
             stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => Some((
                 "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_async".to_string(),
+                false,
+            )),
+            stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER => Some((
+                "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit".to_string(),
                 false,
             )),
             stt::config::CUSTOM_WHISPER_PROVIDER => {

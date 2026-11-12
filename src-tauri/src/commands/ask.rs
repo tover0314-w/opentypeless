@@ -691,7 +691,11 @@ fn build_ask_stt_config(
         },
         smart_format: true,
         sample_rate: 16000,
-        resource_id: if config.stt_provider == stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER {
+        resource_id: if matches!(
+            config.stt_provider.as_str(),
+            stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
+                | stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER
+        ) {
             Some(config.stt_volcengine_resource_id.clone())
         } else {
             None

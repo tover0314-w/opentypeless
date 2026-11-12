@@ -10,6 +10,8 @@ pub fn finalize_timeout(provider: &str, streaming_timeout: Duration) -> Duration
         || crate::stt::config::get_whisper_config(provider).is_some()
     {
         crate::stt::whisper_compat::FINALIZE_TIMEOUT
+    } else if provider == crate::stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER {
+        crate::stt::volcengine_auc::FINALIZE_TIMEOUT
     } else {
         streaming_timeout
     }

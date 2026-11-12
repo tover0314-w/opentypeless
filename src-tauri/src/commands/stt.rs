@@ -101,6 +101,24 @@ async fn check_volcengine_doubao_connection(
     Ok(())
 }
 
+async fn check_volcengine_auc_connection(
+    api_key: &str,
+    resource_id: Option<String>,
+) -> Result<(), String> {
+    let provider = stt::volcengine_auc::VolcengineAucProvider::new();
+    let config = stt::SttConfig {
+        api_key: api_key.to_string(),
+        language: Some("zh".to_string()),
+        smart_format: true,
+        sample_rate: 16000,
+        resource_id,
+        operation_id: None,
+        managed_audio: None,
+        provider_region: None,
+    };
+    provider.probe(&config).await.map_err(|e| e.to_string())
+}
+
 async fn check_aliyun_qwen3_connection(
     api_key: &str,
     region: Option<String>,
@@ -212,6 +230,10 @@ fn build_remote_stt_diagnostics(
             ),
             stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => (
                 Some("wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".to_string()),
+                None,
+            ),
+            stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER => (
+                Some("https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit".to_string()),
                 None,
             ),
             stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => (
@@ -338,6 +360,7 @@ fn build_stt_provider_diagnostics(
         "deepgram"
         | "assemblyai"
         | stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER
+        | stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER
         | stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {
             build_remote_stt_diagnostics(provider, api_key, provider_region)
         }
@@ -472,6 +495,12 @@ pub async fn test_stt_connection(
             Ok(resp.status().is_success())
         }
         stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => Ok(check_volcengine_doubao_connection(
+            &api_key,
+            volcengine_resource_id,
+        )
+        .await
+        .is_ok()),
+        stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER => Ok(check_volcengine_auc_connection(
             &api_key,
             volcengine_resource_id,
         )
@@ -804,6 +833,11 @@ pub async fn bench_stt_connection(
         stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => {
             let t0 = std::time::Instant::now();
             check_volcengine_doubao_connection(&api_key, volcengine_resource_id).await?;
+            Ok(t0.elapsed().as_millis() as u32)
+        }
+        stt::volcengine_auc::VOLCENGINE_AUC_PROVIDER => {
+            let t0 = std::time::Instant::now();
+            check_volcengine_auc_connection(&api_key, volcengine_resource_id).await?;
             Ok(t0.elapsed().as_millis() as u32)
         }
         stt::aliyun_qwen3_asr::ALIYUN_QWEN3_ASR_PROVIDER => {

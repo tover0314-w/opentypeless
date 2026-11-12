@@ -112,6 +112,7 @@ export const STT_PROVIDERS: { value: string; labelKey: string }[] = [
   { value: 'assemblyai', labelKey: 'providers.stt.assemblyai' },
   { value: 'aliyun-qwen3-asr', labelKey: 'providers.stt.aliyunQwen3Asr' },
   { value: 'volcengine-doubao', labelKey: 'providers.stt.volcengineDoubao' },
+  { value: 'volcengine-auc', labelKey: 'providers.stt.volcengineAuc' },
   { value: 'glm-asr', labelKey: 'providers.stt.glmAsr' },
   { value: 'openai-whisper', labelKey: 'providers.stt.openaiWhisper' },
   { value: 'groq-whisper', labelKey: 'providers.stt.groqWhisper' },
@@ -129,6 +130,23 @@ export const VOLCENGINE_STT_RESOURCES = [
   {
     value: 'volc.bigasr.sauc.duration',
     labelKey: 'settings.volcengineResourceBigAsr',
+  },
+] as const
+
+// Recording-file (AUC) resources: submit/query for the two standard models,
+// one synchronous flash call for the turbo model.
+export const VOLCENGINE_AUC_RESOURCES = [
+  {
+    value: 'volc.seedasr.auc',
+    labelKey: 'settings.volcengineResourceSeedAsr',
+  },
+  {
+    value: 'volc.bigasr.auc',
+    labelKey: 'settings.volcengineResourceBigAsr',
+  },
+  {
+    value: 'volc.bigasr.auc_turbo',
+    labelKey: 'settings.volcengineResourceBigAsrTurbo',
   },
 ] as const
 
