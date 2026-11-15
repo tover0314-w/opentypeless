@@ -888,6 +888,7 @@
       "claude": "Claude",
       "ollama": "Ollama (Locale)",
       "openrouter": "OpenRouter",
+      "requesty": "Requesty",
       "cloud": "Cloud di OpenTypeless"
     }
   }
