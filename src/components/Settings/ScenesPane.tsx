@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, Copy, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import {
@@ -12,14 +12,12 @@ import {
 import { setFamilySceneAssignment, updateConfig as persistConfig } from '../../lib/tauri'
 import { importCustomScenesJson, serializeCustomScenes } from '../../lib/scenes/sceneImportExport'
 import { AppLogo } from '../AppLogo'
+import { Select } from '../shared/Select'
+import { valuesEqual } from '../../lib/configValuesEqual'
 
-interface EditorState {
-  mode: 'create' | 'edit' | 'system'
-  id: string | null
-  name: string
-  description: string
-  promptTemplate: string
-}
+import { SceneEditor, type EditorState } from './SceneEditor'
+
+const MAX_SCENE_IMPORT_BYTES = 5 * 1024 * 1024
 
 const APP_WRITING_MODES: Array<{
   family: Exclude<ContextFamily, 'general'>
@@ -171,6 +169,16 @@ export function ScenesPane() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
+  const importRequestId = useRef(0)
+  const editorSavePending = useRef(false)
+  const [editorSaving, setEditorSaving] = useState(false)
+
+  useEffect(
+    () => () => {
+      importRequestId.current += 1
+    },
+    [],
+  )
 
   const saveConfigPatch = async (patch: Partial<AppConfig>): Promise<boolean> => {
     const previousConfig = useAppStore.getState().config
@@ -178,14 +186,24 @@ export function ScenesPane() {
     const nextConfig = { ...previousConfig, ...patch }
     const nextPersistedConfig = { ...(previousSavedConfig ?? previousConfig), ...patch }
     setConfig(nextConfig)
+    const submittedConfig = useAppStore.getState().config
     setSaveError(null)
     try {
       await persistConfig(nextPersistedConfig)
-      if (previousSavedConfig) applyPersistedConfigPatch(patch)
-      else setSavedConfig(nextPersistedConfig)
+      if (previousSavedConfig) {
+        const currentSavedConfig = useAppStore.getState().savedConfig ?? previousSavedConfig
+        setSavedConfig({ ...currentSavedConfig, ...patch })
+      } else setSavedConfig(nextPersistedConfig)
       return true
     } catch {
-      setConfig(previousConfig)
+      const currentConfig = useAppStore.getState().config
+      const restoredConfig = { ...currentConfig }
+      for (const key of Object.keys(patch) as Array<keyof AppConfig>) {
+        if (valuesEqual(currentConfig[key], submittedConfig[key])) {
+          Object.assign(restoredConfig, { [key]: previousConfig[key] })
+        }
+      }
+      setConfig(restoredConfig)
       setSaveError(t('scenes.failedToSave'))
       return false
     }
@@ -235,6 +253,18 @@ export function ScenesPane() {
   }
 
   const handleSaveEditor = async () => {
+    if (editorSavePending.current) return
+    editorSavePending.current = true
+    setEditorSaving(true)
+    try {
+      await saveEditor()
+    } finally {
+      editorSavePending.current = false
+      setEditorSaving(false)
+    }
+  }
+
+  const saveEditor = async () => {
     if (!editor) return
     const name = editor.name.trim()
     const description = editor.description.trim()
@@ -252,7 +282,7 @@ export function ScenesPane() {
         nextOverride,
       ]
       if (await saveConfigPatch({ system_scene_overrides: nextOverrides })) {
-        setEditor(null)
+        setEditor((current) => (current === editor ? null : current))
       }
       return
     }
@@ -285,7 +315,9 @@ export function ScenesPane() {
       nextScenes = [...config.custom_scenes, savedScene]
     }
 
-    if (await saveConfigPatch({ custom_scenes: nextScenes })) setEditor(null)
+    if (await saveConfigPatch({ custom_scenes: nextScenes })) {
+      setEditor((current) => (current === editor ? null : current))
+    }
   }
 
   const handleDuplicateCustom = async (scene: CustomScene) => {
@@ -333,14 +365,21 @@ export function ScenesPane() {
 
   const handleImportCustomScenes = async (file: File | undefined) => {
     if (!file) return
+    const requestId = ++importRequestId.current
     setSaveError(null)
     setMergeMsg(null)
     setMergeOk(false)
 
     try {
+      if (file.size > MAX_SCENE_IMPORT_BYTES) {
+        setSaveError(t('scenes.importFailed'))
+        return
+      }
       const json = await readFileText(file)
+      if (requestId !== importRequestId.current) return
+      const currentScenes = useAppStore.getState().config.custom_scenes
       const result = importCustomScenesJson(json, {
-        existingIds: new Set(config.custom_scenes.map((scene) => scene.id)),
+        existingIds: new Set(currentScenes.map((scene) => scene.id)),
         createId: createSceneId,
         nowIso,
       })
@@ -351,9 +390,9 @@ export function ScenesPane() {
       }
 
       const saved = await saveConfigPatch({
-        custom_scenes: [...config.custom_scenes, ...result.scenes],
+        custom_scenes: [...currentScenes, ...result.scenes],
       })
-      if (!saved) return
+      if (!saved || requestId !== importRequestId.current) return
       const importNotes = [
         result.report.skippedInvalid > 0
           ? t('scenes.importSkippedInvalid', { count: result.report.skippedInvalid })
@@ -375,11 +414,12 @@ export function ScenesPane() {
           .join(' · '),
       )
       setTimeout(() => {
+        if (requestId !== importRequestId.current) return
         setMergeMsg(null)
         setMergeOk(false)
       }, 3000)
     } catch {
-      setSaveError(t('scenes.importFailed'))
+      if (requestId === importRequestId.current) setSaveError(t('scenes.importFailed'))
     }
   }
 
@@ -466,6 +506,7 @@ export function ScenesPane() {
 
         {editor && (
           <SceneEditor
+            saving={editorSaving}
             editor={editor}
             onChange={setEditor}
             onCancel={() => setEditor(null)}
@@ -582,94 +623,19 @@ function AppWritingModes({
               </div>
             </div>
 
-            <label className="block min-w-0 text-[11px] text-text-secondary">
-              <span className="sr-only">{selectLabel}</span>
-              <select
-                aria-label={selectLabel}
-                value={selectedSceneId}
-                onChange={(event) => onChange(mode.family, event.target.value)}
-                className="w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[12px] text-text-primary outline-none focus:border-border-focus"
-              >
-                <option value="">{t(`scenes.systemModes.${mode.family}`)}</option>
-                {sceneOptions.map((scene) => (
-                  <option key={scene.id} value={scene.id}>
-                    {scene.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Select
+              aria-label={selectLabel}
+              value={selectedSceneId}
+              onChange={(value) => onChange(mode.family, value)}
+              className="min-w-0"
+              options={[
+                { value: '', label: t(`scenes.systemModes.${mode.family}`) },
+                ...sceneOptions.map((scene) => ({ value: scene.id, label: scene.name })),
+              ]}
+            />
           </div>
         )
       })}
-    </div>
-  )
-}
-
-function SceneEditor({
-  editor,
-  onChange,
-  onCancel,
-  onSave,
-}: {
-  editor: EditorState
-  onChange: (editor: EditorState) => void
-  onCancel: () => void
-  onSave: () => void
-}) {
-  const { t } = useTranslation()
-  const canSave = editor.name.trim().length > 0 && editor.promptTemplate.trim().length > 0
-
-  return (
-    <div className="space-y-3 rounded-[8px] border border-border bg-bg-secondary px-3 py-3">
-      {editor.mode === 'system' ? (
-        <p className="text-[13px] font-medium text-text-primary">{editor.name}</p>
-      ) : (
-        <>
-          <label className="block text-[12px] text-text-secondary">
-            <span className="block mb-1">{t('scenes.sceneName')}</span>
-            <input
-              value={editor.name}
-              onChange={(e) => onChange({ ...editor, name: e.target.value })}
-              maxLength={80}
-              className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-            />
-          </label>
-          <label className="block text-[12px] text-text-secondary">
-            <span className="block mb-1">{t('scenes.sceneDescription')}</span>
-            <input
-              value={editor.description}
-              onChange={(e) => onChange({ ...editor, description: e.target.value })}
-              maxLength={240}
-              className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-            />
-          </label>
-        </>
-      )}
-      <label className="block text-[12px] text-text-secondary">
-        <span className="block mb-1">{t('scenes.promptTemplate')}</span>
-        <textarea
-          value={editor.promptTemplate}
-          onChange={(e) => onChange({ ...editor, promptTemplate: e.target.value })}
-          maxLength={4000}
-          rows={5}
-          className="w-full resize-y px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-        />
-      </label>
-      <div className="flex items-center justify-end gap-2">
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 rounded-[8px] border border-border bg-transparent text-[12px] text-text-secondary cursor-pointer hover:text-text-primary transition-colors"
-        >
-          {t('common.cancel')}
-        </button>
-        <button
-          onClick={onSave}
-          disabled={!canSave}
-          className="px-3 py-1.5 rounded-[8px] border border-border bg-bg-primary text-[12px] text-text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {t('common.save')}
-        </button>
-      </div>
     </div>
   )
 }

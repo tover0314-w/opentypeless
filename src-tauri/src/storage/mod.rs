@@ -1,3 +1,5 @@
+pub mod stats;
+
 use crate::app_detector::registry::AppRegistry;
 use crate::app_detector::types::{BrowserAccessStatus, ContextFamily, ContextProfile};
 use crate::credentials::{migrate_legacy_config_secrets, SystemCredentialVault};
@@ -20,7 +22,73 @@ pub const DEFAULT_HISTORY_MAX_ENTRIES: u32 = 5000;
 pub const MAX_BACKUP_DICTIONARY_ENTRIES: usize = 10_000;
 pub const MAX_BACKUP_CORRECTION_RULES: usize = 10_000;
 pub const MAX_HISTORY_RETENTION_DAYS: u32 = 3650;
-pub const MAX_HOTKEY_BINDINGS_PER_ROLE: usize = 3;
+/// History rows that kept a recording but never produced inserted text (Typeless `dismissed`,
+/// empty and `error` items). They are excluded from stats and Paste last transcript.
+pub const HISTORY_STATUS_DISMISSED: &str = "dismissed";
+pub const HISTORY_STATUS_SILENT: &str = "silent";
+pub const HISTORY_STATUS_RECOGNITION_FAILED: &str = "recognition_failed";
+const RECORDING_ONLY_STATUSES_SQL: &str = "('dismissed', 'silent', 'recognition_failed')";
+
+const HISTORY_ENTRY_SELECT: &str = "SELECT
+                id,
+                created_at,
+                context_profile_id,
+                context_label,
+                context_icon_key,
+                context_family,
+                browser_access_status,
+                provider_kind,
+                raw_text,
+                polished_text,
+                language,
+                duration_ms,
+                active_scene_id,
+                active_scene_source,
+                active_scene_name,
+                active_scene_prompt_chars,
+                active_scene_prompt_truncated,
+                output_status,
+                output_error,
+                mode,
+                answer_text,
+                EXISTS(SELECT 1 FROM history_audio WHERE history_audio.history_id = history.id)";
+
+fn history_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
+    Ok(HistoryEntry {
+        has_audio: row.get(21)?,
+        id: row.get(0)?,
+        created_at: row.get(1)?,
+        context_profile_id: row.get(2)?,
+        context_label: row.get(3)?,
+        context_icon_key: row.get(4)?,
+        context_family: context_family_from_db(&row.get::<_, String>(5)?),
+        browser_access_status: BrowserAccessStatus::from_history_value(
+            row.get::<_, Option<String>>(6)?.as_deref(),
+        ),
+        provider_kind: HistoryProviderKind::from_db_value(&row.get::<_, String>(7)?),
+        raw_text: row.get(8)?,
+        polished_text: row.get(9)?,
+        language: row.get(10)?,
+        duration_ms: row.get(11)?,
+        active_scene_id: row.get(12)?,
+        active_scene_source: row.get(13)?,
+        active_scene_name: row.get(14)?,
+        active_scene_prompt_chars: row.get(15)?,
+        active_scene_prompt_truncated: row.get(16)?,
+        output_status: row.get(17)?,
+        output_error: row.get(18)?,
+        mode: row.get(19)?,
+        answer_text: row.get(20)?,
+    })
+}
+
+pub fn is_recording_only_status(status: Option<&str>) -> bool {
+    matches!(
+        status,
+        Some(HISTORY_STATUS_DISMISSED | HISTORY_STATUS_SILENT | HISTORY_STATUS_RECOGNITION_FAILED)
+    )
+}
+pub const MAX_HOTKEY_BINDINGS_PER_ROLE: usize = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
@@ -136,6 +204,8 @@ pub struct HotkeyConfig {
     pub edit_selection: Option<ShortcutBinding>,
     pub switch_scene: Option<ShortcutBinding>,
     pub open_app: Option<ShortcutBinding>,
+    /// Re-inserts the most recent transcript (Typeless "Paste last transcript").
+    pub paste_last: Option<ShortcutBinding>,
     pub dictation_mode: String,
 }
 
@@ -148,6 +218,7 @@ impl Default for HotkeyConfig {
         );
         config.translate = default_translate_hotkey().and_then(ShortcutBinding::from_hotkey);
         config.translate_bindings = config.translate.clone().into_iter().collect();
+        config.paste_last = ShortcutBinding::from_hotkey(default_paste_last_hotkey());
         config
     }
 }
@@ -174,6 +245,7 @@ impl HotkeyConfig {
             edit_selection: None,
             switch_scene: None,
             open_app: None,
+            paste_last: None,
             dictation_mode,
         }
     }
@@ -217,6 +289,7 @@ impl HotkeyConfig {
         normalize_optional_binding(&mut self.edit_selection);
         normalize_optional_binding(&mut self.switch_scene);
         normalize_optional_binding(&mut self.open_app);
+        normalize_optional_binding(&mut self.paste_last);
         self.dictation_mode = normalize_hotkey_mode(&self.dictation_mode).to_string();
     }
 }
@@ -348,6 +421,7 @@ pub struct AppConfig {
     pub polish_style: String,
     pub polish_custom_prompt: String,
     pub polish_chinese_script: String,
+    pub language_variants: std::collections::BTreeMap<String, String>,
     pub custom_scenes: Vec<CustomScene>,
     pub system_scene_overrides: Vec<SystemSceneOverride>,
     pub active_scene: Option<ActiveScene>,
@@ -379,6 +453,17 @@ pub struct AppConfig {
     pub history_max_entries: u32,
     pub ui_language: String,
     pub capsule_auto_hide: bool,
+    /// Input device name to record from; empty follows the system default microphone.
+    pub microphone_device: String,
+    /// Short start / stop / error cues played by the floating bar.
+    pub interaction_sounds: bool,
+    /// Mute the system output while recording so playback doesn't bleed into the mic.
+    pub mute_background_audio: bool,
+    /// macOS: keep the app icon in the Dock (Typeless `enableShowAppInDock`, default on).
+    pub show_in_dock: bool,
+    pub save_recording_audio: bool,
+    /// macOS: learn names the user corrects right after dictating (Typeless auto-added words).
+    pub auto_learn_dictionary: bool,
 }
 
 impl Default for AppConfig {
@@ -405,6 +490,7 @@ impl Default for AppConfig {
             polish_style: "clean".to_string(),
             polish_custom_prompt: String::new(),
             polish_chinese_script: "preserve".to_string(),
+            language_variants: std::collections::BTreeMap::new(),
             custom_scenes: Vec::new(),
             system_scene_overrides: Vec::new(),
             active_scene: None,
@@ -436,16 +522,27 @@ impl Default for AppConfig {
             history_max_entries: DEFAULT_HISTORY_MAX_ENTRIES,
             ui_language: "en".to_string(),
             capsule_auto_hide: false,
+            microphone_device: String::new(),
+            interaction_sounds: true,
+            mute_background_audio: false,
+            show_in_dock: true,
+            save_recording_audio: true,
+            auto_learn_dictionary: true,
         }
     }
 }
 
 impl AppConfig {
     pub fn new_install_default() -> Self {
-        Self {
+        let mut config = Self {
             capsule_auto_hide: true,
+            mute_background_audio: true,
             ..Self::default()
-        }
+        };
+        // New installs get tap-to-talk with long-press guidance; existing users keep their mode.
+        config.hotkeys.dictation_mode = "auto".to_string();
+        config.hotkey_mode = "auto".to_string();
+        config
     }
 
     fn migrate_legacy_platform_hotkeys(&mut self) {
@@ -499,45 +596,9 @@ impl AppConfig {
     }
 
     fn normalize_hotkey_settings(&mut self) {
-        self.migrate_platform_typed_hotkeys();
         self.hotkeys.dictation_mode =
             normalize_hotkey_mode(&self.hotkeys.dictation_mode).to_string();
         self.sync_legacy_hotkey_fields_from_typed();
-    }
-
-    fn migrate_platform_typed_hotkeys(&mut self) {
-        #[cfg(target_os = "windows")]
-        {
-            if self.hotkeys.dictation.to_hotkey_string().as_deref() == Some("RightAlt") {
-                if let Some(binding) = ShortcutBinding::from_hotkey("Ctrl+/") {
-                    self.hotkeys.dictation = binding.clone();
-                    self.hotkeys.dictation_bindings = vec![binding];
-                }
-                self.hotkeys.dictation_mode = "hold".to_string();
-            }
-            if self
-                .hotkeys
-                .ask
-                .as_ref()
-                .and_then(ShortcutBinding::to_hotkey_string)
-                .as_deref()
-                == Some("RightAlt+Space")
-            {
-                self.hotkeys.ask = ShortcutBinding::from_hotkey("Ctrl+.");
-                self.hotkeys.ask_bindings = self.hotkeys.ask.clone().into_iter().collect();
-            }
-            if self
-                .hotkeys
-                .translate
-                .as_ref()
-                .and_then(ShortcutBinding::to_hotkey_string)
-                .as_deref()
-                == Some("RightAlt+LeftShift")
-            {
-                self.hotkeys.translate = None;
-                self.hotkeys.translate_bindings.clear();
-            }
-        }
     }
 
     fn sync_legacy_hotkey_fields_from_typed(&mut self) {
@@ -568,6 +629,7 @@ impl AppConfig {
         self.polish_style = normalize_polish_style(&self.polish_style).to_string();
         self.polish_custom_prompt = sanitize_polish_custom_prompt(&self.polish_custom_prompt);
         self.polish_chinese_script = "preserve".to_string();
+        crate::language_variants::normalize(&mut self.language_variants);
         sanitize_custom_scenes(&mut self.custom_scenes);
         sanitize_system_scene_overrides(&mut self.system_scene_overrides);
         sanitize_active_scene(&mut self.active_scene);
@@ -650,8 +712,29 @@ impl AppConfig {
     }
 
     pub fn from_stored_value(value: serde_json::Value) -> Result<Self, serde_json::Error> {
+        if !value.is_object() {
+            return Err(<serde_json::Error as serde::de::Error>::custom(
+                "Application settings must be an object",
+            ));
+        }
         let mut value = value;
         if let Some(object) = value.as_object_mut() {
+            if !object.contains_key("language_variants") {
+                let variant = match object
+                    .get("polish_chinese_script")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    Some("simplified") => Some("zh-CN"),
+                    Some("traditional") => Some("zh-TW"),
+                    _ => None,
+                };
+                if let Some(variant) = variant {
+                    object.insert(
+                        "language_variants".to_string(),
+                        serde_json::json!({ "zh": variant }),
+                    );
+                }
+            }
             if object
                 .get("system_scene_overrides")
                 .is_some_and(serde_json::Value::is_null)
@@ -752,6 +835,18 @@ fn default_ask_hotkey() -> &'static str {
     }
 }
 
+/// Typeless default: Ctrl+Cmd+V on macOS, LeftCtrl+RightShift+V elsewhere.
+fn default_paste_last_hotkey() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Ctrl+Command+V"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Ctrl+Shift+V"
+    }
+}
+
 fn default_translate_hotkey() -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
@@ -764,10 +859,10 @@ fn default_translate_hotkey() -> Option<&'static str> {
 }
 
 fn normalize_hotkey_mode(value: &str) -> &'static str {
-    if value == "toggle" {
-        "toggle"
-    } else {
-        "hold"
+    match value {
+        "toggle" => "toggle",
+        "auto" => "auto",
+        _ => "hold",
     }
 }
 
@@ -926,6 +1021,7 @@ fn normalize_polish_style(value: &str) -> &'static str {
         "clean" => "clean",
         "structured" => "structured",
         "professional" => "professional",
+        "custom" => "custom",
         _ => "clean",
     }
 }
@@ -1143,6 +1239,166 @@ fn sanitize_family_scene_assignments(
 pub struct ConfigManager {
     app_handle: tauri::AppHandle,
     cache: Mutex<Option<AppConfig>>,
+    history_privacy_verified: std::sync::atomic::AtomicBool,
+    input_commit_revision: std::sync::atomic::AtomicU64,
+    config_epoch: String,
+}
+
+fn checked_config_revision(current: u64) -> Result<u64> {
+    current
+        .checked_add(1)
+        .filter(|revision| *revision <= 9_007_199_254_740_991)
+        .ok_or_else(|| anyhow::anyhow!("Application settings revision limit reached"))
+}
+
+pub(crate) fn validate_settings_file(path: &std::path::Path) -> Result<()> {
+    use std::io::Read;
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => anyhow::bail!("Could not read application settings"),
+    };
+    let mut bytes = Vec::new();
+    file.take(8 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("Could not read application settings"))?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        anyhow::bail!("Application settings are too large");
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("Application settings are invalid"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Application settings are invalid"))?;
+    if let Some(config) = object.get("app_config") {
+        AppConfig::from_stored_value(config.clone())
+            .map_err(|_| anyhow::anyhow!("Application settings are invalid"))?;
+    }
+    if object
+        .get("onboarding_completed")
+        .is_some_and(|marker| !marker.is_boolean())
+    {
+        anyhow::bail!("Application onboarding settings are invalid");
+    }
+    Ok(())
+}
+
+fn with_confirmed_retention_cache<Output>(
+    cache: &Mutex<Option<AppConfig>>,
+    verified: bool,
+    enabled: bool,
+    retention_days: u32,
+    action: impl FnOnce(&HistoryRetentionPolicy) -> Result<Output>,
+) -> Result<Output> {
+    let guard = cache
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+    let current = guard
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Application settings are unavailable"))?;
+    if !verified
+        || current.history_enabled != enabled
+        || current.history_retention_days != retention_days
+    {
+        anyhow::bail!("History retention settings changed before cleanup");
+    }
+    action(&current.history_retention_policy())
+}
+
+fn history_privacy_from_cache(
+    cache: Option<&AppConfig>,
+    verified: bool,
+) -> Option<(HistoryRetentionPolicy, bool)> {
+    if !verified {
+        return None;
+    }
+    cache.map(|config| {
+        (
+            config.history_retention_policy(),
+            config.save_recording_audio,
+        )
+    })
+}
+
+fn with_history_privacy_cache<Output>(
+    cache: &Mutex<Option<AppConfig>>,
+    verified: bool,
+    action: impl FnOnce(Option<(HistoryRetentionPolicy, bool)>) -> Result<Output>,
+) -> Result<Output> {
+    let guard = cache
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+    action(history_privacy_from_cache(guard.as_ref(), verified))
+}
+
+#[cfg(test)]
+fn update_cached_config(
+    cache: &Mutex<Option<AppConfig>>,
+    update: impl FnOnce(&mut AppConfig),
+    persist: impl FnOnce(&mut AppConfig) -> Result<()>,
+) -> Result<AppConfig> {
+    try_update_cached_config(
+        cache,
+        |config| {
+            update(config);
+            Ok(())
+        },
+        persist,
+    )
+}
+
+#[cfg(test)]
+fn try_update_cached_config(
+    cache: &Mutex<Option<AppConfig>>,
+    update: impl FnOnce(&mut AppConfig) -> Result<()>,
+    persist: impl FnOnce(&mut AppConfig) -> Result<()>,
+) -> Result<AppConfig> {
+    let revision = std::sync::atomic::AtomicU64::new(0);
+    try_update_cached_config_commit(cache, &revision, update, |config| {
+        persist(config)?;
+        Ok(0)
+    })
+    .map(|(_, config)| config)
+}
+
+fn try_update_cached_config_commit(
+    cache: &Mutex<Option<AppConfig>>,
+    revision: &std::sync::atomic::AtomicU64,
+    update: impl FnOnce(&mut AppConfig) -> Result<()>,
+    persist: impl FnOnce(&mut AppConfig) -> Result<u64>,
+) -> Result<(u64, AppConfig)> {
+    let mut guard = cache
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+    let mut config = guard
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("Application settings are unavailable"))?;
+    let previous = serde_json::to_value(&config)?;
+    update(&mut config)?;
+    config.normalize_values();
+    if serde_json::to_value(&config)? == previous {
+        return Ok((revision.load(std::sync::atomic::Ordering::SeqCst), config));
+    }
+    let committed_revision = persist(&mut config)?;
+    *guard = Some(config.clone());
+    Ok((committed_revision, config))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn with_learning_setting_cache<Output>(
+    cache: &Mutex<Option<AppConfig>>,
+    action: impl FnOnce() -> Result<Output>,
+) -> Result<Option<Output>> {
+    let guard = cache
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+    let config = guard
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Application settings are unavailable"))?;
+    if !config.auto_learn_dictionary {
+        return Ok(None);
+    }
+    action().map(Some)
 }
 
 pub(crate) fn config_with_native_managed_state(
@@ -1155,30 +1411,148 @@ pub(crate) fn config_with_native_managed_state(
 }
 
 impl ConfigManager {
+    pub(crate) fn config_epoch(&self) -> &str {
+        &self.config_epoch
+    }
+
+    pub(crate) fn cached_input_config(&self) -> Result<AppConfig> {
+        self.cached_input_commit().map(|(_, config)| config)
+    }
+
+    pub(crate) fn cached_input_commit(&self) -> Result<(u64, AppConfig)> {
+        let cache = self
+            .cache
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("Application settings are being updated"))?;
+        let config = cache
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Application settings are unavailable"))?;
+        Ok((
+            self.input_commit_revision
+                .load(std::sync::atomic::Ordering::SeqCst),
+            config,
+        ))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn with_current_learning_enabled<Output>(
+        &self,
+        action: impl FnOnce() -> Result<Output>,
+    ) -> Result<Option<Output>> {
+        with_learning_setting_cache(&self.cache, action)
+    }
+    pub(crate) fn with_microphone_scan_settings<Output>(
+        &self,
+        action: impl FnOnce(&tauri_plugin_store::Store<tauri::Wry>) -> Result<Output>,
+    ) -> Result<Output> {
+        let _guard = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+        let store = self.validated_settings_store()?;
+        action(&store)
+    }
+
+    pub(crate) fn load_onboarding_completed(&self) -> Result<bool> {
+        let _guard = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+        let store = self.validated_settings_store()?;
+        match store.get("onboarding_completed") {
+            None | Some(serde_json::Value::Bool(false)) => Ok(false),
+            Some(serde_json::Value::Bool(true)) => Ok(true),
+            Some(_) => anyhow::bail!("Application onboarding settings are invalid"),
+        }
+    }
+
+    pub(crate) fn save_onboarding_completed(&self) -> Result<()> {
+        let _guard = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Application settings are unavailable"))?;
+        let store = self.validated_settings_store()?;
+        persist_onboarding_marker(&store)
+    }
+
+    fn validated_settings_store(
+        &self,
+    ) -> Result<std::sync::Arc<tauri_plugin_store::Store<tauri::Wry>>> {
+        let path = tauri_plugin_store::resolve_store_path(&self.app_handle, "settings.json")
+            .map_err(|_| anyhow::anyhow!("Could not locate application settings"))?;
+        validate_settings_file(&path)?;
+        self.app_handle
+            .store("settings.json")
+            .map_err(|_| anyhow::anyhow!("Could not read application settings"))
+    }
+
+    pub(crate) fn with_current_history_privacy<Output>(
+        &self,
+        action: impl FnOnce(Option<(HistoryRetentionPolicy, bool)>) -> Result<Output>,
+    ) -> Result<Output> {
+        with_history_privacy_cache(
+            &self.cache,
+            self.history_privacy_verified
+                .load(std::sync::atomic::Ordering::SeqCst),
+            action,
+        )
+    }
+
+    pub(crate) fn prune_confirmed_history(
+        &self,
+        history: &HistoryStore,
+        enabled: bool,
+        retention_days: u32,
+        now_iso: &str,
+    ) -> Result<()> {
+        with_confirmed_retention_cache(
+            &self.cache,
+            self.history_privacy_verified
+                .load(std::sync::atomic::Ordering::SeqCst),
+            enabled,
+            retention_days,
+            |policy| history.prune_with_policy_sync(policy, now_iso),
+        )
+    }
+
     pub fn new(app_handle: tauri::AppHandle) -> Self {
         Self {
             app_handle,
             cache: Mutex::new(None),
+            history_privacy_verified: std::sync::atomic::AtomicBool::new(false),
+            input_commit_revision: std::sync::atomic::AtomicU64::new(0),
+            config_epoch: uuid::Uuid::new_v4().to_string(),
         }
     }
 
     pub async fn load(&self) -> Result<AppConfig> {
-        if let Some(config) = self.cache.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        let mut cache = self.cache.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(config) = cache.clone() {
             return Ok(config);
         }
 
-        let mut config = match self.app_handle.store("settings.json") {
-            Ok(store) => match store.get("app_config") {
-                Some(val) => AppConfig::from_stored_value(val.clone())
-                    .unwrap_or_else(|_| AppConfig::new_install_default()),
-                None => AppConfig::new_install_default(),
-            },
-            Err(_) => AppConfig::new_install_default(),
+        let path = tauri_plugin_store::resolve_store_path(&self.app_handle, "settings.json")
+            .map_err(|_| anyhow::anyhow!("Could not locate application settings"))?;
+        validate_settings_file(&path)?;
+        let store = self
+            .app_handle
+            .store("settings.json")
+            .map_err(|_| anyhow::anyhow!("Could not read application settings"))?;
+        let loaded = match store.get("app_config") {
+            Some(value) => Some(
+                AppConfig::from_stored_value(value)
+                    .map_err(|_| anyhow::anyhow!("Application settings are invalid"))?,
+            ),
+            None => None,
         };
+        let privacy_verified = loaded.is_some();
+        let mut config = loaded.unwrap_or_else(AppConfig::new_install_default);
 
         self.migrate_legacy_config_secrets_on_load(&mut config);
 
-        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(config.clone());
+        *cache = Some(config.clone());
+        self.history_privacy_verified
+            .store(privacy_verified, std::sync::atomic::Ordering::SeqCst);
         Ok(config)
     }
 
@@ -1192,9 +1566,13 @@ impl ConfigManager {
                 "Migrated legacy config credentials before saving settings"
             );
         }
-        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(config.clone());
-
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        self.next_input_commit_revision()?;
         self.persist_config(&config)?;
+        *cache = Some(config.clone());
+        self.history_privacy_verified
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.publish_input_commit(&config);
 
         Ok(())
     }
@@ -1203,11 +1581,12 @@ impl ConfigManager {
         &self,
         incoming: AppConfig,
         prepare: impl FnOnce(AppConfig) -> std::result::Result<AppConfig, String>,
-    ) -> Result<AppConfig> {
+    ) -> Result<(u64, AppConfig)> {
         // Merge at commit time: an auth refresh or logout may have changed the
         // capability since the renderer read its settings. Keep this lock until
         // persistence completes so the renderer cannot resurrect an old state.
         let mut cache = self.cache.lock().unwrap_or_else(|error| error.into_inner());
+        self.next_input_commit_revision()?;
         let mut current = cache.clone();
         if let Some(current) = current.as_mut() {
             // Do not discard the only legacy key copy if the vault is unavailable.
@@ -1217,7 +1596,45 @@ impl ConfigManager {
             .map_err(anyhow::Error::msg)?;
         self.persist_config(&config)?;
         *cache = Some(config.clone());
-        Ok(config)
+        self.history_privacy_verified
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let revision = self.publish_input_commit(&config);
+        Ok((revision, config))
+    }
+
+    pub(crate) fn try_update_current_config_commit(
+        &self,
+        update: impl FnOnce(&mut AppConfig) -> Result<()>,
+    ) -> Result<(u64, AppConfig)> {
+        try_update_cached_config_commit(
+            &self.cache,
+            &self.input_commit_revision,
+            update,
+            |config| {
+                self.next_input_commit_revision()?;
+                migrate_legacy_config_secrets(config, &SystemCredentialVault)?;
+                self.persist_config(config)?;
+                self.history_privacy_verified
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(self.publish_input_commit(config))
+            },
+        )
+    }
+
+    fn next_input_commit_revision(&self) -> Result<u64> {
+        checked_config_revision(
+            self.input_commit_revision
+                .load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+
+    fn publish_input_commit(&self, config: &AppConfig) -> u64 {
+        let revision = self
+            .input_commit_revision
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        crate::hotkey::refresh_committed_input_configuration(&self.app_handle, revision, config);
+        revision
     }
 
     fn migrate_legacy_config_secrets_on_load(&self, config: &mut AppConfig) {
@@ -1241,16 +1658,109 @@ impl ConfigManager {
     }
 
     fn persist_config(&self, config: &AppConfig) -> Result<()> {
+        let path = tauri_plugin_store::resolve_store_path(&self.app_handle, "settings.json")
+            .map_err(|_| anyhow::anyhow!("Could not locate application settings"))?;
+        validate_settings_file(&path)?;
         let store = self
             .app_handle
             .store("settings.json")
             .map_err(|e| anyhow::anyhow!("Failed to open store: {}", e))?;
         let val = serde_json::to_value(config)?;
-        store.set("app_config", val);
-        store.save().map_err(|e| anyhow::anyhow!("{}", e))?;
+        persist_config_value(&store, val)?;
 
         Ok(())
     }
+}
+
+fn persist_onboarding_marker<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+) -> Result<()> {
+    persist_settings_marker(store, "onboarding_completed", serde_json::Value::Bool(true))
+        .map_err(|_| anyhow::anyhow!("Could not save onboarding settings"))
+}
+
+pub(crate) fn persist_microphone_scan<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    timestamp: i64,
+) -> Result<()> {
+    persist_settings_marker(
+        store,
+        "better_microphone_last_scan",
+        serde_json::json!(timestamp),
+    )
+}
+
+fn persist_settings_marker<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<()> {
+    let previous = store.get(key);
+    let mut candidate: std::collections::HashMap<String, serde_json::Value> =
+        store.entries().into_iter().collect();
+    candidate.insert(key.to_string(), value.clone());
+    let mut counter = SettingsSizeCounter {
+        bytes: 0,
+        limit: 8 * 1024 * 1024,
+    };
+    serde_json::to_writer_pretty(&mut counter, &candidate)
+        .map_err(|_| anyhow::anyhow!("Application settings are too large"))?;
+    store.set(key, value);
+    if store.save().is_err() {
+        if let Some(previous) = previous {
+            store.set(key, previous);
+        } else {
+            store.delete(key);
+        }
+        anyhow::bail!("Could not save application settings");
+    }
+    Ok(())
+}
+
+struct SettingsSizeCounter {
+    bytes: usize,
+    limit: usize,
+}
+
+impl std::io::Write for SettingsSizeCounter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        if buffer.len() > self.limit.saturating_sub(self.bytes) {
+            return Err(std::io::Error::other("Application settings are too large"));
+        }
+        self.bytes += buffer.len();
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn persist_config_value<R: tauri::Runtime>(
+    store: &tauri_plugin_store::Store<R>,
+    value: serde_json::Value,
+) -> Result<()> {
+    let mut candidate: std::collections::HashMap<String, serde_json::Value> =
+        store.entries().into_iter().collect();
+    candidate.insert("app_config".to_string(), value.clone());
+    let mut counter = SettingsSizeCounter {
+        bytes: 0,
+        limit: 8 * 1024 * 1024,
+    };
+    serde_json::to_writer_pretty(&mut counter, &candidate)
+        .map_err(|_| anyhow::anyhow!("Application settings are too large"))?;
+    let previous = store.get("app_config");
+    store.set("app_config", value);
+    if let Err(error) = store.save() {
+        match previous {
+            Some(previous) => store.set("app_config", previous),
+            None => {
+                store.delete("app_config");
+            }
+        }
+        return Err(anyhow::anyhow!("{error}"));
+    }
+    Ok(())
 }
 
 // ─── HistoryStore (SQLite backed) ───
@@ -1276,6 +1786,18 @@ pub struct HistoryEntry {
     pub active_scene_prompt_truncated: bool,
     pub output_status: Option<String>,
     pub output_error: Option<String>,
+    /// `dictate`, `translate` or `ask`; older rows default to `dictate`.
+    #[serde(default = "default_history_mode")]
+    pub mode: String,
+    /// Ask Anything answer, shown again via History > View answer.
+    #[serde(default)]
+    pub answer_text: Option<String>,
+    #[serde(default)]
+    pub has_audio: bool,
+}
+
+fn default_history_mode() -> String {
+    "dictate".to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1327,9 +1849,54 @@ pub struct HistoryStore {
 }
 
 impl HistoryStore {
+    fn apply_retention_in_transaction(
+        transaction: &rusqlite::Transaction<'_>,
+        policy: &HistoryRetentionPolicy,
+        now_iso: &str,
+    ) -> Result<()> {
+        let cutoff = if policy.enabled && policy.retention_days > 0 {
+            let now = chrono::NaiveDateTime::parse_from_str(now_iso, "%Y-%m-%dT%H:%M:%S")?;
+            let cutoff = now
+                .checked_sub_signed(chrono::Duration::days(policy.retention_days as i64))
+                .ok_or_else(|| anyhow::anyhow!("History retention cutoff is out of range"))?;
+            Some(cutoff)
+        } else {
+            None
+        };
+        if !policy.enabled {
+            transaction.execute("DELETE FROM history", [])?;
+            return Ok(());
+        }
+        let max_entries = policy.max_entries.clamp(1, DEFAULT_HISTORY_MAX_ENTRIES);
+        transaction.execute(
+            "DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT ?1)",
+            rusqlite::params![max_entries],
+        )?;
+        if let Some(cutoff) = cutoff {
+            let mut statement = transaction.prepare("SELECT id, created_at FROM history")?;
+            let entries = statement.query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut expired = Vec::new();
+            for entry in entries {
+                let (id, timestamp) = entry?;
+                let created_at =
+                    chrono::NaiveDateTime::parse_from_str(&timestamp, "%Y-%m-%dT%H:%M:%S")?;
+                if created_at < cutoff {
+                    expired.push(id);
+                }
+            }
+            drop(statement);
+            for id in expired {
+                transaction.execute("DELETE FROM history WHERE id = ?1", [id])?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn new(db_path: PathBuf) -> Result<Self> {
         let conn = Connection::open(&db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1352,11 +1919,19 @@ impl HistoryStore {
                 active_scene_prompt_chars INTEGER,
                 active_scene_prompt_truncated INTEGER NOT NULL DEFAULT 0,
                 output_status TEXT,
-                output_error TEXT
+                output_error TEXT,
+                mode TEXT NOT NULL DEFAULT 'dictate',
+                answer_text TEXT
             );",
         )?;
         ensure_history_optional_columns(&conn)?;
         migrate_legacy_history_context(&conn)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS history_audio (
+                history_id INTEGER PRIMARY KEY REFERENCES history(id) ON DELETE CASCADE,
+                wav BLOB NOT NULL
+            );",
+        )?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -1372,14 +1947,37 @@ impl HistoryStore {
         entry: HistoryEntry,
         policy: &HistoryRetentionPolicy,
     ) -> Result<()> {
+        self.add_with_audio(entry, policy, None).await.map(|_| ())
+    }
+
+    pub async fn add_with_audio(
+        &self,
+        entry: HistoryEntry,
+        policy: &HistoryRetentionPolicy,
+        audio: Option<Vec<u8>>,
+    ) -> Result<Option<i64>> {
+        self.add_with_audio_sync(entry, policy, audio)
+    }
+
+    pub(crate) fn add_with_audio_sync(
+        &self,
+        entry: HistoryEntry,
+        policy: &HistoryRetentionPolicy,
+        audio: Option<Vec<u8>>,
+    ) -> Result<Option<i64>> {
         if !policy.enabled {
-            return Ok(());
+            return Ok(None);
+        }
+        if let Some(wav) = audio.as_ref() {
+            crate::audio::archive::decode_archive_wav(wav)
+                .map_err(|_| anyhow::anyhow!("Invalid or oversized history recording"))?;
         }
 
         let now_iso = entry.created_at.clone();
-        {
-            let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-            conn.execute(
+        let id = {
+            let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            let transaction = conn.transaction()?;
+            transaction.execute(
                 "INSERT INTO history (
                     created_at,
                     app_name,
@@ -1400,9 +1998,11 @@ impl HistoryStore {
                     active_scene_prompt_chars,
                     active_scene_prompt_truncated,
                     output_status,
-                    output_error
+                    output_error,
+                    mode,
+                    answer_text
                 )
-             VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 rusqlite::params![
                     entry.created_at,
                     entry.context_profile_id,
@@ -1422,12 +2022,54 @@ impl HistoryStore {
                     entry.active_scene_prompt_truncated,
                     entry.output_status,
                     entry.output_error,
+                    entry.mode,
+                    entry.answer_text,
                 ],
             )?;
-        }
+            let id = transaction.last_insert_rowid();
+            if let Some(audio) = audio {
+                transaction.execute(
+                    "INSERT INTO history_audio(history_id, wav) VALUES (?1, ?2)",
+                    rusqlite::params![id, audio],
+                )?;
+                transaction.execute(
+                    "DELETE FROM history_audio WHERE history_id IN (
+                        SELECT history_id FROM (
+                            SELECT history_id,
+                                SUM(length(wav)) OVER (ORDER BY history_id DESC) AS retained_bytes
+                            FROM history_audio
+                        ) WHERE retained_bytes > 268435456
+                    )",
+                    [],
+                )?;
+            }
+            Self::apply_retention_in_transaction(&transaction, policy, &now_iso)?;
+            transaction.commit()?;
+            id
+        };
 
-        self.prune_with_policy(policy, &now_iso).await?;
-        Ok(())
+        Ok(Some(id))
+    }
+
+    pub async fn read_audio(&self, id: i64) -> Result<Option<Vec<u8>>> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn.lock().unwrap_or_else(|error| error.into_inner());
+        let recording: Option<Option<Vec<u8>>> = conn
+            .query_row(
+                "SELECT CASE WHEN length(wav) BETWEEN 44 AND ?2 THEN wav ELSE NULL END
+                 FROM history_audio WHERE history_id = ?1",
+                rusqlite::params![id, crate::audio::archive::MAX_ARCHIVE_BYTES as i64],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(recording) = recording else {
+            return Ok(None);
+        };
+        let audio =
+            recording.ok_or_else(|| anyhow::anyhow!("Invalid or oversized history recording"))?;
+        crate::audio::archive::decode_archive_wav(&audio)
+            .map_err(|_| anyhow::anyhow!("Invalid or oversized history recording"))?;
+        Ok(Some(audio))
     }
 
     pub async fn prune_with_policy(
@@ -1435,87 +2077,73 @@ impl HistoryStore {
         policy: &HistoryRetentionPolicy,
         now_iso: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        if !policy.enabled {
-            conn.execute("DELETE FROM history", [])?;
-            return Ok(());
-        }
+        self.prune_with_policy_sync(policy, now_iso)
+    }
 
-        let max_entries = policy.max_entries.clamp(1, DEFAULT_HISTORY_MAX_ENTRIES);
-        conn.execute(
-            "DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT ?1)",
-            rusqlite::params![max_entries],
-        )?;
-
-        if policy.retention_days > 0 {
-            if let Ok(now) = chrono::NaiveDateTime::parse_from_str(now_iso, "%Y-%m-%dT%H:%M:%S") {
-                let cutoff = now - chrono::Duration::days(policy.retention_days as i64);
-                let cutoff_iso = cutoff.format("%Y-%m-%dT%H:%M:%S").to_string();
-                conn.execute(
-                    "DELETE FROM history WHERE created_at < ?1",
-                    rusqlite::params![cutoff_iso],
-                )?;
-            }
-        }
-
+    pub(crate) fn prune_with_policy_sync(
+        &self,
+        policy: &HistoryRetentionPolicy,
+        now_iso: &str,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let transaction = conn.transaction()?;
+        Self::apply_retention_in_transaction(&transaction, policy, now_iso)?;
+        transaction.commit()?;
         Ok(())
     }
 
     pub async fn list(&self, limit: u32, offset: u32) -> Result<Vec<HistoryEntry>> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        let mut stmt = conn.prepare(
-            "SELECT
-                id,
-                created_at,
-                context_profile_id,
-                context_label,
-                context_icon_key,
-                context_family,
-                browser_access_status,
-                provider_kind,
-                raw_text,
-                polished_text,
-                language,
-                duration_ms,
-                active_scene_id,
-                active_scene_source,
-                active_scene_name,
-                active_scene_prompt_chars,
-                active_scene_prompt_truncated,
-                output_status,
-                output_error
-             FROM history ORDER BY id DESC LIMIT ?1 OFFSET ?2",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![limit, offset], |row| {
-            Ok(HistoryEntry {
-                id: row.get(0)?,
-                created_at: row.get(1)?,
-                context_profile_id: row.get(2)?,
-                context_label: row.get(3)?,
-                context_icon_key: row.get(4)?,
-                context_family: context_family_from_db(&row.get::<_, String>(5)?),
-                browser_access_status: BrowserAccessStatus::from_history_value(
-                    row.get::<_, Option<String>>(6)?.as_deref(),
-                ),
-                provider_kind: HistoryProviderKind::from_db_value(&row.get::<_, String>(7)?),
-                raw_text: row.get(8)?,
-                polished_text: row.get(9)?,
-                language: row.get(10)?,
-                duration_ms: row.get(11)?,
-                active_scene_id: row.get(12)?,
-                active_scene_source: row.get(13)?,
-                active_scene_name: row.get(14)?,
-                active_scene_prompt_chars: row.get(15)?,
-                active_scene_prompt_truncated: row.get(16)?,
-                output_status: row.get(17)?,
-                output_error: row.get(18)?,
-            })
-        })?;
+        let mut stmt = conn.prepare(&format!(
+            "{HISTORY_ENTRY_SELECT} FROM history ORDER BY id DESC LIMIT ?1 OFFSET ?2"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params![limit, offset], history_entry_from_row)?;
         let mut entries = Vec::new();
         for row in rows {
             entries.push(row?);
         }
         Ok(entries)
+    }
+
+    pub async fn get(&self, id: i64) -> Result<Option<HistoryEntry>> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn
+            .query_row(
+                &format!("{HISTORY_ENTRY_SELECT} FROM history WHERE id = ?1"),
+                [id],
+                history_entry_from_row,
+            )
+            .optional()?)
+    }
+
+    pub async fn latest_insertable_transcript(&self) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap_or_else(|error| error.into_inner());
+        let mut statement = conn.prepare(
+            "SELECT polished_text, raw_text FROM history
+             WHERE mode != 'ask'
+               AND (output_status IS NULL OR output_status NOT IN (?1, ?2, ?3))
+             ORDER BY id DESC",
+        )?;
+        let rows = statement.query_map(
+            rusqlite::params![
+                HISTORY_STATUS_DISMISSED,
+                HISTORY_STATUS_SILENT,
+                HISTORY_STATUS_RECOGNITION_FAILED
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        for row in rows {
+            let (polished, raw) = row?;
+            if let Some(text) = [polished.as_str(), raw.as_str()]
+                .into_iter()
+                .map(str::trim)
+                .find(|text| !text.is_empty())
+            {
+                return Ok(Some(text.to_owned()));
+            };
+        }
+        Ok(None)
     }
 
     pub async fn clear(&self) -> Result<()> {
@@ -1524,10 +2152,103 @@ impl HistoryStore {
         Ok(())
     }
 
+    /// Typeless replaces a recovered row's text after a successful retry, so it becomes an ordinary
+    /// transcript. Only recording-only rows are updated; finished transcripts are never rewritten.
+    pub async fn complete_recovered(&self, id: i64, text: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute(
+            &format!(
+                "UPDATE history SET raw_text = ?1, polished_text = '', output_status = NULL,
+                 output_error = NULL
+                 WHERE id = ?2 AND output_status IN {RECORDING_ONLY_STATUSES_SQL}"
+            ),
+            rusqlite::params![text, id],
+        )? > 0)
+    }
+
+    /// Fills a cancelled or failed take with the result of recovering it; false once it was
+    /// already recovered.
+    pub async fn complete_unfinished_take(
+        &self,
+        id: i64,
+        raw_text: &str,
+        polished_text: &str,
+        output_status: Option<&str>,
+        output_error: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute(
+            "UPDATE history SET raw_text = ?1, polished_text = ?2, output_status = ?3,
+             output_error = ?4
+             WHERE id = ?5 AND output_status IN (?6, ?7)",
+            rusqlite::params![
+                raw_text,
+                polished_text,
+                output_status,
+                output_error,
+                id,
+                HISTORY_STATUS_DISMISSED,
+                HISTORY_STATUS_RECOGNITION_FAILED
+            ],
+        )? > 0)
+    }
+
+    pub async fn delete(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(conn.execute("DELETE FROM history WHERE id = ?1", rusqlite::params![id])? > 0)
+    }
+
+    /// Usage insights over every stored dictation and translation (Ask questions excluded).
+    pub async fn stats(&self, today: chrono::NaiveDate) -> Result<stats::UsageStats> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT created_at, polished_text, raw_text, duration_ms FROM history
+             WHERE mode <> 'ask' AND COALESCE(output_status, '') NOT IN {RECORDING_ONLY_STATUSES_SQL}"
+        ))?;
+        let samples = stmt
+            .query_map([], |row| {
+                let created_at: String = row.get(0)?;
+                let polished: String = row.get(1)?;
+                let raw: String = row.get(2)?;
+                Ok((
+                    created_at,
+                    if polished.trim().is_empty() {
+                        raw
+                    } else {
+                        polished
+                    },
+                    row.get(3)?,
+                ))
+            })?
+            .filter_map(|row| {
+                let (created_at, text, duration_ms) = row.ok()?;
+                let date =
+                    chrono::NaiveDate::parse_from_str(created_at.get(..10)?, "%Y-%m-%d").ok()?;
+                Some(stats::StatsSample {
+                    date,
+                    text,
+                    duration_ms,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(stats::compute_usage_stats(&samples, today))
+    }
+
     /// Restores cloud backup sections in one SQLite transaction. Dictionary and
     /// correction rows live in the same database, so using the history
     /// connection here prevents a partially restored local data set.
     pub async fn restore_backup_data(
+        &self,
+        history: Option<Vec<HistoryEntry>>,
+        dictionary: Option<Vec<DictionaryEntry>>,
+        correction_rules: Option<Vec<CorrectionRule>>,
+        policy: &HistoryRetentionPolicy,
+        now_iso: &str,
+    ) -> Result<()> {
+        self.restore_backup_data_sync(history, dictionary, correction_rules, policy, now_iso)
+    }
+
+    pub(crate) fn restore_backup_data_sync(
         &self,
         history: Option<Vec<HistoryEntry>>,
         dictionary: Option<Vec<DictionaryEntry>>,
@@ -1554,27 +2275,33 @@ impl HistoryStore {
             if policy.enabled {
                 let max_entries = policy.max_entries.clamp(1, DEFAULT_HISTORY_MAX_ENTRIES) as usize;
                 let cutoff = if policy.retention_days > 0 {
-                    chrono::NaiveDateTime::parse_from_str(now_iso, "%Y-%m-%dT%H:%M:%S")
-                        .ok()
-                        .map(|now| now - chrono::Duration::days(policy.retention_days as i64))
+                    let now = chrono::NaiveDateTime::parse_from_str(now_iso, "%Y-%m-%dT%H:%M:%S")?;
+                    Some(
+                        now.checked_sub_signed(chrono::Duration::days(
+                            policy.retention_days as i64,
+                        ))
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("History retention cutoff is out of range")
+                        })?,
+                    )
                 } else {
                     None
                 };
                 let mut entries = entries
                     .into_iter()
-                    .filter(|entry| {
-                        cutoff.is_none_or(|cutoff| {
-                            chrono::NaiveDateTime::parse_from_str(
-                                &entry.created_at,
-                                "%Y-%m-%dT%H:%M:%S",
-                            )
-                            .is_ok_and(|created_at| created_at >= cutoff)
-                        })
+                    .map(|entry| {
+                        let created_at = chrono::NaiveDateTime::parse_from_str(
+                            &entry.created_at,
+                            "%Y-%m-%dT%H:%M:%S",
+                        )?;
+                        Ok((created_at, entry))
                     })
-                    .take(max_entries)
-                    .collect::<Vec<_>>();
+                    .collect::<Result<Vec<_>>>()?;
+                entries.retain(|(created_at, _)| cutoff.is_none_or(|cutoff| *created_at >= cutoff));
+                entries.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+                entries.truncate(max_entries);
                 entries.reverse();
-                for entry in entries {
+                for (_, entry) in entries {
                     transaction.execute(
                         "INSERT INTO history (
                             created_at,
@@ -1596,8 +2323,10 @@ impl HistoryStore {
                             active_scene_prompt_chars,
                             active_scene_prompt_truncated,
                             output_status,
-                            output_error
-                        ) VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                            output_error,
+                            mode,
+                            answer_text
+                        ) VALUES (?1, '', '', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                         rusqlite::params![
                             entry.created_at,
                             entry.context_profile_id,
@@ -1617,6 +2346,8 @@ impl HistoryStore {
                             entry.active_scene_prompt_truncated,
                             entry.output_status,
                             entry.output_error,
+                            entry.mode,
+                            entry.answer_text,
                         ],
                     )?;
                 }
@@ -1625,10 +2356,10 @@ impl HistoryStore {
 
         if let Some(entries) = dictionary {
             transaction.execute("DELETE FROM dictionary", [])?;
-            for (word, pronunciation) in entries {
+            for (word, pronunciation, auto) in entries {
                 transaction.execute(
-                    "INSERT INTO dictionary (word, pronunciation) VALUES (?1, ?2)",
-                    rusqlite::params![word, pronunciation],
+                    "INSERT INTO dictionary (word, pronunciation, auto) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![word, pronunciation, auto],
                 )?;
             }
         }
@@ -1648,9 +2379,11 @@ impl HistoryStore {
     }
 }
 
-fn prepare_backup_dictionary(
+type PreparedDictionaryRow = (String, Option<String>, bool);
+
+pub(crate) fn prepare_backup_dictionary(
     entries: Vec<DictionaryEntry>,
-) -> Result<Vec<(String, Option<String>)>> {
+) -> Result<Vec<PreparedDictionaryRow>> {
     if entries.len() > MAX_BACKUP_DICTIONARY_ENTRIES {
         anyhow::bail!("backup_dictionary_too_large");
     }
@@ -1665,13 +2398,13 @@ fn prepare_backup_dictionary(
             .transpose()?
             .filter(|value| !value.is_empty());
         if seen.insert(normalized_dictionary_identity(&word)) {
-            prepared.push((word, pronunciation));
+            prepared.push((word, pronunciation, entry.auto));
         }
     }
     Ok(prepared)
 }
 
-fn prepare_backup_correction_rules(
+pub(crate) fn prepare_backup_correction_rules(
     entries: Vec<CorrectionRule>,
 ) -> Result<Vec<(String, String, bool)>> {
     if entries.len() > MAX_BACKUP_CORRECTION_RULES {
@@ -1746,6 +2479,11 @@ fn ensure_history_optional_columns(conn: &Connection) -> Result<()> {
             "provider_kind",
             "ALTER TABLE history ADD COLUMN provider_kind TEXT NOT NULL DEFAULT 'local'",
         ),
+        (
+            "mode",
+            "ALTER TABLE history ADD COLUMN mode TEXT NOT NULL DEFAULT 'dictate'",
+        ),
+        ("answer_text", "ALTER TABLE history ADD COLUMN answer_text TEXT"),
     ] {
         if !columns.contains(name) {
             conn.execute(ddl, [])?;
@@ -1857,6 +2595,8 @@ pub struct DictionaryEntry {
     pub id: i64,
     pub word: String,
     pub pronunciation: Option<String>,
+    #[serde(default)]
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1889,12 +2629,42 @@ impl DictionaryStore {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );",
         )?;
+        migrate_dictionary_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
     pub async fn add(&self, word: &str, pronunciation: Option<&str>) -> Result<()> {
+        self.insert(word, pronunciation, false).map(|_| ())
+    }
+
+    /// Adds a word learned from the user's own edits; returns the new row id.
+    pub async fn add_auto(&self, word: &str) -> Result<i64> {
+        self.insert(word, None, true)
+    }
+
+    fn insert(&self, word: &str, pronunciation: Option<&str>, auto: bool) -> Result<i64> {
+        self.insert_if_current(word, pronunciation, auto, || true)?
+            .ok_or_else(|| anyhow::anyhow!("dictionary_insert_cancelled"))
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    pub(crate) async fn add_auto_if_current(
+        &self,
+        word: &str,
+        is_current: impl FnOnce() -> bool,
+    ) -> Result<Option<i64>> {
+        self.insert_if_current(word, None, true, is_current)
+    }
+
+    fn insert_if_current(
+        &self,
+        word: &str,
+        pronunciation: Option<&str>,
+        auto: bool,
+        is_current: impl FnOnce() -> bool,
+    ) -> Result<Option<i64>> {
         let word = validate_dictionary_text(word, 100, "dictionary_word")?;
         let pronunciation = pronunciation
             .map(|value| validate_dictionary_text(value, 100, "dictionary_pronunciation"))
@@ -1904,11 +2674,14 @@ impl DictionaryStore {
         if dictionary_identity_exists(&conn, &normalized_dictionary_identity(&word), None)? {
             anyhow::bail!("dictionary_duplicate");
         }
+        if !is_current() {
+            return Ok(None);
+        }
         conn.execute(
-            "INSERT INTO dictionary (word, pronunciation) VALUES (?1, ?2)",
-            rusqlite::params![word, pronunciation],
+            "INSERT INTO dictionary (word, pronunciation, auto) VALUES (?1, ?2, ?3)",
+            rusqlite::params![word, pronunciation, auto],
         )?;
-        Ok(())
+        Ok(Some(conn.last_insert_rowid()))
     }
 
     pub async fn update(&self, id: i64, word: &str, pronunciation: Option<&str>) -> Result<()> {
@@ -1940,15 +2713,29 @@ impl DictionaryStore {
         Ok(())
     }
 
+    pub async fn remove_many(&self, ids: &[i64]) -> Result<usize> {
+        self.with_transaction(|transaction| {
+            let mut deleted = 0;
+            for id in ids {
+                deleted += transaction.execute(
+                    "DELETE FROM dictionary WHERE id = ?1",
+                    rusqlite::params![id],
+                )?;
+            }
+            Ok(deleted)
+        })
+    }
+
     pub async fn list(&self) -> Result<Vec<DictionaryEntry>> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt =
-            conn.prepare("SELECT id, word, pronunciation FROM dictionary ORDER BY id ASC")?;
+            conn.prepare("SELECT id, word, pronunciation, auto FROM dictionary ORDER BY id ASC")?;
         let rows = stmt.query_map([], |row| {
             Ok(DictionaryEntry {
                 id: row.get(0)?,
                 word: row.get(1)?,
                 pronunciation: row.get(2)?,
+                auto: row.get(3)?,
             })
         })?;
         let mut entries = Vec::new();
@@ -2091,6 +2878,22 @@ impl DictionaryStore {
     }
 }
 
+fn migrate_dictionary_columns(conn: &Connection) -> Result<()> {
+    let mut statement = conn.prepare("PRAGMA table_info(dictionary)")?;
+    let has_auto = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|name| name.ok())
+        .any(|name| name == "auto");
+    drop(statement);
+    if !has_auto {
+        conn.execute(
+            "ALTER TABLE dictionary ADD COLUMN auto INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn normalized_dictionary_identity(value: &str) -> String {
     value.nfkc().collect::<String>().trim().to_lowercase()
 }
@@ -2157,7 +2960,1149 @@ fn correction_identity_exists(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_size_counter_stops_before_the_limit_is_exceeded() {
+        use std::io::Write;
+        let mut counter = SettingsSizeCounter { bytes: 0, limit: 4 };
+        counter.write_all(b"1234").unwrap();
+        assert_eq!(counter.bytes, 4);
+        assert!(counter.write_all(b"5").is_err());
+        assert_eq!(counter.bytes, 4);
+        let mut counter = SettingsSizeCounter {
+            bytes: 0,
+            limit: usize::MAX,
+        };
+        counter.write_all(b"ok").unwrap();
+        assert_eq!(counter.bytes, 2);
+    }
+
+    #[test]
+    fn settings_size_check_does_not_materialize_serialized_output() {
+        let source = include_str!("mod.rs");
+        let method = source
+            .split("fn persist_config_value<R: tauri::Runtime>(")
+            .nth(1)
+            .unwrap()
+            .split("// ─── HistoryStore")
+            .next()
+            .unwrap();
+        assert!(!method.contains("serde_json::to_vec_pretty"));
+        assert!(method.contains("serde_json::to_writer_pretty"));
+    }
+
+    #[test]
+    fn invalid_onboarding_marker_is_rejected_without_rewriting_settings() {
+        let directory = std::env::temp_dir().join(format!("otl-marker-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.json");
+        for marker in [
+            serde_json::Value::Null,
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::json!([]),
+            serde_json::json!({}),
+        ] {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "app_config": {"ui_language": "ja"},
+                "onboarding_completed": marker
+            }))
+            .unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(validate_settings_file(&path).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        for marker in [false, true] {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&serde_json::json!({"onboarding_completed": marker})).unwrap(),
+            )
+            .unwrap();
+            assert!(validate_settings_file(&path).is_ok());
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn settings_file_validation_rejects_corruption_without_changing_bytes() {
+        let directory =
+            std::env::temp_dir().join(format!("otl-settings-validation-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.json");
+        assert!(validate_settings_file(&path).is_ok());
+        for bytes in [
+            br#"{"app_config":{"history_enabled":false}"#.as_slice(),
+            b"[]".as_slice(),
+            br#"{"app_config":[]}"#.as_slice(),
+            b"{\"app_config\":\xff}".as_slice(),
+        ] {
+            std::fs::write(&path, bytes).unwrap();
+            assert!(validate_settings_file(&path).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::write(&path, br#"{"app_config":{"history_enabled":false}}"#).unwrap();
+        assert!(validate_settings_file(&path).is_ok());
+        assert!(validate_settings_file(&directory).is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn settings_file_validation_bounds_reads_and_preserves_oversized_files() {
+        let directory =
+            std::env::temp_dir().join(format!("otl-settings-size-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("settings.json");
+        let limit = 8 * 1024 * 1024;
+        let mut boundary = br#"{"app_config":{}}"#.to_vec();
+        boundary.resize(limit, b' ');
+        std::fs::write(&path, &boundary).unwrap();
+        assert!(validate_settings_file(&path).is_ok());
+        boundary.push(b' ');
+        std::fs::write(&path, &boundary).unwrap();
+        let error = validate_settings_file(&path).unwrap_err();
+        assert_eq!(error.to_string(), "Application settings are too large");
+        assert_eq!(std::fs::read(&path).unwrap(), boundary);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+    }
+
+    #[test]
+    fn stored_config_requires_an_object_instead_of_a_defaultable_sequence() {
+        for value in [
+            serde_json::json!([]),
+            serde_json::json!([null]),
+            serde_json::Value::Null,
+            serde_json::json!("synthetic-invalid-config"),
+            serde_json::json!(false),
+            serde_json::json!(42),
+        ] {
+            assert!(AppConfig::from_stored_value(value).is_err());
+        }
+        assert!(AppConfig::from_stored_value(serde_json::json!({})).is_ok());
+    }
+
+    #[test]
+    fn explicit_hotkey_normalization_does_not_run_platform_default_migration() {
+        let source = include_str!("mod.rs");
+        let method = source
+            .split("    fn normalize_hotkey_settings(&mut self) {")
+            .nth(1)
+            .unwrap()
+            .split("    fn ")
+            .next()
+            .unwrap();
+        assert!(!method.contains("migrate_platform_typed_hotkeys"));
+    }
+
+    #[test]
+    fn explicit_right_alt_bindings_survive_normalization_and_reopen() {
+        for mode in ["auto", "toggle", "hold"] {
+            let mut config = AppConfig::default();
+            let dictation = ShortcutBinding::from_hotkey("RightAlt").unwrap();
+            let ask = ShortcutBinding::from_hotkey("RightAlt+Space").unwrap();
+            let translate = ShortcutBinding::from_hotkey("RightAlt+LeftShift").unwrap();
+            config.hotkeys.dictation = dictation.clone();
+            config.hotkeys.dictation_bindings = vec![dictation];
+            config.hotkeys.ask = Some(ask.clone());
+            config.hotkeys.ask_bindings = vec![ask];
+            config.hotkeys.translate = Some(translate.clone());
+            config.hotkeys.translate_bindings = vec![translate];
+            config.hotkeys.dictation_mode = mode.to_string();
+            let expected = config.hotkeys.clone();
+            config.normalize_values();
+            assert_eq!(config.hotkeys, expected);
+            assert_eq!(config.hotkey, "RightAlt");
+            assert_eq!(config.ask_hotkey, "RightAlt+Space");
+            assert_eq!(config.hotkey_mode, mode);
+            let reopened =
+                AppConfig::from_stored_value(serde_json::to_value(&config).unwrap()).unwrap();
+            assert_eq!(reopened.hotkeys, expected);
+        }
+    }
+
+    #[test]
+    fn config_revision_capacity_rejects_unsafe_integers_and_overflow() {
+        assert_eq!(checked_config_revision(0).unwrap(), 1);
+        assert_eq!(
+            checked_config_revision(9_007_199_254_740_990).unwrap(),
+            9_007_199_254_740_991
+        );
+        assert!(checked_config_revision(9_007_199_254_740_991).is_err());
+        assert!(checked_config_revision(u64::MAX).is_err());
+    }
+
+    #[test]
+    fn narrow_owned_commit_remains_paired_after_a_later_update() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let original = AppConfig::default();
+        let cache = Mutex::new(Some(original));
+        let revision = AtomicU64::new(4);
+        let first = try_update_cached_config_commit(
+            &cache,
+            &revision,
+            |config| {
+                config.microphone_device = "synthetic-first".into();
+                Ok(())
+            },
+            |_| Ok(revision.fetch_add(1, Ordering::SeqCst) + 1),
+        )
+        .unwrap();
+        let second = try_update_cached_config_commit(
+            &cache,
+            &revision,
+            |config| {
+                config.microphone_device = "synthetic-second".into();
+                Ok(())
+            },
+            |_| Ok(revision.fetch_add(1, Ordering::SeqCst) + 1),
+        )
+        .unwrap();
+        assert_eq!(first.0, 5);
+        assert_eq!(first.1.microphone_device, "synthetic-first");
+        assert_eq!(second.0, 6);
+        assert_eq!(second.1.microphone_device, "synthetic-second");
+        let unchanged = try_update_cached_config_commit(
+            &cache,
+            &revision,
+            |_| Ok(()),
+            |_| panic!("unchanged settings must not persist or increment"),
+        )
+        .unwrap();
+        assert_eq!(unchanged.0, 6);
+        assert_eq!(unchanged.1.microphone_device, "synthetic-second");
+    }
+
+    #[test]
+    fn failed_narrow_owned_commit_does_not_publish_or_replace_cache() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let original = AppConfig::default();
+        let cache = Mutex::new(Some(original.clone()));
+        let revision = AtomicU64::new(4);
+        let result = try_update_cached_config_commit(
+            &cache,
+            &revision,
+            |config| {
+                config.microphone_device = "synthetic-rejected".into();
+                Ok(())
+            },
+            |_| Err(anyhow::anyhow!("synthetic persistence failure")),
+        );
+        assert!(result.is_err());
+        assert_eq!(revision.load(Ordering::SeqCst), 4);
+        assert_eq!(
+            serde_json::to_value(cache.lock().unwrap().as_ref().unwrap()).unwrap(),
+            serde_json::to_value(original).unwrap()
+        );
+    }
+
+    #[test]
+    fn config_load_holds_one_cache_guard_through_initialization() {
+        let source = include_str!("mod.rs");
+        let method = source
+            .split("    pub async fn load(&self) -> Result<AppConfig> {")
+            .nth(1)
+            .unwrap()
+            .split("    pub async fn save(")
+            .next()
+            .unwrap();
+        assert_eq!(method.matches("self.cache.lock()").count(), 1);
+        assert!(
+            method.find("let mut cache =").unwrap()
+                < method.find(".store(\"settings.json\")").unwrap()
+        );
+        assert!(!method.contains(".await"));
+        assert!(!method.contains("AppConfig::from_stored_value(val.clone()).ok()"));
+        assert!(!method.contains("Err(_) => None"));
+    }
+
+    #[test]
+    fn privacy_disable_waits_for_current_write_and_blocks_the_next_history_insert() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+        let cache = Arc::new(Mutex::new(Some(AppConfig::default())));
+        let history = Arc::new(temp_history_store("concurrent-privacy"));
+        let (entered_sender, entered_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let writer_cache = cache.clone();
+        let writer_history = history.clone();
+        let writer = std::thread::spawn(move || {
+            with_history_privacy_cache(&writer_cache, true, |privacy| {
+                entered_sender.send(()).unwrap();
+                release_receiver
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                let (policy, _) = privacy.unwrap();
+                writer_history.add_with_audio_sync(
+                    test_history_entry(0, "2026-11-10T10:00:00"),
+                    &policy,
+                    None,
+                )
+            })
+            .unwrap()
+        });
+        entered_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        let (attempt_sender, attempt_receiver) = mpsc::channel();
+        let (committed_sender, committed_receiver) = mpsc::channel();
+        let settings_cache = cache.clone();
+        let settings = std::thread::spawn(move || {
+            attempt_sender.send(()).unwrap();
+            settings_cache
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .history_enabled = false;
+            committed_sender.send(()).unwrap();
+        });
+        attempt_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(matches!(
+            committed_receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release_sender.send(()).unwrap();
+        assert!(writer.join().unwrap().is_some());
+        committed_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        settings.join().unwrap();
+        let next = with_history_privacy_cache(&cache, true, |privacy| {
+            let (policy, _) = privacy.unwrap();
+            history.add_with_audio_sync(test_history_entry(0, "2026-11-10T10:01:00"), &policy, None)
+        })
+        .unwrap();
+        assert!(next.is_none());
+        assert_eq!(
+            history
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM history", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn guarded_history_write_skips_disabled_history_and_drops_disabled_audio() {
+        let store = temp_history_store("guarded-history-write");
+        let cache = Mutex::new(Some(AppConfig {
+            history_enabled: false,
+            ..AppConfig::default()
+        }));
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let saved = with_history_privacy_cache(&cache, true, |privacy| {
+            let (policy, _) = privacy.unwrap();
+            store.add_with_audio_sync(
+                test_history_entry(0, "2026-11-10T10:00:00"),
+                &policy,
+                Some(audio.clone()),
+            )
+        })
+        .unwrap();
+        assert!(saved.is_none());
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM history", [], |row| row
+                    .get::<_, i64>(0),)
+                .unwrap(),
+            0
+        );
+        *cache.lock().unwrap() = Some(AppConfig {
+            save_recording_audio: false,
+            ..AppConfig::default()
+        });
+        let saved = with_history_privacy_cache(&cache, true, |privacy| {
+            let (policy, save_audio) = privacy.unwrap();
+            store.add_with_audio_sync(
+                test_history_entry(0, "2026-11-10T10:00:00"),
+                &policy,
+                save_audio.then_some(audio),
+            )
+        })
+        .unwrap()
+        .unwrap();
+        let has_audio: bool = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM history_audio WHERE history_id = ?1)",
+                [saved],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!has_audio);
+    }
+
+    #[test]
+    fn history_write_keeps_privacy_guard_until_storage_action_finishes() {
+        let cache = Mutex::new(Some(AppConfig::default()));
+        with_history_privacy_cache(&cache, true, |privacy| {
+            assert!(privacy.unwrap().0.enabled);
+            assert!(cache.try_lock().is_err());
+            Ok(())
+        })
+        .unwrap();
+        assert!(cache.try_lock().is_ok());
+    }
+
+    #[test]
+    fn confirmed_cleanup_holds_configuration_ownership_until_deletion_finishes() {
+        let cache = Mutex::new(Some(AppConfig {
+            history_retention_days: 7,
+            ..AppConfig::default()
+        }));
+        with_confirmed_retention_cache(&cache, true, true, 7, |policy| {
+            assert_eq!(policy.retention_days, 7);
+            assert!(cache.try_lock().is_err());
+            Ok(())
+        })
+        .unwrap();
+        assert!(cache.try_lock().is_ok());
+        let mut invoked = false;
+        assert!(with_confirmed_retention_cache(&cache, true, false, 0, |_| {
+            invoked = true;
+            Ok(())
+        })
+        .is_err());
+        assert!(!invoked);
+        assert!(with_confirmed_retention_cache(&cache, false, true, 7, |_| {
+            invoked = true;
+            Ok(())
+        })
+        .is_err());
+        assert!(!invoked);
+        assert!(with_confirmed_retention_cache(&cache, true, true, 7, |_| {
+            Err::<(), _>(anyhow::anyhow!("synthetic cleanup failure"))
+        })
+        .is_err());
+        assert!(cache.try_lock().is_ok());
+    }
+
+    #[test]
+    fn unverified_default_cache_does_not_authorize_history_retention() {
+        let config = AppConfig::new_install_default();
+        assert!(history_privacy_from_cache(Some(&config), false).is_none());
+        assert!(history_privacy_from_cache(None, true).is_none());
+        let (policy, save_audio) = history_privacy_from_cache(Some(&config), true).unwrap();
+        assert_eq!(policy.enabled, config.history_enabled);
+        assert_eq!(save_audio, config.save_recording_audio);
+        let disabled = AppConfig {
+            history_enabled: false,
+            save_recording_audio: false,
+            ..config
+        };
+        let (policy, save_audio) = history_privacy_from_cache(Some(&disabled), true).unwrap();
+        assert!(!policy.enabled);
+        assert!(!save_audio);
+    }
+
     use super::*;
+
+    #[test]
+    fn store_builder_swallows_corrupt_settings_then_save_overwrites_original_bytes() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        let original = br#"{"onboarding_completed":true,"app_config":{"ui_language":"ja"}"#;
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(&filename, original).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let loaded_config = store.get("app_config");
+        let loaded_onboarding = store.get("onboarding_completed");
+        let reload = store.reload();
+        let before_save = std::fs::read(&filename).unwrap();
+        let save = store.save();
+        let after_save = std::fs::read(&filename).unwrap();
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+
+        assert_eq!(loaded_config, None);
+        assert_eq!(loaded_onboarding, None);
+        assert!(reload.is_err());
+        assert_eq!(before_save, original);
+        save.unwrap();
+        assert_eq!(after_save, b"{}");
+    }
+
+    #[test]
+    fn store_builder_swallows_unreadable_directory_until_explicit_reload() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        std::fs::create_dir_all(&filename).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let loaded_config = store.get("app_config");
+        let reload = store.reload();
+        let save = store.save();
+        let still_directory = filename.is_dir();
+        std::fs::remove_dir(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+
+        assert_eq!(loaded_config, None);
+        assert!(reload.is_err());
+        assert!(save.is_err());
+        assert!(still_directory);
+    }
+
+    #[test]
+    fn store_builder_accepts_invalid_config_types_but_config_parser_rejects_them() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        let original = br#"{"onboarding_completed":true,"app_config":{"auto_start":"invalid"}}"#;
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(&filename, original).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let parsed = AppConfig::from_stored_value(store.get("app_config").unwrap());
+        let onboarding = store.get("onboarding_completed");
+        let observed = std::fs::read(&filename).unwrap();
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+
+        assert!(parsed.is_err());
+        assert_eq!(onboarding, Some(serde_json::json!(true)));
+        assert_eq!(observed, original);
+    }
+
+    fn rejecting_settings_serializer(
+        _settings: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        Err(std::io::Error::other("injected settings serialization failure").into())
+    }
+
+    #[test]
+    fn oversized_config_write_preserves_previous_store_and_file() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("otl-store-size-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let previous = serde_json::json!({ "history_enabled": false });
+        persist_config_value(&store, previous.clone()).unwrap();
+        let original = std::fs::read(&filename).unwrap();
+        let result = persist_config_value(
+            &store,
+            serde_json::json!({ "synthetic": "x".repeat(8 * 1024 * 1024) }),
+        );
+        let observed = store.get("app_config");
+        let persisted = std::fs::read(&filename).unwrap();
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(observed, Some(previous));
+        assert_eq!(persisted, original);
+    }
+
+    #[test]
+    fn migrated_settings_survive_a_new_store_runtime_without_losing_other_keys() {
+        let directory =
+            std::env::temp_dir().join(format!("otl-migration-reopen-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = directory.join("settings.json");
+        let legacy = serde_json::json!({
+            "stt_provider": "custom-whisper",
+            "stt_custom_base_url": "http://127.0.0.1:8000/v1",
+            "llm_provider": "ollama",
+            "polish_enabled": false,
+            "history_enabled": false,
+            "auto_start": false,
+            "ui_language": "ja"
+        });
+        std::fs::write(
+            &filename,
+            serde_json::to_vec(&serde_json::json!({
+                "app_config": legacy,
+                "onboarding_completed": true,
+                "synthetic_other_setting": "preserve"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let expected = {
+            let app = tauri::test::mock_builder()
+                .plugin(tauri_plugin_store::Builder::default().build())
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+                .disable_auto_save()
+                .build()
+                .unwrap();
+            let config = AppConfig::from_stored_value(store.get("app_config").unwrap()).unwrap();
+            assert!(!config.mute_background_audio);
+            assert!(!config.capsule_auto_hide);
+            let migrated = serde_json::to_value(config).unwrap();
+            persist_config_value(&store, migrated.clone()).unwrap();
+            migrated
+        };
+        let observed = {
+            let app = tauri::test::mock_builder()
+                .plugin(tauri_plugin_store::Builder::default().build())
+                .build(tauri::test::mock_context(tauri::test::noop_assets()))
+                .unwrap();
+            let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+                .disable_auto_save()
+                .build()
+                .unwrap();
+            assert_eq!(
+                store.get("onboarding_completed"),
+                Some(serde_json::json!(true))
+            );
+            assert_eq!(
+                store.get("synthetic_other_setting"),
+                Some(serde_json::json!("preserve"))
+            );
+            let config = AppConfig::from_stored_value(store.get("app_config").unwrap()).unwrap();
+            serde_json::to_value(config).unwrap()
+        };
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert_eq!(observed, expected);
+        for (key, value) in legacy.as_object().unwrap() {
+            assert_eq!(observed[key], *value, "legacy field changed: {key}");
+        }
+    }
+
+    #[test]
+    fn successful_store_config_write_preserves_other_settings_on_disk() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        store.set("onboarding_completed", true);
+        let config = serde_json::json!({ "ui_language": "zh", "polish_enabled": false });
+        let result = persist_config_value(&store, config.clone());
+        let bytes = std::fs::read(&filename);
+        let observed = store.get("app_config");
+        let _ = std::fs::remove_file(&filename);
+        let _ = std::fs::remove_dir(&directory);
+        result.unwrap();
+        let persisted: serde_json::Value = serde_json::from_slice(&bytes.unwrap()).unwrap();
+        assert_eq!(persisted["app_config"], config);
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(observed, Some(config));
+    }
+
+    fn reject_candidate_settings_serializer(
+        settings: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+        if settings
+            .get("app_config")
+            .and_then(|config| config.get("ui_language"))
+            .and_then(serde_json::Value::as_str)
+            == Some("zh")
+        {
+            return Err(std::io::Error::other("injected candidate failure").into());
+        }
+        serde_json::to_vec(settings).map_err(Into::into)
+    }
+
+    #[tokio::test]
+    async fn store_config_write_failure_autosaves_only_the_restored_value() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .serialize(reject_candidate_settings_serializer)
+            .build()
+            .unwrap();
+        let previous = serde_json::json!({ "ui_language": "en" });
+        store.set("app_config", previous.clone());
+        store.set("onboarding_completed", true);
+        store.save().unwrap();
+        std::fs::remove_file(&filename).unwrap();
+        let result = persist_config_value(&store, serde_json::json!({ "ui_language": "zh" }));
+        let persisted = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Ok(bytes) = std::fs::read(&filename) {
+                    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                        break value;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        store.save().unwrap();
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(result.is_err());
+        let persisted = persisted.unwrap();
+        assert_eq!(persisted["app_config"], previous);
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(store.get("app_config"), Some(previous));
+    }
+
+    #[test]
+    fn store_config_write_can_retry_after_a_rejected_candidate() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .serialize(reject_candidate_settings_serializer)
+            .build()
+            .unwrap();
+        store.set("onboarding_completed", true);
+        let previous = serde_json::json!({ "ui_language": "en" });
+        persist_config_value(&store, previous.clone()).unwrap();
+        let previous_bytes = std::fs::read(&filename).unwrap();
+        let rejected = persist_config_value(&store, serde_json::json!({ "ui_language": "zh" }));
+        let rejected_bytes = std::fs::read(&filename);
+        let restored = store.get("app_config");
+        let corrected = serde_json::json!({ "ui_language": "ja", "polish_enabled": false });
+        let retry = persist_config_value(&store, corrected.clone());
+        let bytes = std::fs::read(&filename);
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(rejected.is_err());
+        assert_eq!(rejected_bytes.unwrap(), previous_bytes);
+        assert_eq!(restored, Some(previous));
+        retry.unwrap();
+        let persisted: serde_json::Value = serde_json::from_slice(&bytes.unwrap()).unwrap();
+        assert_eq!(persisted["app_config"], corrected);
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(store.get("app_config"), Some(corrected));
+    }
+
+    #[test]
+    fn microphone_scan_write_rolls_back_failed_save_and_preserves_other_settings() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-scan-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        std::fs::create_dir_all(&filename).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let config = serde_json::json!({"ui_language": "ja"});
+        store.set("app_config", config.clone());
+        store.set("onboarding_completed", true);
+        store.set("better_microphone_last_scan", 1000);
+        assert!(persist_microphone_scan(&store, 2000).is_err());
+        assert_eq!(
+            store.get("better_microphone_last_scan"),
+            Some(serde_json::json!(1000))
+        );
+        std::fs::remove_dir(&filename).unwrap();
+        persist_microphone_scan(&store, 2000).unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&filename).unwrap()).unwrap();
+        assert_eq!(persisted["better_microphone_last_scan"], 2000);
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(persisted["app_config"], config);
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn onboarding_marker_write_failure_restores_previous_state_and_keeps_config() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for previous in [None, Some(false), Some(true)] {
+            let directory =
+                std::env::temp_dir().join(format!("otl-onboarding-{}", uuid::Uuid::new_v4()));
+            let filename = directory.join("settings.json");
+            std::fs::create_dir_all(&filename).unwrap();
+            let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+                .disable_auto_save()
+                .build()
+                .unwrap();
+            let config = serde_json::json!({ "ui_language": "ja" });
+            store.set("app_config", config.clone());
+            if let Some(previous) = previous {
+                store.set("onboarding_completed", previous);
+            }
+            assert!(persist_onboarding_marker(&store).is_err());
+            assert_eq!(
+                store.get("onboarding_completed"),
+                previous.map(serde_json::Value::Bool)
+            );
+            assert_eq!(store.get("app_config"), Some(config.clone()));
+            std::fs::remove_dir(&filename).unwrap();
+            persist_onboarding_marker(&store).unwrap();
+            let persisted: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&filename).unwrap()).unwrap();
+            assert_eq!(persisted["onboarding_completed"], true);
+            assert_eq!(persisted["app_config"], config);
+            std::fs::remove_file(&filename).unwrap();
+            std::fs::remove_dir(&directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_validated_update_does_not_persist_or_change_cached_settings() {
+        let original = AppConfig::new_install_default();
+        let cache = Mutex::new(Some(original.clone()));
+        let mut persisted = false;
+        let result = try_update_cached_config(
+            &cache,
+            |config| {
+                config.microphone_device = "synthetic-rejected-device".into();
+                Err(anyhow::anyhow!("synthetic validation failure"))
+            },
+            |_| {
+                persisted = true;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(!persisted);
+        assert_eq!(
+            serde_json::to_value(cache.lock().unwrap().as_ref().unwrap()).unwrap(),
+            serde_json::to_value(original).unwrap()
+        );
+    }
+
+    #[test]
+    fn unchanged_narrow_update_does_not_persist_or_authorize_default_privacy() {
+        let current = AppConfig::new_install_default();
+        let cache = Mutex::new(Some(current.clone()));
+        let mut persisted = false;
+        update_cached_config(
+            &cache,
+            |_| {},
+            |_| {
+                persisted = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!persisted);
+        assert!(history_privacy_from_cache(cache.lock().unwrap().as_ref(), persisted).is_none());
+    }
+
+    #[test]
+    fn managed_capability_narrow_update_preserves_settings_and_rolls_back_failed_clear() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-managed-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let current = AppConfig {
+            stt_provider: "cloud".into(),
+            llm_model: "latest-model".into(),
+            history_enabled: false,
+            ..AppConfig::default()
+        };
+        let expected_hotkeys = serde_json::to_value(&current.hotkeys).unwrap();
+        let cache = Mutex::new(Some(current));
+        let now = chrono::Utc::now();
+        let managed = crate::stt::capabilities::ManagedSttCapabilityState {
+            user_id: "synthetic-user".into(),
+            capability: crate::stt::capabilities::ManagedSttCapability {
+                version: 2,
+                max_recording_seconds: 600,
+                max_multipart_bytes: 4_200_000,
+                formats: vec![
+                    crate::stt::capabilities::ManagedSttFormat {
+                        mime_type: "audio/wav".into(),
+                        max_audio_bytes: 4_000_000,
+                        preferred_client_switch_bytes: Some(3_500_000),
+                        bitrate_bits_per_second: None,
+                    },
+                    crate::stt::capabilities::ManagedSttFormat {
+                        mime_type: "audio/ogg; codecs=opus".into(),
+                        max_audio_bytes: 4_000_000,
+                        preferred_client_switch_bytes: None,
+                        bitrate_bits_per_second: Some(48_000),
+                    },
+                ],
+            },
+            server_generated_at: now.to_rfc3339(),
+            received_at_unix_seconds: now.timestamp(),
+        };
+        let installed = update_cached_config(
+            &cache,
+            |config| {
+                config.managed_stt_capability_state = Some(managed.clone());
+                config.recompute_recording_limit_mirror();
+            },
+            |config| persist_config_value(&store, serde_json::to_value(config)?),
+        )
+        .unwrap();
+        assert_eq!(installed.managed_stt_capability_state, Some(managed));
+        assert_eq!(installed.max_recording_seconds, 600);
+        assert_eq!(installed.llm_model, "latest-model");
+        assert!(!installed.history_enabled);
+        assert_eq!(
+            serde_json::to_value(&installed.hotkeys).unwrap(),
+            expected_hotkeys
+        );
+        let before_failed_clear = std::fs::read(&filename).unwrap();
+        let preserved = directory.join("preserved-settings.json");
+        std::fs::rename(&filename, &preserved).unwrap();
+        std::fs::create_dir(&filename).unwrap();
+        let failed = update_cached_config(
+            &cache,
+            |config| {
+                config.managed_stt_capability_state = None;
+                config.recompute_recording_limit_mirror();
+            },
+            |config| persist_config_value(&store, serde_json::to_value(config)?),
+        );
+        assert!(failed.is_err());
+        assert_eq!(
+            serde_json::to_value(cache.lock().unwrap().as_ref().unwrap()).unwrap(),
+            serde_json::to_value(&installed).unwrap()
+        );
+        assert_eq!(std::fs::read(&preserved).unwrap(), before_failed_clear);
+        assert_eq!(
+            store.get("app_config").unwrap(),
+            serde_json::to_value(&installed).unwrap()
+        );
+        std::fs::remove_dir(&filename).unwrap();
+        std::fs::rename(&preserved, &filename).unwrap();
+        let cleared = update_cached_config(
+            &cache,
+            |config| {
+                config.managed_stt_capability_state = None;
+                config.recompute_recording_limit_mirror();
+            },
+            |config| persist_config_value(&store, serde_json::to_value(config)?),
+        )
+        .unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&filename).unwrap()).unwrap();
+        assert!(cleared.managed_stt_capability_state.is_none());
+        assert_eq!(cleared.max_recording_seconds, 30);
+        assert!(persisted["app_config"]["managed_stt_capability_state"].is_null());
+        assert_eq!(persisted["app_config"]["llm_model"], "latest-model");
+        assert_eq!(persisted["app_config"]["history_enabled"], false);
+        assert_eq!(persisted["app_config"]["hotkeys"], expected_hotkeys);
+        std::fs::remove_file(filename).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn narrow_update_preserves_latest_settings_and_cache_after_failed_persistence() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-narrow-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        std::fs::create_dir_all(&filename).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let current = AppConfig {
+            history_enabled: false,
+            llm_model: "new-model".to_string(),
+            capsule_auto_hide: false,
+            ..AppConfig::default()
+        };
+        let cache = Mutex::new(Some(current.clone()));
+        let save = |config: &mut AppConfig| {
+            assert!(cache.try_lock().is_err());
+            persist_config_value(&store, serde_json::to_value(config)?)
+        };
+        assert!(
+            update_cached_config(&cache, |config| config.capsule_auto_hide = true, save).is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(cache.lock().unwrap().as_ref().unwrap()).unwrap(),
+            serde_json::to_value(current).unwrap()
+        );
+        std::fs::remove_dir(&filename).unwrap();
+        let saved =
+            update_cached_config(&cache, |config| config.capsule_auto_hide = true, save).unwrap();
+        assert!(!saved.history_enabled);
+        assert_eq!(saved.llm_model, "new-model");
+        assert!(saved.capsule_auto_hide);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&filename).unwrap()).unwrap();
+        assert_eq!(persisted["app_config"]["llm_model"], "new-model");
+        assert_eq!(persisted["app_config"]["history_enabled"], false);
+        assert_eq!(persisted["app_config"]["capsule_auto_hide"], true);
+        std::fs::remove_file(&filename).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn translation_narrow_update_preserves_latest_values_on_disk() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("otl-translation-save-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let filename = directory.join("settings.json");
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        store.set("onboarding_completed", true);
+        let mut latest = AppConfig {
+            llm_model: "latest-model".into(),
+            history_enabled: false,
+            target_lang: "en".into(),
+            ..Default::default()
+        };
+        latest.translation.targets = vec!["en".into(), "ja".into(), "de".into()];
+        latest.translation.active_target = "en".into();
+        let cache = Mutex::new(Some(latest));
+        let updated = update_cached_config(
+            &cache,
+            |config| {
+                assert!(crate::commands::translation::apply_translation_target(
+                    config, "ja"
+                ));
+            },
+            |config| persist_config_value(&store, serde_json::to_value(config)?),
+        )
+        .unwrap();
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&filename).unwrap()).unwrap();
+        assert_eq!(persisted["app_config"]["llm_model"], "latest-model");
+        assert_eq!(persisted["app_config"]["history_enabled"], false);
+        assert_eq!(persisted["app_config"]["target_lang"], "ja");
+        assert_eq!(
+            persisted["app_config"]["translation"]["targets"],
+            serde_json::json!(["en", "ja", "de"])
+        );
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(updated.translation.active_target, "ja");
+        std::fs::remove_file(filename).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn store_config_write_io_failure_restores_memory_without_removing_other_settings() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let filename = directory.join("settings.json");
+        std::fs::create_dir_all(&filename).unwrap();
+        let store = tauri_plugin_store::StoreBuilder::new(&app, &filename)
+            .disable_auto_save()
+            .build()
+            .unwrap();
+        let previous = serde_json::json!({ "ui_language": "en" });
+        store.set("app_config", previous.clone());
+        store.set("onboarding_completed", true);
+        let result = persist_config_value(&store, serde_json::json!({ "ui_language": "zh" }));
+        let observed = store.get("app_config");
+        let onboarding = store.get("onboarding_completed");
+        let still_directory = filename.is_dir();
+        std::fs::remove_dir(&filename).unwrap();
+        let corrected = serde_json::json!({ "ui_language": "ja" });
+        let retry = persist_config_value(&store, corrected.clone());
+        let bytes = std::fs::read(&filename);
+        let _ = std::fs::remove_file(&filename);
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(observed, Some(previous));
+        assert_eq!(onboarding, Some(serde_json::json!(true)));
+        assert!(still_directory);
+        retry.unwrap();
+        let persisted: serde_json::Value = serde_json::from_slice(&bytes.unwrap()).unwrap();
+        assert_eq!(persisted["app_config"], corrected);
+        assert_eq!(persisted["onboarding_completed"], true);
+        assert_eq!(store.get("app_config"), Some(corrected));
+    }
+
+    #[test]
+    fn failed_store_config_write_restores_previous_value_and_other_settings() {
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_store::Builder::default().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let directory = std::env::temp_dir().join(format!("otl-store-{}", uuid::Uuid::new_v4()));
+        let store = tauri_plugin_store::StoreBuilder::new(&app, directory.join("settings.json"))
+            .disable_auto_save()
+            .serialize(rejecting_settings_serializer)
+            .build()
+            .unwrap();
+        let previous = serde_json::json!({ "ui_language": "en", "llm_api_key": "legacy-local" });
+        let outcomes = [Some(previous), None].map(|previous| {
+            match &previous {
+                Some(value) => store.set("app_config", value.clone()),
+                None => {
+                    store.delete("app_config");
+                }
+            }
+            store.set("onboarding_completed", true);
+            let result = persist_config_value(&store, serde_json::json!({ "ui_language": "zh" }));
+            (
+                previous,
+                result,
+                store.get("app_config"),
+                store.get("onboarding_completed"),
+            )
+        });
+        let _ = std::fs::remove_dir(&directory);
+        for (previous, result, observed, onboarding) in outcomes {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("injected settings"));
+            assert_eq!(observed, previous);
+            assert_eq!(onboarding, Some(serde_json::json!(true)));
+        }
+    }
 
     #[test]
     fn app_config_defaults_missing_custom_stt_api_key() {
@@ -2367,6 +4312,17 @@ mod tests {
     }
 
     #[test]
+    fn app_config_preserves_custom_polish_style_and_prompt() {
+        let config = AppConfig::from_stored_value(serde_json::json!({
+            "polish_style": "custom",
+            "polish_custom_prompt": "Keep short sentences."
+        }))
+        .unwrap();
+        assert_eq!(config.polish_style, "custom");
+        assert_eq!(config.polish_custom_prompt, "Keep short sentences.");
+    }
+
+    #[test]
     fn app_config_preserves_valid_polish_style() {
         let mut value = serde_json::to_value(AppConfig::default()).unwrap();
         value["polish_style"] = serde_json::json!("structured");
@@ -2461,6 +4417,74 @@ mod tests {
         let config = AppConfig::from_stored_value(value).unwrap();
 
         assert!(!config.streaming_insert_enabled);
+    }
+
+    #[test]
+    fn legacy_config_roundtrip_preserves_provider_shortcuts_and_privacy_preferences() {
+        let legacy = serde_json::json!({
+            "stt_provider": "custom-whisper",
+            "stt_custom_preset": "custom",
+            "stt_custom_base_url": "http://127.0.0.1:8000/v1",
+            "stt_custom_model": "synthetic-local-model",
+            "llm_provider": "ollama",
+            "llm_base_url": "http://127.0.0.1:11434/v1",
+            "llm_model": "synthetic-polish-model",
+            "polish_enabled": false,
+            "hotkey": "Ctrl+Shift+D",
+            "ask_hotkey": "",
+            "hotkey_mode": "toggle",
+            "history_enabled": false,
+            "history_retention_days": 30,
+            "restore_clipboard_after_paste": false,
+            "selected_text_enabled": false,
+            "auto_start": false,
+            "ui_language": "ja"
+        });
+        let migrated = AppConfig::from_stored_value(legacy.clone()).unwrap();
+        let serialized = serde_json::to_value(&migrated).unwrap();
+        for key in [
+            "stt_provider",
+            "stt_custom_preset",
+            "stt_custom_base_url",
+            "stt_custom_model",
+            "llm_provider",
+            "llm_base_url",
+            "llm_model",
+            "polish_enabled",
+            "hotkey",
+            "ask_hotkey",
+            "hotkey_mode",
+            "history_enabled",
+            "history_retention_days",
+            "restore_clipboard_after_paste",
+            "selected_text_enabled",
+            "auto_start",
+            "ui_language",
+        ] {
+            assert_eq!(serialized[key], legacy[key], "legacy field changed: {key}");
+        }
+        assert!(!migrated.capsule_auto_hide);
+        assert!(!migrated.mute_background_audio);
+        assert!(migrated.microphone_device.is_empty());
+        assert!(migrated.language_variants.is_empty());
+        assert!(migrated.show_in_dock);
+        let reopened = AppConfig::from_stored_value(serialized.clone()).unwrap();
+        assert_eq!(serde_json::to_value(reopened).unwrap(), serialized);
+    }
+
+    #[test]
+    fn app_config_defaults_audio_preferences_and_keeps_existing_users_unmuted() {
+        let existing = AppConfig::from_stored_value(serde_json::json!({
+            "stt_provider": "glm-asr"
+        }))
+        .unwrap();
+        assert_eq!(existing.microphone_device, "");
+        assert!(existing.interaction_sounds);
+        assert!(!existing.mute_background_audio);
+
+        let fresh = AppConfig::new_install_default();
+        assert!(fresh.mute_background_audio);
+        assert!(fresh.interaction_sounds);
     }
 
     #[test]
@@ -2656,7 +4680,13 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(config.hotkeys.dictation_bindings.len(), 3);
+        assert_eq!(config.hotkeys.dictation_bindings.len(), 4);
+        assert_eq!(
+            config.hotkeys.dictation_bindings[3]
+                .to_hotkey_string()
+                .as_deref(),
+            Some("F9")
+        );
         assert_eq!(
             config.hotkeys.dictation_bindings[0]
                 .to_hotkey_string()
@@ -3048,15 +5078,38 @@ mod tests {
         assert!(config.auto_start);
     }
 
+    #[test]
+    fn auto_hotkey_mode_survives_load_and_existing_modes_are_kept() {
+        let auto = AppConfig::from_stored_value(serde_json::json!({
+            "hotkeys": { "dictationMode": "auto" }
+        }))
+        .unwrap();
+        assert_eq!(auto.hotkeys.dictation_mode, "auto");
+        assert_eq!(auto.hotkey_mode, "auto");
+
+        let existing = AppConfig::from_stored_value(serde_json::json!({
+            "hotkey": "Ctrl+Shift+;",
+            "hotkey_mode": "toggle"
+        }))
+        .unwrap();
+        assert_eq!(existing.hotkey_mode, "toggle");
+
+        let unknown = AppConfig::from_stored_value(serde_json::json!({
+            "hotkeys": { "dictationMode": "sometimes" }
+        }))
+        .unwrap();
+        assert_eq!(unknown.hotkeys.dictation_mode, "hold");
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
-    fn app_config_new_install_uses_fn_toggle_on_macos() {
+    fn app_config_new_install_uses_fn_auto_on_macos() {
         let config = AppConfig::new_install_default();
         assert_eq!(config.hotkey, "Fn");
         assert_eq!(config.hotkeys.dictation.primary, "Fn");
         assert_eq!(config.hotkeys.dictation.modifiers, Vec::<String>::new());
-        assert_eq!(config.hotkey_mode, "toggle");
-        assert_eq!(config.hotkeys.dictation_mode, "toggle");
+        assert_eq!(config.hotkey_mode, "auto");
+        assert_eq!(config.hotkeys.dictation_mode, "auto");
         assert_eq!(config.ask_hotkey, "Fn+Space");
         assert_eq!(
             config
@@ -3083,8 +5136,8 @@ mod tests {
         assert_eq!(config.hotkey, "Ctrl+/");
         assert_eq!(config.hotkeys.dictation.primary, "/");
         assert_eq!(config.hotkeys.dictation.modifiers, vec!["Ctrl".to_string()]);
-        assert_eq!(config.hotkey_mode, "hold");
-        assert_eq!(config.hotkeys.dictation_mode, "hold");
+        assert_eq!(config.hotkey_mode, "auto");
+        assert_eq!(config.hotkeys.dictation_mode, "auto");
         assert_eq!(config.ask_hotkey, "Ctrl+.");
         assert_eq!(
             config
@@ -3109,7 +5162,7 @@ mod tests {
     fn app_config_new_install_keeps_ctrl_slash_on_linux() {
         let config = AppConfig::new_install_default();
         assert_eq!(config.hotkey, "Ctrl+/");
-        assert_eq!(config.hotkey_mode, "hold");
+        assert_eq!(config.hotkey_mode, "auto");
         assert_eq!(config.ask_hotkey, "Ctrl+.");
         assert_eq!(
             config
@@ -3233,6 +5286,7 @@ mod tests {
 
     fn test_history_entry(id: i64, created_at: &str) -> HistoryEntry {
         HistoryEntry {
+            has_audio: false,
             id,
             created_at: created_at.to_string(),
             context_profile_id: "general.native".to_string(),
@@ -3252,7 +5306,803 @@ mod tests {
             active_scene_prompt_truncated: false,
             output_status: None,
             output_error: None,
+            mode: "dictate".to_string(),
+            answer_text: None,
         }
+    }
+
+    #[tokio::test]
+    async fn retention_cleanup_rejects_invalid_time_before_deleting_records_or_audio() {
+        let store = temp_history_store("retention-invalid-time");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        for timestamp in ["2026-11-01T10:00:00", "2026-11-02T10:00:00"] {
+            store
+                .add_with_audio(
+                    test_history_entry(0, timestamp),
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+        }
+        let entries = store.list(100, 0).await.unwrap();
+        for now in ["invalid", "2026-02-30T10:00:00", "-262143-01-01T00:00:00"] {
+            assert!(store
+                .prune_with_policy(
+                    &HistoryRetentionPolicy {
+                        max_entries: 1,
+                        retention_days: 7,
+                        ..HistoryRetentionPolicy::default()
+                    },
+                    now,
+                )
+                .await
+                .is_err());
+            assert_eq!(store.list(100, 0).await.unwrap().len(), 2);
+            for entry in &entries {
+                assert_eq!(
+                    store.read_audio(entry.id).await.unwrap(),
+                    Some(audio.clone())
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn confirmed_retention_removes_expired_audio_and_preserves_cutoff() {
+        let store = temp_history_store("retention-cutoff");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        for timestamp in ["2026-11-02T09:59:59", "2026-11-03T10:00:00"] {
+            store
+                .add_with_audio(
+                    test_history_entry(0, timestamp),
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+        }
+        let entries = store.list(100, 0).await.unwrap();
+        store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    retention_days: 7,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.list(100, 0).await.unwrap().len(), 1);
+        assert_eq!(store.read_audio(entries[0].id).await.unwrap(), Some(audio));
+        assert!(store.read_audio(entries[1].id).await.unwrap().is_none());
+        store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    enabled: false,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        assert!(store.list(100, 0).await.unwrap().is_empty());
+        assert!(store.read_audio(entries[0].id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn corrupted_database_audio_is_rejected_without_deleting_history() {
+        let store = temp_history_store("corrupted-audio-read");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let id = store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-12T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        {
+            let connection = store.conn.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE history_audio SET wav = zeroblob(25165869) WHERE history_id = ?1",
+                    [id],
+                )
+                .unwrap();
+        }
+        assert!(store.read_audio(id).await.is_err());
+        assert!(store.get(id).await.unwrap().is_some());
+        {
+            let connection = store.conn.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE history_audio SET wav = ?1 WHERE history_id = ?2",
+                    rusqlite::params![b"invalid recording".as_slice(), id],
+                )
+                .unwrap();
+        }
+        assert!(store.read_audio(id).await.is_err());
+        {
+            let connection = store.conn.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE history_audio SET wav = ?1 WHERE history_id = ?2",
+                    rusqlite::params![audio, id],
+                )
+                .unwrap();
+        }
+        assert!(store.read_audio(id).await.unwrap().is_some());
+    }
+
+    #[test]
+    fn history_audio_size_and_data_are_selected_in_one_statement() {
+        let source = include_str!("mod.rs");
+        let method = source
+            .split("pub async fn read_audio(")
+            .nth(1)
+            .unwrap()
+            .split("pub async fn prune_with_policy(")
+            .next()
+            .unwrap();
+        assert_eq!(method.matches(".query_row(").count(), 1);
+        assert!(method.contains("CASE WHEN length(wav) BETWEEN 44 AND ?2 THEN wav ELSE NULL END"));
+    }
+
+    #[tokio::test]
+    async fn text_typed_audio_is_rejected_without_modifying_the_record() {
+        let store = temp_history_store("text-typed-audio");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let id = store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-12T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let invalid_text = "语".repeat(48);
+        {
+            let connection = store.conn.lock().unwrap();
+            connection
+                .execute(
+                    "UPDATE history_audio SET wav = ?1 WHERE history_id = ?2",
+                    rusqlite::params![invalid_text, id],
+                )
+                .unwrap();
+        }
+        assert!(store.read_audio(id).await.is_err());
+        assert!(store.get(id).await.unwrap().is_some());
+        let connection = store.conn.lock().unwrap();
+        let stored: String = connection
+            .query_row(
+                "SELECT wav FROM history_audio WHERE history_id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, invalid_text);
+    }
+
+    #[tokio::test]
+    async fn malformed_recording_header_is_rejected_before_history_insertion() {
+        let store = temp_history_store("malformed-recording");
+        let valid =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        for offset in [4, 16, 20, 22, 24, 28, 32, 34, 40] {
+            let mut invalid = valid.clone();
+            invalid[offset] ^= 1;
+            assert!(store
+                .add_with_audio(
+                    test_history_entry(0, "2026-11-10T10:00:00"),
+                    &HistoryRetentionPolicy::default(),
+                    Some(invalid),
+                )
+                .await
+                .is_err());
+            assert!(store.list(100, 0).await.unwrap().is_empty());
+        }
+        store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-10T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(valid.clone()),
+            )
+            .await
+            .unwrap();
+        let saved = store.list(100, 0).await.unwrap().remove(0);
+        assert_eq!(store.read_audio(saved.id).await.unwrap(), Some(valid));
+    }
+
+    #[tokio::test]
+    async fn invalid_retention_timestamp_rolls_back_a_new_history_recording() {
+        let store = temp_history_store("invalid-insert-retention");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        assert!(store
+            .add_with_audio(
+                test_history_entry(0, "invalid"),
+                &HistoryRetentionPolicy {
+                    retention_days: 7,
+                    ..HistoryRetentionPolicy::default()
+                },
+                Some(audio),
+            )
+            .await
+            .is_err());
+        assert!(store.list(100, 0).await.unwrap().is_empty());
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM history_audio", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_scans_full_capacity_and_removes_only_expired_rows_and_audio() {
+        let store = temp_history_store("full-capacity-retention");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        {
+            let mut connection = store.conn.lock().unwrap();
+            let transaction = connection.transaction().unwrap();
+            for index in 0..5000 {
+                let timestamp = if index < 2500 {
+                    "2026-11-03T09:59:59"
+                } else {
+                    "2026-11-03T10:00:00"
+                };
+                transaction.execute(
+                    "INSERT INTO history(created_at, raw_text, polished_text) VALUES (?1, ?2, ?2)",
+                    rusqlite::params![timestamp, "Synthetic text"],
+                ).unwrap();
+                transaction
+                    .execute(
+                        "INSERT INTO history_audio(history_id, wav) VALUES (?1, ?2)",
+                        rusqlite::params![transaction.last_insert_rowid(), audio],
+                    )
+                    .unwrap();
+            }
+            transaction.commit().unwrap();
+        }
+        let started = std::time::Instant::now();
+        store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    retention_days: 7,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        eprintln!(
+            "5000-row synthetic retention elapsed: {:?}",
+            started.elapsed()
+        );
+        let connection = store.conn.lock().unwrap();
+        for table in ["history", "history_audio"] {
+            assert_eq!(
+                connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                2500
+            );
+        }
+        assert_eq!(
+            connection
+                .query_row("SELECT MIN(created_at) FROM history", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap(),
+            "2026-11-03T10:00:00"
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_age_check_preserves_extended_year_future_recordings() {
+        let store = temp_history_store("extended-retention");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let id = store
+            .add_with_audio(
+                test_history_entry(0, "+10000-01-01T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    retention_days: 7,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.list(100, 0).await.unwrap().len(), 1);
+        assert_eq!(store.read_audio(id).await.unwrap(), Some(audio));
+    }
+
+    #[tokio::test]
+    async fn history_insert_and_retention_failure_roll_back_in_one_transaction() {
+        let store = temp_history_store("insert-retention-rollback");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-01T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap();
+        let original = store.list(100, 0).await.unwrap().remove(0);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_insert_prune BEFORE DELETE ON history
+             BEGIN SELECT RAISE(ABORT, 'synthetic retention failure'); END;",
+            )
+            .unwrap();
+        let result = store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-10T10:00:00"),
+                &HistoryRetentionPolicy {
+                    max_entries: 1,
+                    ..HistoryRetentionPolicy::default()
+                },
+                Some(audio.clone()),
+            )
+            .await;
+        assert!(result.is_err());
+        let entries = store.list(100, 0).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, original.id);
+        assert_eq!(store.read_audio(original.id).await.unwrap(), Some(audio));
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM history_audio", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_cleanup_rolls_back_records_and_audio_when_deletion_fails() {
+        let store = temp_history_store("retention-rollback");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        for timestamp in ["2026-11-01T10:00:00", "2026-11-02T10:00:00"] {
+            store
+                .add_with_audio(
+                    test_history_entry(0, timestamp),
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+        }
+        let entries = store.list(100, 0).await.unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_retention_delete BEFORE DELETE ON history
+             WHEN OLD.created_at = '2026-11-02T10:00:00'
+             BEGIN SELECT RAISE(ABORT, 'synthetic retention failure'); END;",
+            )
+            .unwrap();
+        assert!(store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    enabled: true,
+                    max_entries: 1,
+                    retention_days: 1,
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .is_err());
+        assert_eq!(store.list(100, 0).await.unwrap().len(), 2);
+        for entry in entries {
+            assert_eq!(
+                store.read_audio(entry.id).await.unwrap(),
+                Some(audio.clone())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn recording_audio_follows_history_deletion_and_retention() {
+        let store = temp_history_store("audio-retention");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-01T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap();
+        let entry = store.list(1, 0).await.unwrap().remove(0);
+        assert!(entry.has_audio);
+        assert_eq!(
+            store.read_audio(entry.id).await.unwrap(),
+            Some(audio.clone())
+        );
+        assert!(store.delete(entry.id).await.unwrap());
+        assert!(store.read_audio(entry.id).await.unwrap().is_none());
+        for day in ["2026-11-01T10:00:00", "2026-11-02T10:00:00"] {
+            store
+                .add_with_audio(
+                    test_history_entry(0, day),
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+        }
+        let oldest = store.list(2, 0).await.unwrap()[1].id;
+        store
+            .prune_with_policy(
+                &HistoryRetentionPolicy {
+                    enabled: true,
+                    max_entries: 1,
+                    retention_days: 0,
+                },
+                "2026-11-02T10:00:00",
+            )
+            .await
+            .unwrap();
+        assert!(store.read_audio(oldest).await.unwrap().is_none());
+        let latest = store.list(1, 0).await.unwrap()[0].id;
+        store.clear().await.unwrap();
+        assert!(store.read_audio(latest).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn dismissed_take_is_restored_once_on_the_row_that_stored_it() {
+        let store = temp_history_store("dismissed-restore");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let mut dismissed = test_history_entry(0, "2026-11-03T10:00:00");
+        dismissed.output_status = Some(HISTORY_STATUS_DISMISSED.to_string());
+        dismissed.raw_text.clear();
+        dismissed.polished_text.clear();
+        let id = store
+            .add_with_audio(dismissed, &HistoryRetentionPolicy::default(), Some(audio))
+            .await
+            .unwrap()
+            .unwrap();
+        let stored = store.get(id).await.unwrap().unwrap();
+        assert_eq!(stored.id, id);
+        assert!(stored.has_audio);
+        assert_eq!(
+            stored.output_status.as_deref(),
+            Some(HISTORY_STATUS_DISMISSED)
+        );
+        assert!(store.get(id + 1).await.unwrap().is_none());
+
+        assert!(store
+            .complete_unfinished_take(id, "raw words", "Polished words.", None, None)
+            .await
+            .unwrap());
+        let restored = store.get(id).await.unwrap().unwrap();
+        assert_eq!(restored.raw_text, "raw words");
+        assert_eq!(restored.polished_text, "Polished words.");
+        assert_eq!(restored.output_status, None);
+        assert!(restored.has_audio);
+        assert!(!store
+            .complete_unfinished_take(id, "again", "again", None, None)
+            .await
+            .unwrap());
+        assert_eq!(store.get(id).await.unwrap().unwrap().raw_text, "raw words");
+    }
+
+    #[tokio::test]
+    async fn only_cancelled_or_failed_rows_accept_a_recovered_take() {
+        let store = temp_history_store("dismissed-restore-guard");
+        let mut silent = test_history_entry(0, "2026-11-03T10:00:00");
+        silent.output_status = Some(HISTORY_STATUS_SILENT.to_string());
+        let id = store
+            .add_with_audio(silent, &HistoryRetentionPolicy::default(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!store
+            .complete_unfinished_take(id, "raw", "polished", Some("fallback"), Some("why"))
+            .await
+            .unwrap());
+        let mut failed = test_history_entry(0, "2026-11-03T10:01:00");
+        failed.output_status = Some(HISTORY_STATUS_RECOGNITION_FAILED.to_string());
+        failed.output_error = Some("Recognition did not produce a completed transcript".into());
+        let failed_id = store
+            .add_with_audio(failed, &HistoryRetentionPolicy::default(), None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(store
+            .complete_unfinished_take(failed_id, "raw", "Polished.", None, None)
+            .await
+            .unwrap());
+        let recovered = store.get(failed_id).await.unwrap().unwrap();
+        assert_eq!(recovered.polished_text, "Polished.");
+        assert_eq!(recovered.output_status, None);
+        assert_eq!(recovered.output_error, None);
+        assert_eq!(
+            store
+                .add_with_audio(
+                    test_history_entry(0, "2026-11-03T10:00:00"),
+                    &HistoryRetentionPolicy {
+                        enabled: false,
+                        ..HistoryRetentionPolicy::default()
+                    },
+                    None,
+                )
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_history_does_not_store_audio_and_invalid_audio_is_rejected() {
+        let store = temp_history_store("audio-disabled");
+        store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-02T10:00:00"),
+                &HistoryRetentionPolicy {
+                    enabled: false,
+                    ..HistoryRetentionPolicy::default()
+                },
+                Some(vec![0; 100]),
+            )
+            .await
+            .unwrap();
+        assert!(store.list(10, 0).await.unwrap().is_empty());
+        assert!(store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-02T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(vec![0; 100]),
+            )
+            .await
+            .is_err());
+        assert!(store.list(10, 0).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn disabled_history_skips_valid_audio_in_both_database_tables() {
+        let store = temp_history_store("valid-audio-disabled");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let policy = HistoryRetentionPolicy {
+            enabled: false,
+            ..HistoryRetentionPolicy::default()
+        };
+        for mode in ["dictate", "translate", "ask"] {
+            let mut entry = test_history_entry(0, "2026-11-05T10:00:00");
+            entry.mode = mode.to_string();
+            let result = store
+                .add_with_audio(entry, &policy, (mode != "ask").then(|| audio.clone()))
+                .await
+                .unwrap();
+            assert_eq!(result, None);
+        }
+        let connection = store.conn.lock().unwrap();
+        for table in ["history", "history_audio"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} must remain empty");
+        }
+    }
+
+    #[tokio::test]
+    async fn disabled_history_insert_preserves_existing_text_and_audio() {
+        let store = temp_history_store("disabled-preserves-existing-audio");
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let existing_id = store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-04T10:00:00"),
+                &HistoryRetentionPolicy::default(),
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let existing = store.get(existing_id).await.unwrap().unwrap();
+        let result = store
+            .add_with_audio(
+                test_history_entry(0, "2026-11-05T10:00:00"),
+                &HistoryRetentionPolicy {
+                    enabled: false,
+                    max_entries: 1,
+                    retention_days: 1,
+                },
+                Some(audio.clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, None);
+        let entries = store.list(10, 0).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, existing_id);
+        assert_eq!(entries[0].raw_text, existing.raw_text);
+        assert_eq!(entries[0].polished_text, existing.polished_text);
+        assert_eq!(store.read_audio(existing_id).await.unwrap(), Some(audio));
+        let connection = store.conn.lock().unwrap();
+        let audio_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM history_audio", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(audio_count, 1);
+    }
+
+    #[tokio::test]
+    async fn dismissed_and_silent_recordings_do_not_inflate_usage_statistics() {
+        let store = temp_history_store("recording-only-stats");
+        for status in [HISTORY_STATUS_DISMISSED, HISTORY_STATUS_SILENT] {
+            let mut entry = test_history_entry(0, "2026-11-02T10:00:00");
+            entry.output_status = Some(status.to_string());
+            entry.raw_text.clear();
+            entry.polished_text.clear();
+            entry.duration_ms = Some(4000);
+            store.add(entry).await.unwrap();
+        }
+        let stats = store
+            .stats(chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(stats.total_sessions, 0);
+        assert_eq!(stats.total_audio_seconds, 0);
+    }
+
+    #[tokio::test]
+    async fn recovered_recordings_become_ordinary_transcripts() {
+        let store = temp_history_store("recovered-recording");
+        let mut dismissed = test_history_entry(0, "2026-11-02T10:00:00");
+        dismissed.output_status = Some(HISTORY_STATUS_DISMISSED.to_string());
+        dismissed.raw_text.clear();
+        dismissed.polished_text.clear();
+        store.add(dismissed).await.unwrap();
+        store
+            .add(test_history_entry(0, "2026-11-02T10:01:00"))
+            .await
+            .unwrap();
+        let entries = store.list(10, 0).await.unwrap();
+        let finished = entries.iter().find(|e| e.output_status.is_none()).unwrap();
+        let recovered = entries.iter().find(|e| e.output_status.is_some()).unwrap();
+
+        assert!(store
+            .complete_recovered(recovered.id, "hello again")
+            .await
+            .unwrap());
+        assert!(!store
+            .complete_recovered(finished.id, "must not overwrite")
+            .await
+            .unwrap());
+
+        let entries = store.list(10, 0).await.unwrap();
+        let recovered = entries.iter().find(|e| e.id == recovered.id).unwrap();
+        assert_eq!(recovered.raw_text, "hello again");
+        assert!(recovered.output_status.is_none());
+        let finished = entries.iter().find(|e| e.id == finished.id).unwrap();
+        assert_ne!(finished.raw_text, "must not overwrite");
+    }
+
+    #[test]
+    fn recording_only_statuses_match_typeless_item_states() {
+        assert!(is_recording_only_status(Some("dismissed")));
+        assert!(is_recording_only_status(Some("silent")));
+        assert!(is_recording_only_status(Some("recognition_failed")));
+        assert!(!is_recording_only_status(Some("partial")));
+        assert!(!is_recording_only_status(None));
+    }
+
+    #[tokio::test]
+    async fn failed_recordings_do_not_inflate_usage_statistics() {
+        let store = temp_history_store("failed-audio-stats");
+        let mut entry = test_history_entry(0, "2026-11-02T10:00:00");
+        entry.output_status = Some("recognition_failed".to_string());
+        entry.raw_text = "partial recognition".to_string();
+        entry.polished_text.clear();
+        entry.duration_ms = Some(5000);
+        store.add(entry).await.unwrap();
+        let stats = store
+            .stats(chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(stats.total_sessions, 0);
+        assert_eq!(stats.total_words, 0);
+        assert_eq!(stats.total_audio_seconds, 0);
+    }
+
+    #[tokio::test]
+    async fn history_store_keeps_ask_answers_and_deletes_single_entries() {
+        let store = temp_history_store("ask-delete");
+        let mut ask = test_history_entry(0, "2026-10-31T10:00:00");
+        ask.mode = "ask".to_string();
+        ask.raw_text = "What is the weather?".to_string();
+        ask.answer_text = Some("Sunny.".to_string());
+        store
+            .add(test_history_entry(0, "2026-10-31T09:00:00"))
+            .await
+            .unwrap();
+        store.add(ask).await.unwrap();
+
+        let entries = store.list(10, 0).await.unwrap();
+        assert_eq!(entries[0].mode, "ask");
+        assert_eq!(entries[0].answer_text.as_deref(), Some("Sunny."));
+        assert_eq!(entries[1].mode, "dictate");
+
+        assert!(store.delete(entries[1].id).await.unwrap());
+        assert!(!store.delete(entries[1].id).await.unwrap());
+        assert_eq!(store.list(10, 0).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn history_stats_use_raw_words_when_polished_text_is_whitespace() {
+        let store = temp_history_store("stats-whitespace");
+        let mut entry = test_history_entry(0, "2026-11-04T09:00:00");
+        entry.raw_text = "one two three".to_string();
+        entry.polished_text = " \n\t ".to_string();
+        entry.duration_ms = Some(1_500);
+        store.add(entry).await.unwrap();
+        let stats = store
+            .stats(chrono::NaiveDate::from_ymd_opt(2026, 11, 4).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(stats.total_words, 3);
+        assert_eq!(stats.average_wpm, Some(120));
+    }
+
+    #[tokio::test]
+    async fn history_store_stats_skip_ask_questions() {
+        let store = temp_history_store("stats");
+        let mut dictation = test_history_entry(0, "2026-10-31T09:00:00");
+        dictation.polished_text = "one two three".to_string();
+        dictation.duration_ms = Some(1_500);
+        let mut ask = test_history_entry(0, "2026-10-31T10:00:00");
+        ask.mode = "ask".to_string();
+        ask.polished_text = "ignored question words".to_string();
+        store.add(dictation).await.unwrap();
+        store.add(ask).await.unwrap();
+
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap();
+        let stats = store.stats(today).await.unwrap();
+        assert_eq!(stats.total_words, 3);
+        assert_eq!(stats.total_sessions, 1);
+        assert_eq!(stats.average_wpm, Some(120));
+        assert_eq!(stats.current_streak, 1);
     }
 
     fn temp_history_store(name: &str) -> HistoryStore {
@@ -3311,6 +6161,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_database_reopen_preserves_history_audio_dictionary_and_corrections() {
+        let path = std::env::temp_dir().join(format!(
+            "opentypeless-shared-reopen-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let (history_id, correction_id) = {
+            let history = HistoryStore::new(path.clone()).unwrap();
+            let dictionary = DictionaryStore::new(path.clone()).unwrap();
+            let mut entry = test_history_entry(0, "2026-11-10T10:00:00");
+            entry.mode = "ask".to_string();
+            entry.answer_text = Some("Synthetic persisted answer".to_string());
+            history
+                .add_with_audio(
+                    entry,
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+            dictionary.add("Manual word", Some("manual")).await.unwrap();
+            dictionary.add_auto("Automatic word").await.unwrap();
+            dictionary
+                .add_correction("old phrase", "new phrase")
+                .await
+                .unwrap();
+            let correction_id = dictionary.correction_rules().await.unwrap()[0].id;
+            dictionary
+                .set_correction_enabled(correction_id, false)
+                .await
+                .unwrap();
+            let history_id = history.list(10, 0).await.unwrap()[0].id;
+            (history_id, correction_id)
+        };
+        let dictionary = DictionaryStore::new(path.clone()).unwrap();
+        let history = HistoryStore::new(path.clone()).unwrap();
+        let entries = history.list(10, 0).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, history_id);
+        assert_eq!(entries[0].raw_text, "raw 0");
+        assert_eq!(entries[0].polished_text, "polished 0");
+        assert_eq!(entries[0].mode, "ask");
+        assert_eq!(
+            entries[0].answer_text.as_deref(),
+            Some("Synthetic persisted answer")
+        );
+        assert!(entries[0].has_audio);
+        assert_eq!(history.read_audio(history_id).await.unwrap(), Some(audio));
+        let words = dictionary.list().await.unwrap();
+        assert_eq!(words.len(), 2);
+        assert!(words.iter().any(|word| word.word == "Manual word"
+            && word.pronunciation.as_deref() == Some("manual")
+            && !word.auto));
+        assert!(words
+            .iter()
+            .any(|word| word.word == "Automatic word" && word.auto));
+        let corrections = dictionary.correction_rules().await.unwrap();
+        assert_eq!(corrections.len(), 1);
+        assert_eq!(corrections[0].id, correction_id);
+        assert_eq!(corrections[0].pattern, "old phrase");
+        assert_eq!(corrections[0].replacement, "new phrase");
+        assert!(!corrections[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn failed_dictionary_import_preserves_shared_database_after_reopen() {
+        let path = std::env::temp_dir().join(format!(
+            "opentypeless-import-reopen-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let audio =
+            crate::stt::whisper_compat::WhisperCompatProvider::build_wav(&[1, 0, 2, 0], 16000);
+        let history_id = {
+            let history = HistoryStore::new(path.clone()).unwrap();
+            let dictionary = DictionaryStore::new(path.clone()).unwrap();
+            history
+                .add_with_audio(
+                    test_history_entry(0, "2026-11-10T10:00:00"),
+                    &HistoryRetentionPolicy::default(),
+                    Some(audio.clone()),
+                )
+                .await
+                .unwrap();
+            dictionary
+                .add("Existing word", Some("existing"))
+                .await
+                .unwrap();
+            dictionary
+                .add_correction("existing phrase", "corrected phrase")
+                .await
+                .unwrap();
+            dictionary
+                .execute_batch_for_test(
+                    "CREATE TRIGGER reject_import BEFORE INSERT ON dictionary
+                     WHEN NEW.word = 'rejected'
+                     BEGIN SELECT RAISE(ABORT, 'synthetic import failure'); END;",
+                )
+                .unwrap();
+            let parsed = crate::dictionary_io::parse_dictionary_import(
+                b"first\nrejected",
+                crate::dictionary_io::ImportFormat::Txt,
+            )
+            .unwrap();
+            assert_eq!(
+                crate::dictionary_io::commit_dictionary_import(&dictionary, parsed).await,
+                Err(crate::dictionary_io::DictionaryImportError::Database)
+            );
+            history.list(10, 0).await.unwrap()[0].id
+        };
+        let history = HistoryStore::new(path.clone()).unwrap();
+        let dictionary = DictionaryStore::new(path).unwrap();
+        let entries = history.list(10, 0).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, history_id);
+        assert_eq!(entries[0].raw_text, "raw 0");
+        assert_eq!(entries[0].polished_text, "polished 0");
+        assert!(entries[0].has_audio);
+        assert_eq!(history.read_audio(history_id).await.unwrap(), Some(audio));
+        let words = dictionary.list().await.unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word, "Existing word");
+        assert_eq!(words[0].pronunciation.as_deref(), Some("existing"));
+        let corrections = dictionary.correction_rules().await.unwrap();
+        assert_eq!(corrections.len(), 1);
+        assert_eq!(corrections[0].pattern, "existing phrase");
+        assert_eq!(corrections[0].replacement, "corrected phrase");
+        assert!(corrections[0].enabled);
+    }
+
+    #[tokio::test]
     async fn history_store_prunes_by_max_entries_policy() {
         let store = temp_history_store("max");
         let policy = HistoryRetentionPolicy {
@@ -3363,6 +6344,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backup_restore_orders_extended_years_by_time_not_text() {
+        let (history, _dictionary) = temp_backup_stores("extended-year-order");
+        history
+            .restore_backup_data(
+                Some(vec![
+                    test_history_entry(1, "9999-01-01T10:00:00"),
+                    test_history_entry(2, "+10000-01-01T10:00:00"),
+                ]),
+                None,
+                None,
+                &HistoryRetentionPolicy {
+                    max_entries: 1,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        let restored = history.list(100, 0).await.unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].raw_text, "raw 2");
+    }
+
+    #[tokio::test]
+    async fn backup_restore_retains_newest_entries_from_unsorted_input() {
+        let (history, _dictionary) = temp_backup_stores("unsorted");
+        history
+            .restore_backup_data(
+                Some(vec![
+                    test_history_entry(1, "2026-11-01T10:00:00"),
+                    test_history_entry(3, "2026-11-03T10:00:00"),
+                    test_history_entry(2, "2026-11-02T10:00:00"),
+                ]),
+                None,
+                None,
+                &HistoryRetentionPolicy {
+                    max_entries: 2,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        let restored = history.list(100, 0).await.unwrap();
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].raw_text, "raw 3");
+        assert_eq!(restored[1].raw_text, "raw 2");
+    }
+
+    #[tokio::test]
+    async fn backup_restore_preserves_ask_answers_and_translation_modes() {
+        let (history, _dictionary) = temp_backup_stores("voice-modes");
+        let mut ask = test_history_entry(1, "2026-11-01T10:00:00");
+        ask.mode = "ask".to_string();
+        ask.answer_text = Some("Synthetic saved answer".to_string());
+        let mut translation = test_history_entry(2, "2026-11-02T10:00:00");
+        translation.mode = "translate".to_string();
+        history
+            .restore_backup_data(
+                Some(vec![translation, ask]),
+                None,
+                None,
+                &HistoryRetentionPolicy::default(),
+                "2026-11-10T10:00:00",
+            )
+            .await
+            .unwrap();
+        let restored = history.list(100, 0).await.unwrap();
+        assert_eq!(restored[0].mode, "translate");
+        assert_eq!(restored[1].mode, "ask");
+        assert_eq!(
+            restored[1].answer_text.as_deref(),
+            Some("Synthetic saved answer")
+        );
+        assert!(!restored[0].has_audio);
+        assert!(!restored[1].has_audio);
+    }
+
+    #[tokio::test]
     async fn backup_restore_replaces_all_requested_data_in_one_transaction() {
         let (history, dictionary) = temp_backup_stores("replace");
         history
@@ -3392,11 +6452,13 @@ mod tests {
                         id: 20,
                         word: "OpenTypeless".to_string(),
                         pronunciation: None,
+                        auto: true,
                     },
                     DictionaryEntry {
                         id: 21,
                         word: " opentypeless ".to_string(),
                         pronunciation: Some("duplicate".to_string()),
+                        auto: false,
                     },
                 ]),
                 Some(vec![CorrectionRule {
@@ -3418,9 +6480,40 @@ mod tests {
         let restored_dictionary = dictionary.list().await.unwrap();
         assert_eq!(restored_dictionary.len(), 1);
         assert_eq!(restored_dictionary[0].word, "OpenTypeless");
+        assert!(restored_dictionary[0].auto);
         let restored_rules = dictionary.correction_rules().await.unwrap();
         assert_eq!(restored_rules.len(), 1);
         assert!(!restored_rules[0].enabled);
+    }
+
+    #[tokio::test]
+    async fn backup_restore_rejects_invalid_retention_time_without_replacing_data() {
+        let (history, dictionary) = temp_backup_stores("invalid-retention-time");
+        history
+            .add(test_history_entry(1, "2026-07-01T00:00:00"))
+            .await
+            .unwrap();
+        dictionary.add("Existing", None).await.unwrap();
+        let result = history
+            .restore_backup_data(
+                Some(vec![test_history_entry(2, "2026-07-02T00:00:00")]),
+                Some(vec![DictionaryEntry {
+                    id: 2,
+                    word: "Replacement".to_string(),
+                    pronunciation: None,
+                    auto: false,
+                }]),
+                None,
+                &HistoryRetentionPolicy {
+                    retention_days: 7,
+                    ..HistoryRetentionPolicy::default()
+                },
+                "invalid",
+            )
+            .await;
+        assert!(result.is_err());
+        assert_eq!(history.list(10, 0).await.unwrap()[0].raw_text, "raw 1");
+        assert_eq!(dictionary.list().await.unwrap()[0].word, "Existing");
     }
 
     #[tokio::test]
@@ -3439,6 +6532,7 @@ mod tests {
                     id: 2,
                     word: "x".repeat(101),
                     pronunciation: None,
+                    auto: false,
                 }]),
                 None,
                 &HistoryRetentionPolicy::default(),
@@ -3694,6 +6788,107 @@ mod tests {
         let updated = store.list().await.unwrap();
         assert_eq!(updated[0].word, "OpenTypeless");
         assert_eq!(updated[0].pronunciation.as_deref(), Some("open typeless"));
+    }
+
+    #[tokio::test]
+    async fn dictionary_store_migrates_legacy_rows_as_manual_and_tracks_auto_words() {
+        let path = std::env::temp_dir().join(format!(
+            "opentypeless-dictionary-legacy-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE dictionary (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word TEXT NOT NULL,
+                    pronunciation TEXT
+                );
+                INSERT INTO dictionary (word) VALUES ('Legacy');",
+            )
+            .unwrap();
+        }
+        let store = DictionaryStore::new(path.clone()).unwrap();
+        let auto_id = store.add_auto("Learned").await.unwrap();
+        assert!(store.add_auto(" learned ").await.is_err());
+
+        let entries = store.list().await.unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].word, "Legacy");
+        assert!(!entries[0].auto);
+        assert_eq!(entries[1].id, auto_id);
+        assert!(entries[1].auto);
+        drop(store);
+        assert!(DictionaryStore::new(path).unwrap().list().await.unwrap()[1].auto);
+    }
+
+    #[tokio::test]
+    async fn auto_dictionary_guard_runs_under_database_lock_and_can_reject_insert() {
+        let store = temp_dictionary_store("auto-guard");
+        let result = store
+            .add_auto_if_current("Cancelled word", || {
+                assert!(store.conn.try_lock().is_err());
+                false
+            })
+            .await
+            .unwrap();
+        assert!(result.is_none());
+        assert!(store.list().await.unwrap().is_empty());
+        let inserted = store
+            .add_auto_if_current("Current word", || true)
+            .await
+            .unwrap();
+        assert!(inserted.is_some());
+        assert!(store.list().await.unwrap()[0].auto);
+    }
+
+    #[test]
+    fn learning_setting_guard_holds_current_config_and_rejects_disabled_or_missing_state() {
+        let cache = Mutex::new(Some(AppConfig {
+            auto_learn_dictionary: true,
+            ..Default::default()
+        }));
+        let committed = with_learning_setting_cache(&cache, || {
+            assert!(cache.try_lock().is_err());
+            Ok(7)
+        })
+        .unwrap();
+        assert_eq!(committed, Some(7));
+        cache
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .auto_learn_dictionary = false;
+        assert_eq!(with_learning_setting_cache(&cache, || Ok(8)).unwrap(), None);
+        *cache.lock().unwrap() = None;
+        assert!(with_learning_setting_cache(&cache, || Ok(9)).is_err());
+    }
+
+    #[tokio::test]
+    async fn dictionary_store_removes_many_entries_atomically() {
+        let store = temp_dictionary_store("remove-many");
+        store.add("One", None).await.unwrap();
+        store.add("Two", None).await.unwrap();
+        store.add("Three", None).await.unwrap();
+        let ids = store
+            .list()
+            .await
+            .unwrap()
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            store.remove_many(&[ids[0], ids[2], 9_999]).await.unwrap(),
+            2
+        );
+        let remaining = store.list().await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].word, "Two");
     }
 
     #[tokio::test]

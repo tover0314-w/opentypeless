@@ -35,6 +35,8 @@ export function WelcomeStep() {
           {UI_LANGUAGES.map((lang) => (
             <button
               key={lang.value}
+              type="button"
+              aria-pressed={currentLang === lang.value}
               onClick={() => handleSelectLanguage(lang.value)}
               className={`px-4 py-4 rounded-[10px] text-[14px] border cursor-pointer transition-all ${
                 currentLang === lang.value

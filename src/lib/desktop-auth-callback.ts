@@ -1,10 +1,12 @@
 import { API_BASE_URL } from './constants'
+import { cloudFetch } from './cloudTransport'
 import {
   clearOAuthState,
   claimOAuthState,
   generateOAuthState,
   getPendingOAuthVerifier,
   OAUTH_STATE_TTL_MS,
+  captureOAuthFlowOwner,
 } from './deep-link'
 
 function callbackURLForState(state: string, locale?: string): string {
@@ -47,27 +49,55 @@ async function registerDesktopAuthFlow(
   state: string,
   ttlMs: number,
   locale?: string,
+  isCurrentFlow: () => boolean = captureOAuthFlowOwner(state),
 ): Promise<string> {
   const verifier = getPendingOAuthVerifier(state)
   if (!verifier) throw new Error('Desktop authentication proof is unavailable')
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('Desktop authentication request timed out')
+      controller.abort(error)
+      reject(error)
+    }, 30000)
+  })
   let response: Response
   try {
-    response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/initiate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        state,
-        challenge: await pkceChallenge(verifier),
-        ttlSeconds: ttlMs >= 60 * 60 * 1000 ? 3_600 : 600,
-      }),
-    })
+    const registration = async () => {
+      const challenge = await pkceChallenge(verifier)
+      controller.signal.throwIfAborted()
+      if (!isCurrentFlow() || getPendingOAuthVerifier(state) !== verifier) {
+        throw new Error('Desktop authentication was cancelled or expired')
+      }
+      return cloudFetch(`${API_BASE_URL}/api/auth/desktop-handoff/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state,
+          challenge,
+          ttlSeconds: ttlMs >= 60 * 60 * 1000 ? 3_600 : 600,
+        }),
+        signal: controller.signal,
+      }).then((result) => {
+        if (controller.signal.aborted) {
+          void result.body?.cancel().catch(() => {})
+          controller.signal.throwIfAborted()
+        }
+        return result
+      })
+    }
+    response = await Promise.race([registration(), deadline])
   } catch {
     throw new DesktopAuthError('network', null, 'Unable to reach the sign-in service')
+  } finally {
+    clearTimeout(timer)
   }
+  void response.body?.cancel().catch(() => {})
   if (!response.ok) {
     throw new DesktopAuthError('http', response.status, 'Unable to initiate desktop authentication')
   }
-  if (getPendingOAuthVerifier(state) !== verifier) {
+  if (!isCurrentFlow() || getPendingOAuthVerifier(state) !== verifier) {
     throw new Error('Desktop authentication was cancelled or expired')
   }
   return callbackURLForState(state, locale)
@@ -78,10 +108,11 @@ export async function createDesktopAuthCallbackURL(
   locale?: string,
 ): Promise<string> {
   const state = generateOAuthState(stateTtlMs)
+  const isCurrentFlow = captureOAuthFlowOwner(state)
   try {
-    return await registerDesktopAuthFlow(state, stateTtlMs, locale)
+    return await registerDesktopAuthFlow(state, stateTtlMs, locale, isCurrentFlow)
   } catch (error) {
-    clearOAuthState(state)
+    if (isCurrentFlow()) clearOAuthState(state)
     throw error
   }
 }
@@ -121,10 +152,11 @@ export async function claimDesktopAuthCallbackURL(
 ): Promise<string | null> {
   const state = claimOAuthState(stateTtlMs)
   if (!state) return null
+  const isCurrentFlow = captureOAuthFlowOwner(state)
   try {
-    return await registerDesktopAuthFlow(state, stateTtlMs, locale)
+    return await registerDesktopAuthFlow(state, stateTtlMs, locale, isCurrentFlow)
   } catch (error) {
-    clearOAuthState(state)
+    if (isCurrentFlow()) clearOAuthState(state)
     throw error
   }
 }

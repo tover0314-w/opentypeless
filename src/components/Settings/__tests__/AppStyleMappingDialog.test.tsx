@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { chooseOption, openSelect, selectedValue } from '../../shared/__tests__/selectTestUtils'
 import { AppStyleMappingDialog } from '../AppStyleMappingDialog'
 import { ManageAppMappingsDialog } from '../ManageAppMappingsDialog'
 import * as tauri from '../../../lib/tauri'
@@ -116,6 +117,28 @@ describe('AppStyleMappingDialog', () => {
     expect(label).toHaveValue('你'.repeat(40))
   })
 
+  it('closes an open scene menu on Escape without dismissing the dialog', () => {
+    const onCancel = vi.fn()
+    render(
+      <AppStyleMappingDialog
+        candidate={candidate}
+        context={context}
+        config={config}
+        onCancel={onCancel}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: 'Writing scene' })
+    openSelect(trigger)
+    fireEvent.keyDown(trigger, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(onCancel).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
   it('requires an explicit submit before saving the backend-owned candidate', async () => {
     const onSaved = vi.fn()
     render(
@@ -159,9 +182,7 @@ describe('AppStyleMappingDialog', () => {
     ).not.toBeInTheDocument()
 
     expect(screen.queryByRole('option', { name: 'Clean Dictation' })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Writing scene'), {
-      target: { value: 'custom_focus' },
-    })
+    chooseOption(screen.getByRole('combobox', { name: 'Writing scene' }), 'custom_focus')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>
@@ -198,7 +219,7 @@ describe('AppStyleMappingDialog', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Writing scene')).toHaveValue('')
+    expect(selectedValue(screen.getByRole('combobox', { name: 'Writing scene' }))).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() =>

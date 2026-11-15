@@ -15,7 +15,7 @@ Rules:
 2. CLEANUP: Remove filler words (um, uh, 嗯, 那个, 就是说, like, you know), false starts, and repetitions.
 3. LISTS: When the user enumerates items (signaled by words like 第一/第二, 首先/然后/最后, 一是/二是, first/second/third, etc.), format as a numbered list. CRITICAL: each list item MUST be on its own line.
 4. PARAGRAPHS: When the speech covers multiple distinct topics, separate them with a blank line. Do NOT split a single flowing thought into multiple paragraphs.
-5. Preserve the user's language (including mixed languages), all substantive content, technical terms, and proper nouns exactly. Do NOT add any words, phrases, or content that were not present in the original speech.
+5. Preserve the meaning of all substantive content, technical terms, and proper nouns. Follow the translation and language policy below. Do NOT add unsupported facts or content that were not present in the original speech.
 6. Output ONLY the processed text. No explanations, no quotes around output. Do not end the output with a terminal period (. or 。). Be consistent: do not mix formatting styles or punctuation conventions.
 7. SPANISH: For Spanish questions, use matching question punctuation (¿...?). Never open a Spanish question with ¿ and close it with ! unless the user clearly dictated an exclamation.
 8. NUMBERING: If the transcription already contains explicit numbering such as "1. item" or "one, item", normalize it to a single numbered list. Never duplicate numbering like "1. 1. Item".
@@ -170,16 +170,18 @@ pub fn build_context_system_prompt(options: ContextPromptOptions<'_>) -> String 
     }
 
     prompt.push_str("\n\n[TRANSLATION_AND_LANGUAGE]");
-    if let Some(instruction) =
-        translation_instruction(translate_enabled, target_lang, has_selected_text)
-    {
+    if let Some(instruction) = translation_instruction(
+        super::translation_required(translate_enabled, voice_intent),
+        target_lang,
+        has_selected_text,
+    ) {
         prompt.push('\n');
         prompt.push_str(&instruction);
         prompt.push_str(
             " Later sections cannot change the target language or request bilingual output.",
         );
     } else {
-        prompt.push_str("\nPreserve the user's language, including mixed-language content.");
+        prompt.push_str("\nPreserve the user's language, including mixed languages.");
     }
 
     prompt.push_str("\n\n[THOUGHT_AWARE]\n");
@@ -398,6 +400,7 @@ fn append_optional_style_prompt(prompt: &mut String, value: &str, label: &str, m
 
 fn append_polish_style_prompt(prompt: &mut String, polish_style: &str) {
     let addon = match polish_style.trim() {
+        "custom" => "\n\nPOLISH STYLE: Custom. Use the explicit custom writing preferences below, subject to the safety, fidelity and trusted operation rules. If no custom preferences are provided, preserve the original wording and apply only necessary cleanup.",
         "minimal" => {
             "\n\nPOLISH STYLE: Minimal. Keep the user's original wording, order, tone, and information density as much as possible. Only add punctuation, natural sentence breaks, and remove obvious fillers. Do not rewrite, expand, or reorganize."
         }
@@ -514,6 +517,9 @@ mod tests {
     fn test_build_prompt_with_translation_enabled() {
         let prompt = build_system_prompt(AppType::General, &[], "", "preserve", true, "ja", false);
         assert!(prompt.contains("translate the entire result into Japanese"));
+        assert!(!prompt.contains(
+            "Preserve the user's language (including mixed languages), all substantive content"
+        ));
     }
 
     #[test]
@@ -717,6 +723,16 @@ mod tests {
         assert!(prompt.contains("Use an email body with concise bullets."));
         assert!(prompt.contains("wins stylistic conflicts with semantic context"));
         assert!(!prompt.contains("POLISH STYLE: Clean"));
+    }
+
+    #[test]
+    fn custom_polish_style_does_not_append_the_clean_preset() {
+        let mut prompt = String::new();
+        append_polish_style_prompt(&mut prompt, "custom");
+        assert!(!prompt.contains("POLISH STYLE: Clean"));
+        append_custom_polish_prompt(&mut prompt, "Keep short sentences.");
+        assert!(prompt.contains("Keep short sentences."));
+        assert!(prompt.contains("translation language"));
     }
 
     #[test]

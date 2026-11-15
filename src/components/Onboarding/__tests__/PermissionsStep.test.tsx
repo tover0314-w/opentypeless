@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionsStep } from '../PermissionsStep'
+import { checkAccessibilityPermission } from '../../../lib/tauri'
 
 const mockConfig = {
   hotkey: 'Fn',
@@ -67,6 +68,32 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('PermissionsStep', () => {
+  it('does not claim text output is ready while its permission check is pending', () => {
+    vi.mocked(checkAccessibilityPermission).mockReturnValueOnce(new Promise(() => {}))
+    render(<PermissionsStep />)
+    const row = screen.getByText('Text output').closest('div')!.parentElement!
+    expect(within(row).queryByText('Ready')).toBeNull()
+    expect(within(row).queryByRole('button', { name: 'Fix' })).toBeNull()
+  })
+
+  it('ignores a late denied check after switching to copy-only output', async () => {
+    let finishCheck: (trusted: boolean) => void = () => {}
+    vi.mocked(checkAccessibilityPermission).mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        finishCheck = resolve
+      }),
+    )
+    const { rerender } = render(<PermissionsStep />)
+    Object.assign(mockConfig, {
+      hotkey: 'Ctrl+/',
+      insertion_strategy: 'clipboardCopyOnly',
+      hotkeys: { dictation: { primary: '/', modifiers: ['Ctrl'] } },
+    })
+    rerender(<PermissionsStep />)
+    await act(async () => finishCheck(false))
+    expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull()
+  })
+
   it('shows compact relevant permissions without a settings-style dashboard', async () => {
     render(<PermissionsStep />)
 

@@ -1,25 +1,48 @@
 pub mod app_detector;
+mod ask_stop_request;
 pub mod audio;
 pub mod cloud_request;
 pub mod commands;
 pub mod credentials;
 pub mod dictionary_io;
+pub mod edit_learning;
 pub mod error;
+pub mod escape_cancel;
 pub mod hotkey;
+mod hotkey_controller;
+mod hotkey_registration;
+#[cfg(test)]
+mod http_redirect_tests;
+mod input_command_queue;
+mod input_configuration;
+mod input_session;
+pub mod language_variants;
 #[cfg(target_os = "linux")]
 mod linux_x11;
 pub mod llm;
+mod monitor_transaction;
+mod native_dispatch_gate;
 pub mod native_hotkey;
 pub mod output;
+pub mod paste_last;
 pub mod pipeline;
 pub mod platform;
+pub mod practice;
 pub mod recording_deadline;
+pub mod retry_audio;
 pub mod selection;
+mod session_commit;
+mod session_recovery;
+mod shortcut_capture;
+mod shortcut_event_consumption;
+mod shortcut_lease;
+mod shortcut_release;
 pub mod storage;
 pub mod stt;
 pub mod stt_finalize;
 pub mod tray;
 pub mod voice_intent;
+mod voice_operation;
 mod window_state;
 
 pub use hotkey::{default_ask_shortcut, default_shortcut, parse_hotkey};
@@ -40,6 +63,18 @@ const HTTP_TCP_KEEPALIVE_SECS: u64 = 60;
 
 fn build_shared_http_client() -> reqwest::Client {
     reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let Some(original) = attempt.previous().first() else {
+                return attempt.stop();
+            };
+            if attempt.url().origin() != original.origin() {
+                return attempt.stop();
+            }
+            if attempt.previous().len() >= 10 {
+                return attempt.error("HTTP redirect limit exceeded");
+            }
+            attempt.follow()
+        }))
         .pool_max_idle_per_host(2)
         .pool_idle_timeout(std::time::Duration::from_secs(HTTP_POOL_IDLE_TIMEOUT_SECS))
         .tcp_keepalive(std::time::Duration::from_secs(HTTP_TCP_KEEPALIVE_SECS))
@@ -79,8 +114,36 @@ pub struct HotkeyRegistrationError(pub Arc<Mutex<Option<String>>>);
 
 /// In-memory copy of the system-vault-backed cloud session token.
 /// The main renderer may restore it for authenticated API calls; native STT/LLM reads it directly.
-pub struct SessionTokenStore(pub Arc<Mutex<String>>);
+pub struct SessionTokenStore(
+    pub Arc<Mutex<String>>,
+    pub std::sync::atomic::AtomicBool,
+    pub Mutex<String>,
+);
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudSessionSnapshot {
+    pub token: Option<String>,
+    pub session_epoch: String,
+}
+
+impl SessionTokenStore {
+    pub fn snapshot(&self) -> CloudSessionSnapshot {
+        let token = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let epoch = self.2.lock().unwrap_or_else(|error| error.into_inner());
+        CloudSessionSnapshot {
+            token: (!token.trim().is_empty()).then(|| token.clone()),
+            session_epoch: epoch.clone(),
+        }
+    }
+
+    pub fn rotate_epoch(&self) {
+        *self.2.lock().unwrap_or_else(|error| error.into_inner()) =
+            uuid::Uuid::new_v4().to_string();
+    }
+}
+
+#[cfg(test)]
 fn with_restored_session_token<R, V>(builder: tauri::Builder<R>, vault: &V) -> tauri::Builder<R>
 where
     R: tauri::Runtime,
@@ -93,13 +156,29 @@ where
         })
         .unwrap_or_default();
 
-    builder.manage(SessionTokenStore(Arc::new(Mutex::new(token))))
+    builder
+        .manage(session_commit::SessionCommitAttempts::default())
+        .manage(SessionTokenStore(
+            Arc::new(Mutex::new(token)),
+            std::sync::atomic::AtomicBool::new(false),
+            Mutex::new(uuid::Uuid::new_v4().to_string()),
+        ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AutoStartSyncOutcome {
     config_auto_start: bool,
     error: Option<String>,
+}
+
+/// Shows or hides the Dock icon; the menu-bar icon and windows keep working either way.
+pub fn apply_dock_visibility(app: &tauri::AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = app.set_dock_visibility(visible) {
+        tracing::warn!("Failed to set Dock visibility: {error}");
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
 }
 
 fn reconcile_auto_start_preference(
@@ -177,6 +256,16 @@ fn should_restore_main_window_on_reopen(_has_visible_windows: bool) -> bool {
     true
 }
 
+fn show_main_window_at(app: &tauri::AppHandle, hash: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("navigate", hash);
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        refresh_tray(app);
+    }
+}
+
 fn restore_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -189,7 +278,10 @@ fn should_preserve_auxiliary_window_on_close(label: &str) -> bool {
     label == "ask"
 }
 
-fn attach_ask_window_close_handler(handle: &tauri::AppHandle, ask_window: &tauri::WebviewWindow) {
+fn attach_ask_window_close_handler<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    ask_window: &tauri::WebviewWindow<R>,
+) {
     let handle = handle.clone();
     ask_window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -203,7 +295,9 @@ fn attach_ask_window_close_handler(handle: &tauri::AppHandle, ask_window: &tauri
     });
 }
 
-fn build_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+fn build_ask_window<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
     if let Some(config) = handle
         .config()
         .app
@@ -220,8 +314,8 @@ fn build_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWi
         tauri::WebviewUrl::App("index.html#ask".into()),
     )
     .title("OpenTypeless Ask")
-    .inner_size(400.0, 220.0)
-    .min_inner_size(360.0, 180.0)
+    .inner_size(ASK_WINDOW_WIDTH, 560.0)
+    .min_inner_size(480.0, 200.0)
     .resizable(false)
     .decorations(false)
     .transparent(true)
@@ -233,7 +327,9 @@ fn build_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWi
     .build()
 }
 
-pub fn ensure_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+pub fn ensure_ask_window<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
     if let Some(window) = handle.get_webview_window("ask") {
         return Ok(window);
     }
@@ -253,7 +349,9 @@ pub fn ensure_ask_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::Webv
     }
 }
 
-pub fn show_ask_popup_window(handle: &tauri::AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+pub fn show_ask_popup_window<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
     let window = ensure_ask_window(handle)?;
     let _ = window.unminimize();
     let _ = window.show();
@@ -272,10 +370,334 @@ async fn show_ask_window(
     commands::ask::start_ask_flow(app, state, config_state, token_store, client).await
 }
 
+/// The answer card is 744 px wide inside an 800 px transparent window (Typeless layout).
+const ASK_WINDOW_WIDTH: f64 = 800.0;
+const ASK_WINDOW_MAX_HEIGHT: f64 = 800.0;
+const ASK_WINDOW_MIN_HEIGHT: f64 = 200.0;
+
+/// Clamps the card's reported content height to the window bounds and the visible work area.
+fn ask_window_height(content_height: f64, work_area_height: Option<f64>) -> f64 {
+    let ceiling = work_area_height
+        .map(|available| (available - 20.0).max(ASK_WINDOW_MIN_HEIGHT))
+        .unwrap_or(ASK_WINDOW_MAX_HEIGHT)
+        .min(ASK_WINDOW_MAX_HEIGHT);
+    content_height.clamp(ASK_WINDOW_MIN_HEIGHT, ceiling).ceil()
+}
+
+/// The answer card reports its rendered height so the window hugs it, bottom-anchored.
+#[tauri::command]
+fn resize_ask_window(window: tauri::WebviewWindow, height: f64) -> Result<(), String> {
+    if window.label() != "ask" || !height.is_finite() {
+        return Ok(());
+    }
+    let monitor = window.current_monitor().ok().flatten();
+    let scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor());
+    let work_area_height = monitor
+        .as_ref()
+        .map(|m| f64::from(m.work_area().size.height) / scale);
+    let target = ask_window_height(height, work_area_height);
+    let current = window
+        .inner_size()
+        .map(|size| f64::from(size.height) / scale)
+        .unwrap_or(0.0);
+    if (current - target).abs() <= 2.0 {
+        return Ok(());
+    }
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let bottom = f64::from(position.y) / scale + current;
+    window
+        .set_size(tauri::LogicalSize::new(ASK_WINDOW_WIDTH, target))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(tauri::LogicalPosition::new(
+            f64::from(position.x) / scale,
+            (bottom - target).max(0.0),
+        ))
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use anyhow::Result;
+
+    #[test]
+    fn stale_hotkey_registration_does_not_clear_new_error_or_emit_recovery() {
+        use tauri::Listener;
+
+        let feedback = Arc::new(Mutex::new(Some("new editor failure".to_string())));
+        let app = tauri::test::mock_builder()
+            .manage(HotkeyRegistrationError(Arc::clone(&feedback)))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let recovered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = Arc::clone(&recovered);
+        app.listen_any("hotkey:registration-recovered", move |_| {
+            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let supervisor = hotkey::HotkeySupervisor::default();
+        let stale_generation = supervisor.snapshot().generation;
+        supervisor.disable();
+        for result in [Ok(()), Err("old failure".to_string())] {
+            assert_eq!(
+                record_hotkey_registration_result(
+                    app.handle(),
+                    &supervisor,
+                    stale_generation,
+                    result,
+                ),
+                Err(commands::misc::HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string()),
+            );
+            assert_eq!(
+                feedback.lock().unwrap().as_deref(),
+                Some("new editor failure")
+            );
+            assert!(!recovered.load(std::sync::atomic::Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn history_retry_cancellation_is_limited_to_the_main_window() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![cancel_transcription_retry])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["ask", "capsule", "unknown", "main"] {
+            let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: "cancel_transcription_retry".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                serde_json::json!(if label == "main" {
+                    "History retry cancellation is unavailable"
+                } else {
+                    "History retry cancellation is only available in the main window"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn take_recovery_is_limited_to_main_and_capsule_windows() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![recover_unfinished_take])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["ask", "unknown", "main", "capsule"] {
+            let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: "recover_unfinished_take".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "id": 7 })),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                serde_json::json!(if matches!(label, "main" | "capsule") {
+                    "Take recovery is unavailable"
+                } else {
+                    "Take recovery is only available in the main or capsule window"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn failed_audio_retry_text_is_limited_to_main_and_capsule_windows() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![retry_transcription])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["ask", "unknown", "main", "capsule"] {
+            let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: "retry_transcription".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                serde_json::json!(if matches!(label, "main" | "capsule") {
+                    "Transcription retry is unavailable"
+                } else {
+                    "Transcription retry is only available in the main or capsule window"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn auxiliary_windows_cannot_request_history_transcription_text() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![retry_history_transcription])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["capsule", "ask", "main"] {
+            let window = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &window,
+                tauri::webview::InvokeRequest {
+                    cmd: "retry_history_transcription".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "id": 7 })),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                serde_json::json!(if label == "main" {
+                    "History transcription is unavailable"
+                } else {
+                    "History transcription is only available in the main window"
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn generated_update_acl_allows_main_and_denies_auxiliary_windows() {
+        let capabilities: std::collections::BTreeMap<
+            String,
+            tauri::utils::acl::capability::Capability,
+        > = serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+        for target in [
+            tauri::utils::platform::Target::MacOS,
+            tauri::utils::platform::Target::Windows,
+            tauri::utils::platform::Target::Linux,
+        ] {
+            let manifests =
+                serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json")).unwrap();
+            let resolved = tauri::utils::acl::resolved::Resolved::resolve(
+                &manifests,
+                capabilities.clone(),
+                target,
+            )
+            .unwrap();
+            let authority = tauri::ipc::RuntimeAuthority::new(manifests, resolved);
+            for command in [
+                "plugin:autostart|enable",
+                "plugin:autostart|disable",
+                "plugin:autostart|is_enabled",
+                "plugin:global-shortcut|register",
+                "plugin:global-shortcut|register_all",
+                "plugin:global-shortcut|unregister",
+                "plugin:global-shortcut|unregister_all",
+                "plugin:global-shortcut|is_registered",
+            ] {
+                for window in ["main", "capsule", "ask"] {
+                    assert!(
+                        authority
+                            .resolve_access(command, window, window, &tauri::ipc::Origin::Local)
+                            .is_none(),
+                        "{command} must use the guarded configuration command"
+                    );
+                }
+            }
+            for command in [
+                "plugin:updater|check",
+                "plugin:updater|download",
+                "plugin:updater|install",
+                "plugin:updater|download_and_install",
+                "plugin:process|exit",
+                "plugin:process|restart",
+            ] {
+                assert!(
+                    authority
+                        .resolve_access(command, "main", "main", &tauri::ipc::Origin::Local)
+                        .is_some(),
+                    "{command} must remain available in main"
+                );
+                for window in ["capsule", "ask"] {
+                    assert!(
+                        authority
+                            .resolve_access(command, window, window, &tauri::ipc::Origin::Local)
+                            .is_none(),
+                        "{command} must not be available in {window}"
+                    );
+                }
+                for window in ["main", "capsule", "ask"] {
+                    assert!(
+                        authority
+                            .resolve_access(
+                                command,
+                                window,
+                                window,
+                                &tauri::ipc::Origin::Remote {
+                                    url: "https://untrusted.example.test/".parse().unwrap(),
+                                },
+                            )
+                            .is_none(),
+                        "{command} must not be available to remote content in {window}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn startup_does_not_restore_credentials_before_local_runtime_is_ready() {
+        let source = include_str!("lib.rs");
+        let setup = source
+            .split("        .setup(|app| {")
+            .last()
+            .unwrap()
+            .split("        .invoke_handler(")
+            .next()
+            .unwrap();
+        assert!(!setup.contains("get_protected_session_snapshot"));
+        assert!(!setup.contains("SystemCredentialVault"));
+    }
+
+    #[test]
+    fn startup_requires_valid_settings_before_database_and_background_initialization() {
+        let source = include_str!("lib.rs");
+        let setup = source
+            .split("        .setup(|app| {")
+            .last()
+            .unwrap()
+            .split("        .invoke_handler(")
+            .next()
+            .unwrap();
+        let load = setup.find("block_on(config_manager.load())?").unwrap();
+        assert!(load < setup.find("storage::HistoryStore::new(").unwrap());
+        assert!(load < setup.find("start_default(").unwrap());
+        assert!(load < setup.find("sync_auto_start_preference(").unwrap());
+        assert!(!setup.contains("block_on(config_manager.load()).unwrap_or_default()"));
+    }
 
     fn text_mentions(text: &str, keywords: &[&str]) -> bool {
         let normalized = text.to_ascii_lowercase();
@@ -389,8 +811,23 @@ mod tests {
         assert_eq!(ask["transparent"].as_bool(), Some(true));
         assert_eq!(ask["shadow"].as_bool(), Some(false));
         assert_eq!(ask["resizable"].as_bool(), Some(false));
-        assert_eq!(ask["width"].as_i64(), Some(400));
-        assert_eq!(ask["height"].as_i64(), Some(220));
+        assert_eq!(ask["width"].as_f64(), Some(ASK_WINDOW_WIDTH));
+        assert_eq!(ask["height"].as_i64(), Some(560));
+    }
+
+    #[test]
+    fn ask_window_height_clamps_to_card_bounds_and_work_area() {
+        assert_eq!(
+            ask_window_height(120.0, Some(1000.0)),
+            ASK_WINDOW_MIN_HEIGHT
+        );
+        assert_eq!(ask_window_height(512.4, Some(1000.0)), 513.0);
+        assert_eq!(
+            ask_window_height(2000.0, Some(1000.0)),
+            ASK_WINDOW_MAX_HEIGHT
+        );
+        assert_eq!(ask_window_height(2000.0, Some(620.0)), 600.0);
+        assert_eq!(ask_window_height(700.0, None), 700.0);
     }
 
     #[test]
@@ -532,8 +969,79 @@ async fn stop_recording(state: tauri::State<'_, pipeline::PipelineHandle>) -> Re
 }
 
 #[tauri::command]
+async fn retry_transcription<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
+) -> Result<String, String> {
+    if !matches!(window.label(), "main" | "capsule") {
+        return Err("Transcription retry is only available in the main or capsule window".into());
+    }
+    let state = app
+        .try_state::<pipeline::PipelineHandle>()
+        .ok_or_else(|| "Transcription retry is unavailable".to_string())?;
+    state
+        .retry_transcription()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn abort_recording(state: tauri::State<'_, pipeline::PipelineHandle>) -> Result<(), String> {
-    state.abort();
+    state.dismiss();
+    Ok(())
+}
+
+#[tauri::command]
+async fn retry_history_transcription<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
+    id: i64,
+) -> Result<String, String> {
+    if window.label() != "main" {
+        return Err("History transcription is only available in the main window".into());
+    }
+    let state = app
+        .try_state::<pipeline::PipelineHandle>()
+        .ok_or_else(|| "History transcription is unavailable".to_string())?;
+    state
+        .retry_history_transcription(id)
+        .await
+        .map_err(|error| {
+            tracing::warn!(entry_id = id, error = %error, "History retry failed");
+            error.to_string()
+        })
+}
+
+#[tauri::command]
+async fn recover_unfinished_take<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
+    id: i64,
+) -> Result<(), String> {
+    if !matches!(window.label(), "main" | "capsule") {
+        return Err("Take recovery is only available in the main or capsule window".into());
+    }
+    let state = app
+        .try_state::<pipeline::PipelineHandle>()
+        .ok_or_else(|| "Take recovery is unavailable".to_string())?;
+    state.recover_unfinished_take(id).await.map_err(|error| {
+        tracing::warn!(entry_id = id, error = %error, "Recovering unfinished take failed");
+        error.to_string()
+    })
+}
+
+#[tauri::command]
+fn cancel_transcription_retry<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("History retry cancellation is only available in the main window".into());
+    }
+    let state = app
+        .try_state::<pipeline::PipelineHandle>()
+        .ok_or_else(|| "History retry cancellation is unavailable".to_string())?;
+    state.cancel_history_retry();
     Ok(())
 }
 
@@ -686,32 +1194,35 @@ fn log_linux_launch_diagnostics(xinitthreads_status: linux_x11::XInitThreadsStat
     );
 }
 
-fn set_hotkey_registration_error_state(app: &tauri::AppHandle, message: Option<String>) {
+fn set_hotkey_registration_error_state<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    message: Option<String>,
+) {
     if let Some(state) = app.try_state::<HotkeyRegistrationError>() {
         *state.0.lock().unwrap_or_else(|e| e.into_inner()) = message;
     }
 }
 
-fn record_hotkey_registration_result(
-    app: &tauri::AppHandle,
+fn record_hotkey_registration_result<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     supervisor: &hotkey::HotkeySupervisor,
     generation: u64,
     result: Result<(), String>,
 ) -> Result<(), String> {
-    if !supervisor.is_current_generation(generation) {
+    let error = result.as_ref().err().cloned();
+    if !supervisor.record_registration_result(generation, error.clone(), || {
+        set_hotkey_registration_error_state(app, error.clone());
+        hotkey::publish_saved_input_configuration(app, generation);
+    }) {
         return Err(commands::misc::HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
     }
 
     match result {
         Ok(()) => {
-            supervisor.record_registration_success(generation);
-            set_hotkey_registration_error_state(app, None);
             let _ = app.emit("hotkey:registration-recovered", ());
             Ok(())
         }
         Err(message) => {
-            supervisor.record_registration_failure(generation, message.clone());
-            set_hotkey_registration_error_state(app, Some(message.clone()));
             let _ = app.emit("hotkey:registration-failed", message.clone());
             Err(message)
         }
@@ -721,6 +1232,14 @@ fn record_hotkey_registration_result(
 fn spawn_hotkey_supervisor(app_handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
+            if app_handle
+                .state::<hotkey::HotkeySupervisor>()
+                .snapshot()
+                .state
+                == hotkey::HotkeySupervisorState::Stopped
+            {
+                break;
+            }
             let delay = app_handle
                 .state::<hotkey::HotkeySupervisor>()
                 .next_retry_delay()
@@ -730,6 +1249,130 @@ fn spawn_hotkey_supervisor(app_handle: tauri::AppHandle) {
             tokio::time::sleep(delay).await;
 
             let supervisor = app_handle.state::<hotkey::HotkeySupervisor>();
+            let scanned_generation = supervisor.snapshot().generation;
+            #[cfg(target_os = "macos")]
+            let release_snapshot = shortcut_release::physical_key_snapshot().ok();
+            #[cfg(not(target_os = "macos"))]
+            let release_snapshot: Option<Vec<u16>> = None;
+            let physically_pressed = release_snapshot.as_ref().map(|keys| !keys.is_empty());
+            #[cfg(target_os = "macos")]
+            {
+                supervisor.observe_input_monitoring(shortcut_release::input_monitoring_trusted());
+                supervisor.observe_accessibility(pipeline::is_accessibility_trusted());
+                supervisor.observe_input_for_generation(scanned_generation, || {
+                    hotkey::observe_input_physical_keys(&app_handle, release_snapshot);
+                });
+            }
+            supervisor.observe_release_for_recovery(scanned_generation, physically_pressed);
+            let transaction = app_handle.state::<hotkey::HotkeyConfigTransaction>();
+            let Ok(_transaction) = transaction.0.try_lock() else {
+                continue;
+            };
+            if let Some(lease) = supervisor.permission_recovery_capture().or_else(|| {
+                supervisor.release_recovery_capture_for(scanned_generation, physically_pressed)
+            }) {
+                drop(_transaction);
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let result = commands::misc::resume_hotkey(
+                        window.as_ref().window(),
+                        app_handle.clone(),
+                        app_handle.state::<storage::ConfigManager>(),
+                        app_handle.state::<HotkeyRegistrationError>(),
+                        app_handle.state::<hotkey::HotkeySupervisor>(),
+                        Some(lease.capture_id),
+                    )
+                    .await;
+                    if let Err(error) = result {
+                        tracing::warn!("Permission recovery did not complete: {error}");
+                    }
+                }
+                continue;
+            }
+            if !app_handle
+                .state::<hotkey::HotkeySupervisor>()
+                .capture_allows_registration()
+            {
+                continue;
+            }
+            if supervisor.snapshot().state == hotkey::HotkeySupervisorState::WaitingRelease {
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let snapshot = supervisor.snapshot();
+                let expects_native_monitor = !app_handle
+                    .state::<HotkeyRoleCache>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .native
+                    .is_empty();
+                if matches!(
+                    snapshot.state,
+                    hotkey::HotkeySupervisorState::Installed
+                        | hotkey::HotkeySupervisorState::Failed
+                ) && expects_native_monitor
+                {
+                    let observation = app_handle
+                        .state::<native_hotkey::NativeHotkeyRuntime>()
+                        .observed_native_key_pressed();
+                    let failure = match observation {
+                        Some(Ok(_)) => None,
+                        Some(Err(error)) => Some(error),
+                        None => Some("Native shortcut monitor is missing".to_string()),
+                    };
+                    if let Some(error) = failure {
+                        if supervisor.record_monitor_failure(snapshot.generation, error) {
+                            hotkey::input_monitor_lost(&app_handle);
+                            tracing::warn!(
+                                "Native shortcut monitor became unavailable; scheduling recovery"
+                            );
+                        }
+                    }
+                }
+            }
+            if hotkey::input_configuration_busy(&app_handle) {
+                continue;
+            }
+            if let Ok(config) = app_handle
+                .state::<storage::ConfigManager>()
+                .cached_input_config()
+            {
+                if let Some(generation) =
+                    hotkey::pending_input_configuration_publication(&app_handle, &config)
+                {
+                    if supervisor.publish_registered_configuration(generation, || {
+                        hotkey::publish_saved_input_configuration(&app_handle, generation);
+                    }) {
+                        continue;
+                    }
+                }
+                if hotkey::input_configuration_needs_installation(&app_handle, &config) {
+                    let Some(_installation_reservation) =
+                        hotkey::reserve_input_installation(&app_handle)
+                    else {
+                        continue;
+                    };
+                    let generation = supervisor.wake_for_settings_change();
+                    let result = commands::misc::register_configured_shortcuts_for_generation(
+                        &app_handle,
+                        &config,
+                        &supervisor,
+                        generation,
+                    );
+                    let _ = record_hotkey_registration_result(
+                        &app_handle,
+                        &supervisor,
+                        generation,
+                        result,
+                    );
+                    continue;
+                }
+            }
+            let Some(_installation_reservation) = hotkey::reserve_input_installation(&app_handle)
+            else {
+                continue;
+            };
             let Some(generation) = supervisor.begin_retry_registration_attempt() else {
                 continue;
             };
@@ -737,13 +1380,13 @@ fn spawn_hotkey_supervisor(app_handle: tauri::AppHandle) {
             let config = match app_handle.state::<storage::ConfigManager>().load().await {
                 Ok(config) => config,
                 Err(error) => {
-                    if !supervisor.is_current_generation(generation) {
-                        continue;
-                    }
                     let message = format!("Failed to load hotkey config for retry: {error}");
-                    supervisor.record_registration_failure(generation, message.clone());
-                    set_hotkey_registration_error_state(&app_handle, Some(message.clone()));
-                    let _ = app_handle.emit("hotkey:registration-failed", message);
+                    let _ = record_hotkey_registration_result(
+                        &app_handle,
+                        &supervisor,
+                        generation,
+                        Err(message),
+                    );
                     continue;
                 }
             };
@@ -827,7 +1470,9 @@ fn dispatch_cli_action(app: &tauri::AppHandle, action: CliAction) {
                 )
                 .await
                 {
-                    tracing::error!("CLI ask failed: {error}");
+                    if error != commands::ask::ASK_CANCELLED {
+                        tracing::error!("CLI ask failed");
+                    }
                 }
             });
         }
@@ -868,10 +1513,13 @@ pub fn run() {
 
     // Builder-managed state exists before Tauri creates configured webviews.
     // Registering this in `.setup(...)` races the main renderer's first invoke on WebView2.
-    let builder = with_restored_session_token(
-        tauri::Builder::default(),
-        &credentials::SystemCredentialVault,
-    );
+    let builder = tauri::Builder::default()
+        .manage(session_commit::SessionCommitAttempts::default())
+        .manage(SessionTokenStore(
+            Arc::new(Mutex::new(String::new())),
+            std::sync::atomic::AtomicBool::new(false),
+            Mutex::new(uuid::Uuid::new_v4().to_string()),
+        ));
 
     builder
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -883,6 +1531,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if let Some(action) = parse_cli_action(&args) {
                 dispatch_cli_action(app, action);
@@ -918,6 +1567,7 @@ pub fn run() {
 
             // Initialize stores
             let config_manager = storage::ConfigManager::new(app_handle.clone());
+            let mut initial_config = tauri::async_runtime::block_on(config_manager.load())?;
             let history_store = storage::HistoryStore::new(db_path.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to init history store: {}", e))?;
             let dictionary_store = storage::DictionaryStore::new(db_path)
@@ -940,12 +1590,13 @@ pub fn run() {
             );
 
             // Load initial config to get hotkey
-            let mut initial_config =
-                tauri::async_runtime::block_on(config_manager.load()).unwrap_or_default();
             sync_auto_start_preference(&app_handle, &config_manager, &mut initial_config);
             app.manage(config_manager);
             app.manage(history_store);
+            app.manage(audio::preview::MicrophonePreview::default());
+            app.manage(practice::PracticeState::default());
             app.manage(dictionary_store);
+            app.manage(edit_learning::EditLearningState::default());
             app.manage(app_mapping_store);
             app.manage(shared_client);
             app.manage(context_detector);
@@ -954,6 +1605,9 @@ pub fn run() {
             app.manage(HotkeyModeCache(Arc::new(Mutex::new(
                 initial_config.hotkey_mode.clone(),
             ))));
+            hotkey::install_recording_command_queue(&app_handle);
+            app.manage(audio::output_mute::BackgroundMute::default());
+            audio::output_mute::restore_after_unclean_exit(&app_handle);
             app.manage(AskHotkeyCache(Arc::new(Mutex::new(
                 initial_config.ask_hotkey.clone(),
             ))));
@@ -965,10 +1619,15 @@ pub fn run() {
             let hotkey_registration_error = Arc::new(Mutex::new(None));
             app.manage(HotkeyRegistrationError(hotkey_registration_error.clone()));
             let hotkey_supervisor = hotkey::HotkeySupervisor::default();
+            #[cfg(target_os = "macos")]
+            hotkey_supervisor.observe_accessibility(pipeline::is_accessibility_trusted());
             app.manage(hotkey_supervisor.clone());
+            app.manage(hotkey::HotkeyConfigTransaction::default());
             app.manage(CloseToTrayCache(Arc::new(Mutex::new(
                 initial_config.close_to_tray,
             ))));
+            apply_dock_visibility(app.handle(), initial_config.show_in_dock);
+            escape_cancel::install(&app_handle);
             // Register global shortcut from config
             let handler = hotkey::build_shortcut_handler(app_handle.clone());
             app.handle().plugin(
@@ -989,7 +1648,7 @@ pub fn run() {
 
             // System tray
             let tray_menu =
-                tray::build_tray_menu(&app_handle, false, true, initial_config.capsule_auto_hide)
+                tray::build_tray_menu(&app_handle, false, initial_config.capsule_auto_hide)
                     .map_err(|e| anyhow::anyhow!("Failed to build tray menu: {}", e))?;
 
             let tray = TrayIconBuilder::new()
@@ -1004,18 +1663,8 @@ pub fn run() {
                     "quit" => {
                         app.exit(0);
                     }
-                    "show_hide" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let visible = window.is_visible().unwrap_or(false);
-                            if visible {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                            refresh_tray(app);
-                        }
-                    }
+                    "open_home" => show_main_window_at(app, "#/"),
+                    "add_word" => show_main_window_at(app, "#/dictionary"),
                     "record" => {
                         let handle = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -1052,41 +1701,41 @@ pub fn run() {
                             }
                         });
                     }
-                    "settings" => {
+                    "settings" => show_main_window_at(app, "#/settings?pane=general"),
+                    "history" => show_main_window_at(app, "#/history"),
+                    "account" => show_main_window_at(app, "#/account"),
+                    "check_updates" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("tray:settings", ());
+                            let _ = window.emit("tray:check-updates", ());
+                            let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
                             refresh_tray(app);
                         }
                     }
-                    "history" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("tray:history", ());
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            refresh_tray(app);
+                    "about" => show_main_window_at(app, "#/settings?pane=about"),
+                    id => {
+                        if let Some(device) = tray::microphone_selection_from_menu_id(id) {
+                            let handle = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let config_state = handle.state::<storage::ConfigManager>();
+                                if let Err(e) = commands::config::save_microphone_device(
+                                    &handle,
+                                    &config_state,
+                                    device,
+                                )
+                                .await
+                                {
+                                    tracing::error!("Tray microphone selection failed: {}", e);
+                                }
+                            });
                         }
                     }
-                    "account" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("navigate", "#/account");
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            refresh_tray(app);
-                        }
-                    }
-                    "about" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("tray:about", ());
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            refresh_tray(app);
-                        }
-                    }
-                    _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
+                    if matches!(event, TrayIconEvent::Enter { .. }) {
+                        tray::refresh_microphones(tray.app_handle());
+                    }
                     let should_show = matches!(
                         event,
                         TrayIconEvent::Click {
@@ -1112,12 +1761,43 @@ pub fn run() {
             app.manage(TrayHandle {
                 tray: Mutex::new(tray),
             });
+            tray::refresh_microphones(&app_handle);
 
             // Close-to-tray: intercept window close
             if let Some(main_window) = app.get_webview_window("main") {
                 window_state::restore_and_track(&main_window);
                 let handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
+                    practice::cancel_for_window_event(&handle, "main", event);
+                    if let Some(lease) =
+                        shortcut_capture::stop_for_window_event(&handle, "main", event)
+                    {
+                        let recovery_handle = handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let Some(window) = recovery_handle.get_webview_window("main") else {
+                                return;
+                            };
+                            let result = commands::misc::resume_hotkey(
+                                window.as_ref().window(),
+                                recovery_handle.clone(),
+                                recovery_handle.state::<storage::ConfigManager>(),
+                                recovery_handle.state::<HotkeyRegistrationError>(),
+                                recovery_handle.state::<hotkey::HotkeySupervisor>(),
+                                Some(lease.capture_id),
+                            )
+                            .await;
+                            if let Err(error) = result {
+                                tracing::warn!(
+                                    "Window shortcut recovery did not complete: {error}"
+                                );
+                            }
+                        });
+                    }
+                    if matches!(event, tauri::WindowEvent::Focused(true)) {
+                        handle
+                            .state::<hotkey::HotkeySupervisor>()
+                            .retry_failed_on_focus();
+                    }
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         window_state::save_main_window_state(&handle);
                         let close_to_tray = *handle
@@ -1165,8 +1845,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::config::load_onboarding_completed,
+            commands::config::save_onboarding_completed,
             start_recording,
             stop_recording,
+            retry_transcription,
+            retry_history_transcription,
+            recover_unfinished_take,
+            cancel_transcription_retry,
             abort_recording,
             commands::ask::ask_anything,
             commands::ask::start_ask_dictation,
@@ -1185,10 +1871,12 @@ pub fn run() {
             commands::app_mappings::reset_custom_app_mappings,
             commands::app_mappings::set_family_scene_assignment,
             show_ask_window,
+            resize_ask_window,
             commands::misc::check_accessibility_permission,
             commands::misc::request_accessibility_permission,
             commands::misc::request_browser_access,
             commands::config::get_config,
+            commands::config::get_config_commit,
             commands::config::update_config,
             commands::credentials::get_credential_status,
             commands::credentials::read_credential,
@@ -1206,12 +1894,29 @@ pub fn run() {
             commands::stt::bench_stt_connection,
             commands::llm::fetch_llm_models,
             commands::history::get_history,
+            commands::history::export_history_audio,
+            commands::share::copy_png_to_clipboard,
+            commands::share::save_png_with_dialog,
             commands::history::clear_history,
+            commands::history::prune_history_retention,
+            commands::history::delete_history_entry,
+            commands::history::get_usage_stats,
+            commands::ask::show_saved_ask_answer,
+            commands::audio::list_microphones,
+            audio::preview::start_microphone_preview,
+            audio::preview::get_microphone_preview_level,
+            audio::preview::stop_microphone_preview,
+            commands::practice::start_practice,
+            commands::practice::stop_practice,
+            commands::practice::cancel_practice,
+            commands::practice::get_practice,
             commands::backup::restore_backup_data,
+            commands::backup::validate_backup_data,
             commands::dictionary::get_dictionary,
             commands::dictionary::add_dictionary_entry,
             commands::dictionary::update_dictionary_entry,
             commands::dictionary::remove_dictionary_entry,
+            commands::dictionary::remove_dictionary_entries,
             commands::dictionary::get_correction_rules,
             commands::dictionary::add_correction_rule,
             commands::dictionary::update_correction_rule,
@@ -1224,8 +1929,12 @@ pub fn run() {
             commands::misc::update_hotkey,
             commands::misc::update_ask_hotkey,
             commands::misc::pause_hotkey,
+            shortcut_capture::start_shortcut_capture,
+            shortcut_capture::stop_shortcut_capture,
             commands::misc::resume_hotkey,
             commands::misc::refresh_tray_labels,
+            commands::misc::set_tray_update_status,
+            commands::misc::is_development_build,
             commands::misc::get_platform_capabilities,
             commands::misc::get_hotkey_registration_error,
             commands::misc::get_hotkey_status,
@@ -1233,13 +1942,30 @@ pub fn run() {
             commands::config::set_auto_start,
             commands::config::set_capsule_auto_hide,
             commands::config::get_session_token,
+            commands::config::get_cloud_session_snapshot,
             commands::config::set_session_token,
+            commands::config::set_cloud_session_snapshot,
+            commands::config::begin_cloud_session_commit,
+            commands::config::cancel_cloud_session_commit,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            if matches!(_event, tauri::RunEvent::Exit) {
+                if let Some(supervisor) = _app.try_state::<hotkey::HotkeySupervisor>() {
+                    supervisor.shutdown();
+                }
+                if let Some(queue) = _app.try_state::<hotkey::RecordingCommandQueue>() {
+                    queue.shutdown();
+                }
+                if let Some(runtime) = _app.try_state::<native_hotkey::NativeHotkeyRuntime>() {
+                    runtime.shutdown();
+                }
+            }
             if matches!(_event, tauri::RunEvent::ExitRequested { .. }) {
+                practice::cancel_on_exit(_app);
                 window_state::save_main_window_state(_app);
+                audio::output_mute::restore_on_exit(_app);
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {

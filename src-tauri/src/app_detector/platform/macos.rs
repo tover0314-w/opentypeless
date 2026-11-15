@@ -31,6 +31,43 @@ pub(crate) fn restore_target_application(target: &TargetAppGuard) -> bool {
 }
 
 impl ContextSignalSource for MacOsContextSource {
+    fn target_identity(&self) -> Option<TargetAppGuard> {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
+        use std::ffi::CStr;
+
+        objc2::rc::autoreleasepool(|_| unsafe {
+            let workspace_class = AnyClass::get("NSWorkspace")?;
+            let workspace: *mut AnyObject = msg_send![workspace_class, sharedWorkspace];
+            if workspace.is_null() {
+                return None;
+            }
+            let application: *mut AnyObject = msg_send![workspace, frontmostApplication];
+            if application.is_null() {
+                return None;
+            }
+            let process_id: i32 = msg_send![application, processIdentifier];
+            if process_id <= 0 {
+                return None;
+            }
+            let identifier: *mut AnyObject = msg_send![application, bundleIdentifier];
+            let native_identity = if identifier.is_null() {
+                None
+            } else {
+                let bytes: *const std::os::raw::c_char = msg_send![identifier, UTF8String];
+                if bytes.is_null() {
+                    None
+                } else {
+                    CStr::from_ptr(bytes).to_str().ok().map(str::to_owned)
+                }
+            };
+            Some(TargetAppGuard {
+                process_id: Some(process_id as u32),
+                native_identity,
+            })
+        })
+    }
+
     fn collect(&self) -> Option<ContextSignals> {
         let output = Command::new("/usr/bin/osascript")
             .args(["-e", FRONT_APP_SCRIPT])

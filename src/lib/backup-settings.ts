@@ -1,3 +1,12 @@
+import { normalizeLanguageVariants, type LanguageVariants } from './languageVariants'
+import { LLM_PROVIDERS, STT_PROVIDERS, TARGET_LANGUAGES, UI_LANGUAGES } from './constants'
+import { bindingFromHotkey } from '../stores/appStore'
+import { importCustomScenesJson } from './scenes/sceneImportExport'
+import {
+  restoreActiveScene,
+  restoreFamilyAssignments,
+  restoreSystemOverrides,
+} from './scenes/backupSceneMetadata'
 import type {
   ActiveScene,
   AppConfig,
@@ -50,8 +59,14 @@ type SafeScalarKey =
   | 'history_max_entries'
   | 'ui_language'
   | 'capsule_auto_hide'
+  | 'interaction_sounds'
+  | 'mute_background_audio'
+  | 'show_in_dock'
+  | 'save_recording_audio'
+  | 'auto_learn_dictionary'
 
 export type BackupSettings = Partial<Pick<AppConfig, SafeScalarKey>> & {
+  language_variants?: LanguageVariants
   voice_routing_flags?: VoiceRoutingFlags
   custom_scenes?: CustomScene[]
   system_scene_overrides?: SystemSceneOverride[]
@@ -69,18 +84,56 @@ function safeBinding(binding: ShortcutBinding | null | undefined): ShortcutBindi
   }
 }
 
+const CREDENTIAL_QUERY_KEYS = new Set([
+  'apikey',
+  'accesstoken',
+  'authorization',
+  'token',
+  'password',
+  'secret',
+  'clientsecret',
+  'signature',
+  'sig',
+  'key',
+])
+
+function safeBackupEndpoint(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  if (!value.trim()) return value
+  try {
+    const endpoint = new URL(value)
+    if (
+      !['http:', 'https:'].includes(endpoint.protocol) ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.hash
+    ) {
+      return undefined
+    }
+    for (const key of endpoint.searchParams.keys()) {
+      if (CREDENTIAL_QUERY_KEYS.has(key.toLowerCase().replace(/[-_]/g, ''))) {
+        return undefined
+      }
+    }
+    return value
+  } catch {
+    return undefined
+  }
+}
+
 export function createBackupSettings(config: AppConfig): BackupSettings {
   const settings: BackupSettings = {
+    language_variants: normalizeLanguageVariants(config.language_variants),
     stt_provider: config.stt_provider,
     stt_language: config.stt_language,
     stt_custom_preset: config.stt_custom_preset,
-    stt_custom_base_url: config.stt_custom_base_url,
+    stt_custom_base_url: safeBackupEndpoint(config.stt_custom_base_url),
     stt_custom_model: config.stt_custom_model,
     stt_volcengine_resource_id: config.stt_volcengine_resource_id,
     stt_aliyun_qwen_region: config.stt_aliyun_qwen_region,
     llm_provider: config.llm_provider,
     llm_model: config.llm_model,
-    llm_base_url: config.llm_base_url,
+    llm_base_url: safeBackupEndpoint(config.llm_base_url),
     polish_enabled: config.polish_enabled,
     context_adaptation_enabled: config.context_adaptation_enabled,
     polish_style: config.polish_style,
@@ -157,6 +210,7 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
           editSelection: safeBinding(config.hotkeys.editSelection),
           switchScene: safeBinding(config.hotkeys.switchScene),
           openApp: safeBinding(config.hotkeys.openApp),
+          pasteLast: safeBinding(config.hotkeys.pasteLast),
           dictationMode: config.hotkeys.dictationMode,
         }
       : undefined,
@@ -179,6 +233,11 @@ export function createBackupSettings(config: AppConfig): BackupSettings {
     history_max_entries: config.history_max_entries,
     ui_language: config.ui_language,
     capsule_auto_hide: config.capsule_auto_hide,
+    interaction_sounds: config.interaction_sounds,
+    mute_background_audio: config.mute_background_audio,
+    show_in_dock: config.show_in_dock,
+    save_recording_audio: config.save_recording_audio,
+    auto_learn_dictionary: config.auto_learn_dictionary,
   }
 
   if (config.voice_routing_flags) {
@@ -233,42 +292,197 @@ const SAFE_SCALAR_KEYS: readonly SafeScalarKey[] = [
   'history_max_entries',
   'ui_language',
   'capsule_auto_hide',
+  'interaction_sounds',
+  'mute_background_audio',
+  'show_in_dock',
+  'save_recording_audio',
+  'auto_learn_dictionary',
 ]
+
+const ENUM_VALUES: Partial<Record<SafeScalarKey, readonly string[]>> = {
+  stt_provider: STT_PROVIDERS.map((provider) => provider.value),
+  llm_provider: LLM_PROVIDERS.map((provider) => provider.value),
+  output_mode: ['keyboard', 'clipboard'],
+  insertion_strategy: [
+    'auto',
+    'keyboard',
+    'clipboardPaste',
+    'clipboardCopyOnly',
+    'windowsSendInput',
+  ],
+  theme: ['light', 'dark', 'system'],
+  polish_style: ['minimal', 'clean', 'structured', 'professional', 'custom'],
+  hotkey_mode: ['hold', 'toggle', 'auto'],
+  stt_aliyun_qwen_region: ['china-mainland', 'international'],
+  paste_shortcut: ['ctrlV', 'ctrlShiftV', 'shiftInsert'],
+  windows_sendinput_newline_mode: ['enter', 'shiftEnter', 'crlf'],
+  polish_chinese_script: ['preserve', 'simplified', 'traditional'],
+  recording_limit_mode: ['auto', 'custom'],
+  ui_language: UI_LANGUAGES.map((language) => language.value),
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function restoredBinding(value: unknown): ShortcutBinding | null {
+  if (
+    !isRecord(value) ||
+    typeof value.primary !== 'string' ||
+    !Array.isArray(value.modifiers) ||
+    !value.modifiers.every((modifier) => typeof modifier === 'string')
+  ) {
+    return null
+  }
+  return bindingFromHotkey([...value.modifiers, value.primary].join('+'))
+}
+
+function restoreHotkeys(current: HotkeyConfig, incoming: Record<string, unknown>): HotkeyConfig {
+  const next = { ...current }
+  for (const role of ['dictation', 'ask', 'translate'] as const) {
+    const listKey = `${role}Bindings` as 'dictationBindings' | 'askBindings' | 'translateBindings'
+    const list = incoming[listKey]
+    if (Array.isArray(list)) {
+      const parsed = list.map(restoredBinding)
+      if (parsed.some((binding) => binding === null) || (role === 'dictation' && !parsed.length)) {
+        continue
+      }
+      const bindings = parsed.filter((binding): binding is ShortcutBinding => binding !== null)
+      const unique = bindings
+        .filter(
+          (binding, index) =>
+            bindings.findIndex(
+              (candidate) =>
+                candidate.primary === binding.primary &&
+                candidate.modifiers.join('+') === binding.modifiers.join('+'),
+            ) === index,
+        )
+        .slice(0, 4)
+      next[listKey] = unique
+      if (role === 'dictation') next.dictation = unique[0]
+      else next[role] = unique[0] ?? null
+    } else if (list === undefined && role in incoming) {
+      const binding = restoredBinding(incoming[role])
+      if (binding) {
+        next[role] = binding
+        next[listKey] = [binding, ...current[listKey].slice(1)]
+      } else if (role !== 'dictation' && incoming[role] === null) {
+        next[role] = null
+        next[listKey] = []
+      }
+    }
+  }
+  for (const role of ['editSelection', 'switchScene', 'openApp', 'pasteLast'] as const) {
+    if (incoming[role] === null) next[role] = null
+    else {
+      const binding = restoredBinding(incoming[role])
+      if (binding) next[role] = binding
+    }
+  }
+  const mode = incoming.dictationMode
+  if (mode === 'hold' || mode === 'toggle' || mode === 'auto') next.dictationMode = mode
+  return next
 }
 
 export function mergeBackupSettings(current: AppConfig, backup: unknown): AppConfig {
   if (!isRecord(backup)) return current
 
   const next = { ...current }
+  if ('language_variants' in backup) {
+    next.language_variants = normalizeLanguageVariants(backup.language_variants)
+  } else if (
+    backup.polish_chinese_script === 'simplified' ||
+    backup.polish_chinese_script === 'traditional'
+  ) {
+    next.language_variants = {
+      ...normalizeLanguageVariants(current.language_variants),
+      zh: backup.polish_chinese_script === 'simplified' ? 'zh-CN' : 'zh-TW',
+    }
+  }
   const writable = next as unknown as Record<string, unknown>
   for (const key of SAFE_SCALAR_KEYS) {
     const incoming = backup[key]
+    if (
+      (key === 'llm_base_url' || key === 'stt_custom_base_url') &&
+      (typeof incoming !== 'string' || safeBackupEndpoint(incoming) === undefined)
+    ) {
+      continue
+    }
+    const allowed = ENUM_VALUES[key]
+    if (allowed && (typeof incoming !== 'string' || !allowed.includes(incoming))) continue
+    if (typeof incoming === 'number' && (!Number.isSafeInteger(incoming) || incoming < 0)) {
+      continue
+    }
     if (typeof incoming === typeof current[key]) writable[key] = incoming
+  }
+  if (
+    backup.polish_chinese_script === 'simplified' ||
+    backup.polish_chinese_script === 'traditional'
+  ) {
+    next.polish_chinese_script = 'preserve'
   }
 
   if (isRecord(backup.voice_routing_flags)) {
-    next.voice_routing_flags = backup.voice_routing_flags as unknown as VoiceRoutingFlags
+    next.voice_routing_flags = { ...current.voice_routing_flags }
+    for (const key of [
+      'draft_insert',
+      'rewrite_selection',
+      'translate_selection',
+      'search',
+    ] as const) {
+      const incoming = backup.voice_routing_flags[key]
+      if (typeof incoming === 'boolean') next.voice_routing_flags[key] = incoming
+    }
   }
   if (Array.isArray(backup.custom_scenes)) {
-    next.custom_scenes = backup.custom_scenes as CustomScene[]
+    const imported = importCustomScenesJson(JSON.stringify(backup.custom_scenes), {
+      existingIds: new Set(),
+      createId: () => `custom_${crypto.randomUUID()}`,
+      nowIso: () => new Date().toISOString(),
+    })
+    if (backup.custom_scenes.length === 0 || imported.scenes.length > 0) {
+      next.custom_scenes = imported.scenes
+    }
   }
   if (Array.isArray(backup.system_scene_overrides)) {
-    next.system_scene_overrides = backup.system_scene_overrides as SystemSceneOverride[]
+    const overrides = restoreSystemOverrides(backup.system_scene_overrides)
+    if (backup.system_scene_overrides.length === 0 || overrides.length > 0) {
+      next.system_scene_overrides = overrides
+    }
   }
-  if (backup.active_scene === null || isRecord(backup.active_scene)) {
-    next.active_scene = backup.active_scene as ActiveScene | null
+  if (backup.active_scene === null) {
+    next.active_scene = null
+  } else {
+    const active = restoreActiveScene(backup.active_scene)
+    if (active) next.active_scene = active
   }
   if (Array.isArray(backup.family_scene_assignments)) {
-    next.family_scene_assignments = backup.family_scene_assignments as FamilySceneAssignment[]
+    const assignments = restoreFamilyAssignments(backup.family_scene_assignments)
+    if (backup.family_scene_assignments.length === 0 || assignments.length > 0) {
+      next.family_scene_assignments = assignments
+    }
   }
   if (isRecord(backup.translation)) {
-    next.translation = backup.translation as unknown as TranslationConfig
+    const { targets, active_target: requestedActive } = backup.translation
+    if (
+      Array.isArray(targets) &&
+      targets.every((target) => typeof target === 'string') &&
+      typeof requestedActive === 'string'
+    ) {
+      const supported = new Set(TARGET_LANGUAGES.map((language) => language.value))
+      const normalized = [...new Set(targets.map((target) => target.trim().toLowerCase()))]
+        .filter((target) => supported.has(target))
+        .slice(0, 5)
+      if (normalized.length > 0) {
+        const active = requestedActive.trim().toLowerCase()
+        const activeTarget = normalized.includes(active) ? active : normalized[0]
+        next.translation = { targets: normalized, active_target: activeTarget }
+        next.target_lang = activeTarget
+      }
+    }
   }
   if (isRecord(backup.hotkeys)) {
-    next.hotkeys = backup.hotkeys as unknown as HotkeyConfig
+    next.hotkeys = restoreHotkeys(current.hotkeys, backup.hotkeys)
   }
 
   return next

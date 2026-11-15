@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import { LlmPane } from '../LlmPane'
+import { chooseOption, selectedValue } from '../../shared/__tests__/selectTestUtils'
 import * as tauri from '../../../lib/tauri'
 
 // Mock Tauri
@@ -124,12 +125,15 @@ const mockAuthStore = {
 }
 
 vi.mock('../../../stores/appStore', () => ({
-  useAppStore: (selector: any) => {
-    if (typeof selector === 'function') {
-      return selector(mockAppStore)
-    }
-    return mockAppStore
-  },
+  useAppStore: Object.assign(
+    (selector: any) => {
+      if (typeof selector === 'function') {
+        return selector(mockAppStore)
+      }
+      return mockAppStore
+    },
+    { getState: () => mockAppStore },
+  ),
 }))
 
 vi.mock('../../../stores/authStore', () => ({
@@ -150,6 +154,137 @@ vi.mock('../../../stores/authStore', () => ({
 }))
 
 describe('LlmPane', () => {
+  it('preserves connection feedback when confirming the current model', () => {
+    mockAppStore.llmTestStatus = 'success'
+    mockAppStore.llmLatencyMs = 187
+    mockAppStore.llmModels = ['gpt-4o-mini', 'another-model']
+    render(<LlmPane />)
+    const input = screen.getByRole('combobox', { name: 'Model' })
+    fireEvent.focus(input)
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(mockAppStore.updateConfig).not.toHaveBeenCalled()
+    expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalled()
+    expect(mockAppStore.setLlmLatencyMs).not.toHaveBeenCalled()
+    expect(screen.getByText('187ms')).toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('uses the existing connection failure text for a blank backend error', async () => {
+    mockAppStore.config.llm_api_key = 'synthetic-key'
+    vi.mocked(tauri.benchLlmConnection).mockRejectedValueOnce(new Error(' \n\t'))
+    render(<LlmPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    expect(await screen.findByText('Connection failed')).toBeInTheDocument()
+  })
+
+  it('redacts the tested API key from connection feedback and logs', async () => {
+    const key = 'synthetic+$private-key'
+    mockAppStore.config.llm_api_key = key
+    vi.mocked(tauri.benchLlmConnection).mockRejectedValueOnce(
+      new Error(`Rejected ${key}; repeated ${key}`),
+    )
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      expect(
+        await screen.findByText('Rejected [redacted]; repeated [redacted]'),
+      ).toBeInTheDocument()
+      expect(log).toHaveBeenCalledExactlyOnceWith('[LLM Test] Connection failed')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it.each(['success', 'failure'] as const)(
+    'ignores connection %s after configuration changes without a rerender',
+    async (outcome) => {
+      let finish: ((latency: number) => void) | undefined
+      let fail: ((error: Error) => void) | undefined
+      vi.mocked(tauri.benchLlmConnection).mockReturnValueOnce(
+        new Promise<number>((resolve, reject) => {
+          finish = resolve
+          fail = reject
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      mockAppStore.config = { ...mockAppStore.config, llm_base_url: 'https://new.example.test/v1' }
+      await act(async () => {
+        if (outcome === 'success') finish?.(123)
+        else fail?.(new Error('Obsolete connection failure'))
+      })
+      expect(mockAppStore.setLlmLatencyMs).not.toHaveBeenCalledWith(123)
+      expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+      expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalledWith('error')
+    },
+  )
+
+  it.each(['llm_provider', 'llm_base_url', 'llm_api_key'] as const)(
+    'does not send model or connection requests from a stale %s render',
+    async (field) => {
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      render(<LlmPane />)
+      const modelsButton = screen.getByRole('button', { name: 'Fetch models' })
+      const testButton = screen.getByRole('button', { name: 'Test' })
+      await act(async () => {
+        mockAppStore.config = { ...mockAppStore.config, [field]: 'changed-value' }
+        fireEvent.click(modelsButton)
+        fireEvent.click(testButton)
+      })
+      expect(tauri.fetchLlmModels).not.toHaveBeenCalled()
+      expect(tauri.benchLlmConnection).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(['llm_provider', 'llm_base_url', 'llm_api_key'] as const)(
+    'rejects a model list after %s changes before the page rerenders',
+    async (field) => {
+      let finish: ((models: string[]) => void) | undefined
+      vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+        new Promise<string[]>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }))
+      mockAppStore.config = { ...mockAppStore.config, [field]: 'changed-value' }
+      await act(async () => finish?.(['obsolete-model']))
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['obsolete-model'])
+    },
+  )
+
+  it('does not overwrite a newer shared model cache with a late request', async () => {
+    let finish: ((models: string[]) => void) | undefined
+    vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+      new Promise<string[]>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.llm_api_key = 'synthetic-key'
+    const { rerender } = render(<LlmPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }))
+    mockAppStore.llmModels = ['new-shared-model']
+    rerender(<LlmPane />)
+    await act(async () => finish?.(['old-request-model']))
+    expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['old-request-model'])
+  })
+
+  it('keeps a newly typed key when the initial vault read finishes late', async () => {
+    let finishRead: (secret: string) => void = () => {}
+    vi.mocked(tauri.readCredential).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        finishRead = resolve
+      }),
+    )
+    render(<LlmPane />)
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'new-user-key' } })
+    await act(async () => finishRead('old-vault-key'))
+    expect(screen.getByLabelText('API Key')).toHaveValue('new-user-key')
+  })
+
   beforeEach(() => {
     // Reset mock store state
     mockAppStore.config = {
@@ -198,7 +333,7 @@ describe('LlmPane', () => {
       render(<LlmPane />)
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0] // First select is provider
-      expect(providerSelect).toHaveValue('openai')
+      expect(selectedValue(providerSelect)).toBe('openai')
     })
 
     it('updates config and resets state when provider changes', () => {
@@ -206,7 +341,7 @@ describe('LlmPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'anthropic' } })
+      chooseOption(providerSelect, 'claude')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalled()
       expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle')
@@ -219,7 +354,7 @@ describe('LlmPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'doubao' } })
+      chooseOption(providerSelect, 'doubao')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         llm_provider: 'doubao',
@@ -278,6 +413,17 @@ describe('LlmPane', () => {
   })
 
   describe('API Key input', () => {
+    it('shows a load error rather than a save error when credential reading fails', async () => {
+      vi.mocked(tauri.readCredential).mockRejectedValueOnce(new Error('synthetic-private-detail'))
+      render(<LlmPane />)
+      expect(await screen.findByText('common.loadFailed')).toBeInTheDocument()
+      expect(screen.queryByText(/settings.credentialSaveFailed/)).not.toBeInTheDocument()
+      const input = screen.getByPlaceholderText('Enter API Key')
+      fireEvent.change(input, { target: { value: 'synthetic-replacement' } })
+      expect(input).toHaveValue('synthetic-replacement')
+      expect(screen.queryByText('common.loadFailed')).not.toBeInTheDocument()
+    })
+
     it('displays the rotated vault key instead of a stale onboarding key', async () => {
       mockAppStore.config.llm_api_key = 'old-onboarding-key'
       vi.mocked(tauri.readCredential).mockResolvedValueOnce('new-vault-key')
@@ -322,10 +468,203 @@ describe('LlmPane', () => {
   })
 
   describe('Test button and latency display', () => {
+    it('starts only one model-list request for same-turn repeated refresh clicks', async () => {
+      let finish: ((models: string[]) => void) | undefined
+      vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+        new Promise<string[]>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      render(<LlmPane />)
+      const button = screen.getByRole('button', { name: 'Fetch models' })
+      act(() => {
+        fireEvent.click(button)
+        fireEvent.click(button)
+      })
+      expect(tauri.fetchLlmModels).toHaveBeenCalledOnce()
+      await act(async () => finish?.(['synthetic-model']))
+      expect(button).not.toBeDisabled()
+    })
+
+    it('keeps a new endpoint request locked when the old request finishes', async () => {
+      let finishOld: ((models: string[]) => void) | undefined
+      let finishNew: ((models: string[]) => void) | undefined
+      vi.mocked(tauri.fetchLlmModels)
+        .mockReturnValueOnce(
+          new Promise<string[]>((resolve) => {
+            finishOld = resolve
+          }),
+        )
+        .mockReturnValueOnce(
+          new Promise<string[]>((resolve) => {
+            finishNew = resolve
+          }),
+        )
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      const { rerender } = render(<LlmPane />)
+      const button = screen.getByRole('button', { name: 'Fetch models' })
+      fireEvent.click(button)
+      mockAppStore.config = { ...mockAppStore.config, llm_base_url: 'https://new.example.test/v1' }
+      rerender(<LlmPane />)
+      fireEvent.click(button)
+      expect(tauri.fetchLlmModels).toHaveBeenCalledTimes(2)
+      await act(async () => finishOld?.(['old-model']))
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+      expect(tauri.fetchLlmModels).toHaveBeenCalledTimes(2)
+      await act(async () => finishNew?.(['new-model']))
+      expect(button).not.toBeDisabled()
+      expect(mockAppStore.setLlmModels).toHaveBeenCalledWith(['new-model'])
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['old-model'])
+    })
+
+    it('permits a model-list retry after a failed request without clearing cached models', async () => {
+      vi.mocked(tauri.fetchLlmModels)
+        .mockRejectedValueOnce(new Error('Synthetic model-list failure'))
+        .mockResolvedValueOnce(['replacement-model'])
+      mockAppStore.config.llm_api_key = 'synthetic-key'
+      mockAppStore.llmModels = ['cached-model']
+      render(<LlmPane />)
+      const button = screen.getByRole('button', { name: 'Fetch models' })
+      await act(async () => fireEvent.click(button))
+      expect(button).not.toBeDisabled()
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalled()
+      await act(async () => fireEvent.click(button))
+      expect(tauri.fetchLlmModels).toHaveBeenCalledTimes(2)
+      expect(mockAppStore.setLlmModels).toHaveBeenCalledWith(['replacement-model'])
+    })
+
+    it.each(['llm_model', 'llm_base_url'] as const)(
+      'ignores a pending connection result after external %s changes',
+      async (field) => {
+        let finish: (latency: number) => void = () => {}
+        vi.mocked(tauri.benchLlmConnection).mockReturnValueOnce(
+          new Promise<number>((resolve) => {
+            finish = resolve
+          }),
+        )
+        mockAppStore.config.llm_api_key = 'sk-test123'
+        const { rerender } = render(<LlmPane />)
+        fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+        mockAppStore.config = { ...mockAppStore.config, [field]: 'changed-config' }
+        rerender(<LlmPane />)
+        await act(async () => finish(100))
+        expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+        expect(mockAppStore.setLlmLatencyMs).not.toHaveBeenCalledWith(100)
+      },
+    )
+
+    it('ignores a model list after the endpoint changes outside the page controls', async () => {
+      let finish: (models: string[]) => void = () => {}
+      vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+        new Promise<string[]>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      const { rerender } = render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }))
+      mockAppStore.config = { ...mockAppStore.config, llm_base_url: 'https://new.example/v1' }
+      rerender(<LlmPane />)
+      finish(['old-endpoint-model'])
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['old-endpoint-model'])
+    })
+
+    it('does not apply an old model list after switching providers', async () => {
+      let finish: (models: string[]) => void = () => {}
+      vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+        new Promise<string[]>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }))
+      chooseOption(screen.getByRole('combobox', { name: 'Provider' }), 'ollama')
+      finish(['old-provider-model'])
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['old-provider-model'])
+    })
+
+    it('does not apply a model list after leaving the configuration page', async () => {
+      let finish: (models: string[]) => void = () => {}
+      vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+        new Promise<string[]>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      const { unmount } = render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Fetch models' }))
+      unmount()
+      finish(['old-provider-model'])
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(mockAppStore.setLlmModels).not.toHaveBeenCalledWith(['old-provider-model'])
+    })
+
+    it('ignores a connection result after leaving the configuration page', async () => {
+      let finish: (latency: number) => void = () => {}
+      vi.mocked(tauri.benchLlmConnection).mockReturnValueOnce(
+        new Promise<number>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      const { unmount } = render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      unmount()
+      finish(100)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+    })
+
+    it('resets connection status when the model name changes', () => {
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      mockAppStore.llmTestStatus = 'success'
+      render(<LlmPane />)
+      fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), {
+        target: { value: 'different-model' },
+      })
+      expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle')
+    })
+
+    it('ignores a test result after the model was edited', async () => {
+      let finish: (latency: number) => void = () => {}
+      vi.mocked(tauri.benchLlmConnection).mockReturnValueOnce(
+        new Promise<number>((resolve) => {
+          finish = resolve
+        }),
+      )
+      mockAppStore.config.llm_api_key = 'sk-test123'
+      render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), {
+        target: { value: 'different-model' },
+      })
+      finish(100)
+      await waitFor(() => expect(mockAppStore.setLlmTestStatus).toHaveBeenCalledWith('idle'))
+      expect(mockAppStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+    })
+
     it('test button is disabled when API key is empty', () => {
       render(<LlmPane />)
       const button = screen.getByRole('button', { name: /test/i })
       expect(button).toBeDisabled()
+    })
+
+    it('does not enable connection testing with a whitespace-only API key', () => {
+      mockAppStore.config.llm_api_key = ' \t\n'
+      render(<LlmPane />)
+      const button = screen.getByRole('button', { name: /test/i })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+      expect(tauri.benchLlmConnection).not.toHaveBeenCalled()
     })
 
     it('test button is enabled when API key is present', () => {
@@ -343,6 +682,8 @@ describe('LlmPane', () => {
       mockAppStore.config.llm_model = 'llama3.2'
 
       render(<LlmPane />)
+      // Keyless providers test from the Base URL row inside the advanced section.
+      fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
       const button = screen.getByRole('button', { name: /test/i })
 
       expect(screen.queryByPlaceholderText('Enter API Key')).not.toBeInTheDocument()
@@ -378,6 +719,23 @@ describe('LlmPane', () => {
       render(<LlmPane />)
 
       expect(screen.getByTitle('Fetch models')).toBeDisabled()
+    })
+
+    it('does not fetch models or test Ollama with a whitespace-only base URL', async () => {
+      vi.useFakeTimers()
+      try {
+        mockAppStore.config.llm_provider = 'ollama'
+        mockAppStore.config.llm_base_url = '   '
+        render(<LlmPane />)
+        fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
+        expect(screen.getByTitle('Fetch models')).toBeDisabled()
+        expect(screen.getByRole('button', { name: /test/i })).toBeDisabled()
+        await vi.advanceTimersByTimeAsync(500)
+        expect(tauri.fetchLlmModels).not.toHaveBeenCalled()
+        expect(tauri.benchLlmConnection).not.toHaveBeenCalled()
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('shows loading state during test', () => {
@@ -453,18 +811,108 @@ describe('LlmPane', () => {
     })
   })
 
+  it('starts only one connection test while a request is pending', async () => {
+    let finish: (latency: number) => void = () => {}
+    vi.mocked(tauri.benchLlmConnection).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.llm_api_key = 'test-key'
+    render(<LlmPane />)
+    const button = screen.getByRole('button', { name: 'Test' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(tauri.benchLlmConnection).toHaveBeenCalledTimes(1)
+    await act(async () => finish(100))
+    fireEvent.click(button)
+    expect(tauri.benchLlmConnection).toHaveBeenCalledTimes(2)
+  })
+
   describe('AI polish behavior settings', () => {
+    it('opens migrated translation controls from the capsule deep link', () => {
+      const previousHash = window.location.hash
+      window.location.hash = '#/models?section=translation'
+      try {
+        render(<LlmPane grouped />)
+        expect(screen.getByTestId('translation-target-en')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Advanced polish settings' })).toHaveAttribute(
+          'aria-expanded',
+          'true',
+        )
+      } finally {
+        window.location.hash = previousHash
+      }
+    })
+
+    it('keeps app examples visible but dimmed in the grouped page without coverage counts', () => {
+      mockAppStore.config.polish_enabled = false
+      render(<LlmPane grouped />)
+      const examples = screen.getByLabelText('Apps adapted by context')
+      expect(examples).toHaveAttribute('aria-disabled', 'true')
+      expect(within(examples).getByLabelText('Gmail')).toBeInTheDocument()
+      expect(within(examples).queryByText('+63')).toBeNull()
+      expect(within(examples).queryByText('+65')).toBeNull()
+    })
+
+    it('keeps the connection address in the model group instead of text processing', () => {
+      mockAppStore.config.llm_provider = 'ollama'
+      mockAppStore.config.llm_base_url = 'http://localhost:11434/v1'
+      render(<LlmPane grouped />)
+      const models = screen.getByRole('region', { name: 'modelsPage.aiModel' })
+      const processing = screen.getByRole('region', { name: 'modelsPage.textProcessing' })
+      expect(within(models).getByRole('textbox', { name: 'Base URL' })).toHaveValue(
+        'http://localhost:11434/v1',
+      )
+      expect(within(processing).queryByRole('textbox', { name: 'Base URL' })).toBeNull()
+    })
+
+    it('does not replace an existing translation target when all five slots are occupied', () => {
+      mockAppStore.config.translation = {
+        targets: ['en', 'ja', 'fr', 'de', 'es'],
+        active_target: 'en',
+      }
+      render(<LlmPane grouped />)
+      fireEvent.click(screen.getByRole('combobox', { name: 'settings.translationTarget' }))
+      const option = screen.getByRole('option', { name: 'Português' })
+      expect(option).toHaveAttribute('aria-disabled', 'true')
+      fireEvent.click(option)
+      expect(mockAppStore.updateConfig).not.toHaveBeenCalled()
+    })
+
+    it('selects the active translation language without enabling always-translate', () => {
+      mockAppStore.config.translation = { targets: ['en', 'ja'], active_target: 'en' }
+      render(<LlmPane grouped />)
+      chooseOption(screen.getByRole('combobox', { name: 'settings.translationTarget' }), 'ja')
+      expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
+        translation: { targets: ['en', 'ja'], active_target: 'ja' },
+      })
+      expect(screen.queryByRole('switch', { name: 'Always translate output' })).toBeNull()
+    })
+
+    it('shows custom style instructions once without clearing the existing draft', () => {
+      mockAppStore.config.polish_style = 'custom'
+      mockAppStore.config.polish_custom_prompt = 'Keep short sentences.'
+      render(<LlmPane />)
+      expect(screen.getAllByRole('textbox', { name: 'Custom polish instructions' })).toHaveLength(1)
+      expect(screen.getByRole('textbox', { name: 'Custom polish instructions' })).toHaveValue(
+        'Keep short sentences.',
+      )
+      fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
+      expect(screen.getAllByRole('textbox', { name: 'Custom polish instructions' })).toHaveLength(1)
+    })
+
     it('shows Clean as the default polish style outside advanced settings', () => {
       render(<LlmPane />)
 
       expect(screen.getByText('Polish style')).toBeInTheDocument()
-      expect(screen.getByDisplayValue('Clean')).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Polish style' })).toHaveTextContent('Clean')
     })
 
     it('updates the selected polish style without opening advanced settings', () => {
       render(<LlmPane />)
 
-      fireEvent.change(screen.getByDisplayValue('Clean'), { target: { value: 'structured' } })
+      chooseOption(screen.getByRole('combobox', { name: 'Polish style' }), 'structured')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ polish_style: 'structured' })
       expect(screen.queryByText('Custom polish instructions')).not.toBeInTheDocument()
@@ -576,8 +1024,14 @@ describe('LlmPane', () => {
   })
 
   describe('Base URL input', () => {
+    it('keeps the base URL inside advanced settings', () => {
+      render(<LlmPane />)
+      expect(screen.queryByPlaceholderText('https://api.openai.com/v1')).not.toBeInTheDocument()
+    })
+
     it('updates config when base URL changes', () => {
       render(<LlmPane />)
+      fireEvent.click(screen.getByRole('button', { name: /advanced polish settings/i }))
       const input = screen.getByPlaceholderText('https://api.openai.com/v1')
 
       fireEvent.change(input, { target: { value: 'https://custom.api.com/v1' } })
@@ -593,21 +1047,14 @@ describe('LlmPane', () => {
       mockAppStore.config.polish_enabled = false
       render(<LlmPane />)
 
-      const contextSwitch = screen
-        .getByText('Adapt writing to the current app')
-        .closest('label')
-        ?.querySelector('[role="switch"]')
+      const contextSwitch = screen.getByRole('switch', { name: 'Adapt writing to the current app' })
       expect(contextSwitch).toBeDisabled()
     })
 
     it('updates the context adaptation preference', () => {
       render(<LlmPane />)
-      const contextSwitch = screen
-        .getByText('Adapt writing to the current app')
-        .closest('label')
-        ?.querySelector('[role="switch"]')
-      expect(contextSwitch).not.toBeNull()
-      fireEvent.click(contextSwitch!)
+      const contextSwitch = screen.getByRole('switch', { name: 'Adapt writing to the current app' })
+      fireEvent.click(contextSwitch)
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         context_adaptation_enabled: false,
       })
@@ -641,14 +1088,21 @@ describe('LlmPane', () => {
       expect(coverage).toHaveClass('gap-1')
     })
 
-    it('dims representative apps whenever app adaptation is not active', () => {
+    it('hides representative apps whenever app adaptation is not active', () => {
       mockAppStore.config.context_adaptation_enabled = false
       render(<LlmPane />)
 
-      expect(screen.getByLabelText('Apps adapted by context')).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      )
+      expect(screen.queryByLabelText('Apps adapted by context')).not.toBeInTheDocument()
+      expect(
+        screen.getByRole('switch', { name: 'Adapt writing to the current app' }),
+      ).toBeInTheDocument()
+    })
+
+    it('hides representative apps when AI cleanup is disabled', () => {
+      mockAppStore.config.polish_enabled = false
+      render(<LlmPane />)
+      expect(screen.queryByLabelText('Apps adapted by context')).not.toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'AI cleanup for dictation' })).toBeInTheDocument()
     })
 
     it('keeps helper copy and advanced toggles out of the default flow', () => {
@@ -774,12 +1228,12 @@ describe('LlmPane', () => {
       expect(screen.queryByText('Gmail')).not.toBeInTheDocument()
     })
 
-    it('shows a compact translate-to control next to translation when enabled', () => {
+    it('leaves translation targets to Settings > Language', () => {
       mockAppStore.config.translate_enabled = true
 
       render(<LlmPane />)
-      expect(screen.getByText('Translate to')).toBeInTheDocument()
-      expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+      expect(screen.getByRole('switch', { name: 'Always translate output' })).toBeInTheDocument()
+      expect(screen.queryByText('Translate to')).not.toBeInTheDocument()
     })
   })
 })

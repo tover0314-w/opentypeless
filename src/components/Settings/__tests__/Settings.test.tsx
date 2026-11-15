@@ -7,18 +7,21 @@
  * 3. appStore.llmModels — 状态提升：初始值、读写、reset
  * 4. LlmPane provider 切换 — 清空 models 缓存
  * 5. LlmPane useEffect skip — 已有缓存时不再触发 debounce fetch
- * 6. DirtyBar — 配置变更后出现，Reset 后消失
+ * 6. Autosave — 配置变更自动保存，失败时回滚到后端真值
  * 7. appStore getInitialState — llmModels 在 reset 后为空数组
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, cleanup, within } from '@testing-library/react'
 import React from 'react'
 import { useAppStore } from '../../../stores/appStore'
 
 // 每个测试后清理 DOM，防止多次 render 的节点积累导致 getByText 找到多个元素
-afterEach(() => {
-  cleanup()
+afterEach(async () => {
+  for (const key of ['/', 'c', 'k', 'Escape', 'Control', 'Shift', 'Alt', 'Meta']) {
+    fireEvent.keyUp(window, { key })
+  }
+  await act(async () => cleanup())
 })
 
 // ─── Mock framer-motion ───────────────────────────────────────────────────────
@@ -43,6 +46,7 @@ const MOTION_PROPS = new Set([
 const motionComponentCache = new Map<string, React.ComponentType<any>>()
 
 vi.mock('framer-motion', () => ({
+  useReducedMotion: () => false,
   AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   motion: new Proxy(
     {},
@@ -84,6 +88,13 @@ vi.mock('react-i18next', async (importOriginal) => {
 
 // ─── Mock Tauri plugins / lib/tauri ──────────────────────────────────────────
 vi.mock('../../../lib/tauri', () => ({
+  startMicrophonePreview: vi.fn().mockResolvedValue(1),
+  getMicrophonePreviewLevel: vi.fn().mockResolvedValue(0),
+  stopMicrophonePreview: vi.fn().mockResolvedValue(undefined),
+  listMicrophones: vi.fn().mockResolvedValue([
+    { name: 'MacBook Pro Microphone', isDefault: true, connection: 'builtIn' },
+    { name: 'Studio USB Mic', isDefault: false, connection: 'usb' },
+  ]),
   getConfig: vi.fn().mockResolvedValue(null),
   getSttRecordingCapability: vi.fn().mockResolvedValue({
     capability: {
@@ -250,7 +261,9 @@ vi.mock('../../../stores/authStore', () => ({
 }))
 
 // ─── Import components AFTER mocks ───────────────────────────────────────────
-import { Settings } from '../index'
+import { Settings, SettingsModal } from '../index'
+import { ModelsPage } from '../../ModelsPage'
+import { chooseOption, selectedValue } from '../../shared/__tests__/selectTestUtils'
 import {
   checkAccessibilityPermission,
   getConfig,
@@ -324,80 +337,218 @@ function renderSettings() {
   return render(<Settings />)
 }
 
-// 侧边栏导航按钮：精确匹配 sidebar 内的 <button data-motion="button"> 子元素
+// Legacy pane labels map onto the merged settings modal tabs.
+const LEGACY_TAB_LABELS: Record<string, string> = {
+  'settings.general': 'settingsModal.tabs.settings',
+  'settings.scenes': 'settingsModal.tabs.personalization',
+  'settings.about': 'settingsModal.tabs.about',
+}
+
+// Speech recognition and AI polish moved from the Settings modal to the sidebar Models page.
+const MODEL_SECTIONS = new Set(['settings.speechRecognition', 'settings.aiPolish'])
+
 function clickSidebarItem(label: string) {
-  const spans = screen.getAllByText(label)
-  // sidebar button 的直接父链中有 data-motion="button"，且该 button 不含 h2
-  const sidebarSpan = spans.find((el) => {
-    const btn = el.closest('[data-motion="button"]')
-    return btn !== null && btn.querySelector('h2') === null
-  })
-  const btn = (sidebarSpan ?? spans[0]).closest('[data-motion="button"], button')
-  if (btn) fireEvent.click(btn)
-  else fireEvent.click(spans[0])
+  if (MODEL_SECTIONS.has(label)) {
+    cleanup()
+    render(<ModelsPage />)
+    return
+  }
+  const tabLabel = LEGACY_TAB_LABELS[label] ?? label
+  const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
+  const tab = within(nav).getByText(tabLabel).closest('button')
+  if (!tab) throw new Error(`Settings tab not found: ${tabLabel}`)
+  fireEvent.click(tab)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Tab 切换 — 渲染正确 Pane 内容
 // ─────────────────────────────────────────────────────────────────────────────
+describe('Settings modal keyboard dismissal', () => {
+  it('does not close when Escape cancels input method composition', () => {
+    const onClose = vi.fn()
+    render(<SettingsModal onClose={onClose} />)
+    fireEvent.keyDown(window, { key: 'Escape', isComposing: true })
+    expect(onClose).not.toHaveBeenCalled()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('Settings tab 切换', () => {
   beforeEach(() => {
     resetStore()
     seedSavedConfig()
   })
 
-  it('初始渲染显示简化后的常用设置', () => {
+  it.each([
+    { mode: 'auto', label: 'settings.autoPressMode' },
+    { mode: 'toggle', label: 'settings.toggleOnOff' },
+    { mode: 'hold', label: 'settings.holdToTalk' },
+  ])(
+    'persists $mode from the actual trigger button without losing bindings',
+    async ({ mode, label }) => {
+      const state = useAppStore.getState()
+      const extra = { primary: '9', modifiers: ['Ctrl', 'Alt'] }
+      state.updateConfig({
+        hotkeys: {
+          ...state.config.hotkeys,
+          dictationMode: mode === 'hold' ? 'toggle' : 'hold',
+          dictationBindings: [state.config.hotkeys.dictation, extra],
+        },
+      })
+      seedSavedConfig()
+      vi.mocked(updateConfig).mockClear()
+      renderSettings()
+      fireEvent.click(screen.getByRole('button', { name: label }))
+      await waitFor(() =>
+        expect(updateConfig).toHaveBeenCalledWith(
+          expect.objectContaining({
+            hotkey_mode: mode,
+            hotkeys: expect.objectContaining({
+              dictationMode: mode,
+              dictationBindings: [state.config.hotkeys.dictation, extra],
+            }),
+          }),
+          expect.stringMatching(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          ),
+        ),
+      )
+      expect(useAppStore.getState().savedConfig?.hotkey_mode).toBe(mode)
+    },
+  )
+
+  it('lays out Settings in the Typeless order', () => {
     renderSettings()
 
-    expect(screen.getByText('settings.hotkey')).toBeDefined()
-    expect(screen.getByText('settings.dictationHotkey')).toBeDefined()
-    expect(screen.getByText('settings.askHotkey')).toBeDefined()
-    expect(screen.getByText('settings.translateHotkey')).toBeDefined()
-    expect(screen.getByText('settings.dictationMode')).toBeDefined()
-    expect(screen.getAllByRole('button', { name: 'settings.shortcutAdd' })).toHaveLength(3)
-    expect(screen.queryByText('settings.askAnything')).toBeNull()
-    expect(screen.queryByText('settings.askAnythingDesc')).toBeNull()
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
+    expect(headings).toEqual([
+      'settings.hotkey',
+      'generalPane.language',
+      'generalPane.audio',
+      'generalPane.general',
+      'generalPane.input',
+    ])
+    expect(screen.getByText('shortcuts.dictateTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.translateTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.askTitle')).toBeDefined()
+    expect(screen.getByText('shortcuts.pasteLastTitle')).toBeDefined()
+    expect(screen.getByText('generalPane.appearance')).toBeDefined()
+    expect(screen.getByText('generalPane.launchAtLogin')).toBeDefined()
     expect(screen.getByLabelText('settings.tryAsk')).toBeDefined()
-    expect(screen.queryByText('ask.voiceQuestion')).toBeNull()
-    expect(screen.getByText('settings.outputMode')).toBeDefined()
-    expect(screen.getByText('settings.dictationMode')).toBeDefined()
     expect(screen.queryByText('settings.diagnostics')).toBeNull()
+    expect(screen.queryByText('generalPane.dictationLanguage')).toBeNull()
+    expect(screen.queryByText('generalPane.translationTargets')).toBeNull()
+    expect(screen.queryByText('languageVariants.title')).toBeNull()
+  })
+  it('pairs each visible general settings row with a description', () => {
+    const { container } = renderSettings()
+    const rows = container.querySelectorAll('.settings-row-label')
+    expect(rows.length).toBeGreaterThan(10)
+    for (const row of rows) {
+      expect(row.children.length, row.textContent ?? '').toBe(2)
+    }
+  })
+  it('keeps all four shortcut editors inside the migrated scrolling settings pane', () => {
+    renderSettings()
+    const navigation = screen.getByRole('navigation', { name: 'settingsModal.title' })
+    expect(within(navigation).getAllByRole('button')).toHaveLength(5)
+    for (const label of [
+      'shortcuts.dictateTitle',
+      'shortcuts.translateTitle',
+      'shortcuts.askTitle',
+      'shortcuts.pasteLastTitle',
+    ]) {
+      const group = screen.getByRole('group', { name: label })
+      expect(group.closest('.settings-dialog-content')).not.toBeNull()
+      expect(within(group).getByRole('button', { name: /shortcuts.change/ })).toBeEnabled()
+    }
   })
 
-  it('General pane keeps Ask visible and hides low-frequency settings until More is opened', () => {
+  it('shows each shortcut as keycaps with Add another', () => {
     renderSettings()
 
-    expect(screen.getByText('settings.hotkey')).toBeDefined()
-    expect(screen.getByText('settings.askHotkey')).toBeDefined()
-    expect(screen.getByText('settings.outputMode')).toBeDefined()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(within(dictate).getByRole('button', { name: /shortcuts.change/ })).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'shortcuts.addAnother' }).length).toBeGreaterThan(
+      0,
+    )
     expect(screen.queryByText('settings.restoreClipboardAfterPaste')).toBeNull()
     expect(screen.queryByText('settings.maxRecordingDuration')).toBeNull()
-    expect(screen.queryByText('settings.historyPrivacy')).toBeNull()
-    expect(screen.queryByText('settings.launchAtStartup')).toBeNull()
-
-    fireEvent.click(screen.getByText('settings.advancedGeneral'))
-
-    expect(screen.getAllByText('settings.askHotkey')).toHaveLength(1)
-    expect(screen.getByText('settings.saveHistory')).toBeDefined()
-    expect(screen.getByText('settings.launchAtStartup')).toBeDefined()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
-    expect(screen.queryByText('settings.restoreClipboardAfterPaste')).toBeNull()
-    expect(screen.queryByText('settings.maxRecordingDuration')).toBeNull()
-    expect(screen.queryByText('settings.historyPrivacy')).toBeNull()
-    expect(screen.getByText('settings.hideCapsuleWhenIdle')).toBeDefined()
   })
 
-  it('keeps unsaved drafts dirty after leaving and reopening Settings', () => {
-    const firstRender = renderSettings()
+  it('does not offer additional bindings for the single-binding paste-last role', () => {
+    renderSettings()
+    const group = screen.getByRole('group', { name: 'shortcuts.pasteLastTitle' })
+    expect(within(group).queryByRole('button', { name: 'shortcuts.addAnother' })).toBeNull()
+  })
+
+  it('resumes global shortcuts when the settings unmounts during recording', async () => {
+    const { resumeHotkey } = await import('../../../lib/tauri')
+    vi.mocked(resumeHotkey).mockClear()
+    const { unmount } = renderSettings()
+    const group = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    fireEvent.click(within(group).getByRole('button', { name: /shortcuts.change/ }))
+    unmount()
+    await waitFor(() => expect(resumeHotkey).toHaveBeenCalled())
+  })
+
+  it('saves a recorded shortcut before resuming global shortcuts', async () => {
+    const { resumeHotkey } = await import('../../../lib/tauri')
+    vi.mocked(resumeHotkey).mockClear()
+    vi.mocked(updateConfig).mockClear()
+    let finishSave!: () => void
+    vi.mocked(updateConfig).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve
+      }),
+    )
+    renderSettings()
+    const group = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    fireEvent.click(within(group).getByRole('button', { name: /shortcuts.change/ }))
+    await waitFor(() => expect(group.querySelector('[data-capture-ready="true"]')).not.toBeNull())
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK', ctrlKey: true, shiftKey: true })
+    fireEvent.keyUp(window, { key: 'k', code: 'KeyK' })
+    fireEvent.keyUp(window, { key: 'Control' })
+    fireEvent.keyUp(window, { key: 'Shift' })
+    await waitFor(() => expect(finishSave).toBeTypeOf('function'))
+    const resumedBeforeSave = vi.mocked(resumeHotkey).mock.calls.length
+    await act(async () => finishSave())
+    expect(resumedBeforeSave).toBe(0)
+    await waitFor(() => expect(resumeHotkey).toHaveBeenCalled())
+    expect(useAppStore.getState().savedConfig?.hotkeys.dictation.primary).toBe('K')
+  })
+
+  it('resumes after an in-flight pause finishes following unmount', async () => {
+    const { pauseHotkey, resumeHotkey } = await import('../../../lib/tauri')
+    vi.mocked(pauseHotkey).mockClear()
+    let resolvePause: () => void = () => {}
+    vi.mocked(pauseHotkey).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePause = resolve
+        }),
+    )
+    vi.mocked(resumeHotkey).mockClear()
+    const { unmount } = renderSettings()
+    const group = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    fireEvent.click(within(group).getByRole('button', { name: /shortcuts.change/ }))
+    await waitFor(() => expect(pauseHotkey).toHaveBeenCalledTimes(1))
+    unmount()
+    expect(resumeHotkey).not.toHaveBeenCalled()
+    await act(async () => resolvePause())
+    expect(resumeHotkey).toHaveBeenCalledTimes(1)
+  })
+  it('saves edits automatically without a save bar', async () => {
+    vi.mocked(updateConfig).mockClear()
+    vi.mocked(setAutoStart).mockClear()
+    renderSettings()
     act(() => useAppStore.getState().updateConfig({ auto_start: false }))
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
 
-    firstRender.unmount()
-    renderSettings()
-
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
-    expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
+    await waitFor(() => expect(useAppStore.getState().savedConfig?.auto_start).toBe(false))
+    expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
+    expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1)
   })
 
   it('does not mark an unchanged backend config dirty when object key order differs', () => {
@@ -455,30 +606,67 @@ describe('Settings tab 切换', () => {
     }
   })
 
-  it('More settings keeps only preference toggles visible', () => {
+  it('keeps OpenTypeless-only preferences in the Input section', () => {
     renderSettings()
-    fireEvent.click(screen.getByText('settings.advancedGeneral'))
 
-    expect(screen.getAllByText('settings.askHotkey')).toHaveLength(1)
-    expect(screen.getByText('settings.launchAtStartup')).toBeDefined()
-    expect(screen.getByText('settings.saveHistory')).toBeDefined()
-    expect(screen.getByText('settings.startMinimized')).toBeDefined()
-    const startMinimized = screen.getByRole('switch', { name: 'settings.startMinimized' })
-    fireEvent.click(startMinimized)
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.startMinimized' }))
     expect(useAppStore.getState().config.start_minimized).toBe(true)
-    expect(screen.getByText('settings.hideCapsuleWhenIdle')).toBeDefined()
-    expect(screen.queryByText('settings.outputDetails')).toBeNull()
-    expect(screen.queryByText('settings.diagnostics')).toBeNull()
-    expect(screen.getByRole('switch', { name: 'settings.launchAtStartup' })).toHaveAttribute(
+    expect(screen.getByRole('switch', { name: 'generalPane.launchAtLogin' })).toHaveAttribute(
       'aria-checked',
       'true',
     )
-
-    const historyLabel = screen.getByText('settings.saveHistory')
-    fireEvent.click(historyLabel.closest('label') ?? historyLabel)
+    fireEvent.click(screen.getByRole('switch', { name: 'settings.saveHistory' }))
     expect(useAppStore.getState().config.history_enabled).toBe(false)
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.hideCapsule' }))
+    expect(useAppStore.getState().config.capsule_auto_hide).toBe(
+      !useAppStore.getInitialState().config.capsule_auto_hide,
+    )
   })
 
+  it('switches appearance and Dock visibility from General', () => {
+    const originalPlatform = window.navigator.platform
+    Object.defineProperty(window.navigator, 'platform', { value: 'MacIntel', configurable: true })
+    try {
+      renderSettings()
+      fireEvent.click(screen.getByRole('button', { name: 'generalPane.appearanceDark' }))
+      expect(useAppStore.getState().config.theme).toBe('dark')
+      fireEvent.click(screen.getByRole('switch', { name: 'generalPane.showInDock' }))
+      expect(useAppStore.getState().config.show_in_dock).toBe(false)
+    } finally {
+      Object.defineProperty(window.navigator, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      })
+    }
+  })
+  it('Help explore replays the onboarding practice steps and closes the modal', () => {
+    const onClose = vi.fn()
+    useAppStore.setState({ onboardingCompleted: true, onboardingStep: 0 })
+    render(<Settings initialTab="help" onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'settingsModal.help.start' }))
+
+    expect(useAppStore.getState().onboardingCompleted).toBe(false)
+    expect(useAppStore.getState().onboardingStep).toBe(6)
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('General pane picks the microphone and audio preferences', async () => {
+    renderSettings()
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.microphone' }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'Studio USB Mic' }))
+    fireEvent.click(screen.getByRole('button', { name: 'microphoneDialog.save' }))
+    expect(useAppStore.getState().config.microphone_device).toBe('Studio USB Mic')
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.microphone' }))
+    fireEvent.click(await screen.findByRole('radio', { name: 'settings.micAutoDetect' }))
+    fireEvent.click(screen.getByRole('button', { name: 'microphoneDialog.save' }))
+    expect(useAppStore.getState().config.microphone_device).toBe('')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'generalPane.interactionSounds' }))
+    expect(useAppStore.getState().config.interaction_sounds).toBe(false)
+  })
   it('General pane shows compact hotkey conflict status', async () => {
     const { getHotkeyStatus } = await import('../../../lib/tauri')
     vi.mocked(getHotkeyStatus).mockResolvedValueOnce(
@@ -604,34 +792,23 @@ describe('Settings tab 切换', () => {
 
     renderSettings()
 
-    expect(await screen.findByText('RightAlt')).toBeDefined()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(await within(dictate).findByText('Right Alt')).toBeDefined()
     expect(screen.queryByText('settings.hotkeyInvalid')).toBeNull()
   })
-
-  it('does not offer Windows RightAlt as a default shortcut chip', async () => {
+  it('does not offer macOS Fn presets on Windows', async () => {
     const originalPlatform = window.navigator.platform
     Object.defineProperty(window.navigator, 'platform', {
       value: 'Win32',
       configurable: true,
     })
-    useAppStore.getState().setPlatformCapabilities({
-      os: 'windows',
-      sessionType: 'unknown',
-      globalHotkeyReliable: true,
-      keyboardOutputReliable: true,
-      clipboardAutoPasteReliable: true,
-    })
 
     try {
       renderSettings()
-
-      fireEvent.click(screen.getByText('Ctrl+.'))
+      const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+      fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+      expect(screen.queryByRole('button', { name: 'Fn + Space' })).toBeNull()
       expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      fireEvent.click(screen.getByText('settings.pressKeyCombination'))
-
-      fireEvent.click(screen.getByText('Ctrl+/'))
-      expect(screen.queryByRole('button', { name: 'Right Alt' })).toBeNull()
-      expect(useAppStore.getState().config.hotkey).toBe('Ctrl+/')
     } finally {
       Object.defineProperty(window.navigator, 'platform', {
         value: originalPlatform,
@@ -639,55 +816,53 @@ describe('Settings tab 切换', () => {
       })
     }
   })
+  it('blocks an Ask shortcut that Dictation already uses', async () => {
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    await waitFor(() =>
+      expect(document.querySelector('[data-capture-ready="true"]')).not.toBeNull(),
+    )
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true })
+    fireEvent.keyUp(window, { key: '/', ctrlKey: true })
 
-  it('blocks local Ask hotkey drafts that conflict with Dictation', async () => {
-    vi.useFakeTimers()
-    try {
-      renderSettings()
-      fireEvent.click(screen.getByText('Ctrl+.'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: '/', ctrlKey: true })
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
-      expect(screen.getByText('settings.hotkeyConflict')).toBeDefined()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
+    expect(within(ask).getByText('shortcuts.errorInUse')).toBeDefined()
   })
 
-  it('blocks local Dictation hotkey drafts that conflict with Ask', async () => {
-    vi.useFakeTimers()
-    try {
-      renderSettings()
-      fireEvent.click(screen.getByText('Ctrl+/'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: '.', ctrlKey: true })
+  it('blocks shortcuts the system reserves', async () => {
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    await waitFor(() =>
+      expect(document.querySelector('[data-capture-ready="true"]')).not.toBeNull(),
+    )
+    fireEvent.keyDown(window, { key: 'c', ctrlKey: true })
+    fireEvent.keyUp(window, { key: 'c', ctrlKey: true })
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.hotkey).toBe('Ctrl+/')
-      expect(screen.getByText('settings.hotkeyConflict')).toBeDefined()
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Ctrl+.')
+    expect(within(ask).getByText('shortcuts.errorReserved')).toBeDefined()
   })
+  it('adds and removes extra shortcuts but keeps the last Dictation key', async () => {
+    renderSettings()
+    const dictate = screen.getByRole('group', { name: 'shortcuts.dictateTitle' })
+    expect(within(dictate).queryByRole('button', { name: 'shortcuts.remove' })).toBeNull()
 
+    fireEvent.click(within(dictate).getByRole('button', { name: 'shortcuts.addAnother' }))
+    await waitFor(() =>
+      expect(document.querySelector('[data-capture-ready="true"]')).not.toBeNull(),
+    )
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true, altKey: true })
+    fireEvent.keyUp(window, { key: 'k', ctrlKey: true, altKey: true })
+    expect(useAppStore.getState().config.hotkeys.dictationBindings).toHaveLength(2)
+
+    fireEvent.click(within(dictate).getAllByRole('button', { name: 'shortcuts.remove' })[1])
+    expect(useAppStore.getState().config.hotkeys.dictationBindings).toHaveLength(1)
+  })
   it('点击 Speech Recognition 后显示 STT provider 字段', () => {
     renderSettings()
     clickSidebarItem('settings.speechRecognition')
-    expect(screen.getByText('settings.provider')).toBeDefined()
+    expect(screen.getAllByText('settings.provider').length).toBeGreaterThan(0)
     // STT pane 含语言选择
     expect(screen.getByText('settings.sttLanguage')).toBeDefined()
   })
@@ -700,10 +875,11 @@ describe('Settings tab 切换', () => {
     expect(screen.queryByText('settings.askAnything')).toBeNull()
   })
 
-  it('点击 Dictionary 后显示词典输入框 placeholder', () => {
+  it('Dictionary is a top-level page, not a settings tab', () => {
     renderSettings()
-    clickSidebarItem('settings.dictionary')
-    expect(screen.getByPlaceholderText('dictionary.word')).toBeDefined()
+    const nav = screen.getByRole('navigation', { name: 'settingsModal.title' })
+    expect(within(nav).queryByText('settings.dictionary')).toBeNull()
+    expect(within(nav).queryByText('settingsModal.tabs.models')).toBeNull()
   })
 
   it('点击 Scenes 后显示本地 scenes 空状态（user=null）', () => {
@@ -719,13 +895,14 @@ describe('Settings tab 切换', () => {
   it('点击 About 后显示版本信息区域', () => {
     renderSettings()
     clickSidebarItem('settings.about')
-    expect(screen.getByText('settings.openSource')).toBeDefined()
+    expect(screen.getByText('settings.aboutPage.version')).toBeDefined()
+    expect(screen.getByText('settings.aboutPage.privacy')).toBeDefined()
   })
 
   it('可以在多个 tab 之间来回切换', () => {
     renderSettings()
-    clickSidebarItem('settings.aiPolish')
-    expect(screen.getByText('settings.enableAiPolish')).toBeDefined()
+    clickSidebarItem('settings.scenes')
+    expect(screen.getByText('scenes.myScenes')).toBeDefined()
 
     clickSidebarItem('settings.general')
     expect(screen.getByText('settings.hotkey')).toBeDefined()
@@ -733,8 +910,9 @@ describe('Settings tab 切换', () => {
 
   it('切换到 Scenes 后不会残留上一个设置页内容', () => {
     renderSettings()
-    clickSidebarItem('settings.aiPolish')
-    expect(screen.getByText('settings.enableAiPolish')).toBeDefined()
+    clickSidebarItem('settings.about')
+    expect(screen.getByText('settings.aboutPage.version')).toBeDefined()
+    expect(screen.getByText('settings.aboutPage.privacy')).toBeDefined()
 
     clickSidebarItem('settings.general')
     expect(screen.getByText('settings.hotkey')).toBeDefined()
@@ -750,46 +928,38 @@ describe('Settings tab 切换', () => {
 
   it('切换 tab 后 title bar 更新', () => {
     renderSettings()
-    clickSidebarItem('settings.dictionary')
-    // title bar 中的 h2 应该显示 settings.dictionary
-    const titles = screen.getAllByText('settings.dictionary')
-    // 至少出现两次：sidebar nav 和 title bar h2
-    expect(titles.length).toBeGreaterThanOrEqual(2)
+    clickSidebarItem('settings.about')
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'settingsModal.tabs.about' }),
+    ).toBeDefined()
   })
 
-  it('records macOS Ask hotkey as a local draft without immediate persistence', async () => {
-    vi.useFakeTimers()
-    try {
-      Object.defineProperty(window.navigator, 'platform', {
-        value: 'MacIntel',
-        configurable: true,
-      })
-      const { resumeHotkey, updateAskHotkey } = await import('../../../lib/tauri')
-      const mockUpdateAskHotkey = vi.mocked(updateAskHotkey)
-      const mockResumeHotkey = vi.mocked(resumeHotkey)
-      mockUpdateAskHotkey.mockClear()
-      mockResumeHotkey.mockClear()
-      useAppStore.getState().updateConfig({ ask_hotkey: 'Command+.' })
-      seedSavedConfig()
+  it('records a macOS Ask shortcut and resumes global hotkeys', async () => {
+    Object.defineProperty(window.navigator, 'platform', {
+      value: 'MacIntel',
+      configurable: true,
+    })
+    const { resumeHotkey, updateAskHotkey } = await import('../../../lib/tauri')
+    const mockUpdateAskHotkey = vi.mocked(updateAskHotkey)
+    const mockResumeHotkey = vi.mocked(resumeHotkey)
+    mockUpdateAskHotkey.mockClear()
+    mockResumeHotkey.mockClear()
+    useAppStore.getState().updateConfig({ ask_hotkey: 'Command+.' })
+    seedSavedConfig()
 
-      renderSettings()
-      fireEvent.click(screen.getByText('Command+.'))
-      await act(async () => {
-        await Promise.resolve()
-      })
-      fireEvent.keyDown(window, { key: ';', metaKey: true })
+    renderSettings()
+    const ask = screen.getByRole('group', { name: 'shortcuts.askTitle' })
+    fireEvent.click(within(ask).getByRole('button', { name: /shortcuts.change/ }))
+    await waitFor(() =>
+      expect(document.querySelector('[data-capture-ready="true"]')).not.toBeNull(),
+    )
+    fireEvent.keyDown(window, { key: 'k', metaKey: true, shiftKey: true })
+    fireEvent.keyUp(window, { key: 'k', metaKey: true, shiftKey: true })
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600)
-      })
-
-      expect(useAppStore.getState().config.ask_hotkey).toBe('Command+;')
-      expect(mockUpdateAskHotkey).not.toHaveBeenCalled()
-      expect(mockResumeHotkey).toHaveBeenCalledTimes(1)
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(useAppStore.getState().config.ask_hotkey).toBe('Command+Shift+K')
+    expect(mockUpdateAskHotkey).not.toHaveBeenCalled()
+    fireEvent.keyUp(window, { key: 'k' })
+    await waitFor(() => expect(mockResumeHotkey).toHaveBeenCalledTimes(1))
   })
 })
 
@@ -831,13 +1001,15 @@ describe('Settings Scenes local custom scenes', () => {
     expect(screen.getByLabelText('Slack')).toBeInTheDocument()
     expect(screen.getByLabelText('Lark')).toBeInTheDocument()
 
-    const emailSelect = screen.getByLabelText('contextFamilies.email scenes.appWritingScene')
-    expect(emailSelect).toHaveValue('custom_email')
-    const workChatSelect = screen.getByLabelText(
-      'contextFamilies.work_chat scenes.appWritingScene',
-    ) as HTMLSelectElement
-    expect(workChatSelect).toHaveValue('')
-    expect(workChatSelect.selectedOptions[0]?.textContent).toBe('scenes.systemModes.work_chat')
+    const emailSelect = screen.getByRole('combobox', {
+      name: 'contextFamilies.email scenes.appWritingScene',
+    })
+    expect(selectedValue(emailSelect)).toBe('custom_email')
+    const workChatSelect = screen.getByRole('combobox', {
+      name: 'contextFamilies.work_chat scenes.appWritingScene',
+    })
+    expect(selectedValue(workChatSelect)).toBe('')
+    expect(workChatSelect).toHaveTextContent('scenes.systemModes.work_chat')
     expect(screen.queryByText('scenes.builtInScenes')).not.toBeInTheDocument()
   })
 
@@ -862,9 +1034,10 @@ describe('Settings Scenes local custom scenes', () => {
     renderSettings()
     clickSidebarItem('settings.scenes')
 
-    fireEvent.change(screen.getByLabelText('contextFamilies.email scenes.appWritingScene'), {
-      target: { value: 'custom_email' },
-    })
+    chooseOption(
+      screen.getByRole('combobox', { name: 'contextFamilies.email scenes.appWritingScene' }),
+      'custom_email',
+    )
 
     await waitFor(() => {
       expect(setFamilySceneAssignment).toHaveBeenCalledWith('email', 'custom_email')
@@ -930,10 +1103,59 @@ describe('Settings Scenes local custom scenes', () => {
     expect(screen.queryByText('settings.unsavedChanges')).toBeNull()
   })
 
-  it('persists only scene fields and preserves unrelated unsaved settings', async () => {
+  it('uses shared field and action styles in the scene editor', () => {
     renderSettings()
-    act(() => useAppStore.getState().updateConfig({ auto_start: false }))
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    expect(screen.getByLabelText('scenes.sceneName')).toHaveClass('field-control')
+    expect(screen.getByLabelText('scenes.sceneDescription')).toHaveClass('field-control')
+    expect(screen.getByLabelText('scenes.promptTemplate')).toHaveClass('field-control')
+    expect(screen.getByText('Save')).toHaveClass('btn-primary')
+    expect(screen.getByText('common.cancel')).toHaveClass('btn-outline')
+  })
+
+  it('bounds scene editor fields without splitting Unicode characters', () => {
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    for (const { label, limit } of [
+      { label: 'scenes.sceneName', limit: 80 },
+      { label: 'scenes.sceneDescription', limit: 240 },
+      { label: 'scenes.promptTemplate', limit: 4000 },
+    ]) {
+      const input = screen.getByLabelText(label)
+      fireEvent.change(input, { target: { value: `${'a'.repeat(limit - 1)}😀tail` } })
+      expect(input).toHaveValue(`${'a'.repeat(limit - 1)}😀`)
+      expect(input).not.toHaveAttribute('maxlength')
+    }
+  })
+
+  it('defers scene field truncation until input method composition finishes', () => {
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.promptTemplate'), {
+      target: { value: 'Keep my wording.' },
+    })
+    for (const { label, limit } of [
+      { label: 'scenes.sceneName', limit: 80 },
+      { label: 'scenes.sceneDescription', limit: 240 },
+      { label: 'scenes.promptTemplate', limit: 4000 },
+    ]) {
+      const input = screen.getByLabelText(label)
+      const composingText = `${'a'.repeat(limit - 1)}中文候选`
+      fireEvent.compositionStart(input)
+      fireEvent.change(input, { target: { value: composingText } })
+      expect(input).toHaveValue(composingText)
+      expect(screen.getByText('Save')).toBeDisabled()
+      fireEvent.compositionEnd(input)
+      expect(input).toHaveValue(`${'a'.repeat(limit - 1)}中`)
+      expect(screen.getByText('Save')).toBeEnabled()
+    }
+  })
+
+  it('persists scene fields through the scene editor', async () => {
+    renderSettings()
     clickSidebarItem('settings.scenes')
 
     fireEvent.click(screen.getByText('scenes.newScene'))
@@ -947,10 +1169,8 @@ describe('Settings Scenes local custom scenes', () => {
 
     await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
     const persistedConfig = vi.mocked(updateConfig).mock.calls[0][0]
-    expect(persistedConfig.auto_start).toBe(true)
-    expect(useAppStore.getState().config.auto_start).toBe(false)
-    expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
-    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    expect(persistedConfig.custom_scenes.map((scene) => scene.name)).toEqual(['Focused Notes'])
+    expect(useAppStore.getState().savedConfig?.custom_scenes).toHaveLength(1)
   })
 
   it('lets existing users clear a legacy globally active scene', async () => {
@@ -990,6 +1210,120 @@ describe('Settings Scenes local custom scenes', () => {
     expect(await screen.findByText('scenes.failedToSave')).toBeInTheDocument()
     expect(screen.getByLabelText('scenes.sceneName')).toHaveValue('Meeting Notes')
     expect(screen.getByLabelText('scenes.promptTemplate')).toHaveValue('Keep concise notes.')
+    await waitFor(() => expect(screen.getByText('Save')).toBeEnabled())
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(screen.queryByLabelText('scenes.sceneName')).toBeNull())
+    expect(updateConfig).toHaveBeenCalledTimes(2)
+    expect(useAppStore.getState().savedConfig?.custom_scenes[0].name).toBe('Meeting Notes')
+  })
+
+  it('does not create duplicate scenes while an editor save is pending', async () => {
+    let finishSave: () => void = () => {}
+    vi.mocked(updateConfig).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve
+      }),
+    )
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.sceneName'), {
+      target: { value: 'Single scene' },
+    })
+    fireEvent.change(screen.getByLabelText('scenes.promptTemplate'), {
+      target: { value: 'Single instructions.' },
+    })
+    fireEvent.click(screen.getByText('Save'))
+    expect(screen.getByText('Save')).toBeDisabled()
+    fireEvent.click(screen.getByText('Save'))
+    const saveCalls = vi.mocked(updateConfig).mock.calls.length
+    await act(async () => finishSave())
+    expect(saveCalls).toBe(1)
+    expect(useAppStore.getState().config.custom_scenes).toHaveLength(1)
+  })
+
+  it('keeps a new editor open when an earlier editor save completes', async () => {
+    let finishSave: () => void = () => {}
+    vi.mocked(updateConfig).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve
+      }),
+    )
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.sceneName'), {
+      target: { value: 'First scene' },
+    })
+    fireEvent.change(screen.getByLabelText('scenes.promptTemplate'), {
+      target: { value: 'First instructions.' },
+    })
+    fireEvent.click(screen.getByText('Save'))
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.sceneName'), {
+      target: { value: 'Second scene' },
+    })
+    await act(async () => finishSave())
+    expect(screen.getByLabelText('scenes.sceneName')).toHaveValue('Second scene')
+  })
+
+  it('preserves newer appearance edits when a pending scene save fails', async () => {
+    let failSave: (error: Error) => void = () => {}
+    vi.mocked(updateConfig).mockReturnValueOnce(
+      new Promise<void>((_resolve, reject) => {
+        failSave = reject
+      }),
+    )
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.sceneName'), {
+      target: { value: 'Pending scene' },
+    })
+    fireEvent.change(screen.getByLabelText('scenes.promptTemplate'), {
+      target: { value: 'Keep concise notes.' },
+    })
+    fireEvent.click(screen.getByText('Save'))
+    act(() => useAppStore.getState().updateConfig({ theme: 'dark' }))
+    await act(async () => failSave(new Error('disk full')))
+    expect(useAppStore.getState().config.theme).toBe('dark')
+    expect(useAppStore.getState().config.custom_scenes).toEqual([])
+    expect(screen.getByText('scenes.failedToSave')).toBeInTheDocument()
+  })
+
+  it('preserves newer scene edits when an older save succeeds', async () => {
+    let finishSave: () => void = () => {}
+    vi.mocked(updateConfig).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishSave = resolve
+      }),
+    )
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.click(screen.getByText('scenes.newScene'))
+    fireEvent.change(screen.getByLabelText('scenes.sceneName'), {
+      target: { value: 'Pending scene' },
+    })
+    fireEvent.change(screen.getByLabelText('scenes.promptTemplate'), {
+      target: { value: 'Initial instructions.' },
+    })
+    fireEvent.click(screen.getByText('Save'))
+    const submitted = useAppStore.getState().config.custom_scenes
+    act(() =>
+      useAppStore.getState().updateConfig({
+        custom_scenes: submitted.map((scene) => ({
+          ...scene,
+          prompt_template: 'Newer instructions.',
+        })),
+      }),
+    )
+    await act(async () => finishSave())
+    expect(useAppStore.getState().config.custom_scenes[0].prompt_template).toBe(
+      'Newer instructions.',
+    )
+    expect(useAppStore.getState().savedConfig?.custom_scenes[0].prompt_template).toBe(
+      'Initial instructions.',
+    )
   })
 
   it('removes family assignments that reference a deleted custom scene', async () => {
@@ -1014,7 +1348,7 @@ describe('Settings Scenes local custom scenes', () => {
     clickSidebarItem('settings.scenes')
     const sceneName = screen
       .getAllByText('Warm Email')
-      .find((element) => element.tagName === 'SPAN')
+      .find((element) => element.tagName === 'SPAN' && !element.closest('[role="combobox"]'))
     expect(sceneName).toBeDefined()
     fireEvent.click(sceneName!.closest('button')!)
     fireEvent.click(screen.getByText('scenes.delete'))
@@ -1057,6 +1391,128 @@ describe('Settings Scenes local custom scenes', () => {
     createObjectUrl.mockRestore()
     revokeObjectUrl.mockRestore()
     click.mockRestore()
+  })
+
+  it('rejects oversized scene files before reading or saving them', async () => {
+    const file = new File([], 'oversized-scenes.json', { type: 'application/json' })
+    const read = vi.fn().mockResolvedValue('{}')
+    Object.defineProperty(file, 'size', { value: 5 * 1024 * 1024 + 1 })
+    Object.defineProperty(file, 'text', { value: read })
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.change(screen.getByLabelText('scenes.import'), {
+      target: { files: [file] },
+    })
+    await waitFor(() => expect(screen.getByText('scenes.importFailed')).toBeInTheDocument())
+    expect(read).not.toHaveBeenCalled()
+    expect(updateConfig).not.toHaveBeenCalled()
+  })
+
+  it('does not save an import after leaving the scenes pane', async () => {
+    let finishRead: (value: string) => void = () => {}
+    const file = new File([], 'delayed-scenes.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', {
+      value: () =>
+        new Promise<string>((resolve) => {
+          finishRead = resolve
+        }),
+    })
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.change(screen.getByLabelText('scenes.import'), {
+      target: { files: [file] },
+    })
+    clickSidebarItem('settings.general')
+    await act(async () =>
+      finishRead(
+        JSON.stringify({
+          version: 1,
+          scenes: [{ id: 'imported', name: 'Imported', promptTemplate: 'Imported prompt' }],
+        }),
+      ),
+    )
+    expect(updateConfig).not.toHaveBeenCalled()
+    expect(useAppStore.getState().config.custom_scenes).toEqual([])
+  })
+
+  it('uses only the latest file selection when reads finish out of order', async () => {
+    let finishOlder: (value: string) => void = () => {}
+    const older = new File([], 'older.json', { type: 'application/json' })
+    Object.defineProperty(older, 'text', {
+      value: () =>
+        new Promise<string>((resolve) => {
+          finishOlder = resolve
+        }),
+    })
+    const newer = new File([], 'newer.json', { type: 'application/json' })
+    Object.defineProperty(newer, 'text', {
+      value: () =>
+        Promise.resolve(
+          JSON.stringify({
+            version: 1,
+            scenes: [{ id: 'newer', name: 'Newer', promptTemplate: 'Newer prompt' }],
+          }),
+        ),
+    })
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    const input = screen.getByLabelText('scenes.import')
+    fireEvent.change(input, { target: { files: [older] } })
+    fireEvent.change(input, { target: { files: [newer] } })
+    await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1))
+    await act(async () =>
+      finishOlder(
+        JSON.stringify({
+          version: 1,
+          scenes: [{ id: 'older', name: 'Older', promptTemplate: 'Older prompt' }],
+        }),
+      ),
+    )
+    expect(updateConfig).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().config.custom_scenes.map((scene) => scene.id)).toEqual(['newer'])
+  })
+
+  it('preserves scenes created while an import file is still being read', async () => {
+    let finishRead: (value: string) => void = () => {}
+    const file = new File([], 'delayed-scenes.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', {
+      value: () =>
+        new Promise<string>((resolve) => {
+          finishRead = resolve
+        }),
+    })
+    renderSettings()
+    clickSidebarItem('settings.scenes')
+    fireEvent.change(screen.getByLabelText('scenes.import'), {
+      target: { files: [file] },
+    })
+    act(() => {
+      useAppStore.getState().updateConfig({
+        custom_scenes: [
+          {
+            id: 'created-during-read',
+            name: 'New scene',
+            description: '',
+            prompt_template: 'Keep this edit.',
+            created_at: '',
+            updated_at: '',
+          },
+        ],
+      })
+    })
+    await act(async () =>
+      finishRead(
+        JSON.stringify({
+          version: 1,
+          scenes: [{ id: 'imported', name: 'Imported', promptTemplate: 'Imported prompt' }],
+        }),
+      ),
+    )
+    await waitFor(() => expect(updateConfig).toHaveBeenCalledTimes(1))
+    expect(useAppStore.getState().config.custom_scenes.map((scene) => scene.id)).toEqual([
+      'created-during-read',
+      'imported',
+    ])
   })
 
   it('imports local scenes from JSON without overwriting existing ids', async () => {
@@ -1123,10 +1579,9 @@ describe('Settings 动画结构', () => {
     seedSavedConfig()
   })
 
-  it('motion wrapper 正常渲染 pane 内容', () => {
-    const { container } = renderSettings()
-    // 我们的 mock 给 motion 元素打上 data-motion 属性
-    expect(container.querySelector('[data-motion]')).not.toBeNull()
+  it('renders the active pane content', () => {
+    renderSettings()
+    expect(screen.getByText('settings.hotkey')).toBeDefined()
   })
 
   it('切换 tab 后 pane 内容正常更新（无卡死）', () => {
@@ -1190,13 +1645,13 @@ describe('LlmPane provider 切换清空 models', () => {
     renderSettings()
     clickSidebarItem('settings.aiPolish')
 
-    // provider select 是当前 pane 中的第一个 combobox
-    const selects = screen.getAllByRole('combobox')
-    const providerSelect = selects[0]
+    // The Models tab stacks STT above AI Polish; use the AI Polish section's provider select.
+    const llmSection = screen.getByRole('region', { name: 'modelsPage.aiModel' })
+    const providerSelect = within(llmSection).getAllByRole('combobox')[0]
 
-    await act(async () => {
-      fireEvent.change(providerSelect, { target: { value: 'openai' } })
-    })
+    // The seeded provider may already be OpenAI; pick a different one so the change fires.
+    const next = providerSelect.getAttribute('data-value') === 'openai' ? 'claude' : 'openai'
+    chooseOption(providerSelect, next)
 
     expect(useAppStore.getState().llmModels).toEqual([])
   })
@@ -1222,12 +1677,12 @@ describe('LlmPane models 缓存：已有缓存时跳过 fetch', () => {
     const mockFetch = vi.mocked(fetchLlmModels)
     mockFetch.mockClear()
 
-    useAppStore.getState().setLlmModels(['cached-model'])
     useAppStore.getState().updateConfig({
       llm_api_key: 'sk-test',
       llm_base_url: 'https://api.openai.com/v1',
       llm_provider: 'openai',
     })
+    useAppStore.getState().setLlmModels(['cached-model'])
 
     renderSettings()
     clickSidebarItem('settings.aiPolish')
@@ -1285,9 +1740,9 @@ describe('LlmPane models 缓存：已有缓存时跳过 fetch', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. DirtyBar — 配置变更后出现，Reset 后消失
+// 6. Autosave — edits persist automatically and roll back to backend truth on failure
 // ─────────────────────────────────────────────────────────────────────────────
-describe('DirtyBar 行为', () => {
+describe('Settings autosave', () => {
   beforeEach(() => {
     resetStore()
     seedSavedConfig()
@@ -1302,49 +1757,44 @@ describe('DirtyBar 行为', () => {
     vi.mocked(toast).mockClear()
   })
 
-  it('初始状态下 DirtyBar 不显示', () => {
+  it('does not label an unverified draft as persisted on mount', () => {
+    useAppStore.setState({ savedConfig: null })
+    useAppStore.getState().updateConfig({ theme: 'dark' })
+    const draft = useAppStore.getState().config
     renderSettings()
+    expect(useAppStore.getState().savedConfig).toBeNull()
+    expect(useAppStore.getState().config).toBe(draft)
+    expect(updateConfig).not.toHaveBeenCalled()
+  })
+
+  it('does not save when nothing changed', async () => {
+    renderSettings()
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(vi.mocked(updateConfig)).not.toHaveBeenCalled()
     expect(screen.queryByText('Unsaved changes')).toBeNull()
   })
 
-  it('修改 config 后 DirtyBar 出现', async () => {
+  it('persists a changed setting and marks it saved', async () => {
     renderSettings()
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
+    await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(updateConfig).mock.calls[0][0].theme).toBe('dark')
+    await waitFor(() => expect(useAppStore.getState().savedConfig?.theme).toBe('dark'))
   })
 
-  it('点击 Reset 后 DirtyBar 消失', async () => {
+  it('coalesces rapid edits into one save', async () => {
     renderSettings()
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
+      useAppStore.getState().updateConfig({ theme: 'light' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByText('Reset'))
-
-    await waitFor(() => {
-      expect(screen.queryByText('Unsaved changes')).toBeNull()
-    })
+    await waitFor(() => expect(vi.mocked(updateConfig)).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(updateConfig).mock.calls[0][0].theme).toBe('light')
   })
 
-  it('DirtyBar 显示 Save 和 Reset 两个按钮', async () => {
-    renderSettings()
-    act(() => {
-      useAppStore.getState().updateConfig({ theme: 'dark' })
-    })
-    await waitFor(() => {
-      expect(screen.getByText('Save')).toBeDefined()
-      expect(screen.getByText('Reset')).toBeDefined()
-    })
-  })
-
-  it('persisted capsule visibility patch does not erase unrelated dirty settings', async () => {
+  it('persisted capsule visibility patch does not erase unrelated edits', async () => {
     renderSettings()
 
     act(() => {
@@ -1368,19 +1818,13 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ theme: 'dark' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(vi.mocked(getConfig)).toHaveBeenCalledTimes(1)
     })
-    expect(useAppStore.getState().config.theme).toBe('system')
+    await waitFor(() => expect(useAppStore.getState().config.theme).toBe('system'))
     expect(useAppStore.getState().savedConfig?.theme).toBe('system')
     expect(toast).toHaveBeenCalledWith('Shortcut registration failed', 'error')
-    expect(screen.queryByText('Unsaved changes')).toBeNull()
   })
 
   it('保存失败后刷新后端 hotkey 注册错误状态', async () => {
@@ -1396,11 +1840,6 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ hotkey: 'Ctrl+Shift+;' })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(useAppStore.getState().hotkeyRegistrationError).toBe('Shortcut registration failed')
@@ -1419,17 +1858,12 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ auto_start: false })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
     })
+    await waitFor(() => expect(useAppStore.getState().config.auto_start).toBe(true))
     expect(vi.mocked(updateConfig)).not.toHaveBeenCalled()
-    expect(useAppStore.getState().config.auto_start).toBe(true)
     expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
     expect(toast).toHaveBeenCalledWith('Login item failed', 'error')
   })
@@ -1446,20 +1880,11 @@ describe('DirtyBar 行为', () => {
     act(() => {
       useAppStore.getState().updateConfig({ auto_start: false })
     })
-    await waitFor(() => {
-      expect(screen.getByText('Unsaved changes')).toBeDefined()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
-      expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(false)
+      expect(vi.mocked(setAutoStart).mock.calls).toEqual([[false], [true]])
     })
-    await waitFor(() => {
-      expect(vi.mocked(setAutoStart)).toHaveBeenCalledWith(true)
-    })
-    expect(vi.mocked(setAutoStart).mock.calls).toEqual([[false], [true]])
-    expect(useAppStore.getState().config.auto_start).toBe(true)
+    await waitFor(() => expect(useAppStore.getState().config.auto_start).toBe(true))
     expect(useAppStore.getState().savedConfig?.auto_start).toBe(true)
     expect(toast).toHaveBeenCalledWith('Shortcut registration failed', 'error')
   })

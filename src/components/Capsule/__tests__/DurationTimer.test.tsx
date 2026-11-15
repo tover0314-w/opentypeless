@@ -6,7 +6,7 @@ import { DurationTimer } from '../DurationTimer'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 
-describe('DurationTimer', () => {
+describe('DurationTimer countdown', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000_000)
@@ -19,7 +19,7 @@ describe('DurationTimer', () => {
     vi.clearAllMocks()
   })
 
-  it('renders elapsed time from the Rust capture-ready timestamp', () => {
+  it('stays hidden until the final minute of the recording limit', () => {
     useAppStore.setState({
       recordingDeadline: {
         sessionId: 7,
@@ -30,13 +30,28 @@ describe('DurationTimer', () => {
       },
     })
 
+    const { container } = render(<DurationTimer />)
+    expect(container.textContent).toBe('')
+  })
+
+  it('counts down the remaining time from the Rust deadline', () => {
+    useAppStore.setState({
+      recordingDeadline: {
+        sessionId: 7,
+        recordingKind: 'dictation',
+        startedAtUnixMs: 940_000,
+        deadlineAtUnixMs: 1_045_000,
+        effectiveMaxSeconds: 105,
+      },
+    })
+
     render(<DurationTimer />)
-    expect(screen.getByText('01:00')).toBeInTheDocument()
+    expect(screen.getByText('00:45')).toBeInTheDocument()
 
     act(() => {
       vi.advanceTimersByTime(2_000)
     })
-    expect(screen.getByText('01:02')).toBeInTheDocument()
+    expect(screen.getByText('00:43')).toBeInTheDocument()
   })
 
   it('never acts as the recording stop authority', () => {
@@ -56,6 +71,6 @@ describe('DurationTimer', () => {
     })
 
     expect(invoke).not.toHaveBeenCalled()
-    expect(screen.getByText('00:29')).toBeInTheDocument()
+    expect(screen.getByText('00:00')).toBeInTheDocument()
   })
 })

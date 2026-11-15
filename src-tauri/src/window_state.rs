@@ -16,9 +16,13 @@ struct WindowState {
 
 struct MainWindowState(Mutex<Option<WindowState>>);
 
+// Mirrors the main window minimum in tauri.conf.json.
+const MIN_WIDTH: u32 = 988;
+const MIN_HEIGHT: u32 = 685;
+
 impl WindowState {
     fn valid(&self) -> bool {
-        self.x > -1000 && self.y > -1000 && self.width >= 720 && self.height >= 480
+        self.x > -1000 && self.y > -1000 && self.width >= MIN_WIDTH && self.height >= MIN_HEIGHT
     }
 
     fn observe(&mut self, observed: Self, minimized: bool, fullscreen: bool) {
@@ -128,8 +132,8 @@ mod tests {
         WindowState {
             x: 100,
             y: 80,
-            width: 960,
-            height: 720,
+            width: 1080,
+            height: 750,
             maximized: false,
         }
     }
@@ -137,7 +141,7 @@ mod tests {
     #[test]
     fn legacy_window_state_defaults_to_restored() {
         let state: WindowState =
-            serde_json::from_str(r#"{"x":100,"y":80,"width":960,"height":720}"#).unwrap();
+            serde_json::from_str(r#"{"x":100,"y":80,"width":1080,"height":750}"#).unwrap();
         assert_eq!(state, normal_state());
     }
 
@@ -210,5 +214,21 @@ mod tests {
         };
         state.observe(restored.clone(), false, false);
         assert_eq!(state, restored);
+    }
+
+    #[test]
+    fn geometry_below_the_main_window_minimum_is_not_restored() {
+        let legacy_small = WindowState {
+            width: 900,
+            height: 700,
+            ..normal_state()
+        };
+        assert!(!legacy_small.valid());
+        assert!(WindowState {
+            width: MIN_WIDTH,
+            height: MIN_HEIGHT,
+            ..normal_state()
+        }
+        .valid());
     }
 }

@@ -251,12 +251,48 @@ pub fn response_text(kind: LlmApiKind, body: &Value) -> String {
     }
 }
 
+pub fn response_completion_error(kind: LlmApiKind, body: &Value) -> Option<&'static str> {
+    match kind {
+        LlmApiKind::AnthropicMessages => match &body["stop_reason"] {
+            Value::Null => None,
+            Value::String(reason) => match reason.as_str() {
+                "end_turn" | "stop_sequence" => None,
+                "max_tokens" => Some("Anthropic LLM response was truncated"),
+                "tool_use" => Some("Anthropic LLM response requires an unsupported tool call"),
+                "pause_turn" => Some("Anthropic LLM response requires continuation"),
+                "refusal" => Some("Anthropic LLM refused the request"),
+                _ => Some("Anthropic LLM returned an unsupported completion reason"),
+            },
+            _ => Some("Anthropic LLM returned an unsupported completion reason"),
+        },
+        LlmApiKind::OpenAiCompatible => match &body["choices"][0]["finish_reason"] {
+            Value::Null => None,
+            Value::String(reason) => match reason.as_str() {
+                "stop" => None,
+                "length" => Some("LLM response was truncated"),
+                "content_filter" => Some("LLM response was blocked by the content filter"),
+                "tool_calls" | "function_call" => {
+                    Some("LLM response requires an unsupported tool call")
+                }
+                _ => Some("LLM returned an unsupported completion reason"),
+            },
+            _ => Some("LLM returned an unsupported completion reason"),
+        },
+    }
+}
+
 pub fn parse_stream_event(kind: LlmApiKind, body: &Value) -> StreamEvent {
     match kind {
         LlmApiKind::AnthropicMessages => {
             if body["type"].as_str() == Some("error") {
                 return StreamEvent {
-                    error: body["error"]["message"].as_str().map(str::to_string),
+                    error: Some(
+                        body["error"]["message"]
+                            .as_str()
+                            .filter(|message| !message.trim().is_empty())
+                            .unwrap_or("LLM streaming returned an error")
+                            .to_string(),
+                    ),
                     ..StreamEvent::default()
                 };
             }
@@ -265,6 +301,14 @@ pub fn parse_stream_event(kind: LlmApiKind, body: &Value) -> StreamEvent {
                     done: true,
                     ..StreamEvent::default()
                 };
+            }
+            if body["type"].as_str() == Some("message_delta") {
+                if let Some(error) = response_completion_error(kind, &body["delta"]) {
+                    return StreamEvent {
+                        error: Some(error.to_string()),
+                        ..StreamEvent::default()
+                    };
+                }
             }
             if body["type"].as_str() == Some("content_block_delta")
                 && body["delta"]["type"].as_str() == Some("text_delta")
@@ -277,6 +321,26 @@ pub fn parse_stream_event(kind: LlmApiKind, body: &Value) -> StreamEvent {
             StreamEvent::default()
         }
         LlmApiKind::OpenAiCompatible => {
+            if let Some(error) = body.get("error").filter(|error| !error.is_null()) {
+                return StreamEvent {
+                    error: Some(
+                        error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .or_else(|| error.as_str())
+                            .filter(|message| !message.trim().is_empty())
+                            .unwrap_or("LLM streaming returned an error")
+                            .to_string(),
+                    ),
+                    ..StreamEvent::default()
+                };
+            }
+            if let Some(error) = response_completion_error(kind, body) {
+                return StreamEvent {
+                    error: Some(error.to_string()),
+                    ..StreamEvent::default()
+                };
+            }
             let delta = &body["choices"][0]["delta"];
             StreamEvent {
                 text: delta["content"].as_str().map(str::to_string),
@@ -296,6 +360,134 @@ mod tests {
             json!({"role": "system", "content": "Be concise."}),
             json!({"role": "user", "content": "Hello"}),
         ]
+    }
+
+    #[test]
+    fn completion_checks_reject_unknown_and_malformed_reasons_without_echoing_them() {
+        for reason in [
+            json!("synthetic-private-reason"),
+            json!(1),
+            json!(true),
+            json!({}),
+        ] {
+            for (kind, body) in [
+                (
+                    LlmApiKind::AnthropicMessages,
+                    json!({"stop_reason": reason}),
+                ),
+                (
+                    LlmApiKind::OpenAiCompatible,
+                    json!({"choices": [{"finish_reason": reason}]}),
+                ),
+            ] {
+                let error = response_completion_error(kind, &body).unwrap();
+                assert!(!error.contains("synthetic-private-reason"));
+                assert!(error.contains("unsupported completion reason"));
+            }
+        }
+    }
+
+    #[test]
+    fn compatible_completion_check_preserves_normal_and_absent_reasons() {
+        for body in [
+            json!({}),
+            json!({"choices": [{"finish_reason": null}]}),
+            json!({"choices": [{"finish_reason": "stop"}]}),
+        ] {
+            assert!(response_completion_error(LlmApiKind::OpenAiCompatible, &body).is_none());
+            let event = parse_stream_event(LlmApiKind::OpenAiCompatible, &body);
+            assert!(event.error.is_none());
+        }
+        for reason in ["length", "content_filter"] {
+            let event = parse_stream_event(
+                LlmApiKind::OpenAiCompatible,
+                &json!({"choices": [{
+                    "finish_reason": reason,
+                    "delta": {"content": "Must not deliver", "reasoning_content": "Neither"}
+                }]}),
+            );
+            assert!(event.error.is_some());
+            assert!(event.text.is_none());
+            assert!(event.reasoning.is_none());
+        }
+    }
+
+    #[test]
+    fn anthropic_completion_check_preserves_normal_and_missing_stop_reasons() {
+        for body in [
+            json!({}),
+            json!({"stop_reason": null}),
+            json!({"stop_reason": "end_turn"}),
+            json!({"stop_reason": "stop_sequence"}),
+        ] {
+            assert!(response_completion_error(LlmApiKind::AnthropicMessages, &body).is_none());
+        }
+        assert_eq!(
+            response_completion_error(
+                LlmApiKind::AnthropicMessages,
+                &json!({"stop_reason": "max_tokens"})
+            ),
+            Some("Anthropic LLM response was truncated")
+        );
+        assert!(response_completion_error(
+            LlmApiKind::OpenAiCompatible,
+            &json!({"stop_reason": "max_tokens"})
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn anthropic_error_event_without_message_still_reports_failure() {
+        for error in [
+            json!({"type": "overloaded_error"}),
+            json!({"message": " "}),
+            Value::Null,
+        ] {
+            let event = parse_stream_event(
+                LlmApiKind::AnthropicMessages,
+                &json!({"type": "error", "error": error}),
+            );
+            assert_eq!(
+                event.error.as_deref(),
+                Some("LLM streaming returned an error")
+            );
+            assert!(event.text.is_none());
+            assert!(!event.done);
+        }
+        let event = parse_stream_event(
+            LlmApiKind::AnthropicMessages,
+            &json!({"type": "error", "error": {"message": "Provider unavailable"}}),
+        );
+        assert_eq!(event.error.as_deref(), Some("Provider unavailable"));
+    }
+
+    #[test]
+    fn compatible_stream_error_takes_precedence_over_content() {
+        for (error, expected) in [
+            (
+                json!({"message": "Provider unavailable"}),
+                "Provider unavailable",
+            ),
+            (json!("Provider unavailable"), "Provider unavailable"),
+            (json!({"code": "failed"}), "LLM streaming returned an error"),
+        ] {
+            let event = parse_stream_event(
+                LlmApiKind::OpenAiCompatible,
+                &json!({
+                    "error": error,
+                    "choices": [{"delta": {"content": "Must not deliver"}}]
+                }),
+            );
+            assert_eq!(event.error.as_deref(), Some(expected));
+            assert!(event.text.is_none());
+            assert!(event.reasoning.is_none());
+        }
+        let event = parse_stream_event(
+            LlmApiKind::OpenAiCompatible,
+            &json!({"error": null, "choices": [{"delta": {"content": "Normal"}}]}),
+        );
+        assert_eq!(event.text.as_deref(), Some("Normal"));
+        assert!(event.error.is_none());
     }
 
     #[test]

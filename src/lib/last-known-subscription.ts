@@ -1,4 +1,5 @@
 import type { SubscriptionStatus } from './api'
+import { accountSnapshotMatches, isSubscriptionStatus } from './subscription-validation'
 
 export interface LastKnownSubscription {
   verifiedAt: string
@@ -18,32 +19,61 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string'
-}
-
-function isNonNegativeNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-}
-
-function isSubscriptionStatus(value: unknown): value is SubscriptionStatus {
-  if (!isRecord(value) || typeof value.plan !== 'string' || typeof value.source !== 'string') {
-    return false
+function cacheableSubscription(snapshot: SubscriptionStatus): SubscriptionStatus {
+  const account = snapshot.accountSnapshot
+  const capability = account?.managedSttCapabilities
+  return {
+    plan: snapshot.plan,
+    source: snapshot.source,
+    displayName: snapshot.displayName,
+    subscriptionEnd: snapshot.subscriptionEnd,
+    subscriptionStatus: snapshot.subscriptionStatus,
+    licenseStatus: snapshot.licenseStatus,
+    billingProvider: snapshot.billingProvider,
+    cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+    canManageBilling: snapshot.canManageBilling,
+    canMigrateToStripe: snapshot.canMigrateToStripe,
+    entitlementVersion: snapshot.entitlementVersion,
+    quotaModel: snapshot.quotaModel,
+    ...(snapshot.quotaDataAvailable === undefined
+      ? {}
+      : { quotaDataAvailable: snapshot.quotaDataAvailable }),
+    displayWordsUsedEstimate: snapshot.displayWordsUsedEstimate,
+    displayWordsLimit: snapshot.displayWordsLimit,
+    displayWordsResetAt: snapshot.displayWordsResetAt,
+    sttSecondsUsed: snapshot.sttSecondsUsed,
+    sttSecondsLimit: snapshot.sttSecondsLimit,
+    llmTokensUsed: snapshot.llmTokensUsed,
+    llmTokensLimit: snapshot.llmTokensLimit,
+    cloudWordsUsed: snapshot.cloudWordsUsed,
+    cloudWordsLimit: snapshot.cloudWordsLimit,
+    cloudWordsResetAt: snapshot.cloudWordsResetAt,
+    byokUnlimited: snapshot.byokUnlimited,
+    ...(account === undefined
+      ? {}
+      : {
+          accountSnapshot: account
+            ? {
+                schemaVersion: account.schemaVersion,
+                userId: account.userId,
+                generatedAt: account.generatedAt,
+                managedSttCapabilities: capability
+                  ? {
+                      version: capability.version,
+                      maxRecordingSeconds: capability.maxRecordingSeconds,
+                      maxMultipartBytes: capability.maxMultipartBytes,
+                      formats: capability.formats.map((format) => ({
+                        mimeType: format.mimeType,
+                        maxAudioBytes: format.maxAudioBytes,
+                        preferredClientSwitchBytes: format.preferredClientSwitchBytes,
+                        bitrateBitsPerSecond: format.bitrateBitsPerSecond,
+                      })),
+                    }
+                  : null,
+              }
+            : null,
+        }),
   }
-  return (
-    typeof value.displayName === 'string' &&
-    isNullableString(value.subscriptionEnd) &&
-    isNullableString(value.subscriptionStatus) &&
-    isNonNegativeNumber(value.displayWordsUsedEstimate) &&
-    isNonNegativeNumber(value.displayWordsLimit) &&
-    isNonNegativeNumber(value.sttSecondsUsed) &&
-    isNonNegativeNumber(value.sttSecondsLimit) &&
-    isNonNegativeNumber(value.llmTokensUsed) &&
-    isNonNegativeNumber(value.llmTokensLimit) &&
-    isNonNegativeNumber(value.cloudWordsUsed) &&
-    isNonNegativeNumber(value.cloudWordsLimit) &&
-    typeof value.byokUnlimited === 'boolean'
-  )
 }
 
 export function loadLastKnownSubscription(
@@ -71,7 +101,10 @@ export function loadLastKnownSubscription(
     ) {
       return null
     }
-    return { verifiedAt: cached.verifiedAt, snapshot: cached.snapshot }
+    if (!accountSnapshotMatches(cached.snapshot, userId)) {
+      return null
+    }
+    return { verifiedAt: cached.verifiedAt, snapshot: cacheableSubscription(cached.snapshot) }
   } catch {
     return null
   }
@@ -94,9 +127,15 @@ export function saveLastKnownSubscription(
   verifiedAt: string,
 ) {
   try {
+    if (!isSubscriptionStatus(snapshot) || !accountSnapshotMatches(snapshot, userId)) return
     storage.setItem(
       keyFor(userId),
-      JSON.stringify({ version: CACHE_VERSION, userId, verifiedAt, snapshot }),
+      JSON.stringify({
+        version: CACHE_VERSION,
+        userId,
+        verifiedAt,
+        snapshot: cacheableSubscription(snapshot),
+      }),
     )
   } catch {
     // The live in-memory entitlement remains usable when storage is unavailable.

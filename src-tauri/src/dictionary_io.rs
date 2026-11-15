@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 
-pub const MAX_IMPORT_BYTES: usize = 1024 * 1024;
+pub const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_IMPORT_ROWS: usize = 10_000;
 const CSV_MARKER: &str = "# opentypeless_dictionary";
 const CSV_HEADER: [&str; 6] = [
@@ -61,6 +61,7 @@ pub enum DictionaryImportError {
     InvalidUtf8,
     UnsupportedFormat,
     InvalidStructure,
+    TooManyRows,
     Database,
 }
 
@@ -71,6 +72,7 @@ impl fmt::Display for DictionaryImportError {
             Self::InvalidUtf8 => "dictionary_import_invalid_utf8",
             Self::UnsupportedFormat => "dictionary_import_unsupported_format",
             Self::InvalidStructure => "dictionary_import_invalid_structure",
+            Self::TooManyRows => "dictionary_import_too_many_rows",
             Self::Database => "dictionary_import_database_error",
         })
     }
@@ -85,6 +87,7 @@ pub struct DictionaryImportReport {
     pub skipped_duplicates: usize,
     pub skipped_invalid: usize,
     pub errors: Vec<ImportRowError>,
+    pub accepted_words: Vec<String>,
 }
 
 pub fn parse_dictionary_import(
@@ -133,9 +136,17 @@ fn parse_csv(text: &str) -> Result<ParsedDictionaryImport, DictionaryImportError
         .ok_or(DictionaryImportError::InvalidStructure)?
         .map_err(|_| DictionaryImportError::InvalidStructure)?;
 
-    let marked = first.len() == 2
-        && first.get(0).is_some_and(|value| value.trim() == CSV_MARKER)
-        && first.get(1).is_some_and(|value| value.trim() == "1");
+    let export_version =
+        if first.len() == 2 && first.get(0).is_some_and(|value| value.trim() == CSV_MARKER) {
+            match first.get(1).map(str::trim) {
+                Some("1") => Some(1),
+                Some("2") => Some(2),
+                _ => None,
+            }
+        } else {
+            None
+        };
+    let marked = export_version.is_some();
     if first
         .get(0)
         .is_some_and(|value| value.trim().starts_with(CSV_MARKER))
@@ -157,7 +168,10 @@ fn parse_csv(text: &str) -> Result<ParsedDictionaryImport, DictionaryImportError
             .zip(CSV_HEADER)
             .all(|(actual, expected)| actual.trim() == expected)
     {
-        return Err(DictionaryImportError::InvalidStructure);
+        if marked {
+            return Err(DictionaryImportError::InvalidStructure);
+        }
+        return parse_word_list_csv(text);
     }
 
     let mut parsed = empty_parsed_import();
@@ -177,7 +191,7 @@ fn parse_csv(text: &str) -> Result<ParsedDictionaryImport, DictionaryImportError
         }
         let fields = record
             .iter()
-            .map(|value| restore_exported_csv_cell(value, marked))
+            .map(|value| restore_exported_csv_cell(value, export_version))
             .collect::<Vec<_>>();
         let row = match fields[0].trim().to_ascii_lowercase().as_str() {
             "dictionary" => {
@@ -197,6 +211,34 @@ fn parse_csv(text: &str) -> Result<ParsedDictionaryImport, DictionaryImportError
             _ => Err("unknown_row_type"),
         };
         push_validated_row(&mut parsed, row_number, row);
+    }
+    Ok(parsed)
+}
+
+/// One word per row, matching the plain word-list CSV other dictation apps export.
+fn parse_word_list_csv(text: &str) -> Result<ParsedDictionaryImport, DictionaryImportError> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(text.as_bytes());
+    let mut parsed = empty_parsed_import();
+    let mut data_rows = 0;
+    for (record_index, record) in reader.records().enumerate() {
+        let record = record.map_err(|_| DictionaryImportError::InvalidStructure)?;
+        let mut cells = record.iter().map(str::trim).filter(|cell| !cell.is_empty());
+        let Some(word) = cells.next() else {
+            continue;
+        };
+        if cells.next().is_some() {
+            return Err(DictionaryImportError::InvalidStructure);
+        }
+        data_rows += 1;
+        enforce_row_limit(data_rows)?;
+        push_validated_row(
+            &mut parsed,
+            record_index + 1,
+            validate_dictionary_row(word, None),
+        );
     }
     Ok(parsed)
 }
@@ -306,7 +348,7 @@ fn empty_parsed_import() -> ParsedDictionaryImport {
 
 fn enforce_row_limit(rows: usize) -> Result<(), DictionaryImportError> {
     if rows > MAX_IMPORT_ROWS {
-        Err(DictionaryImportError::InvalidStructure)
+        Err(DictionaryImportError::TooManyRows)
     } else {
         Ok(())
     }
@@ -416,12 +458,16 @@ fn push_row_error(parsed: &mut ParsedDictionaryImport, row: usize, code: &str) {
     });
 }
 
-fn restore_exported_csv_cell(value: &str, marked: bool) -> String {
-    if marked && value.starts_with('\'') && starts_with_formula_character(&value[1..]) {
-        value[1..].to_string()
-    } else {
-        value.to_string()
+fn restore_exported_csv_cell(value: &str, export_version: Option<u8>) -> String {
+    if let Some(rest) = value.strip_prefix('\'') {
+        if export_version.is_some()
+            && (starts_with_formula_character(rest)
+                || (export_version == Some(2) && rest.starts_with('\'')))
+        {
+            return rest.to_string();
+        }
     }
+    value.to_string()
 }
 
 fn starts_with_formula_character(value: &str) -> bool {
@@ -467,10 +513,15 @@ fn report_rows(
 ) -> DictionaryImportReport {
     let mut accepted = 0;
     let mut skipped_duplicates = 0;
+    let mut accepted_words = Vec::new();
     for row in rows {
         let inserted = match row {
             ParsedDictionaryRow::Dictionary { word, .. } => {
-                dictionary_identities.insert(normalized_dictionary_identity(word))
+                let inserted = dictionary_identities.insert(normalized_dictionary_identity(word));
+                if inserted {
+                    accepted_words.push(word.clone());
+                }
+                inserted
             }
             ParsedDictionaryRow::Correction {
                 pattern,
@@ -489,6 +540,7 @@ fn report_rows(
         skipped_duplicates,
         skipped_invalid,
         errors,
+        accepted_words,
     }
 }
 
@@ -521,6 +573,7 @@ pub async fn commit_dictionary_import(
 
             let mut accepted = 0;
             let mut skipped_duplicates = 0;
+            let mut accepted_words = Vec::new();
             for row in &parsed.rows {
                 match row {
                     ParsedDictionaryRow::Dictionary {
@@ -535,6 +588,7 @@ pub async fn commit_dictionary_import(
                             "INSERT INTO dictionary (word, pronunciation) VALUES (?1, ?2)",
                             rusqlite::params![word, pronunciation],
                         )?;
+                        accepted_words.push(word.clone());
                     }
                     ParsedDictionaryRow::Correction {
                         pattern,
@@ -561,6 +615,7 @@ pub async fn commit_dictionary_import(
                 skipped_duplicates,
                 skipped_invalid: parsed.skipped_invalid,
                 errors: parsed.errors,
+                accepted_words,
             })
         })
         .map_err(|_| DictionaryImportError::Database)
@@ -606,7 +661,7 @@ pub fn export_dictionary_csv(
         .flexible(true)
         .from_writer(Vec::new());
     writer
-        .write_record([CSV_MARKER, "1"])
+        .write_record([CSV_MARKER, "2"])
         .map_err(|_| DictionaryImportError::InvalidStructure)?;
     writer
         .write_record(CSV_HEADER)
@@ -646,7 +701,7 @@ pub fn export_dictionary_csv(
 }
 
 fn safe_csv_cell(value: &str) -> String {
-    if starts_with_formula_character(value) {
+    if starts_with_formula_character(value) || value.starts_with('\'') {
         format!("'{value}")
     } else {
         value.to_string()
@@ -717,6 +772,36 @@ mod tests {
             .join("\n");
         assert_eq!(
             parse_dictionary_import(too_many.as_bytes(), ImportFormat::Txt),
+            Err(DictionaryImportError::TooManyRows)
+        );
+    }
+
+    #[test]
+    fn csv_parser_accepts_one_column_word_lists() {
+        let input = "\u{feff}OpenTypeless\r\n\r\n\"Talk, More\"\r\n  ,  \r\n  Kubernetes  ,\r\n";
+
+        let parsed = parse_dictionary_import(input.as_bytes(), ImportFormat::Csv).unwrap();
+
+        let words = parsed
+            .rows
+            .iter()
+            .map(|row| match row {
+                ParsedDictionaryRow::Dictionary { word, .. } => word.as_str(),
+                ParsedDictionaryRow::Correction { .. } => panic!("unexpected correction"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(words, ["OpenTypeless", "Talk, More", "Kubernetes"]);
+        assert_eq!(parsed.skipped_invalid, 0);
+    }
+
+    #[test]
+    fn csv_parser_rejects_multi_column_word_lists_and_bad_marked_headers() {
+        assert_eq!(
+            parse_dictionary_import(b"OpenTypeless\nword,second", ImportFormat::Csv),
+            Err(DictionaryImportError::InvalidStructure)
+        );
+        assert_eq!(
+            parse_dictionary_import(b"# opentypeless_dictionary,1\nword\n", ImportFormat::Csv),
             Err(DictionaryImportError::InvalidStructure)
         );
     }
@@ -759,11 +844,39 @@ mod tests {
     }
 
     #[test]
+    fn csv_export_preserves_literal_apostrophes_before_formula_characters() {
+        let words = ["'=literal", "''=literal", "'ordinary", "+formula"];
+        let dictionary = words
+            .iter()
+            .enumerate()
+            .map(|(index, word)| DictionaryEntry {
+                id: index as i64,
+                word: word.to_string(),
+                pronunciation: Some(word.to_string()),
+                auto: false,
+            })
+            .collect::<Vec<_>>();
+        let exported = export_dictionary_csv(&dictionary, &[]).unwrap();
+        let parsed = parse_dictionary_import(exported.as_bytes(), ImportFormat::Csv).unwrap();
+        for (row, expected) in parsed.rows.iter().zip(words) {
+            assert_eq!(
+                row,
+                &ParsedDictionaryRow::Dictionary {
+                    word: expected.to_string(),
+                    pronunciation: Some(expected.to_string()),
+                }
+            );
+        }
+        assert_eq!(parsed.rows.len(), words.len());
+    }
+
+    #[test]
     fn csv_export_neutralizes_formulas_and_round_trips_only_its_marker() {
         let dictionary = vec![DictionaryEntry {
             id: 1,
             word: "  =HYPERLINK(\"https://example.com\")".to_string(),
             pronunciation: Some("+cmd".to_string()),
+            auto: false,
         }];
         let corrections = vec![CorrectionRule {
             id: 2,
@@ -773,7 +886,7 @@ mod tests {
         }];
 
         let exported = export_dictionary_csv(&dictionary, &corrections).unwrap();
-        assert!(exported.starts_with("# opentypeless_dictionary,1"));
+        assert!(exported.starts_with("# opentypeless_dictionary,2"));
         assert!(exported.contains("'  =HYPERLINK"));
         assert!(exported.contains("'+cmd"));
         assert!(exported.contains("'-danger"));
@@ -793,6 +906,15 @@ dictionary,'=literal,,,,true\n";
             &parsed.rows[0],
             ParsedDictionaryRow::Dictionary { word, .. } if word == "'=literal"
         ));
+
+        let legacy = b"# opentypeless_dictionary,1\n\
+type,word,pronunciation,wrong_phrase,corrected_phrase,enabled\n\
+dictionary,'=legacy,,,,true\n";
+        let parsed = parse_dictionary_import(legacy, ImportFormat::Csv).unwrap();
+        assert!(matches!(
+            &parsed.rows[0],
+            ParsedDictionaryRow::Dictionary { word, .. } if word == "=legacy"
+        ));
     }
 
     #[test]
@@ -802,6 +924,7 @@ dictionary,'=literal,,,,true\n";
                 id: 9,
                 word: "OpenTypeless".to_string(),
                 pronunciation: None,
+                auto: true,
             }],
             &[CorrectionRule {
                 id: 8,
@@ -853,9 +976,11 @@ dictionary,'=literal,,,,true\n";
         let preview = preview_dictionary_import(&store, &parsed).await.unwrap();
         assert_eq!(preview.accepted, 1);
         assert_eq!(preview.skipped_duplicates, 2);
+        assert_eq!(preview.accepted_words, ["TalkMore"]);
 
         let report = commit_dictionary_import(&store, parsed).await.unwrap();
         assert_eq!(report.accepted, 1);
+        assert_eq!(report.accepted_words, ["TalkMore"]);
         assert_eq!(report.skipped_duplicates, 2);
         assert_eq!(store.list().await.unwrap().len(), 2);
         assert_eq!(store.correction_rules().await.unwrap().len(), 1);

@@ -1,5 +1,11 @@
 pub mod clipboard;
+#[cfg(target_os = "macos")]
+pub(crate) mod event_identity;
+mod guarded;
 pub mod keyboard;
+mod keyboard_progress;
+#[cfg(target_os = "macos")]
+mod scheduled;
 pub mod windows_modifier_guard;
 pub mod windows_sendinput;
 
@@ -197,7 +203,34 @@ pub async fn output_with_strategy(
     clipboard_options: clipboard::ClipboardOutputOptions,
     windows_sendinput_options: windows_sendinput::WindowsSendInputOptions,
 ) -> Result<OutputOutcome, String> {
-    let keyboard = create_output(OutputMode::Keyboard, app_handle);
+    output_with_guard(
+        app_handle,
+        text,
+        strategy,
+        clipboard_options,
+        windows_sendinput_options,
+        OutputGuards {
+            insert: std::sync::Arc::new(|| true),
+            copy: std::sync::Arc::new(|| true),
+        },
+    )
+    .await
+}
+
+pub struct OutputGuards {
+    pub insert: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    pub copy: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+pub async fn output_with_guard(
+    app_handle: &tauri::AppHandle,
+    text: &str,
+    strategy: InsertionStrategy,
+    clipboard_options: clipboard::ClipboardOutputOptions,
+    windows_sendinput_options: windows_sendinput::WindowsSendInputOptions,
+    guards: OutputGuards,
+) -> Result<OutputOutcome, String> {
+    let keyboard = keyboard::KeyboardOutput::with_guard(app_handle, guards.insert.clone());
     let windows_sendinput =
         windows_sendinput::WindowsSendInputOutput::new(windows_sendinput_options);
     let clipboard_paste =
@@ -214,10 +247,10 @@ pub async fn output_with_strategy(
     output_with_strategy_using(
         text,
         strategy,
-        keyboard.as_ref(),
-        &windows_sendinput,
-        clipboard_paste.as_ref(),
-        clipboard_copy.as_ref(),
+        &guarded::GuardedOutput::new(Box::new(keyboard), guards.insert.clone()),
+        &guarded::GuardedOutput::new(Box::new(windows_sendinput), guards.insert.clone()),
+        &guarded::GuardedOutput::new(clipboard_paste, guards.insert),
+        &guarded::GuardedOutput::new(clipboard_copy, guards.copy),
         clipboard_warning_for_platform(),
     )
     .await
@@ -229,17 +262,43 @@ pub async fn output_stream_chunk(
     strategy: InsertionStrategy,
     windows_sendinput_options: windows_sendinput::WindowsSendInputOptions,
 ) -> Result<InsertResult, String> {
+    output_stream_chunk_with_guard(
+        app_handle,
+        text,
+        strategy,
+        windows_sendinput_options,
+        std::sync::Arc::new(|| true),
+    )
+    .await
+}
+
+pub async fn output_stream_chunk_with_guard(
+    app_handle: &tauri::AppHandle,
+    text: &str,
+    strategy: InsertionStrategy,
+    windows_sendinput_options: windows_sendinput::WindowsSendInputOptions,
+    guard: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Result<InsertResult, String> {
     match strategy.direct_streaming_strategy() {
-        Some(InsertionStrategy::Keyboard) => create_output(OutputMode::Keyboard, app_handle)
-            .type_text(text)
-            .await
-            .map_err(|e| e.to_string()),
-        Some(InsertionStrategy::WindowsSendInput) => {
-            windows_sendinput::WindowsSendInputOutput::new(windows_sendinput_options)
-                .type_text(text)
-                .await
-                .map_err(|e| e.to_string())
-        }
+        Some(InsertionStrategy::Keyboard) => guarded::GuardedOutput::new(
+            Box::new(keyboard::KeyboardOutput::with_guard(
+                app_handle,
+                guard.clone(),
+            )),
+            guard,
+        )
+        .type_text(text)
+        .await
+        .map_err(|e| e.to_string()),
+        Some(InsertionStrategy::WindowsSendInput) => guarded::GuardedOutput::new(
+            Box::new(windows_sendinput::WindowsSendInputOutput::new(
+                windows_sendinput_options,
+            )),
+            guard,
+        )
+        .type_text(text)
+        .await
+        .map_err(|e| e.to_string()),
         _ => Err(format!(
             "Insertion strategy {:?} does not support streaming chunks",
             strategy
@@ -380,10 +439,48 @@ async fn output_with_strategy_using(
 
     // Try keyboard first
     match keyboard.type_text(text).await {
+        Ok(mut partial) if partial.status == InsertStatus::PartiallyInserted => {
+            let recovery_message = match clipboard_copy.type_text(text).await {
+                Ok(copied) => {
+                    partial.chars_copied = copied.chars_copied;
+                    "copied full text without pasting again"
+                }
+                Err(_) => "full text could not be copied",
+            };
+            let warning = UserError {
+                code: "output_fallback_clipboard".into(),
+                details: Some(format!(
+                    "Keyboard output completed {} characters before stopping; {}.",
+                    partial.chars_inserted, recovery_message
+                )),
+                retry_count: 0,
+            };
+            Ok(OutputOutcome {
+                insert_result: partial.with_warning(&warning),
+                warning: Some(warning),
+            })
+        }
         Ok(insert_result) => Ok(OutputOutcome {
             insert_result,
             warning: None,
         }),
+        Err(AppError::OutputUnconfirmed(message)) => {
+            let copied = clipboard_copy
+                .type_text(text)
+                .await
+                .map_err(|error| error.to_string())?;
+            let warning = UserError {
+                code: "output_fallback_clipboard".into(),
+                details: Some(format!(
+                    "Keyboard output is unconfirmed; copied full text without pasting again. {message}"
+                )),
+                retry_count: 0,
+            };
+            Ok(OutputOutcome {
+                insert_result: copied.with_warning(&warning),
+                warning: Some(warning),
+            })
+        }
         Err(kb_err) => {
             tracing::warn!(
                 "Keyboard output failed: {}, falling back to clipboard",
@@ -428,9 +525,199 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
 
+    #[tokio::test]
+    async fn lost_insert_permission_uses_only_the_still_owned_recovery_copy() {
+        let keyboard = guarded::GuardedOutput::new(
+            Box::new(FakeOutput::err(OutputMode::Keyboard, "must not type")),
+            std::sync::Arc::new(|| false),
+        );
+        let no_paste = FakeOutput::err(OutputMode::Clipboard, "must not paste");
+        let copy = guarded::GuardedOutput::new(
+            Box::new(FakeOutput::ok(
+                OutputMode::Clipboard,
+                InsertResult::copied_fallback(InsertionStrategy::ClipboardCopyOnly, 4),
+            )),
+            std::sync::Arc::new(|| true),
+        );
+        let outcome = output_with_strategy_using(
+            "text",
+            InsertionStrategy::Keyboard,
+            &keyboard,
+            &no_paste,
+            &no_paste,
+            &copy,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.insert_result.status, InsertStatus::CopiedFallback);
+        assert_eq!(outcome.insert_result.chars_copied, 4);
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_keyboard_output_never_replays_full_text_as_paste() {
+        struct UnconfirmedKeyboard;
+
+        #[async_trait]
+        impl TextOutput for UnconfirmedKeyboard {
+            async fn type_text(&self, _text: &str) -> Result<InsertResult, AppError> {
+                Err(AppError::OutputUnconfirmed(
+                    "Synthetic output timeout".into(),
+                ))
+            }
+
+            fn mode(&self) -> OutputMode {
+                OutputMode::Keyboard
+            }
+        }
+
+        let no_paste = FakeOutput::err(OutputMode::Clipboard, "Paste must not execute");
+        let copy = FakeOutput::ok(
+            OutputMode::Clipboard,
+            InsertResult::copied_fallback(InsertionStrategy::ClipboardCopyOnly, 4),
+        );
+        let outcome = output_with_strategy_using(
+            "text",
+            InsertionStrategy::Keyboard,
+            &UnconfirmedKeyboard,
+            &no_paste,
+            &no_paste,
+            &copy,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.insert_result.chars_copied, 4);
+        assert_eq!(outcome.insert_result.chars_inserted, 0);
+        assert!(outcome
+            .warning
+            .unwrap()
+            .details
+            .unwrap()
+            .contains("unconfirmed"));
+    }
+
+    #[tokio::test]
+    async fn revoked_output_guard_blocks_clipboard_fallback_after_keyboard_failure() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct RevokingKeyboard(Arc<AtomicBool>);
+
+        #[async_trait]
+        impl TextOutput for RevokingKeyboard {
+            async fn type_text(&self, _text: &str) -> Result<InsertResult, AppError> {
+                self.0.store(false, Ordering::SeqCst);
+                Err(AppError::Output("Synthetic keyboard failure".into()))
+            }
+
+            fn mode(&self) -> OutputMode {
+                OutputMode::Keyboard
+            }
+        }
+
+        struct CountingClipboard(Arc<AtomicUsize>);
+
+        #[async_trait]
+        impl TextOutput for CountingClipboard {
+            async fn type_text(&self, _text: &str) -> Result<InsertResult, AppError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                panic!("Revoked operation must not reach clipboard output");
+            }
+
+            fn mode(&self) -> OutputMode {
+                OutputMode::Clipboard
+            }
+        }
+
+        let permitted = Arc::new(AtomicBool::new(true));
+        let checked_permission = permitted.clone();
+        let guard: guarded::OutputGuard =
+            Arc::new(move || checked_permission.load(Ordering::SeqCst));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let keyboard =
+            guarded::GuardedOutput::new(Box::new(RevokingKeyboard(permitted)), guard.clone());
+        let clipboard =
+            guarded::GuardedOutput::new(Box::new(CountingClipboard(calls.clone())), guard);
+        let result = output_with_strategy_using(
+            "Synthetic text",
+            InsertionStrategy::Keyboard,
+            &keyboard,
+            &keyboard,
+            &clipboard,
+            &clipboard,
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn partial_keyboard_output_copies_without_pasting_and_preserves_progress() {
+        let keyboard = FakeOutput::ok(
+            OutputMode::Keyboard,
+            InsertResult::partially_inserted(InsertionStrategy::Keyboard, 2),
+        );
+        let unused = FakeOutput::err(OutputMode::Clipboard, "must not paste");
+        let copy = FakeOutput::ok(
+            OutputMode::Clipboard,
+            InsertResult::copied_fallback(InsertionStrategy::ClipboardCopyOnly, 4),
+        );
+        let outcome = output_with_strategy_using(
+            "text",
+            InsertionStrategy::Keyboard,
+            &keyboard,
+            &unused,
+            &unused,
+            &copy,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            outcome.insert_result.status,
+            InsertStatus::PartiallyInserted
+        );
+        assert_eq!(outcome.insert_result.chars_inserted, 2);
+        assert_eq!(outcome.insert_result.chars_copied, 4);
+    }
+
     struct FakeOutput {
         mode: OutputMode,
         result: Result<InsertResult, &'static str>,
+    }
+
+    #[tokio::test]
+    async fn partial_keyboard_output_preserves_progress_when_recovery_copy_fails() {
+        let keyboard = FakeOutput::ok(
+            OutputMode::Keyboard,
+            InsertResult::partially_inserted(InsertionStrategy::Keyboard, 2),
+        );
+        let unavailable = FakeOutput::err(OutputMode::Clipboard, "synthetic copy failure");
+        let outcome = output_with_strategy_using(
+            "text",
+            InsertionStrategy::Keyboard,
+            &keyboard,
+            &unavailable,
+            &unavailable,
+            &unavailable,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            outcome.insert_result.status,
+            InsertStatus::PartiallyInserted
+        );
+        assert_eq!(outcome.insert_result.chars_inserted, 2);
+        assert_eq!(outcome.insert_result.chars_copied, 0);
+        assert!(outcome
+            .warning
+            .unwrap()
+            .details
+            .unwrap()
+            .contains("could not be copied"));
     }
 
     impl FakeOutput {

@@ -48,6 +48,10 @@ pub struct BackupHistoryEntry {
     // Pre-context backups used app_name instead of a normalized context label.
     #[serde(default)]
     app_name: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    answer_text: Option<String>,
 }
 
 impl BackupHistoryEntry {
@@ -64,7 +68,10 @@ impl BackupHistoryEntry {
             "backup_history_polished_text",
             true,
         )?;
-        if raw_text.is_empty() && polished_text.is_empty() {
+        if raw_text.is_empty()
+            && polished_text.is_empty()
+            && !storage::is_recording_only_status(self.output_status.as_deref())
+        {
             return Err("backup_history_text_empty".to_string());
         }
 
@@ -76,6 +83,7 @@ impl BackupHistoryEntry {
         .unwrap_or_else(|| "General".to_string());
 
         Ok(HistoryEntry {
+            has_audio: false,
             id: 0,
             created_at: normalize_timestamp(self.created_at, fallback_timestamp)?,
             context_profile_id: optional_backup_string(
@@ -127,6 +135,12 @@ impl BackupHistoryEntry {
                 2_000,
                 "backup_history_output_error",
             )?,
+            mode: match self.mode.as_deref() {
+                Some("ask") => "ask".to_string(),
+                Some("translate") => "translate".to_string(),
+                _ => "dictate".to_string(),
+            },
+            answer_text: optional_backup_string(self.answer_text, 20_000, "backup_history_answer")?,
         })
     }
 }
@@ -136,6 +150,8 @@ pub struct BackupDictionaryEntry {
     word: String,
     #[serde(default)]
     pronunciation: Option<String>,
+    #[serde(default)]
+    auto: bool,
 }
 
 impl From<BackupDictionaryEntry> for DictionaryEntry {
@@ -144,6 +160,7 @@ impl From<BackupDictionaryEntry> for DictionaryEntry {
             id: 0,
             word: entry.word,
             pronunciation: entry.pronunciation,
+            auto: entry.auto,
         }
     }
 }
@@ -186,15 +203,17 @@ pub struct RestoreBackupResult {
     correction_rules: Vec<CorrectionRule>,
 }
 
-#[tauri::command]
-pub async fn restore_backup_data(
-    history_state: tauri::State<'_, storage::HistoryStore>,
-    dictionary_state: tauri::State<'_, storage::DictionaryStore>,
-    config_state: tauri::State<'_, storage::ConfigManager>,
+struct PreparedBackupPayload {
+    history: Option<Vec<HistoryEntry>>,
+    dictionary: Option<Vec<DictionaryEntry>>,
+    correction_rules: Option<Vec<CorrectionRule>>,
+}
+
+fn prepare_backup_payload(
     history: Option<Vec<BackupHistoryEntry>>,
     dictionary: Option<DictionaryBackupPayload>,
-) -> Result<RestoreBackupResult, String> {
-    let fallback_timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    fallback_timestamp: &str,
+) -> Result<PreparedBackupPayload, String> {
     let history = history
         .map(|entries| {
             if entries.len() > DEFAULT_HISTORY_MAX_ENTRIES as usize {
@@ -202,11 +221,14 @@ pub async fn restore_backup_data(
             }
             entries
                 .into_iter()
-                .map(|entry| entry.into_storage(&fallback_timestamp))
+                .map(|entry| entry.into_storage(fallback_timestamp))
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?;
-    let (dictionary, correction_rules) = match dictionary {
+    let (dictionary, correction_rules): (
+        Option<Vec<DictionaryEntry>>,
+        Option<Vec<CorrectionRule>>,
+    ) = match dictionary {
         Some(DictionaryBackupPayload::Legacy(entries)) => {
             (Some(entries.into_iter().map(Into::into).collect()), None)
         }
@@ -219,21 +241,60 @@ pub async fn restore_backup_data(
         ),
         None => (None, None),
     };
-    let policy = config_state
-        .load()
-        .await
-        .map_err(|error| error.to_string())?
-        .history_retention_policy();
+    if let Some(entries) = dictionary.as_ref() {
+        storage::prepare_backup_dictionary(entries.clone()).map_err(|error| error.to_string())?;
+    }
+    if let Some(rules) = correction_rules.as_ref() {
+        storage::prepare_backup_correction_rules(rules.clone())
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(PreparedBackupPayload {
+        history,
+        dictionary,
+        correction_rules,
+    })
+}
 
-    history_state
-        .restore_backup_data(
-            history,
-            dictionary,
-            correction_rules,
-            &policy,
-            &fallback_timestamp,
-        )
-        .await
+#[tauri::command]
+pub fn validate_backup_data<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    history: Option<Vec<BackupHistoryEntry>>,
+    dictionary: Option<DictionaryBackupPayload>,
+) -> Result<(), String> {
+    ensure_backup_window(window.label())?;
+    let fallback_timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    prepare_backup_payload(history, dictionary, &fallback_timestamp)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn restore_backup_data(
+    window: tauri::Window,
+    history_state: tauri::State<'_, storage::HistoryStore>,
+    dictionary_state: tauri::State<'_, storage::DictionaryStore>,
+    config_state: tauri::State<'_, storage::ConfigManager>,
+    history: Option<Vec<BackupHistoryEntry>>,
+    dictionary: Option<DictionaryBackupPayload>,
+) -> Result<RestoreBackupResult, String> {
+    ensure_backup_window(window.label())?;
+    let fallback_timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let PreparedBackupPayload {
+        history,
+        dictionary,
+        correction_rules,
+    } = prepare_backup_payload(history, dictionary, &fallback_timestamp)?;
+    config_state
+        .with_current_history_privacy(|privacy| {
+            let (policy, _save_audio) = privacy
+                .ok_or_else(|| anyhow::anyhow!("Application history settings are unavailable"))?;
+            history_state.restore_backup_data_sync(
+                history,
+                dictionary,
+                correction_rules,
+                &policy,
+                &fallback_timestamp,
+            )
+        })
         .map_err(|error| error.to_string())?;
 
     Ok(RestoreBackupResult {
@@ -274,6 +335,14 @@ fn normalize_timestamp(value: Option<String>, fallback: &str) -> Result<String, 
         .map_err(|_| "backup_history_created_at_invalid".to_string())
 }
 
+fn ensure_backup_window(label: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err("Backup restoration is only available in the main window".to_string())
+    }
+}
+
 fn optional_backup_string(
     value: Option<String>,
     max_chars: usize,
@@ -304,6 +373,176 @@ fn validated_backup_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_backup_timestamp_accepts_extended_naive_years() {
+        assert_eq!(
+            normalize_timestamp(Some("+10000-01-01T10:00:00".to_string()), ""),
+            Ok("+10000-01-01T10:00:00".to_string())
+        );
+    }
+
+    #[test]
+    fn validation_and_restore_share_backup_payload_preparation() {
+        let production = include_str!("backup.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        for marker in [
+            "pub fn validate_backup_data",
+            "pub async fn restore_backup_data(",
+        ] {
+            let command = production
+                .split(marker)
+                .nth(1)
+                .unwrap()
+                .split("\n#[tauri::command]")
+                .next()
+                .unwrap();
+            assert!(command.contains("prepare_backup_payload("));
+        }
+    }
+
+    #[test]
+    fn backup_validation_ipc_rejects_invalid_payloads_without_database_state() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![validate_backup_data])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        for (body, valid) in [
+            (
+                serde_json::json!({"history":[{"raw_text":"Words","created_at":"invalid"}]}),
+                false,
+            ),
+            (
+                serde_json::json!({"history":[{"raw_text":"Words","created_at":"2026-02-30T10:00:00"}]}),
+                false,
+            ),
+            (
+                serde_json::json!({"history":[{"raw_text":"Words","created_at":"2026-11-01T25:00:00Z"}]}),
+                false,
+            ),
+            (serde_json::json!({"dictionary":[{"word":""}]}), false),
+            (
+                serde_json::json!({"history":[{"raw_text":"Words","created_at":"2026-11-10T10:00:00"}],"dictionary":[{"word":"Term"}]}),
+                true,
+            ),
+            (
+                serde_json::json!({"history":[{"raw_text":"Question","mode":"ask","answer_text":"Synthetic answer"}]}),
+                true,
+            ),
+        ] {
+            let result = tauri::test::get_ipc_response(
+                &main,
+                tauri::webview::InvokeRequest {
+                    cmd: "validate_backup_data".to_string(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            );
+            assert_eq!(result.is_ok(), valid);
+        }
+        for label in ["capsule", "ask"] {
+            let webview = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let result = tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: "validate_backup_data".to_string(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                        "history": [{"raw_text": "Synthetic words"}]
+                    })),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                serde_json::json!("Backup restoration is only available in the main window")
+            );
+        }
+    }
+
+    #[test]
+    fn recording_only_backup_rows_keep_status_without_fabricating_audio() {
+        for status in ["dismissed", "silent", "recognition_failed"] {
+            let entry: BackupHistoryEntry = serde_json::from_value(serde_json::json!({
+                "created_at": "2026-11-10T10:00:00",
+                "raw_text": "",
+                "polished_text": "",
+                "output_status": status,
+                "has_audio": true
+            }))
+            .unwrap();
+            let restored = entry.into_storage("2026-11-10T10:00:00").unwrap();
+            assert_eq!(restored.output_status.as_deref(), Some(status));
+            assert!(!restored.has_audio);
+        }
+        let entry: BackupHistoryEntry =
+            serde_json::from_value(serde_json::json!({"raw_text": "", "output_status": "unknown"}))
+                .unwrap();
+        assert!(entry.into_storage("2026-11-10T10:00:00").is_err());
+    }
+
+    #[test]
+    fn backup_restore_uses_guarded_current_privacy_for_database_write() {
+        let source = include_str!("backup.rs");
+        let command = source
+            .split("pub async fn restore_backup_data(")
+            .nth(1)
+            .unwrap()
+            .split("fn default_true")
+            .next()
+            .unwrap();
+        assert!(command.contains(".with_current_history_privacy("));
+        assert!(command.contains(".restore_backup_data_sync("));
+        assert!(!command.contains(".history_retention_policy()"));
+    }
+
+    #[test]
+    fn backup_restore_checks_main_window_before_processing_or_storage() {
+        let source = include_str!("backup.rs");
+        let command = source
+            .split("pub async fn restore_backup_data(")
+            .nth(1)
+            .unwrap()
+            .split("fn normalize_timestamp")
+            .next()
+            .unwrap();
+        let guard = command
+            .find("ensure_backup_window(window.label())?;")
+            .unwrap();
+        assert!(guard < command.find("let fallback_timestamp").unwrap());
+    }
+
+    #[test]
+    fn backup_restore_window_policy_rejects_auxiliary_windows() {
+        assert!(ensure_backup_window("main").is_ok());
+        for label in ["capsule", "ask", "", "other"] {
+            assert!(ensure_backup_window(label).is_err());
+        }
+    }
+
+    #[test]
+    fn dictionary_backup_rejects_duplicate_correction_aliases() {
+        let value = serde_json::json!({
+            "entries": [],
+            "correction_rules": [],
+            "correctionRules": []
+        });
+        assert!(serde_json::from_value::<DictionaryBackupPayload>(value).is_err());
+    }
 
     #[test]
     fn legacy_history_uses_safe_context_defaults() {

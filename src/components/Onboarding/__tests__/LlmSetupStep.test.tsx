@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LlmSetupStep } from '../LlmSetupStep'
+import { selectedValue, selectOptions } from '../../shared/__tests__/selectTestUtils'
 import * as tauri from '../../../lib/tauri'
 
 const mockStore = {
@@ -56,11 +57,89 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('LlmSetupStep', () => {
+  it('names its endpoint and credential inputs using existing translated labels', () => {
+    mockStore.config.llm_provider = 'openai'
+    render(<LlmSetupStep />)
+    expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password')
+    expect(screen.getByRole('textbox', { name: 'Base URL' })).toBeInTheDocument()
+  })
+
+  it('uses the shared field and secondary action styles', () => {
+    const { container } = render(<LlmSetupStep />)
+    for (const input of container.querySelectorAll('input')) {
+      expect(input).toHaveClass('field-control')
+    }
+    expect(screen.getByRole('button', { name: 'Test' })).toHaveClass('btn-outline')
+    expect(screen.getByTitle('Fetch models')).toHaveClass('btn-outline')
+  })
+
+  it('ignores a connection result after the model changes', async () => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(tauri.testLlmConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    const { rerender } = render(<LlmSetupStep />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    mockStore.config = { ...mockStore.config, llm_model: 'new-model' }
+    rerender(<LlmSetupStep />)
+    await act(async () => finish(true))
+    expect(mockStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+  })
+
+  it('does not complete a connection test after leaving setup', async () => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(tauri.testLlmConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    const { unmount } = render(<LlmSetupStep />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    unmount()
+    await act(async () => finish(true))
+    expect(mockStore.setLlmTestStatus).not.toHaveBeenCalledWith('success')
+    expect(mockStore.setLlmTestStatus).toHaveBeenLastCalledWith('idle')
+  })
+
+  it('ignores a model list returned for a previous endpoint', async () => {
+    let finish: (models: string[]) => void = () => {}
+    vi.mocked(tauri.fetchLlmModels).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    const { rerender } = render(<LlmSetupStep />)
+    fireEvent.click(screen.getByTitle('Fetch models'))
+    mockStore.config = { ...mockStore.config, llm_base_url: 'http://localhost:9000/v1' }
+    rerender(<LlmSetupStep />)
+    await act(async () => finish(['llama3.2', 'old-endpoint-model']))
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Model' }))
+    expect(screen.queryByRole('option', { name: 'old-endpoint-model' })).toBeNull()
+    expect(screen.getByTitle('Fetch models')).toBeEnabled()
+  })
+
+  it('uses the shared styled model input while preserving custom model entry', async () => {
+    vi.mocked(tauri.fetchLlmModels).mockResolvedValueOnce(['llama3.2', 'local-model'])
+    const { container } = render(<LlmSetupStep />)
+    fireEvent.click(screen.getByTitle('Fetch models'))
+    await waitFor(() => expect(tauri.fetchLlmModels).toHaveBeenCalled())
+    const input = screen.getByRole('combobox', { name: 'Model' })
+    await act(async () => fireEvent.focus(input))
+    expect(screen.getByRole('listbox', { name: 'Model' })).toHaveAttribute('data-select-menu')
+    fireEvent.click(screen.getByRole('option', { name: 'local-model' }))
+    expect(mockStore.updateConfig).toHaveBeenCalledWith({ llm_model: 'local-model' })
+    fireEvent.change(input, { target: { value: 'custom-model' } })
+    expect(mockStore.updateConfig).toHaveBeenCalledWith({ llm_model: 'custom-model' })
+    expect(container.querySelector('datalist')).toBeNull()
+  })
+
   it('does not offer managed Cloud inside BYOK provider setup', () => {
     render(<LlmSetupStep />)
 
     const providerSelect = screen.getAllByRole('combobox')[0]
-    expect(providerSelect.querySelector('option[value="cloud"]')).toBeNull()
+    expect(selectOptions(providerSelect).map((option) => option.value)).not.toContain('cloud')
   })
 
   it('moves a saved Cloud config to a valid BYOK provider instead of showing a dead selection', async () => {
@@ -73,7 +152,7 @@ describe('LlmSetupStep', () => {
 
     render(<LlmSetupStep />)
 
-    expect(screen.getAllByRole('combobox')[0]).toHaveValue('zhipu')
+    expect(selectedValue(screen.getAllByRole('combobox')[0])).toBe('zhipu')
     await waitFor(() => {
       expect(mockStore.updateConfig).toHaveBeenCalledWith({
         llm_provider: 'zhipu',

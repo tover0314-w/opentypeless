@@ -111,6 +111,17 @@ pub struct TargetAppGuard {
 }
 
 impl TargetAppGuard {
+    pub fn has_known_mismatch(&self, current: &Self) -> bool {
+        self.process_id
+            .zip(current.process_id)
+            .is_some_and(|(expected, observed)| expected != observed)
+            || self
+                .native_identity
+                .as_deref()
+                .zip(current.native_identity.as_deref())
+                .is_some_and(|(expected, observed)| !expected.eq_ignore_ascii_case(observed))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.process_id.is_none() && self.native_identity.is_none()
     }

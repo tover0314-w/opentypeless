@@ -6,8 +6,23 @@ import linuxdeployPrepareScriptSource from '../../../.github/scripts/prepare-lin
 import linuxdeployWrapperSource from '../../../.github/scripts/linuxdeploy-exclude-wrapper.rs?raw'
 import constantsSource from '../constants.ts?raw'
 import linuxVerificationScriptSource from '../../../.github/scripts/upload-linux-verification-artifacts.sh?raw'
+import packageJson from '../../../package.json'
+import tauriConfig from '../../../src-tauri/tauri.conf.json'
+import { APP_VERSION, APP_VERSION_HEADER_VALUE } from '../constants'
 
 describe('release version wiring', () => {
+  it('checks production frontend builds and locked Rust test targets in CI', () => {
+    expect(ciWorkflowSource).toContain('- run: npm run build')
+    expect(ciWorkflowSource).toContain('cargo clippy --locked --all-targets --target')
+    expect(ciWorkflowSource).toContain('cargo test --locked --target')
+  })
+
+  it('uses the current package version for local builds and cloud version headers', () => {
+    expect(packageJson.version).toBe(tauriConfig.version)
+    expect(APP_VERSION).toBe(`v${packageJson.version}`)
+    expect(APP_VERSION_HEADER_VALUE).toBe(packageJson.version)
+  })
+
   it('lets frontend builds read the release tag version from Vite env', () => {
     expect(constantsSource).toContain('import.meta.env.VITE_APP_VERSION')
   })

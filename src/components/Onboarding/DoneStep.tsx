@@ -1,14 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
-import {
-  Check,
-  Keyboard,
-  MessageCircleQuestion,
-  GripHorizontal,
-  MousePointer,
-  LayoutGrid,
-} from 'lucide-react'
+import { Check, Keyboard, MessageCircleQuestion, GripHorizontal, LayoutGrid } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
+import { Keycaps } from '../shared/Keycaps'
 
 export function DoneStep() {
   const { t } = useTranslation()
@@ -47,13 +41,21 @@ export function DoneStep() {
       <div className="w-full space-y-2">
         <Tip
           icon={Keyboard}
-          title={`${dictationAction} ${config.hotkey}`}
+          title={
+            <>
+              {dictationAction} <Keycaps hotkey={config.hotkey} />
+            </>
+          }
           desc={t('onboarding.done.holdPressSub')}
         />
         {config.ask_hotkey && (
           <Tip
             icon={MessageCircleQuestion}
-            title={`${t('onboarding.done.askAnything')} ${config.ask_hotkey}`}
+            title={
+              <>
+                {t('onboarding.done.askAnything')} <Keycaps hotkey={config.ask_hotkey} />
+              </>
+            }
             desc={t('onboarding.done.askAnythingSub')}
           />
         )}
@@ -61,11 +63,6 @@ export function DoneStep() {
           icon={GripHorizontal}
           title={t('onboarding.done.dragToReposition')}
           desc={t('onboarding.done.dragToRepositionSub')}
-        />
-        <Tip
-          icon={MousePointer}
-          title={t('onboarding.done.rightClickMenu')}
-          desc={t('onboarding.done.rightClickMenuSub')}
         />
         <Tip
           icon={LayoutGrid}
@@ -83,7 +80,7 @@ function Tip({
   desc,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string }>
-  title: string
+  title: React.ReactNode
   desc: string
 }) {
   return (
@@ -92,7 +89,9 @@ function Tip({
         <Icon size={14} />
       </div>
       <div>
-        <p className="text-[13px] font-medium text-text-primary">{title}</p>
+        <p className="flex flex-wrap items-center gap-1 text-[13px] font-medium text-text-primary">
+          {title}
+        </p>
         <p className="text-[11px] text-text-tertiary">{desc}</p>
       </div>
     </div>

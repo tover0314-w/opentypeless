@@ -26,6 +26,8 @@ pub struct CloudSttProvider {
 
 /// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
 const MAX_AUDIO_BYTES: usize = 24 * 1024 * 1024;
+const MAX_TRANSCRIPT_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_ERROR_RESPONSE_BYTES: usize = 65536;
 const WAV_HEADER_BYTES: u64 = 44;
 const MANAGED_INTENT_WARMUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(4 * 60);
 const MANAGED_INTENT_WARMUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -131,6 +133,22 @@ struct CloudAudioPayload {
     mime_type: &'static str,
 }
 
+fn parse_cloud_transcript(body: &str) -> Result<Option<String>, AppError> {
+    let invalid = || AppError::Config("Invalid cloud transcription response".into());
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|_| invalid())?;
+    let object = value.as_object().ok_or_else(invalid)?;
+    if object.contains_key("error") {
+        return Err(invalid());
+    }
+    let text = object
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(invalid)?
+        .trim()
+        .to_string();
+    Ok(if text.is_empty() { None } else { Some(text) })
+}
+
 fn stream_serial(operation_id: Option<&str>) -> u32 {
     let mut hash = 0x811c_9dc5u32;
     for byte in operation_id.unwrap_or("opentypeless-cloud-stt").bytes() {
@@ -159,31 +177,14 @@ fn contains_quota_marker(value: &str) -> bool {
         || value.contains("byok")
 }
 
-fn forbidden_error_message(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("error")
-        .and_then(|v| v.as_str())
-        .or_else(|| value.get("message").and_then(|v| v.as_str()))
-        .or_else(|| {
-            value
-                .get("error")
-                .and_then(|v| v.get("message"))
-                .and_then(|v| v.as_str())
-        })
-        .map(String::from)
-}
-
-fn quota_message_from_value(value: &serde_json::Value) -> Option<String> {
+fn has_quota_marker(value: &serde_json::Value) -> bool {
     for field in ["code", "error_code", "type"] {
         if value
             .get(field)
             .and_then(|v| v.as_str())
             .is_some_and(contains_quota_marker)
         {
-            return Some(
-                forbidden_error_message(value)
-                    .unwrap_or_else(|| "Cloud STT quota exceeded".to_string()),
-            );
+            return true;
         }
     }
 
@@ -191,23 +192,23 @@ fn quota_message_from_value(value: &serde_json::Value) -> Option<String> {
         if let Some(item) = value.get(field) {
             if let Some(message) = item.as_str() {
                 if contains_quota_marker(message) {
-                    return Some(message.to_string());
+                    return true;
                 }
-            } else if let Some(message) = quota_message_from_value(item) {
-                return Some(message);
+            } else if has_quota_marker(item) {
+                return true;
             }
         }
     }
 
-    None
+    false
 }
 
 fn cloud_stt_forbidden_error(body: &str) -> AppError {
     let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
 
     if let Some(value) = parsed.as_ref() {
-        if let Some(message) = quota_message_from_value(value) {
-            return AppError::Quota(message);
+        if has_quota_marker(value) {
+            return AppError::Quota("Cloud STT quota exceeded".into());
         }
     }
 
@@ -221,7 +222,7 @@ impl CloudSttProvider {
             audio_buffer: Vec::new(),
             managed_audio_worker: None,
             managed_audio_failed: false,
-            client: reqwest::Client::new(),
+            client: crate::build_shared_http_client(),
             api_base_url,
         }
     }
@@ -327,15 +328,16 @@ async fn encode_managed_audio_fallback(
 #[async_trait]
 impl SttProvider for CloudSttProvider {
     async fn connect(&mut self, config: &SttConfig) -> Result<(), AppError> {
-        if config.api_key.is_empty() {
+        self.stt_config = None;
+        self.audio_buffer.clear();
+        self.managed_audio_worker.take();
+        self.managed_audio_failed = false;
+        if config.api_key.trim().is_empty() {
             return Err(AppError::Auth(
                 "Cloud STT: session token is missing. Please sign in first.".to_string(),
             ));
         }
         self.stt_config = Some(config.clone());
-        self.audio_buffer.clear();
-        self.managed_audio_worker.take();
-        self.managed_audio_failed = false;
         if let Some(managed_config) = config.managed_audio {
             if config.sample_rate != 16_000 {
                 tracing::warn!(
@@ -365,6 +367,9 @@ impl SttProvider for CloudSttProvider {
     }
 
     async fn send_audio(&mut self, chunk: &[u8]) -> Result<(), AppError> {
+        if self.stt_config.is_none() {
+            return Err(AppError::Config("Cloud STT is not connected".into()));
+        }
         if self.audio_buffer.len() + chunk.len() > MAX_AUDIO_BYTES {
             return Err(AppError::Config(
                 "Cloud STT: audio exceeds maximum length (~12 min)".to_string(),
@@ -393,8 +398,8 @@ impl SttProvider for CloudSttProvider {
     }
 
     async fn disconnect(&mut self) -> Result<Option<String>, AppError> {
-        let config = match &self.stt_config {
-            Some(c) => c.clone(),
+        let config = match self.stt_config.take() {
+            Some(config) => config,
             None => return Ok(None),
         };
 
@@ -449,32 +454,38 @@ impl SttProvider for CloudSttProvider {
                 match resp_result {
                     Ok(resp) => {
                         let status = resp.status();
-                        let body = resp.text().await?;
+                        let response_limit = if status.is_success() {
+                            MAX_TRANSCRIPT_RESPONSE_BYTES
+                        } else {
+                            MAX_ERROR_RESPONSE_BYTES
+                        };
+                        let bytes =
+                            crate::cloud_request::read_response_with_limit(resp, response_limit)
+                                .await?;
+                        let body = if status.is_success() {
+                            String::from_utf8(bytes).map_err(|_| {
+                                AppError::Config("Invalid cloud transcription response".into())
+                            })?
+                        } else {
+                            String::from_utf8_lossy(&bytes).into_owned()
+                        };
 
                         if status.is_success() {
-                            let v: serde_json::Value = serde_json::from_str(&body)
-                                .map_err(|e| AppError::Config(e.to_string()))?;
-                            let text = v["text"].as_str().unwrap_or("").trim().to_string();
-
-                            tracing::info!("Cloud STT transcription: {} chars", text.len());
-
-                            return Ok(if text.is_empty() { None } else { Some(text) });
+                            let text = parse_cloud_transcript(&body)?;
+                            tracing::info!(
+                                "Cloud STT transcription: {} chars",
+                                text.as_ref().map_or(0, String::len)
+                            );
+                            return Ok(text);
                         } else if let Some(error) = managed_cloud_error(status.as_u16(), &body) {
                             return Err(error);
                         } else if status.as_u16() == 403 {
                             return Err(cloud_stt_forbidden_error(&body));
                         } else if status.as_u16() >= 500 && attempt < 2 {
-                            let truncate_at = body
-                                .char_indices()
-                                .take_while(|&(i, _)| i < 200)
-                                .last()
-                                .map(|(i, c)| i + c.len_utf8())
-                                .unwrap_or(body.len());
                             tracing::warn!(
-                                "Cloud STT server error {} (attempt {}/3): {}",
+                                "Cloud STT server error {} (attempt {}/3)",
                                 status,
-                                attempt + 1,
-                                &body[..truncate_at]
+                                attempt + 1
                             );
                             attempt += 1;
                             tokio::time::sleep(std::time::Duration::from_millis(
@@ -483,17 +494,10 @@ impl SttProvider for CloudSttProvider {
                             .await;
                             continue;
                         } else {
-                            let truncate_at = body
-                                .char_indices()
-                                .take_while(|&(i, _)| i < 200)
-                                .last()
-                                .map(|(i, c)| i + c.len_utf8())
-                                .unwrap_or(body.len());
-                            let sanitized = &body[..truncate_at];
-                            tracing::error!("Cloud STT HTTP {}: {}", status, sanitized);
+                            tracing::error!("Cloud STT HTTP {}", status);
                             return Err(AppError::Api {
                                 status: status.as_u16(),
-                                body: sanitized.to_string(),
+                                body: String::new(),
                             });
                         }
                     }
@@ -537,6 +541,440 @@ impl SttProvider for CloudSttProvider {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Default)]
+    struct CapturedLog(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn read_test_upload(socket: &mut tokio::net::TcpStream) -> Vec<u8> {
+        use tokio::io::AsyncReadExt;
+
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let read = socket.read(&mut buffer).await.unwrap();
+            assert!(read > 0);
+            request.extend_from_slice(&buffer[..read]);
+            assert!(request.len() < 65536);
+            if let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap();
+                if request.len() >= header_end + 4 + length {
+                    return request;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_cloud_response_read_releases_provider_state() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (headers_sent, received_headers) = tokio::sync::oneshot::channel();
+        let (release_server, server_release) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_test_upload(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            headers_sent.send(()).unwrap();
+            let _ = server_release.await;
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let mut provider = CloudSttProvider::with_client(format!("http://{address}"), client);
+        provider
+            .connect(&SttConfig {
+                managed_audio: None,
+                ..stt_config()
+            })
+            .await
+            .unwrap();
+        provider.send_audio(&[0; 32]).await.unwrap();
+        let pending = async {
+            let cancellation = async {
+                received_headers.await.unwrap();
+                tokio::task::yield_now().await;
+            };
+            tokio::select! {
+                result = provider.disconnect() => panic!("stalled response completed: {result:?}"),
+                _ = cancellation => {}
+            }
+        };
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await;
+        let _ = release_server.send(());
+        server.await.unwrap();
+        result.unwrap();
+        assert!(provider.stt_config.is_none());
+        assert!(provider.audio_buffer.is_empty());
+        assert!(provider.managed_audio_worker.is_none());
+        assert!(provider.send_audio(&[0; 32]).await.is_err());
+        assert_eq!(provider.disconnect().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn reused_cloud_provider_uploads_only_the_current_token_and_audio() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for (token, samples, answer) in [
+                ("synthetic-first-token", vec![1u8; 32], "first"),
+                ("synthetic-second-token", vec![2u8; 48], "second"),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_test_upload(&mut socket).await;
+                let header_end = request
+                    .windows(4)
+                    .position(|part| part == b"\r\n\r\n")
+                    .unwrap();
+                let headers = String::from_utf8_lossy(&request[..header_end]).to_ascii_lowercase();
+                assert!(headers.contains(&format!("authorization: bearer {token}\r\n")));
+                let wav = WhisperCompatProvider::build_wav(&samples, 16000);
+                let body = &request[header_end + 4..];
+                let audio_start = body.windows(4).position(|part| part == b"RIFF").unwrap();
+                assert_eq!(&body[audio_start..audio_start + wav.len()], wav.as_slice());
+                assert!(body[audio_start + wav.len()..].starts_with(b"\r\n--"));
+                let response = format!(r#"{{"text":"{answer}"}}"#);
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                            response.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let mut provider = CloudSttProvider::with_client(format!("http://{address}"), client);
+        let run = async {
+            for (token, samples, answer) in [
+                ("synthetic-first-token", vec![1u8; 32], "first"),
+                ("synthetic-second-token", vec![2u8; 48], "second"),
+            ] {
+                let config = SttConfig {
+                    api_key: token.into(),
+                    managed_audio: None,
+                    ..stt_config()
+                };
+                provider.connect(&config).await.unwrap();
+                provider.send_audio(&samples).await.unwrap();
+                assert_eq!(
+                    provider.disconnect().await.unwrap().as_deref(),
+                    Some(answer)
+                );
+                assert!(provider.stt_config.is_none());
+                assert!(provider.audio_buffer.is_empty());
+            }
+            server.await.unwrap();
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(5), run)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cloud_disconnect_rejects_oversized_response_headers_before_reading_body() {
+        use tokio::io::AsyncWriteExt;
+
+        for (status, chunked, at_limit) in [
+            (200, false, false),
+            (200, true, false),
+            (200, true, true),
+            (403, false, false),
+            (403, true, false),
+            (403, true, true),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_test_upload(&mut socket).await;
+                if chunked {
+                    let mut body = if at_limit && status == 200 {
+                        r#"{"text":"synthetic boundary transcript"}"#.to_string()
+                    } else if at_limit {
+                        r#"{"error":{"code":"stt_quota_exceeded"}}"#.to_string()
+                    } else {
+                        String::new()
+                    };
+                    let limit = if status == 200 {
+                        MAX_TRANSCRIPT_RESPONSE_BYTES
+                    } else {
+                        MAX_ERROR_RESPONSE_BYTES
+                    };
+                    let length = limit + usize::from(!at_limit);
+                    body.push_str(&" ".repeat(length - body.len()));
+                    let response = format!(
+                        "HTTP/1.1 {status} Response\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                } else {
+                    socket
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 {status} Response\r\nContent-Length: 8388609\r\nConnection: close\r\n\r\n"
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            });
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let mut provider = CloudSttProvider::with_client(format!("http://{address}"), client);
+            provider
+                .connect(&SttConfig {
+                    managed_audio: None,
+                    ..stt_config()
+                })
+                .await
+                .unwrap();
+            provider.send_audio(&[0; 32]).await.unwrap();
+            let result =
+                tokio::time::timeout(std::time::Duration::from_secs(5), provider.disconnect())
+                    .await
+                    .unwrap();
+            server.await.unwrap();
+            if at_limit && status == 200 {
+                assert_eq!(
+                    result.unwrap().as_deref(),
+                    Some("synthetic boundary transcript")
+                );
+            } else if at_limit {
+                assert!(matches!(result.unwrap_err(), AppError::Quota(_)));
+            } else {
+                assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "Config error: Service response too large"
+                );
+            }
+            assert!(provider.stt_config.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn cloud_disconnect_validates_the_actual_http_transcript_response() {
+        use tokio::io::AsyncWriteExt;
+        use tracing::instrument::WithSubscriber;
+
+        for (status, body, expected) in [
+            (
+                200,
+                r#"{"text":" synthetic words "}"#,
+                Some(Some("synthetic words")),
+            ),
+            (200, r#"{"text":""}"#, Some(None)),
+            (200, r#"{"text":null}"#, None),
+            (200, "synthetic-invalid-utf8", None),
+            (400, "synthetic-private-transcript-detail", None),
+            (500, "synthetic-private-transcript-detail", None),
+            (
+                503,
+                "synthetic-private-transcript-detail",
+                Some(Some("recovered")),
+            ),
+            (503, "synthetic-invalid-utf8", Some(Some("recovered"))),
+            (
+                401,
+                r#"{"error":{"code":"AUTH_SESSION_INVALID","message":"synthetic-private-transcript-detail"}}"#,
+                None,
+            ),
+            (
+                403,
+                r#"{"error":{"code":"stt_quota_exceeded","message":"synthetic-private-transcript-detail"}}"#,
+                None,
+            ),
+            (
+                403,
+                r#"{"error":"synthetic-private-transcript-detail"}"#,
+                None,
+            ),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let mut server = tokio::spawn(async move {
+                for (response_status, response_body) in if status == 503 {
+                    vec![(503, body), (200, r#"{"text":"recovered"}"#)]
+                } else if status == 500 {
+                    vec![(500, body); 3]
+                } else {
+                    vec![(status, body)]
+                } {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let request = read_test_upload(&mut socket).await;
+                    let header_end = request
+                        .windows(4)
+                        .position(|part| part == b"\r\n\r\n")
+                        .unwrap();
+                    let headers = String::from_utf8_lossy(&request[..header_end]);
+                    assert!(headers.starts_with("POST /api/proxy/stt "));
+                    assert!(headers
+                        .to_ascii_lowercase()
+                        .contains("bearer synthetic-token"));
+                    let response_bytes = if response_body == "synthetic-invalid-utf8" {
+                        vec![0xff, 0xfe]
+                    } else {
+                        response_body.as_bytes().to_vec()
+                    };
+                    socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {response_status} Response\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            response_bytes.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                    socket.write_all(&response_bytes).await.unwrap();
+                }
+                if status == 500 {
+                    assert!(tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        listener.accept()
+                    )
+                    .await
+                    .is_err());
+                }
+            });
+            let client = reqwest::Client::builder().no_proxy().build().unwrap();
+            let mut provider = CloudSttProvider::with_client(format!("http://{address}"), client);
+            let config = SttConfig {
+                api_key: "synthetic-token".into(),
+                managed_audio: None,
+                ..stt_config()
+            };
+            provider.connect(&config).await.unwrap();
+            provider.send_audio(&[0; 32]).await.unwrap();
+            let logs = CapturedLog::default();
+            let writer = logs.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::INFO)
+                .with_writer(move || writer.clone())
+                .finish();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                provider.disconnect().with_subscriber(subscriber),
+            )
+            .await
+            .unwrap();
+            let server_result =
+                tokio::time::timeout(std::time::Duration::from_secs(2), &mut server).await;
+            if server_result.is_err() {
+                server.abort();
+                let _ = server.await;
+                panic!("server did not receive the expected retries: {result:?}");
+            }
+            server_result.unwrap().unwrap();
+            assert!(provider.stt_config.is_none());
+            assert!(provider.audio_buffer.is_empty());
+            assert!(provider.send_audio(&[0; 32]).await.is_err());
+            let output = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+            assert!(!output.contains("synthetic-private-transcript-detail"));
+            assert!(!output.contains("synthetic-token"));
+            if status == 503 {
+                assert!(
+                    output.contains("Cloud STT server error 503 Service Unavailable (attempt 1/3)"),
+                    "{output}"
+                );
+            }
+            match expected {
+                Some(text) => assert_eq!(result.unwrap().as_deref(), text),
+                None if status == 500 => {
+                    assert!(matches!(
+                        result.unwrap_err(),
+                        AppError::Api { status: 500, ref body } if body.is_empty()
+                    ));
+                    assert_eq!(output.matches("Cloud STT server error 500").count(), 2);
+                    assert!(output.contains("Cloud STT HTTP 500"));
+                }
+                None if status == 401 => {
+                    assert!(matches!(result.unwrap_err(), AppError::CloudSessionInvalid));
+                }
+                None if status == 403 => {
+                    let error = result.unwrap_err();
+                    if body.contains("stt_quota_exceeded") {
+                        assert!(
+                            matches!(error, AppError::Quota(ref message) if message == "Cloud STT quota exceeded")
+                        );
+                    } else {
+                        assert!(
+                            matches!(error, AppError::Auth(ref message) if message == "Cloud STT access denied")
+                        );
+                    }
+                }
+                None if status == 400 => {
+                    let error = result.unwrap_err();
+                    assert!(
+                        matches!(error, AppError::Api { status: 400, ref body } if body.is_empty())
+                    );
+                    assert!(output.contains("Cloud STT HTTP 400"));
+                }
+                None => assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "Config error: Invalid cloud transcription response"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_cloud_transcript_is_not_treated_as_silence() {
+        for body in [
+            "null",
+            "[]",
+            "{}",
+            r#"{"text":null}"#,
+            r#"{"text":42}"#,
+            r#"{"text":{}}"#,
+            r#"{"text":"synthetic text","error":"synthetic private detail"}"#,
+            "synthetic invalid JSON",
+        ] {
+            let error = parse_cloud_transcript(body).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Config error: Invalid cloud transcription response"
+            );
+        }
+    }
+
+    #[test]
+    fn cloud_transcript_preserves_valid_text_and_empty_speech() {
+        assert_eq!(
+            parse_cloud_transcript(r#"{"text":"  synthetic words  ","language":"en"}"#).unwrap(),
+            Some("synthetic words".into())
+        );
+        assert_eq!(parse_cloud_transcript(r#"{"text":""}"#).unwrap(), None);
+        assert_eq!(parse_cloud_transcript(r#"{"text":"   "}"#).unwrap(), None);
+    }
+
     fn managed_config() -> super::super::managed_audio::ManagedAudioEncodingConfig {
         super::super::managed_audio::ManagedAudioEncodingConfig::default()
     }
@@ -551,6 +989,90 @@ mod tests {
             operation_id: Some("operation-1".to_string()),
             managed_audio: Some(managed_config()),
             provider_region: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_cloud_disconnect_releases_state_and_allows_a_new_connection() {
+        let mut provider = CloudSttProvider::new("https://example.test".into());
+        let config = SttConfig {
+            managed_audio: None,
+            ..stt_config()
+        };
+        provider.connect(&config).await.unwrap();
+        assert_eq!(provider.disconnect().await.unwrap(), None);
+        assert!(provider.stt_config.is_none());
+        assert!(provider.managed_audio_worker.is_none());
+        assert!(provider.send_audio(&[0; 32]).await.is_err());
+        assert_eq!(provider.disconnect().await.unwrap(), None);
+        let next = SttConfig {
+            api_key: "synthetic-next-token".into(),
+            ..config
+        };
+        provider.connect(&next).await.unwrap();
+        provider.send_audio(&[0; 32]).await.unwrap();
+        assert_eq!(provider.audio_buffer.len(), 32);
+        assert_eq!(
+            provider.stt_config.as_ref().unwrap().api_key,
+            "synthetic-next-token"
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnected_cloud_provider_rejects_audio_without_buffering_it() {
+        let mut provider = CloudSttProvider::new("https://example.test".into());
+        assert!(provider.send_audio(&[0; 32]).await.is_err());
+        assert!(provider.audio_buffer.is_empty());
+        let config = SttConfig {
+            managed_audio: None,
+            ..stt_config()
+        };
+        provider.connect(&config).await.unwrap();
+        provider.send_audio(&[0; 32]).await.unwrap();
+        assert_eq!(provider.audio_buffer.len(), 32);
+        let invalid = SttConfig {
+            api_key: String::new(),
+            ..config
+        };
+        assert!(provider.connect(&invalid).await.is_err());
+        assert!(provider.send_audio(&[0; 32]).await.is_err());
+        assert!(provider.audio_buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_cloud_reconnect_does_not_retain_previous_credentials_or_audio() {
+        let mut provider = CloudSttProvider::new("https://example.test".into());
+        let config = SttConfig {
+            managed_audio: None,
+            ..stt_config()
+        };
+        provider.connect(&config).await.unwrap();
+        provider.send_audio(&[0; 32]).await.unwrap();
+        let invalid = SttConfig {
+            api_key: " ".into(),
+            ..config
+        };
+        assert!(provider.connect(&invalid).await.is_err());
+        assert!(provider.stt_config.is_none());
+        assert!(provider.audio_buffer.is_empty());
+        assert!(provider.managed_audio_worker.is_none());
+    }
+
+    #[tokio::test]
+    async fn cloud_connect_rejects_blank_tokens_before_preparing_audio() {
+        for token in ["", " ", "\t\n"] {
+            let mut provider = CloudSttProvider::new("https://example.test".into());
+            let config = SttConfig {
+                api_key: token.into(),
+                ..stt_config()
+            };
+            assert!(matches!(
+                provider.connect(&config).await,
+                Err(AppError::Auth(_))
+            ));
+            assert!(provider.stt_config.is_none());
+            assert!(provider.managed_audio_worker.is_none());
+            assert!(provider.audio_buffer.is_empty());
         }
     }
 
@@ -603,6 +1125,21 @@ mod tests {
         assert_eq!(payload.mime_type, "audio/ogg; codecs=opus");
         assert!(payload.bytes.starts_with(b"OggS"));
         assert!(payload.bytes.len() <= managed_config().max_audio_bytes as usize);
+    }
+
+    #[test]
+    fn forbidden_quota_error_does_not_retain_private_server_details() {
+        for body in [
+            r#"{"code":"stt_quota_exceeded","error":"synthetic-private-account-detail"}"#,
+            r#"{"error":{"code":"stt_quota_exceeded","message":"synthetic-private-account-detail"}}"#,
+            r#"{"error":"quota exceeded for synthetic-private-account-detail"}"#,
+        ] {
+            let error = cloud_stt_forbidden_error(body);
+            assert!(
+                matches!(error, AppError::Quota(ref message) if message == "Cloud STT quota exceeded")
+            );
+            assert_eq!(error.to_user_error().code, "stt_quota_exceeded");
+        }
     }
 
     #[test]

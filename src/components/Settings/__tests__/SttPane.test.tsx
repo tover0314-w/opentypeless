@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { SttPane } from '../SttPane'
+import { chooseOption, selectedValue, selectOptions } from '../../shared/__tests__/selectTestUtils'
 import * as tauri from '../../../lib/tauri'
 
 // Mock Tauri
@@ -129,12 +130,15 @@ const mockAuthStore = {
 }
 
 vi.mock('../../../stores/appStore', () => ({
-  useAppStore: (selector: any) => {
-    if (typeof selector === 'function') {
-      return selector(mockAppStore)
-    }
-    return mockAppStore
-  },
+  useAppStore: Object.assign(
+    (selector: any) => {
+      if (typeof selector === 'function') {
+        return selector(mockAppStore)
+      }
+      return mockAppStore
+    },
+    { getState: () => mockAppStore },
+  ),
 }))
 
 vi.mock('../../../stores/authStore', () => ({
@@ -155,6 +159,155 @@ vi.mock('../../../stores/authStore', () => ({
 }))
 
 describe('SttPane', () => {
+  it('folds grouped language and duration settings without resetting stored values', () => {
+    const { container } = render(<SttPane grouped />)
+    const advanced = container.querySelector('details')
+    expect(advanced).not.toHaveAttribute('open')
+    expect(advanced).toHaveTextContent('Single recording duration')
+    expect(mockAppStore.config.stt_language).toBe('en')
+    expect(mockAppStore.updateConfig).not.toHaveBeenCalled()
+  })
+
+  it('provides descriptions for the self-hosted preset and model rows', () => {
+    mockAppStore.config.stt_provider = 'custom-whisper'
+    render(<SttPane />)
+    expect(screen.getByText('modelsPage.sttPresetDesc')).toBeInTheDocument()
+    expect(screen.getByText('modelsPage.sttModelDesc')).toBeInTheDocument()
+  })
+
+  it('uses the existing connection failure text for a blank backend error', async () => {
+    mockAppStore.config.stt_api_key = 'synthetic-key'
+    vi.mocked(tauri.benchSttConnection).mockRejectedValueOnce(new Error(' \n\t'))
+    render(<SttPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    expect(await screen.findByText('Connection failed')).toBeInTheDocument()
+  })
+
+  it('redacts the tested API key from connection feedback and logs', async () => {
+    const key = 'synthetic+$private-key'
+    mockAppStore.config.stt_api_key = key
+    vi.mocked(tauri.benchSttConnection).mockRejectedValueOnce(
+      new Error(`Rejected ${key}; repeated ${key}`),
+    )
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      render(<SttPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      expect(
+        await screen.findByText('Rejected [redacted]; repeated [redacted]'),
+      ).toBeInTheDocument()
+      expect(log).toHaveBeenCalledExactlyOnceWith('[STT Test] Connection failed')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it.each(['success', 'failure'] as const)(
+    'ignores connection %s after configuration changes without a rerender',
+    async (outcome) => {
+      let finish: ((latency: number) => void) | undefined
+      let fail: ((error: Error) => void) | undefined
+      vi.mocked(tauri.benchSttConnection).mockReturnValueOnce(
+        new Promise<number>((resolve, reject) => {
+          finish = resolve
+          fail = reject
+        }),
+      )
+      mockAppStore.config.stt_api_key = 'synthetic-key'
+      render(<SttPane />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      mockAppStore.config = { ...mockAppStore.config, stt_aliyun_qwen_region: 'international' }
+      await act(async () => {
+        if (outcome === 'success') finish?.(123)
+        else fail?.(new Error('Obsolete connection failure'))
+      })
+      expect(mockAppStore.setSttLatencyMs).not.toHaveBeenCalledWith(123)
+      expect(mockAppStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+      expect(mockAppStore.setSttTestStatus).not.toHaveBeenCalledWith('error')
+    },
+  )
+
+  it.each([
+    'stt_provider',
+    'stt_api_key',
+    'stt_custom_base_url',
+    'stt_aliyun_qwen_region',
+  ] as const)('does not start a connection test from a stale %s render', async (field) => {
+    mockAppStore.config.stt_api_key = 'synthetic-key'
+    render(<SttPane />)
+    const button = screen.getAllByRole('button', { name: /test/i })[0]
+    await act(async () => {
+      mockAppStore.config = { ...mockAppStore.config, [field]: 'changed-value' }
+      fireEvent.click(button)
+    })
+    expect(tauri.benchSttConnection).not.toHaveBeenCalled()
+  })
+
+  it('keeps a newly typed key when the initial vault read finishes late', async () => {
+    let finishRead: (secret: string) => void = () => {}
+    vi.mocked(tauri.readCredential).mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        finishRead = resolve
+      }),
+    )
+    render(<SttPane />)
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'new-user-key' } })
+    await act(async () => finishRead('old-vault-key'))
+    expect(screen.getByLabelText('API Key')).toHaveValue('new-user-key')
+  })
+
+  it('ignores a connection result after the region changes through external configuration', async () => {
+    let finish: (latency: number) => void = () => {}
+    vi.mocked(tauri.benchSttConnection).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.stt_api_key = 'test-key'
+    const { rerender } = render(<SttPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    mockAppStore.config = { ...mockAppStore.config, stt_aliyun_qwen_region: 'international' }
+    rerender(<SttPane />)
+    finish(100)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockAppStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+  })
+
+  it('ignores a connection result after the provider changes', async () => {
+    let finish: (latency: number) => void = () => {}
+    vi.mocked(tauri.benchSttConnection).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.stt_api_key = 'test-key'
+    render(<SttPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    chooseOption(screen.getByRole('combobox', { name: 'Provider' }), 'openai-whisper')
+    finish(100)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockAppStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+  })
+
+  it('ignores a connection result after leaving the page', async () => {
+    let finish: (latency: number) => void = () => {}
+    vi.mocked(tauri.benchSttConnection).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.stt_api_key = 'test-key'
+    const { unmount } = render(<SttPane />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    unmount()
+    finish(100)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(mockAppStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+  })
+
   beforeEach(() => {
     // Reset mock store state
     mockAppStore.config = {
@@ -222,26 +375,46 @@ describe('SttPane', () => {
     vi.clearAllMocks()
   })
 
+  it('starts only one connection test while a request is pending', async () => {
+    let finish: (latency: number) => void = () => {}
+    vi.mocked(tauri.benchSttConnection).mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockAppStore.config.stt_api_key = 'test-key'
+    render(<SttPane />)
+    const button = screen.getByRole('button', { name: 'Test' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(tauri.benchSttConnection).toHaveBeenCalledTimes(1)
+    await act(async () => finish(100))
+    fireEvent.click(button)
+    expect(tauri.benchSttConnection).toHaveBeenCalledTimes(2)
+  })
+
   describe('Provider selection', () => {
     it('renders provider dropdown with current value', () => {
       render(<SttPane />)
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0] // First select is provider
-      expect(providerSelect).toHaveValue('deepgram')
+      expect(selectedValue(providerSelect)).toBe('deepgram')
     })
 
     it('lists Volcengine Doubao realtime ASR as an STT provider', () => {
       render(<SttPane />)
-      expect(screen.getByRole('option', { name: 'Volcengine Doubao Realtime ASR' })).toHaveValue(
-        'volcengine-doubao',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Volcengine Doubao Realtime ASR',
+        value: 'volcengine-doubao',
+      })
     })
 
     it('lists Aliyun Qwen3 realtime ASR as an STT provider', () => {
       render(<SttPane />)
-      expect(screen.getByRole('option', { name: 'Aliyun Qwen3 Realtime ASR' })).toHaveValue(
-        'aliyun-qwen3-asr',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Aliyun Qwen3 Realtime ASR',
+        value: 'aliyun-qwen3-asr',
+      })
     })
 
     it('shows a persisted Beijing or Singapore region selector for Aliyun Qwen3', () => {
@@ -250,14 +423,14 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const region = screen.getByLabelText('Service region')
-      expect(region).toHaveValue('china-mainland')
+      expect(selectedValue(region)).toBe('china-mainland')
       expect(
         screen.getByText(
           'Use the region where your DashScope API key was created. Keys are region-specific.',
         ),
       ).toBeInTheDocument()
 
-      fireEvent.change(region, { target: { value: 'international' } })
+      chooseOption(region, 'international')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_aliyun_qwen_region: 'international',
@@ -290,9 +463,10 @@ describe('SttPane', () => {
     it('shows Apple Speech as a built-in local provider on macOS only', () => {
       render(<SttPane />)
 
-      expect(screen.getByRole('option', { name: 'Apple Speech (Local)' })).toHaveValue(
-        'apple-speech',
-      )
+      expect(selectOptions(screen.getAllByRole('combobox')[0])).toContainEqual({
+        label: 'Apple Speech (Local)',
+        value: 'apple-speech',
+      })
 
       cleanup()
       mockAppStore.platformCapabilities = {
@@ -304,7 +478,9 @@ describe('SttPane', () => {
       }
       render(<SttPane />)
 
-      expect(screen.queryByRole('option', { name: 'Apple Speech (Local)' })).not.toBeInTheDocument()
+      expect(
+        selectOptions(screen.getAllByRole('combobox')[0]).map((option) => option.value),
+      ).not.toContain('apple-speech')
     })
 
     it('does not show API key input for Apple Speech and can test without credentials', async () => {
@@ -351,9 +527,11 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const resourceSelect = screen.getByLabelText('Volcengine ASR resource')
-      expect(resourceSelect).toHaveValue('volc.seedasr.sauc.duration')
+      const label = resourceSelect.closest('.settings-row')?.querySelector('.settings-row-label')
+      expect(label?.children).toHaveLength(2)
+      expect(selectedValue(resourceSelect)).toBe('volc.seedasr.sauc.duration')
 
-      fireEvent.change(resourceSelect, { target: { value: 'volc.bigasr.sauc.duration' } })
+      chooseOption(resourceSelect, 'volc.bigasr.sauc.duration')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_volcengine_resource_id: 'volc.bigasr.sauc.duration',
@@ -367,7 +545,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
 
-      fireEvent.change(providerSelect, { target: { value: 'assemblyai' } })
+      chooseOption(providerSelect, 'assemblyai')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ stt_provider: 'assemblyai' })
       expect(mockAppStore.setSttTestStatus).toHaveBeenCalledWith('idle')
@@ -380,8 +558,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*10 minutes/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*10 minutes/i)
       expect(screen.getByText('Product safety limit')).toBeInTheDocument()
       expect(tauri.getSttRecordingCapability).toHaveBeenCalledWith('deepgram', 'auto', 600)
     })
@@ -409,11 +587,10 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(within(duration).getByRole('option', { name: '30 seconds' })).toBeInTheDocument()
-      expect(within(duration).queryByRole('option', { name: '1 minute' })).not.toBeInTheDocument()
-      expect(
-        within(duration).queryByRole('option', { name: 'Custom duration…' }),
-      ).not.toBeInTheDocument()
+      const labels = selectOptions(duration).map((option) => option.label)
+      expect(labels).toContain('30 seconds')
+      expect(labels).not.toContain('1 minute')
+      expect(labels).not.toContain('Custom duration…')
       expect(
         screen.getByText('This provider allows recordings up to 30 seconds.'),
       ).toBeInTheDocument()
@@ -443,7 +620,7 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(duration).toHaveValue('30')
+      expect(selectedValue(duration)).toBe('30')
       expect(screen.queryByLabelText('Recording limit presets')).not.toBeInTheDocument()
       expect(screen.queryByLabelText('Custom duration')).not.toBeInTheDocument()
       expect(
@@ -473,7 +650,7 @@ describe('SttPane', () => {
       const duration = await screen.findByLabelText('Single recording duration')
       expect(screen.queryByLabelText('Custom duration')).not.toBeInTheDocument()
 
-      fireEvent.change(duration, { target: { value: 'custom' } })
+      chooseOption(duration, 'custom')
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ recording_limit_mode: 'custom' })
 
       const input = await screen.findByLabelText('Custom duration')
@@ -545,9 +722,9 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       const duration = await screen.findByLabelText('Single recording duration')
-      expect(
-        within(duration).queryByRole('option', { name: 'Custom duration…' }),
-      ).not.toBeInTheDocument()
+      expect(selectOptions(duration).map((option) => option.label)).not.toContain(
+        'Custom duration…',
+      )
       expect(screen.getByText('Safe Cloud fallback')).toBeInTheDocument()
       expect(
         screen.queryByText('Current: 30 seconds. Cloud supports up to 30 seconds.'),
@@ -558,7 +735,7 @@ describe('SttPane', () => {
       render(<SttPane />)
       const duration = await screen.findByLabelText('Single recording duration')
 
-      fireEvent.change(duration, { target: { value: '300' } })
+      chooseOption(duration, '300')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         recording_limit_mode: 'custom',
@@ -586,8 +763,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*30 seconds/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*30 seconds/i)
       expect(screen.getByText('Safe Cloud fallback')).toBeInTheDocument()
 
       cleanup()
@@ -609,8 +786,8 @@ describe('SttPane', () => {
       render(<SttPane />)
 
       expect(
-        await screen.findByRole('option', { name: /Auto \(recommended,.*10 minutes/i }),
-      ).toBeInTheDocument()
+        await screen.findByRole('combobox', { name: 'Single recording duration' }),
+      ).toHaveTextContent(/Auto \(recommended,.*10 minutes/i)
       expect(screen.getByText('Set automatically for OpenTypeless Cloud.')).toBeInTheDocument()
     })
   })
@@ -699,6 +876,16 @@ describe('SttPane', () => {
 
       expect(await screen.findByText(/settings.credentialSaveFailed/)).toBeInTheDocument()
     })
+    it('shows a load error rather than a save error when credential reading fails', async () => {
+      vi.mocked(tauri.readCredential).mockRejectedValueOnce(new Error('synthetic-private-detail'))
+      render(<SttPane />)
+      expect(await screen.findByText('common.loadFailed')).toBeInTheDocument()
+      expect(screen.queryByText(/settings.credentialSaveFailed/)).not.toBeInTheDocument()
+      const input = screen.getByPlaceholderText('Enter API Key')
+      fireEvent.change(input, { target: { value: 'synthetic-replacement' } })
+      expect(input).toHaveValue('synthetic-replacement')
+      expect(screen.queryByText('common.loadFailed')).not.toBeInTheDocument()
+    })
   })
 
   describe('Custom Whisper provider UI', () => {
@@ -717,7 +904,7 @@ describe('SttPane', () => {
       expect(screen.getByText('Base URL')).toBeInTheDocument()
       expect(screen.getByText('Model')).toBeInTheDocument()
       expect(screen.getByText('API Key (optional)')).toBeInTheDocument()
-      expect(presetSelect).toHaveValue('speaches')
+      expect(selectedValue(presetSelect)).toBe('speaches')
       expect(screen.getByDisplayValue('http://localhost:8000/v1')).toBeInTheDocument()
       expect(screen.getByDisplayValue('Systran/faster-whisper-large-v3')).toBeInTheDocument()
     })
@@ -737,7 +924,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const presetSelect = selects[1]
 
-      fireEvent.change(presetSelect, { target: { value: 'speaches' } })
+      chooseOption(presetSelect, 'speaches')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_custom_preset: 'speaches',
@@ -751,7 +938,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const presetSelect = selects[1]
 
-      fireEvent.change(presetSelect, { target: { value: 'custom' } })
+      chooseOption(presetSelect, 'custom')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({
         stt_custom_preset: 'custom',
@@ -786,8 +973,22 @@ describe('SttPane', () => {
           'Systran/faster-whisper-large-v3',
         )
       })
-      expect(screen.getByText('Local endpoint ready')).toBeInTheDocument()
+      expect(screen.queryByText('Local endpoint ready')).not.toBeInTheDocument()
+      expect(screen.getByText('settings.localSttConfigured')).not.toHaveClass('text-success')
       expect(screen.getByText('http://localhost:8000/v1/audio/transcriptions')).toBeInTheDocument()
+    })
+
+    it('withdraws old diagnostics while a changed endpoint is checked', async () => {
+      const { rerender } = render(<SttPane />)
+      expect(
+        await screen.findByText('http://localhost:8000/v1/audio/transcriptions'),
+      ).toBeInTheDocument()
+      vi.mocked(tauri.getSttProviderDiagnostics).mockReturnValueOnce(new Promise(() => {}))
+      mockAppStore.config.stt_custom_base_url = 'http://localhost:9000/v1'
+      rerender(<SttPane />)
+      expect(
+        screen.queryByText('http://localhost:8000/v1/audio/transcriptions'),
+      ).not.toBeInTheDocument()
     })
 
     it('shows a quiet setup status when local endpoint config is invalid', async () => {
@@ -853,6 +1054,15 @@ describe('SttPane', () => {
       const buttons = screen.getAllByRole('button', { name: /test/i })
       const button = buttons[0]
       expect(button).toBeDisabled()
+    })
+
+    it('does not enable connection testing with a whitespace-only API key', () => {
+      mockAppStore.config.stt_api_key = ' \t\n'
+      render(<SttPane />)
+      const button = screen.getAllByRole('button', { name: /test/i })[0]
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+      expect(tauri.benchSttConnection).not.toHaveBeenCalled()
     })
 
     it('test button is enabled when API key is present', () => {
@@ -951,7 +1161,7 @@ describe('SttPane', () => {
       render(<SttPane />)
       const selects = screen.getAllByRole('combobox')
       const languageSelect = selects[1] // Second select is language
-      expect(languageSelect).toHaveValue('en')
+      expect(selectedValue(languageSelect)).toBe('en')
     })
 
     it('updates config when language changes', () => {
@@ -959,7 +1169,7 @@ describe('SttPane', () => {
       const selects = screen.getAllByRole('combobox')
       const languageSelect = selects[1]
 
-      fireEvent.change(languageSelect, { target: { value: 'zh' } })
+      chooseOption(languageSelect, 'zh')
 
       expect(mockAppStore.updateConfig).toHaveBeenCalledWith({ stt_language: 'zh' })
     })
@@ -997,7 +1207,7 @@ describe('SttPane', () => {
       // Change provider
       const selects = screen.getAllByRole('combobox')
       const providerSelect = selects[0]
-      fireEvent.change(providerSelect, { target: { value: 'assemblyai' } })
+      chooseOption(providerSelect, 'assemblyai')
 
       // Verify state was reset
       expect(mockAppStore.setSttLatencyMs).toHaveBeenCalledWith(null)

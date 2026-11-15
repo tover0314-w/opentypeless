@@ -65,6 +65,17 @@ pub async fn remove_dictionary_entry(
     state.remove(id).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn remove_dictionary_entries(
+    state: tauri::State<'_, storage::DictionaryStore>,
+    ids: Vec<i64>,
+) -> Result<usize, String> {
+    if ids.len() > storage::MAX_BACKUP_DICTIONARY_ENTRIES {
+        return Err("dictionary_batch_too_large".to_string());
+    }
+    state.remove_many(&ids).await.map_err(|e| e.to_string())
+}
+
 fn validate_correction_inputs(
     pattern: String,
     replacement: String,

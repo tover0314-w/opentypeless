@@ -5,13 +5,20 @@ import {
   DEFAULT_CHECKOUT_PRODUCT,
   type CheckoutProduct,
 } from './constants'
-import { invalidateCloudSessionOnce, loadSessionToken } from './cloud-session'
+import { captureCloudSessionOwner, invalidateCloudSessionOnce } from './cloud-session'
+import { loadSessionWithSignal } from './load-session-with-signal'
+import { cloudFetch } from './cloudTransport'
+import { validBackupDictionary } from './backup-dictionary-validation'
+import { validBackupHistory } from './backup-history-validation'
+import { hasValidSubscriptionBillingFields, isSubscriptionStatus } from './subscription-validation'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await loadSessionToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+async function authHeaders(signal: AbortSignal) {
+  const isCurrentOwner = captureCloudSessionOwner()
+  const token = await loadSessionWithSignal(signal)
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
+  return { headers, isCurrentOwner }
 }
 
 function clientHeaders(): Record<string, string> {
@@ -27,24 +34,37 @@ async function request<T>(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const res = await fetch(`${API_BASE_URL}${path}`, {
+    const authenticationHeaders = await authHeaders(controller.signal)
+    controller.signal.throwIfAborted()
+    const res = await cloudFetch(`${API_BASE_URL}${path}`, {
       ...fetchOptions,
       credentials: 'include',
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         ...clientHeaders(),
-        ...(await authHeaders()),
+        ...authenticationHeaders.headers,
         ...fetchOptions?.headers,
       },
     })
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }))
-      throw parseCloudError(res.status, body, res.statusText)
+      const body = await res.json().catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          ((error instanceof Error || error instanceof DOMException) && error.name === 'AbortError')
+        ) {
+          throw error
+        }
+        return { error: res.statusText }
+      })
+      controller.signal.throwIfAborted()
+      throw parseCloudError(res.status, body, res.statusText, authenticationHeaders.isCurrentOwner)
     }
 
-    return res.json()
+    const body = await res.json()
+    controller.signal.throwIfAborted()
+    return body
   } finally {
     clearTimeout(timer)
   }
@@ -79,6 +99,7 @@ export function parseCloudError(
   status: number,
   body: unknown,
   fallbackMessage = `Request failed (${status})`,
+  isCurrentOwner: () => boolean = () => true,
 ): CloudApiError {
   let code: string | null = null
   let message = fallbackMessage
@@ -93,9 +114,9 @@ export function parseCloudError(
     }
   }
 
-  if (code === 'AUTH_SESSION_INVALID') {
-    void invalidateCloudSessionOnce().catch((error) => {
-      console.error('Failed to invalidate cloud session:', error)
+  if (status === 401 && code === 'AUTH_SESSION_INVALID' && isCurrentOwner()) {
+    void invalidateCloudSessionOnce().catch(() => {
+      console.error('Failed to invalidate cloud session')
     })
   }
   return new CloudApiError(status, code, message)
@@ -118,8 +139,8 @@ export type QuotaModel = 'legacy_dual_meter' | 'cloud_words'
 export interface ManagedSttFormat {
   mimeType: string
   maxAudioBytes: number
-  preferredClientSwitchBytes?: number
-  bitrateBitsPerSecond?: number
+  preferredClientSwitchBytes?: number | null
+  bitrateBitsPerSecond?: number | null
 }
 
 export interface ManagedSttCapability {
@@ -149,6 +170,7 @@ export interface SubscriptionStatus {
   canMigrateToStripe?: boolean
   entitlementVersion?: number
   quotaModel: QuotaModel
+  quotaDataAvailable?: boolean
   displayWordsUsedEstimate: number
   displayWordsLimit: number
   displayWordsResetAt: string | null
@@ -165,6 +187,12 @@ export interface SubscriptionStatus {
 
 export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
   return request<Partial<SubscriptionStatus>>('/api/subscription/status').then((status) => {
+    if (
+      !hasValidSubscriptionBillingFields(status) ||
+      (status.quotaDataAvailable !== undefined && typeof status.quotaDataAvailable !== 'boolean')
+    ) {
+      throw new Error('Invalid subscription response')
+    }
     const plan = (status.plan ?? 'free') as SubscriptionPlan
     const source =
       status.source ??
@@ -192,7 +220,7 @@ export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
     const displayWordsLimit = status.displayWordsLimit ?? 0
     const displayWordsResetAt = status.displayWordsResetAt ?? null
 
-    return {
+    const subscription = {
       plan,
       source: source as SubscriptionSource,
       displayName:
@@ -217,6 +245,16 @@ export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
       entitlementVersion:
         typeof status.entitlementVersion === 'number' ? status.entitlementVersion : 1,
       quotaModel,
+      quotaDataAvailable:
+        status.quotaDataAvailable !== false &&
+        (quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
+          ? typeof status.displayWordsUsedEstimate === 'number' &&
+            typeof status.displayWordsLimit === 'number'
+          : (typeof status.cloudWordsUsed === 'number' &&
+              typeof status.cloudWordsLimit === 'number') ||
+            (quotaModel === 'legacy_dual_meter' &&
+              status.displayWordsUsedEstimate === 0 &&
+              status.displayWordsLimit === 0)),
       displayWordsUsedEstimate,
       displayWordsLimit,
       displayWordsResetAt,
@@ -230,6 +268,10 @@ export function getSubscriptionStatus(): Promise<SubscriptionStatus> {
       byokUnlimited: status.byokUnlimited ?? true,
       accountSnapshot: status.accountSnapshot ?? null,
     }
+    if (!isSubscriptionStatus(subscription)) {
+      throw new Error('Invalid subscription response')
+    }
+    return subscription
   })
 }
 
@@ -277,23 +319,36 @@ export async function proxyStt(
   const timer = setTimeout(() => controller.abort(), 60_000)
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/proxy/stt`, {
+    const authenticationHeaders = await authHeaders(controller.signal)
+    controller.signal.throwIfAborted()
+    const res = await cloudFetch(`${API_BASE_URL}/api/proxy/stt`, {
       method: 'POST',
       credentials: 'include',
       signal: controller.signal,
       headers: {
         ...clientHeaders(),
-        ...(await authHeaders()),
+        ...authenticationHeaders.headers,
       },
       body: formData,
     })
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }))
-      throw parseCloudError(res.status, body, res.statusText)
+      const body = await res.json().catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          ((error instanceof Error || error instanceof DOMException) && error.name === 'AbortError')
+        ) {
+          throw error
+        }
+        return { error: res.statusText }
+      })
+      controller.signal.throwIfAborted()
+      throw parseCloudError(res.status, body, res.statusText, authenticationHeaders.isCurrentOwner)
     }
 
-    return res.json()
+    const body = await res.json()
+    controller.signal.throwIfAborted()
+    return body
   } finally {
     clearTimeout(timer)
   }
@@ -311,23 +366,38 @@ export function proxyLlm(
 }
 
 // Backup
-export function uploadBackup(data: {
+export async function uploadBackup(data: {
   history?: unknown
   dictionary?: unknown
   settings?: unknown
 }): Promise<{ success: boolean }> {
-  return request('/api/backup/upload', {
+  const body = await request<unknown>('/api/backup/upload', {
     method: 'POST',
     body: JSON.stringify(data),
   })
+  if (!isRecord(body) || body.success !== true || 'error' in body) {
+    throw new Error('Backup upload was not confirmed')
+  }
+  return { success: true }
 }
 
-export function downloadBackup(): Promise<{
+export async function downloadBackup(): Promise<{
   history?: unknown
   dictionary?: unknown
   settings?: unknown
 }> {
-  return request('/api/backup/download')
+  const body = await request<unknown>('/api/backup/download')
+  if (!isRecord(body) || 'error' in body) throw new Error('Invalid backup response')
+  if (!validBackupHistory(body.history)) {
+    throw new Error('Invalid backup response')
+  }
+  if (body.settings != null && !isRecord(body.settings)) {
+    throw new Error('Invalid backup response')
+  }
+  if (!validBackupDictionary(body.dictionary)) {
+    throw new Error('Invalid backup response')
+  }
+  return body
 }
 
 // Scenes

@@ -13,6 +13,9 @@ mod windows;
 
 pub(crate) trait ContextSignalSource: Send + Sync + 'static {
     fn collect(&self) -> Option<ContextSignals>;
+    fn target_identity(&self) -> Option<TargetAppGuard> {
+        self.collect().map(|signals| TargetAppGuard::from(&signals))
+    }
 }
 
 pub(crate) fn default_source() -> Arc<dyn ContextSignalSource> {

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -14,12 +14,34 @@ import { PermissionsStep } from './PermissionsStep'
 import { QuickTestStep } from './QuickTestStep'
 import { DoneStep } from './DoneStep'
 import { slideRight } from '../../lib/animations'
+import { invoke } from '@tauri-apps/api/core'
+import { valuesEqual } from '../../lib/configValuesEqual'
 
 const TOTAL_STEPS = 8
 
 export function Onboarding() {
   const { t } = useTranslation()
   const [saveFailed, setSaveFailed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const navigationPending = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  const navigate = async (action: () => Promise<void>) => {
+    if (!mounted.current || navigationPending.current) return
+    navigationPending.current = true
+    setSaving(true)
+    try {
+      await action()
+    } finally {
+      navigationPending.current = false
+      if (mounted.current) setSaving(false)
+    }
+  }
   const step = useAppStore((s) => s.onboardingStep)
   const setStep = useAppStore((s) => s.setOnboardingStep)
   const setOnboardingCompleted = useAppStore((s) => s.setOnboardingCompleted)
@@ -31,6 +53,15 @@ export function Onboarding() {
   const setConfig = useAppStore((s) => s.setConfig)
   const setSavedConfig = useAppStore((s) => s.setSavedConfig)
   const user = useAuthStore((s) => s.user)
+  const config = useAppStore((s) => s.config)
+  const navigationIdentity = useRef({ step, mode: onboardingMode, user, config })
+  navigationIdentity.current = { step, mode: onboardingMode, user, config }
+  const isCurrentNavigation = () =>
+    mounted.current &&
+    navigationIdentity.current.step === step &&
+    navigationIdentity.current.mode === onboardingMode &&
+    navigationIdentity.current.user === user &&
+    valuesEqual(navigationIdentity.current.config, config)
 
   const canNext = (() => {
     switch (step) {
@@ -43,7 +74,7 @@ export function Onboarding() {
       case 3:
         return sttTestStatus === 'success' // STT must pass (BYOK only)
       case 4:
-        return llmTestStatus === 'success' // LLM must pass (BYOK only)
+        return !config.polish_enabled || llmTestStatus === 'success'
       case 5:
         return true // Permissions — optional
       case 6:
@@ -54,6 +85,8 @@ export function Onboarding() {
         return false
     }
   })()
+  const currentCanNext = useRef(canNext)
+  currentCanNext.current = canNext
 
   const titles = [
     { title: t('onboarding.steps.welcome'), subtitle: t('onboarding.steps.welcomeSub') },
@@ -69,28 +102,28 @@ export function Onboarding() {
     { title: t('onboarding.steps.setupComplete'), subtitle: undefined },
   ]
 
-  const config = useAppStore((s) => s.config)
-
   const saveConfig = async (draft = config) => {
     setSaveFailed(false)
     try {
-      return await saveOnboardingConfig(draft)
+      const saved = await saveOnboardingConfig(draft)
+      if (!isCurrentNavigation()) throw new Error('Onboarding navigation is no longer active')
+      return saved
     } catch (error) {
-      setSaveFailed(true)
+      if (isCurrentNavigation()) setSaveFailed(true)
       throw error
     }
   }
 
   const handleNext = async () => {
+    if (!canNext || !isCurrentNavigation()) return
     if (step < TOTAL_STEPS - 1) {
-      // Cloud mode: set providers BEFORE saving, then skip STT/LLM setup
       if (step === 2 && onboardingMode === 'cloud') {
-        updateConfig({ stt_provider: 'cloud', llm_provider: 'cloud' })
         try {
           await saveConfig({ ...config, stt_provider: 'cloud', llm_provider: 'cloud' })
         } catch {
-          // Best-effort save
+          return
         }
+        updateConfig({ stt_provider: 'cloud', llm_provider: 'cloud' })
         setStep(5)
         return
       }
@@ -98,19 +131,21 @@ export function Onboarding() {
       try {
         await saveConfig(config)
       } catch {
-        // Best-effort save — continue navigation even if save fails
+        return
       }
 
-      setStep(step + 1)
+      if (!currentCanNext.current) return
+      setStep(step === 3 && !config.polish_enabled ? 5 : step + 1)
     } else {
       try {
         const saved = await saveConfig(config)
         await saveOnboardingCompleted()
+        if (!isCurrentNavigation()) return
         setConfig(saved)
         setSavedConfig(saved)
         setOnboardingCompleted(true)
       } catch {
-        setSaveFailed(true)
+        if (isCurrentNavigation()) setSaveFailed(true)
       }
     }
   }
@@ -120,12 +155,16 @@ export function Onboarding() {
       try {
         await saveConfig(config)
       } catch {
-        // Best-effort save
+        return
       }
 
       // Cloud mode skips provider setup, so Permissions returns to Mode Select.
       if (step === 5 && onboardingMode === 'cloud') {
         setStep(2)
+        return
+      }
+      if (step === 5 && !config.polish_enabled) {
+        setStep(3)
         return
       }
 
@@ -142,12 +181,12 @@ export function Onboarding() {
   const handleSkip = async () => {
     if (step === 1) {
       // Skip login → go straight to BYOK STT setup
-      setOnboardingMode('byok')
       try {
         await saveConfig(config)
       } catch {
-        // Best-effort save
+        return
       }
+      setOnboardingMode('byok')
       setStep(3)
       return
     }
@@ -155,13 +194,23 @@ export function Onboarding() {
     try {
       const saved = await saveConfig(config)
       await saveOnboardingCompleted()
+      if (!isCurrentNavigation()) return
       setConfig(saved)
       setSavedConfig(saved)
     } catch {
-      setSaveFailed(true)
+      if (isCurrentNavigation()) setSaveFailed(true)
       return
     }
     setOnboardingCompleted(true)
+  }
+
+  const handleClose = async () => {
+    try {
+      await saveConfig(config)
+      await invoke('plugin:process|exit', { code: 0 })
+    } catch {
+      if (isCurrentNavigation()) setSaveFailed(true)
+    }
   }
 
   return (
@@ -170,14 +219,16 @@ export function Onboarding() {
       totalSteps={TOTAL_STEPS}
       title={titles[step].title}
       subtitle={titles[step].subtitle}
-      canNext={canNext}
-      canBack={step > 0}
+      canNext={canNext && !saving}
+      canBack={step > 0 && !saving}
+      busy={saving}
       nextLabel={
         step === TOTAL_STEPS - 1 ? t('onboarding.steps.getStarted') : t('onboarding.layout.next')
       }
-      onNext={handleNext}
-      onBack={handleBack}
-      onSkip={handleSkip}
+      onNext={() => void navigate(handleNext)}
+      onBack={() => void navigate(handleBack)}
+      onSkip={() => void navigate(handleSkip)}
+      onClose={() => void navigate(handleClose)}
     >
       {saveFailed && (
         <p role="alert" className="mb-3 text-sm text-error">

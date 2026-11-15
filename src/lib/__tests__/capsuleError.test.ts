@@ -2,6 +2,52 @@ import { describe, expect, it } from 'vitest'
 import { capsuleErrorKeyFromPayload } from '../capsuleError'
 
 describe('capsuleErrorKeyFromPayload', () => {
+  it('keeps Apple speech authorization distinct from microphone authorization', () => {
+    expect(
+      capsuleErrorKeyFromPayload({
+        code: 'stt_failed',
+        details: 'Speech Recognition permission is denied for OpenTypeless',
+      }),
+    ).toBe('speech_permission_required')
+    expect(capsuleErrorKeyFromPayload('Speech Recognition is restricted on this Mac')).toBe(
+      'speech_permission_restricted',
+    )
+    expect(
+      capsuleErrorKeyFromPayload('Timed out waiting for Speech Recognition authorization'),
+    ).toBe('speech_permission_required')
+  })
+
+  it('does not confuse unavailable input devices with unsupported speech languages', () => {
+    expect(capsuleErrorKeyFromPayload('Audio capture failed: No input device available')).toBe(
+      'microphone_unavailable',
+    )
+    expect(
+      capsuleErrorKeyFromPayload('Apple Speech recognizer could not be created for this language'),
+    ).toBe('speech_language_unavailable')
+    expect(capsuleErrorKeyFromPayload({ code: 'speech_permission_required' })).toBe(
+      'speech_permission_required',
+    )
+  })
+  it('distinguishes a missing cloud session from an invalid API key', () => {
+    expect(
+      capsuleErrorKeyFromPayload(
+        'Auth error: Cloud STT: session token is missing. Please sign in first.',
+      ),
+    ).toBe('authentication_required')
+    expect(capsuleErrorKeyFromPayload('Auth error: invalid API key')).toBe('stt_invalid_key')
+  })
+
+  it('recognizes microphone permission and network failures', () => {
+    expect(capsuleErrorKeyFromPayload('Audio capture failed: microphone permission denied')).toBe(
+      'microphone_permission_required',
+    )
+    expect(capsuleErrorKeyFromPayload('STT connection failed: network is unreachable')).toBe(
+      'no_network',
+    )
+    expect(capsuleErrorKeyFromPayload({ code: 'authentication_required' })).toBe(
+      'authentication_required',
+    )
+  })
   it('keeps structured STT quota errors short', () => {
     expect(
       capsuleErrorKeyFromPayload({

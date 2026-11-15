@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, CreditCard, Loader2, LogIn } from 'lucide-react'
+import { AudioLines, ArrowUpRight, Check, CreditCard, Loader2, LogIn } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
 import { CHECKOUT_PLANS, PRO_PLAN, type CheckoutProduct } from '../../lib/constants'
@@ -40,10 +40,6 @@ export function UpgradePage() {
     displayWordsLimit,
     cloudWordsUsed,
     cloudWordsLimit,
-    sttSecondsUsed,
-    sttSecondsLimit,
-    llmTokensUsed,
-    llmTokensLimit,
   } = useAuthStore()
   const { t } = useTranslation()
   const { navigate } = useRoute()
@@ -126,13 +122,18 @@ export function UpgradePage() {
   }, [handleSubscribe, user])
 
   return (
-    <div className="max-w-[620px] mx-auto py-7 px-6 text-[13px]">
-      <header className="mb-5 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-[19px] font-semibold text-text-primary">{t('upgrade.title')}</h1>
-          <p className="mt-1 max-w-[420px] text-[13px] leading-5 text-text-secondary">
-            {t('upgrade.subtitle')}
-          </p>
+    <div className="upgrade-page max-w-[680px] mx-auto py-7 px-6 text-[13px]">
+      <header className="upgrade-header mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="upgrade-mark" aria-hidden="true">
+            <AudioLines size={24} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-[19px] font-semibold text-text-primary">{t('upgrade.title')}</h1>
+            <p className="mt-1 max-w-[420px] text-[13px] leading-5 text-text-secondary">
+              {t('upgrade.serviceSubtitle')}
+            </p>
+          </div>
         </div>
         <span
           className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium ${
@@ -165,8 +166,8 @@ export function UpgradePage() {
             return (
               <section
                 key={checkoutPlan.product}
-                className={`jelly-card flex rounded-[18px] p-4 ${
-                  isLifetime ? 'ring-1 ring-accent/30' : ''
+                className={`upgrade-plan surface-card flex rounded-[14px] p-5 ${
+                  isLifetime ? 'upgrade-plan-recommended' : ''
                 }`}
               >
                 <div className="relative z-[1] flex h-full w-full flex-col">
@@ -180,19 +181,22 @@ export function UpgradePage() {
                       </span>
                     )}
                   </div>
-                  <p className="mt-3 text-[24px] font-semibold leading-none text-text-primary">
+                  <p className="mt-5 text-[34px] font-semibold leading-none text-text-primary">
                     {price}
                     <span className="text-[13px] font-normal text-text-secondary">
                       {' '}
                       / {t(checkoutPlan.periodKey)}
                     </span>
                   </p>
+                  <p className="upgrade-allowance mt-4 font-semibold text-accent">
+                    {t('upgrade.monthlyAllowance')}
+                  </p>
                   <p className="mt-2 min-h-[36px] text-[12px] leading-5 text-text-secondary">
                     {isMigrationPlan
                       ? t('upgrade.migrationDescription')
                       : t(checkoutPlan.descriptionKey)}
                   </p>
-                  {sublineKey && (
+                  {hasMonthlyAccess && sublineKey && (
                     <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-bg-secondary/70 px-2 py-1 text-[11px] font-medium text-text-secondary">
                       {t(sublineKey)}
                     </p>
@@ -202,7 +206,11 @@ export function UpgradePage() {
                       <button
                         onClick={() => handleSubscribe(checkoutPlan.product)}
                         disabled={loadingProduct !== null}
-                        className="jelly-btn-accent flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className={`upgrade-cta flex w-full items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isLifetime
+                            ? 'upgrade-cta-primary bg-accent text-white hover:bg-accent-hover'
+                            : 'border border-border text-text-primary hover:bg-bg-secondary'
+                        }`}
                       >
                         {isLoading ? (
                           <Loader2 size={14} className="animate-spin" />
@@ -216,6 +224,7 @@ export function UpgradePage() {
                           : isMigrationPlan
                             ? t('upgrade.switchToStripe')
                             : t(checkoutPlan.ctaKey)}
+                        <ArrowUpRight size={14} aria-hidden="true" />
                       </button>
                     </div>
                   )}
@@ -227,7 +236,7 @@ export function UpgradePage() {
       )}
 
       {/* Cloud plan benefits */}
-      <section className="mb-4 rounded-[18px] p-4 jelly-card">
+      <section className="mb-4 rounded-[16px] p-4 surface-card">
         <div className="relative z-[1]">
           <h2 className="text-[12px] font-semibold text-text-primary">
             {t('upgrade.benefits.title')}
@@ -239,16 +248,25 @@ export function UpgradePage() {
                   <Check size={12} />
                 </span>
                 <span className="text-[13px] leading-5 text-text-primary">
-                  {t(benefit.labelKey)}
+                  {t(
+                    benefit.labelKey === 'upgrade.benefits.cloudWords'
+                      ? 'upgrade.serviceBenefit'
+                      : benefit.labelKey,
+                  )}
                 </span>
               </div>
             ))}
           </div>
         </div>
       </section>
+      {visiblePlans.length > 0 && (
+        <p className="mb-4 text-[11px] leading-5 text-text-tertiary">
+          {t('upgrade.allowancePending')}
+        </p>
+      )}
 
       {/* Pro quota progress */}
-      {hasCloudAccess && (
+      {hasCloudAccess && wordsLimit > 0 && (
         <section className="mb-4 overflow-hidden rounded-[10px] border border-border">
           <div className="border-b border-border bg-bg-secondary/50 px-4 py-2.5">
             <h3 className="text-[13px] font-medium text-text-primary">
@@ -256,32 +274,13 @@ export function UpgradePage() {
             </h3>
           </div>
           <div className="px-4 py-3 space-y-3">
-            {wordsLimit > 0 ? (
-              <QuotaBar
-                label={t('upgrade.cloudWords')}
-                used={wordsUsed}
-                limit={wordsLimit}
-                unit={t('upgrade.kWords')}
-                divisor={1000}
-              />
-            ) : (
-              <>
-                <QuotaBar
-                  label={t('upgrade.stt')}
-                  used={sttSecondsUsed}
-                  limit={sttSecondsLimit}
-                  unit={t('account.quotaHours')}
-                  divisor={3600}
-                />
-                <QuotaBar
-                  label={t('upgrade.llm')}
-                  used={llmTokensUsed}
-                  limit={llmTokensLimit}
-                  unit={t('account.quotaTokens')}
-                  divisor={1000}
-                />
-              </>
-            )}
+            <QuotaBar
+              label={t('upgrade.cloudWords')}
+              used={wordsUsed}
+              limit={wordsLimit}
+              unit={t('upgrade.kWords')}
+              divisor={1000}
+            />
           </div>
         </section>
       )}

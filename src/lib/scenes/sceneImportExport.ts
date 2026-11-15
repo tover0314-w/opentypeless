@@ -81,6 +81,10 @@ export function importCustomScenesJson(
   let renamedConflicts = 0
 
   for (const record of records.slice(0, MAX_SCENES)) {
+    if (!isRecord(record)) {
+      skippedInvalid += 1
+      continue
+    }
     const imported = portableRecordToCustomScene(record, usedIds, options)
     if (!imported) {
       skippedInvalid += 1
@@ -107,15 +111,14 @@ export function importCustomScenesJson(
   }
 }
 
-function parseSceneRecords(json: string): UnknownSceneRecord[] {
+function parseSceneRecords(json: string): unknown[] {
   const parsed = JSON.parse(json) as unknown
-  const scenes = Array.isArray(parsed)
-    ? parsed
-    : isRecord(parsed) && Array.isArray(parsed.scenes)
-      ? parsed.scenes
-      : []
-
-  return scenes.filter(isRecord)
+  if (isRecord(parsed) && 'version' in parsed && parsed.version !== 1) {
+    throw new Error('Unsupported scene pack version')
+  }
+  if (Array.isArray(parsed)) return parsed
+  if (isRecord(parsed) && Array.isArray(parsed.scenes)) return parsed.scenes
+  throw new Error('Invalid scene pack structure')
 }
 
 function portableRecordToCustomScene(
@@ -173,15 +176,17 @@ function uniqueSceneId(
     return { id: importedId, renamedConflict: false }
   }
 
-  let nextId = sanitizeSceneString(createId(), SCENE_ID_MAX_CHARS)
-  while (!nextId || usedIds.has(nextId)) {
-    nextId = sanitizeSceneString(createId(), SCENE_ID_MAX_CHARS)
+  for (let attempt = 0; attempt < MAX_SCENES; attempt += 1) {
+    const nextId = sanitizeSceneString(createId(), SCENE_ID_MAX_CHARS)
+    if (nextId && !usedIds.has(nextId)) {
+      return { id: nextId, renamedConflict: Boolean(importedId) }
+    }
   }
-  return { id: nextId, renamedConflict: Boolean(importedId) }
+  throw new Error('Could not generate a unique scene ID')
 }
 
 function sanitizeSceneString(value: string, maxChars: number): string {
-  return value.replace(/\0/g, '').trim().slice(0, maxChars)
+  return Array.from(value.replace(/\0/g, '').trim()).slice(0, maxChars).join('')
 }
 
 function readString(value: unknown): string {

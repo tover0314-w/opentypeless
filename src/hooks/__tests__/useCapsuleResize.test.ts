@@ -14,6 +14,7 @@ import { useAppStore } from '../../stores/appStore'
 
 const windowApiMocks = vi.hoisted(() => ({
   getCurrentWindow: vi.fn(),
+  cursorPosition: vi.fn(),
   availableMonitors: vi.fn(),
   currentMonitor: vi.fn(),
   primaryMonitor: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('@tauri-apps/api/window', () => {
     getCurrentWindow: windowApiMocks.getCurrentWindow,
     availableMonitors: windowApiMocks.availableMonitors,
     currentMonitor: windowApiMocks.currentMonitor,
+    cursorPosition: windowApiMocks.cursorPosition,
     primaryMonitor: windowApiMocks.primaryMonitor,
     Window: { getByLabel: windowApiMocks.getMainWindow },
     monitorFromPoint: windowApiMocks.monitorFromPoint,
@@ -71,7 +73,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'idle',
@@ -83,7 +84,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: true,
         pipelineState: 'idle',
@@ -95,7 +95,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'recording',
@@ -107,7 +106,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'preparing',
@@ -119,7 +117,6 @@ describe('getCapsuleVisibility', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: false,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'ask_recording',
@@ -127,11 +124,11 @@ describe('getCapsuleVisibility', () => {
     ).toBe(true)
   })
 
-  it('shows idle capsule while the context menu is open', () => {
+  it('shows idle capsule while the translation target menu is open', () => {
     expect(
       getCapsuleVisibility({
         capsuleAutoHide: true,
-        contextMenuOpen: true,
+        translationTargetMenuOpen: true,
         capsuleExpanded: false,
         hasError: false,
         pipelineState: 'idle',
@@ -149,22 +146,22 @@ describe('capsule monitor geometry', () => {
     {
       name: 'primary monitor',
       workArea: { position: { x: 0, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 848, y: 900 },
+      expected: { x: 848, y: 980 },
     },
     {
       name: 'monitor to the right',
       workArea: { position: { x: 3440, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 4288, y: 900 },
+      expected: { x: 4288, y: 980 },
     },
     {
       name: 'monitor to the left',
       workArea: { position: { x: -1920, y: 0 }, size: { width: 1920, height: 1040 } },
-      expected: { x: -1072, y: 900 },
+      expected: { x: -1072, y: 980 },
     },
     {
       name: 'monitor above',
       workArea: { position: { x: 0, y: -1080 }, size: { width: 1920, height: 1040 } },
-      expected: { x: 848, y: -180 },
+      expected: { x: 848, y: -100 },
     },
   ])('uses the global work-area origin for the $name', ({ workArea, expected }) => {
     expect(
@@ -181,7 +178,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 3032, y: 1290 })
+    ).toEqual({ x: 3032, y: 1410 })
   })
 
   it('supports a 200% scale factor without converting the global origin', () => {
@@ -193,7 +190,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: -2144, y: 1600 })
+    ).toEqual({ x: -2144, y: 1760 })
   })
 
   it('uses the work area rather than placing the capsule behind the taskbar', () => {
@@ -205,7 +202,7 @@ describe('capsule monitor geometry', () => {
         },
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 848, y: 900 })
+    ).toEqual({ x: 848, y: 980 })
   })
 
   it('preserves a capsule that is even partially visible on any monitor', () => {
@@ -299,7 +296,7 @@ describe('capsule monitor geometry', () => {
         monitors[0],
         logicalCapsuleSize,
       ),
-    ).toEqual({ x: 848, y: 900 })
+    ).toEqual({ x: 848, y: 980 })
   })
 })
 
@@ -321,8 +318,6 @@ describe('useCapsuleResize async updates', () => {
       pipelineState: 'idle',
       capsuleExpanded: false,
       pipelineError: null,
-      contextMenuOpen: false,
-      contextMenuReady: false,
       translationTargetMenuOpen: false,
       config: { ...state.config, capsule_auto_hide: true },
     }))
@@ -337,6 +332,7 @@ describe('useCapsuleResize async updates', () => {
       show: windowApiMocks.show,
       hide: windowApiMocks.hide,
     })
+    windowApiMocks.cursorPosition.mockReset().mockRejectedValue(new Error('no cursor'))
     windowApiMocks.availableMonitors.mockReset().mockResolvedValue([monitor])
     windowApiMocks.currentMonitor.mockReset().mockResolvedValue(monitor)
     windowApiMocks.primaryMonitor.mockReset().mockResolvedValue(monitor)
@@ -385,7 +381,8 @@ describe('useCapsuleResize async updates', () => {
       const position = windowApiMocks.setPosition.mock.lastCall?.[0]
       const size = windowApiMocks.setSize.mock.lastCall?.[0]
       expect(position.x + size.width / 2).toBe(960)
-      expect(position.y).toBe(900)
+      // The panel sits on the work area's bottom edge (1040); the bar's 8px padding lifts it.
+      expect(position.y + size.height).toBe(1040)
     },
   )
 
@@ -412,7 +409,7 @@ describe('useCapsuleResize async updates', () => {
       .mockResolvedValue(monitor)
 
     act(() => {
-      useAppStore.setState({ contextMenuOpen: true })
+      useAppStore.setState({ translationTargetMenuOpen: true })
     })
 
     await waitFor(() => {
@@ -420,7 +417,7 @@ describe('useCapsuleResize async updates', () => {
     })
 
     act(() => {
-      useAppStore.setState({ contextMenuOpen: false })
+      useAppStore.setState({ translationTargetMenuOpen: false })
     })
 
     await waitFor(() => {
@@ -434,12 +431,11 @@ describe('useCapsuleResize async updates', () => {
     })
 
     expect(windowApiMocks.setSize.mock.calls.map(([size]) => [size.width, size.height])).toEqual([
-      [60, 60],
+      [120, 56],
     ])
     expect(windowApiMocks.setPosition).toHaveBeenCalledTimes(1)
     expect(windowApiMocks.show).not.toHaveBeenCalled()
     expect(windowApiMocks.hide).toHaveBeenCalledTimes(1)
-    expect(useAppStore.getState().contextMenuReady).toBe(false)
 
     windowApiMocks.outerPosition.mockResolvedValue({ x: 100, y: 100 })
     windowApiMocks.outerSize.mockResolvedValue(null)
@@ -449,8 +445,12 @@ describe('useCapsuleResize async updates', () => {
       useAppStore.setState({ pipelineState: 'recording' })
     })
 
+    // Without an outer size the previous panel height (56) is used; the bottom edge stays put
+    // while the recording panel grows to 104px.
     await waitFor(() => {
-      expect(windowApiMocks.setPosition).toHaveBeenCalledWith(expect.objectContaining({ y: 100 }))
+      expect(windowApiMocks.setPosition).toHaveBeenCalledWith(
+        expect.objectContaining({ y: 100 + 56 - 104 }),
+      )
     })
   })
 })

@@ -1,94 +1,82 @@
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { invoke } from '@tauri-apps/api/core'
-import i18n from '../../i18n'
-import { ExternalLink } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { useAppStore } from '../../stores/appStore'
-import { APP_NAME, APP_VERSION, APP_REPO_URL, UI_LANGUAGES } from '../../lib/constants'
+import { APP_LICENSE_URL, APP_REPO_URL } from '../../lib/constants'
+import { useAppVersion } from '../../hooks/useAppVersion'
+import { siteUrl } from '../../lib/siteLinks'
+import { CheckUpdateDialog } from './CheckUpdateDialog'
 
-export function AboutPane() {
-  const { t } = useTranslation()
-  const config = useAppStore((s) => s.config)
-  const updateConfig = useAppStore((s) => s.updateConfig)
+/** Typeless About: version + check for updates, then legal links; OpenTypeless adds its source rows. */
+export function AboutPane({ autoCheck = null }: { autoCheck?: string | null }) {
+  const { t, i18n } = useTranslation()
+  const [checking, setChecking] = useState(false)
+  const version = useAppVersion()
 
-  const currentLang = config.ui_language || i18n.language || 'en'
+  // Typeless opens the dialog shortly after the pane when reached from "Check for updates...".
+  useEffect(() => {
+    if (!autoCheck) return
+    const timer = window.setTimeout(() => setChecking(true), 1100)
+    return () => window.clearTimeout(timer)
+  }, [autoCheck])
 
-  const handleSelectLanguage = (value: string) => {
-    i18n.changeLanguage(value)
-    localStorage.setItem('ui_language', value)
-    updateConfig({ ui_language: value })
-    invoke('refresh_tray_labels').catch(() => {})
-  }
+  const links = [
+    { title: t('settings.aboutPage.privacy'), url: siteUrl('privacy', i18n.language) },
+    { title: t('settings.aboutPage.terms'), url: siteUrl('terms', i18n.language) },
+    { title: t('settings.aboutPage.sourceCode'), url: APP_REPO_URL, value: 'GitHub' },
+    { title: t('settings.aboutPage.license'), url: APP_LICENSE_URL, value: t('settings.mit') },
+  ]
 
   return (
-    <div className="space-y-5 text-[13px]">
-      {/* Header */}
-      <div className="text-center py-6">
-        <h2 className="text-[22px] font-semibold text-text-primary">{APP_NAME}</h2>
-        <p className="text-text-secondary mt-1 text-[13px]">{APP_VERSION}</p>
+    <div className="flex flex-col">
+      <AboutRow title={t('settings.aboutPage.version')} description={`v${version}`}>
+        <button
+          type="button"
+          onClick={() => setChecking(true)}
+          className="h-8 cursor-pointer rounded-[20px] border border-border bg-transparent px-3 text-[14px] leading-5 text-text-primary hover:bg-fill-hover"
+        >
+          {t('settings.aboutPage.checkUpdates')}
+        </button>
+      </AboutRow>
+      {links.map((link) => (
+        <button
+          key={link.title}
+          type="button"
+          onClick={() => openUrl(link.url)}
+          className="group w-full cursor-pointer border-none bg-transparent p-0 text-left"
+        >
+          <AboutRow title={link.title}>
+            <span className="flex items-center gap-2 text-[14px] text-text-tertiary group-hover:text-text-secondary">
+              {link.value}
+              <ArrowUpRight size={16} />
+            </span>
+          </AboutRow>
+        </button>
+      ))}
+      <AboutRow title={t('settings.framework')} description={t('settings.tauriReact')} />
+      {checking ? <CheckUpdateDialog onClose={() => setChecking(false)} /> : null}
+    </div>
+  )
+}
+
+function AboutRow({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="flex min-h-[52px] items-center gap-4 py-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span className="text-[14px] font-medium leading-5 text-text-primary">{title}</span>
+        {description ? (
+          <span className="text-[14px] leading-5 text-text-tertiary">{description}</span>
+        ) : null}
       </div>
-
-      <p className="text-text-secondary leading-relaxed">{t('settings.aboutDescription')}</p>
-
-      {/* Language */}
-      <SectionCard title={t('settings.language')}>
-        <div className="grid grid-cols-2 gap-3 p-3">
-          {UI_LANGUAGES.map((lang) => (
-            <button
-              key={lang.value}
-              onClick={() => handleSelectLanguage(lang.value)}
-              className={`px-4 py-3 rounded-[8px] text-[13px] border cursor-pointer transition-all ${
-                currentLang === lang.value
-                  ? 'bg-accent/10 border-accent text-accent font-medium'
-                  : 'bg-bg-secondary border-border text-text-primary hover:border-text-tertiary'
-              }`}
-            >
-              <div className="font-medium">{lang.label}</div>
-            </button>
-          ))}
-        </div>
-      </SectionCard>
-
-      {/* Open Source */}
-      <SectionCard title={t('settings.openSource')}>
-        <InfoRow label={t('settings.license')} value={t('settings.mit')} />
-        <LinkRow label={t('settings.github')} url={APP_REPO_URL} linkText={t('settings.view')} />
-        <InfoRow label={t('settings.framework')} value={t('settings.tauriReact')} />
-      </SectionCard>
+      {children ? <div className="shrink-0">{children}</div> : null}
     </div>
-  )
-}
-
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="border border-border rounded-[10px] overflow-hidden">
-      <div className="px-3 py-2.5 bg-bg-secondary/50 border-b border-border">
-        <h3 className="text-[13px] font-medium text-text-primary">{title}</h3>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between px-3 py-2.5 border-b border-border last:border-b-0">
-      <span className="text-text-secondary">{label}</span>
-      <span className="text-text-primary">{value}</span>
-    </div>
-  )
-}
-
-function LinkRow({ label, url, linkText }: { label: string; url: string; linkText: string }) {
-  return (
-    <button
-      onClick={() => openUrl(url)}
-      className="flex justify-between items-center w-full px-3 py-2.5 border-b border-border last:border-b-0 bg-transparent border-x-0 border-t-0 cursor-pointer text-[13px]"
-    >
-      <span className="text-text-secondary">{label}</span>
-      <span className="text-accent flex items-center gap-1">
-        {linkText} <ExternalLink size={12} />
-      </span>
-    </button>
   )
 }

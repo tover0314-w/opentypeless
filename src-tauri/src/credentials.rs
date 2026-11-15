@@ -118,14 +118,52 @@ pub fn store_cloud_session_token<V: CredentialVault + CredentialSecretReader>(
         return Err(anyhow!("cloud session token is empty"));
     }
     vault.set_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER, token)?;
-    if load_cloud_session_token(vault)?.as_deref() != Some(token) {
-        return Err(anyhow!("cloud session vault verification failed"));
+    if load_cloud_session_token(vault)
+        .map_err(|_| anyhow!(UnverifiedCloudSessionWrite))?
+        .as_deref()
+        != Some(token)
+    {
+        return Err(anyhow!(UnverifiedCloudSessionWrite));
     }
     Ok(())
 }
 
-pub fn remove_cloud_session_token<V: CredentialSecretRemover>(vault: &V) -> Result<()> {
-    vault.remove_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER)
+#[derive(Debug)]
+pub struct UnverifiedCloudSessionWrite;
+
+impl std::fmt::Display for UnverifiedCloudSessionWrite {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("cloud session vault verification failed")
+    }
+}
+
+impl std::error::Error for UnverifiedCloudSessionWrite {}
+
+pub fn remove_cloud_session_token<
+    V: CredentialVault + CredentialSecretReader + CredentialSecretRemover,
+>(
+    vault: &V,
+) -> Result<()> {
+    if vault
+        .remove_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER)
+        .is_ok()
+    {
+        match load_cloud_session_token(vault) {
+            Ok(None) => return Ok(()),
+            Ok(Some(_)) => {}
+            Err(_) => return Err(anyhow!("cloud session vault clearing verification failed")),
+        }
+    }
+    vault
+        .set_secret(CLOUD_SESSION_NAMESPACE, CLOUD_SESSION_PROVIDER, "")
+        .map_err(|_| anyhow!("cloud session could not be cleared from the system vault"))?;
+    if load_cloud_session_token(vault)
+        .map_err(|_| anyhow!("cloud session vault clearing verification failed"))?
+        .is_some()
+    {
+        return Err(anyhow!("cloud session vault clearing verification failed"));
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -194,14 +232,32 @@ fn encode_stored_credential(secret: &str, updated_at: &str) -> Result<String> {
 
 fn decode_stored_credential(stored: &str) -> Result<StoredCredential> {
     match serde_json::from_str::<StoredCredentialPayload>(stored) {
-        Ok(payload) if payload.version == STORED_CREDENTIAL_VERSION => Ok(StoredCredential {
-            value: payload.value,
-            updated_at: Some(payload.updated_at),
-        }),
-        _ => Ok(StoredCredential {
-            value: stored.to_string(),
-            updated_at: None,
-        }),
+        Ok(payload)
+            if payload.version == STORED_CREDENTIAL_VERSION && payload.secret_kind == "apiKey" =>
+        {
+            Ok(StoredCredential {
+                value: payload.value,
+                updated_at: Some(payload.updated_at),
+            })
+        }
+        Ok(_) => Err(anyhow!("Unsupported stored credential format")),
+        Err(_) => {
+            let identified = serde_json::from_str::<serde_json::Value>(stored)
+                .ok()
+                .and_then(|value| {
+                    value.as_object().map(|object| {
+                        object.contains_key("version") && object.contains_key("secretKind")
+                    })
+                })
+                .unwrap_or(false);
+            if identified {
+                return Err(anyhow!("Invalid stored credential format"));
+            }
+            Ok(StoredCredential {
+                value: stored.to_string(),
+                updated_at: None,
+            })
+        }
     }
 }
 
@@ -238,16 +294,21 @@ pub fn migrate_legacy_config_secrets<V: CredentialVault + CredentialSecretReader
         // Migration imports missing entries only. Explicit key changes use
         // set_credential, so an old settings snapshot cannot replace a newer key.
         if vault
-            .get_secret(namespace, provider)?
+            .get_secret(namespace, provider)
+            .map_err(|_| anyhow!("Could not read provider credential during migration"))?
             .is_some_and(|stored| !stored.trim().is_empty())
         {
             continue;
         }
-        vault.set_secret(namespace, provider, secret)?;
-        let verified = vault.get_secret(namespace, provider)?;
+        vault
+            .set_secret(namespace, provider, secret)
+            .map_err(|_| anyhow!("Could not store provider credential during migration"))?;
+        let verified = vault
+            .get_secret(namespace, provider)
+            .map_err(|_| anyhow!("Could not verify provider credential during migration"))?;
         if verified.as_deref() != Some(secret.as_str()) {
             return Err(anyhow!(
-                "credential vault verification failed for {namespace}.{provider}"
+                "Provider credential verification failed during migration"
             ));
         }
         migrated.push(CredentialRef {
@@ -287,7 +348,11 @@ pub fn resolve_config_secret<V: CredentialSecretReader>(
     if !legacy_secret.trim().is_empty() {
         return Ok(legacy_secret.to_string());
     }
-    Ok(vault.get_secret(namespace, provider)?.unwrap_or_default())
+    Ok(vault
+        .get_secret(namespace, provider)
+        .map_err(|_| anyhow!("Could not read provider credential from the system vault"))?
+        .filter(|secret| !secret.trim().is_empty())
+        .unwrap_or_default())
 }
 
 pub fn stt_credential_provider(config: &AppConfig) -> &str {
@@ -302,6 +367,9 @@ pub fn resolve_stt_config_secret<V: CredentialSecretReader>(
     config: &AppConfig,
     vault: &V,
 ) -> Result<String> {
+    if config.stt_provider == crate::stt::config::APPLE_SPEECH_PROVIDER {
+        return Ok(String::new());
+    }
     let provider = stt_credential_provider(config);
     let legacy_secret = if provider == crate::stt::config::CUSTOM_WHISPER_PROVIDER {
         &config.stt_custom_api_key
@@ -475,6 +543,62 @@ mod tests {
     }
 
     #[test]
+    fn migration_errors_do_not_expose_vault_details_or_discard_legacy_keys() {
+        struct PrivateFailureVault {
+            stage: &'static str,
+            reads: std::sync::atomic::AtomicUsize,
+        }
+
+        impl CredentialVault for PrivateFailureVault {
+            fn set_secret(&self, _namespace: &str, _provider: &str, _secret: &str) -> Result<()> {
+                if self.stage == "write" {
+                    Err(anyhow!("synthetic-private-account-detail"))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        impl CredentialSecretReader for PrivateFailureVault {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                let read = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if self.stage == "read" || (self.stage == "verify" && read > 0) {
+                    Err(anyhow!("synthetic-private-account-detail"))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+
+        for (stage, expected) in [
+            (
+                "read",
+                "Could not read provider credential during migration",
+            ),
+            (
+                "write",
+                "Could not store provider credential during migration",
+            ),
+            (
+                "verify",
+                "Could not verify provider credential during migration",
+            ),
+        ] {
+            let mut config = AppConfig {
+                stt_api_key: "synthetic-legacy-secret".into(),
+                ..AppConfig::default()
+            };
+            let vault = PrivateFailureVault {
+                stage,
+                reads: std::sync::atomic::AtomicUsize::new(0),
+            };
+            let error = migrate_legacy_config_secrets(&mut config, &vault).unwrap_err();
+            assert_eq!(error.to_string(), expected);
+            assert_eq!(config.stt_api_key, "synthetic-legacy-secret");
+        }
+    }
+
+    #[test]
     fn keeps_plaintext_api_keys_when_any_vault_write_fails() {
         let mut config = AppConfig {
             stt_provider: "deepgram".to_string(),
@@ -516,15 +640,36 @@ mod tests {
         }
 
         let mut config = AppConfig {
-            stt_provider: "deepgram".to_string(),
+            stt_provider: "synthetic-private-provider".to_string(),
             stt_api_key: "stt-secret".to_string(),
             ..AppConfig::default()
         };
 
         let result = migrate_legacy_config_secrets(&mut config, &MismatchedReadVault::default());
 
-        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Provider credential verification failed during migration"
+        );
         assert_eq!(config.stt_api_key, "stt-secret");
+    }
+
+    #[test]
+    fn whitespace_only_vault_credentials_are_treated_as_missing() {
+        struct BlankVault;
+
+        impl CredentialSecretReader for BlankVault {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                Ok(Some(" \t\n ".into()))
+            }
+        }
+
+        for (namespace, provider) in [("stt", "deepgram"), ("llm", "openai")] {
+            assert_eq!(
+                resolve_config_secret("", namespace, provider, &BlankVault).unwrap(),
+                ""
+            );
+        }
     }
 
     #[test]
@@ -542,6 +687,24 @@ mod tests {
         let secret = resolve_config_secret("", "llm", "openai", &ReadVault).unwrap();
 
         assert_eq!(secret, "vault-secret");
+    }
+
+    #[test]
+    fn config_secret_resolution_does_not_echo_vault_failure_details() {
+        struct PrivateFailure;
+        impl CredentialSecretReader for PrivateFailure {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                Err(anyhow!("synthetic-private-key and account detail"))
+            }
+        }
+        for namespace in ["stt", "llm"] {
+            assert_eq!(
+                resolve_config_secret("", namespace, "synthetic-provider", &PrivateFailure)
+                    .unwrap_err()
+                    .to_string(),
+                "Could not read provider credential from the system vault"
+            );
+        }
     }
 
     #[test]
@@ -577,6 +740,121 @@ mod tests {
 
         assert_eq!(decoded.value, "legacy-secret");
         assert_eq!(decoded.updated_at, None);
+    }
+
+    #[test]
+    fn stored_credential_decoder_rejects_unsupported_envelope_identity() {
+        for (version, kind) in [(2, "apiKey"), (1, "otherSecret")] {
+            let stored = serde_json::json!({
+                "version": version,
+                "secretKind": kind,
+                "value": "synthetic-private-secret",
+                "updatedAt": "2026-07-06T00:00:00Z"
+            })
+            .to_string();
+            let error = decode_stored_credential(&stored).unwrap_err();
+            assert_eq!(error.to_string(), "Unsupported stored credential format");
+        }
+    }
+
+    #[test]
+    fn stored_credential_decoder_rejects_malformed_identified_envelopes() {
+        for payload in [
+            serde_json::json!({"version": 1, "secretKind": "apiKey"}),
+            serde_json::json!({
+                "version": 1,
+                "secretKind": "apiKey",
+                "value": 42,
+                "updatedAt": "2026-07-06T00:00:00Z"
+            }),
+            serde_json::json!({
+                "version": "1",
+                "secretKind": "apiKey",
+                "value": "synthetic-private-secret",
+                "updatedAt": null
+            }),
+        ] {
+            assert_eq!(
+                decode_stored_credential(&payload.to_string())
+                    .unwrap_err()
+                    .to_string(),
+                "Invalid stored credential format"
+            );
+        }
+    }
+
+    #[test]
+    fn stored_credential_decoder_preserves_unrelated_legacy_json() {
+        let stored = r#"{"value":"legacy-json-secret","custom":"provider-specific"}"#;
+        assert_eq!(decode_stored_credential(stored).unwrap().value, stored);
+    }
+
+    #[test]
+    fn apple_speech_does_not_require_access_to_the_credential_vault() {
+        struct UnavailableVault;
+
+        impl CredentialSecretReader for UnavailableVault {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                Err(anyhow!("synthetic unavailable vault"))
+            }
+        }
+
+        let config = AppConfig {
+            stt_provider: crate::stt::config::APPLE_SPEECH_PROVIDER.into(),
+            stt_api_key: String::new(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            resolve_stt_config_secret(&config, &UnavailableVault).unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn apple_speech_does_not_forward_an_unrelated_legacy_provider_key() {
+        struct UnexpectedVault;
+
+        impl CredentialSecretReader for UnexpectedVault {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                panic!("Apple Speech must not read provider credentials");
+            }
+        }
+
+        let config = AppConfig {
+            stt_provider: crate::stt::config::APPLE_SPEECH_PROVIDER.into(),
+            stt_api_key: "synthetic-previous-provider-key".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            resolve_stt_config_secret(&config, &UnexpectedVault).unwrap(),
+            ""
+        );
+        assert_eq!(config.stt_api_key, "synthetic-previous-provider-key");
+    }
+
+    #[test]
+    fn custom_whisper_still_reports_vault_failures_without_private_details() {
+        struct UnavailableVault;
+
+        impl CredentialSecretReader for UnavailableVault {
+            fn get_secret(&self, namespace: &str, provider: &str) -> Result<Option<String>> {
+                assert_eq!(namespace, "stt");
+                assert_eq!(provider, crate::stt::config::CUSTOM_WHISPER_PROVIDER);
+                Err(anyhow!("synthetic-private-vault-detail"))
+            }
+        }
+
+        let config = AppConfig {
+            stt_provider: crate::stt::config::CUSTOM_WHISPER_PROVIDER.into(),
+            stt_custom_api_key: String::new(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            resolve_stt_config_secret(&config, &UnavailableVault)
+                .unwrap_err()
+                .to_string(),
+            "Could not read provider credential from the system vault"
+        );
     }
 
     #[test]
@@ -627,5 +905,97 @@ mod tests {
         let secret = resolve_llm_config_secret(&config, &vault).unwrap();
 
         assert_eq!(secret, "llm-secret");
+    }
+
+    #[test]
+    fn recording_snapshots_preserve_legacy_byok_credentials_when_vault_is_unavailable() {
+        use crate::input_configuration::InputConfiguration;
+        use crate::input_session::{InputAction, InputBinding, InputMode, VoiceRole};
+
+        struct UnavailableVault;
+
+        impl CredentialSecretReader for UnavailableVault {
+            fn get_secret(&self, _namespace: &str, _provider: &str) -> Result<Option<String>> {
+                Err(anyhow!("synthetic unavailable vault"))
+            }
+        }
+
+        for provider in ["deepgram", crate::stt::config::CUSTOM_WHISPER_PROVIDER] {
+            let mut runtime = InputConfiguration::<String, AppConfig>::default();
+            let original = AppConfig {
+                stt_provider: provider.into(),
+                stt_api_key: "synthetic-original-stt".into(),
+                stt_custom_api_key: "synthetic-original-custom".into(),
+                llm_api_key: "synthetic-original-llm".into(),
+                ..Default::default()
+            };
+            runtime.stage_installation(
+                1,
+                "toggle".into(),
+                vec![InputBinding {
+                    role: VoiceRole::Dictation,
+                    binding_id: "synthetic-binding".into(),
+                    mode: InputMode::Toggle,
+                    revision: 0,
+                }],
+                vec!["synthetic-binding".into()],
+            );
+            assert!(runtime.publish_saved_revision(1, 1, &"toggle".into(), original.clone()));
+            let actions = runtime.press_committed("synthetic-binding", VoiceRole::Dictation, 10);
+            let [InputAction::Start {
+                session_id,
+                binding,
+            }] = actions.as_slice()
+            else {
+                panic!("expected synthetic recording start");
+            };
+            let mut next = original.clone();
+            next.stt_api_key = "synthetic-next-stt".into();
+            next.stt_custom_api_key = "synthetic-next-custom".into();
+            next.llm_api_key = "synthetic-next-llm".into();
+            assert!(runtime.refresh_saved_snapshot(2, &"toggle".into(), next));
+            let owned = runtime
+                .owned_snapshot(*session_id, binding.revision)
+                .unwrap();
+            let expected_stt = if provider == crate::stt::config::CUSTOM_WHISPER_PROVIDER {
+                "synthetic-original-custom"
+            } else {
+                "synthetic-original-stt"
+            };
+            assert_eq!(
+                resolve_stt_config_secret(owned, &UnavailableVault).unwrap(),
+                expected_stt
+            );
+            assert_eq!(
+                resolve_llm_config_secret(owned, &UnavailableVault).unwrap(),
+                "synthetic-original-llm"
+            );
+            runtime.release("synthetic-binding", 20);
+            runtime.cancel(*session_id);
+            let actions = runtime.press_committed("synthetic-binding", VoiceRole::Dictation, 30);
+            let [InputAction::Start {
+                session_id,
+                binding,
+            }] = actions.as_slice()
+            else {
+                panic!("expected next synthetic recording start");
+            };
+            let owned = runtime
+                .owned_snapshot(*session_id, binding.revision)
+                .unwrap();
+            let expected_stt = if provider == crate::stt::config::CUSTOM_WHISPER_PROVIDER {
+                "synthetic-next-custom"
+            } else {
+                "synthetic-next-stt"
+            };
+            assert_eq!(
+                resolve_stt_config_secret(owned, &UnavailableVault).unwrap(),
+                expected_stt
+            );
+            assert_eq!(
+                resolve_llm_config_secret(owned, &UnavailableVault).unwrap(),
+                "synthetic-next-llm"
+            );
+        }
     }
 }

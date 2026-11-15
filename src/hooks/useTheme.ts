@@ -23,12 +23,17 @@ export function useTheme() {
     applyTheme(theme)
 
     if (theme === 'system') {
+      let active = true
       const mq = window.matchMedia('(prefers-color-scheme: dark)')
       const handler = (e: MediaQueryListEvent) => {
+        if (!active || useAppStore.getState().config.theme !== 'system') return
         root.classList.toggle('dark', e.matches)
       }
       mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
+      return () => {
+        active = false
+        mq.removeEventListener('change', handler)
+      }
     }
   }, [theme])
 

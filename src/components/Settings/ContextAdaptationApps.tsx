@@ -20,7 +20,13 @@ const REPRESENTATIVE_APPS: readonly RepresentativeApp[] = [
   { label: 'Cursor', iconKey: 'cursor', family: 'prompt_or_code' },
 ]
 
-export function ContextAdaptationApps({ disabled }: { disabled: boolean }) {
+export function ContextAdaptationApps({
+  disabled,
+  showCounts = true,
+}: {
+  disabled: boolean
+  showCounts?: boolean
+}) {
   const { t } = useTranslation()
 
   return (
@@ -28,7 +34,7 @@ export function ContextAdaptationApps({ disabled }: { disabled: boolean }) {
       role="group"
       aria-label={t('settings.contextAdaptationApps')}
       aria-disabled={disabled}
-      className={`mt-2 ml-[52px] flex min-w-0 items-center gap-1 transition-opacity ${disabled ? 'opacity-40' : 'opacity-100'}`}
+      className={`mt-2 flex min-w-0 items-center gap-1 transition-opacity ${disabled ? 'opacity-40' : 'opacity-100'}`}
     >
       {REPRESENTATIVE_APPS.map((app) => (
         <span
@@ -41,12 +47,16 @@ export function ContextAdaptationApps({ disabled }: { disabled: boolean }) {
           <AppLogo iconKey={app.iconKey} family={app.family} />
         </span>
       ))}
-      <span className="context-app-count--full ml-0.5 flex-none text-[11px] text-text-tertiary">
-        +63
-      </span>
-      <span className="context-app-count--compact ml-0.5 flex-none text-[11px] text-text-tertiary">
-        +65
-      </span>
+      {showCounts && (
+        <span className="context-app-count--full ml-0.5 flex-none text-[11px] text-text-tertiary">
+          +63
+        </span>
+      )}
+      {showCounts && (
+        <span className="context-app-count--compact ml-0.5 flex-none text-[11px] text-text-tertiary">
+          +65
+        </span>
+      )}
     </div>
   )
 }

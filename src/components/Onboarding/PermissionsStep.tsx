@@ -16,7 +16,7 @@ type PermissionRowModel = {
   icon: React.ComponentType<{ size?: number; className?: string }>
   title: string
   desc: string
-  state: PermissionState
+  state: PermissionState | null
   action?: 'accessibility' | null
 }
 
@@ -31,9 +31,18 @@ export function PermissionsStep() {
       setAccessibilityTrusted(true)
       return
     }
+    let active = true
+    setAccessibilityTrusted(null)
     checkAccessibilityPermission()
-      .then(setAccessibilityTrusted)
-      .catch(() => setAccessibilityTrusted(false))
+      .then((trusted) => {
+        if (active) setAccessibilityTrusted(trusted)
+      })
+      .catch(() => {
+        if (active) setAccessibilityTrusted(false)
+      })
+    return () => {
+      active = false
+    }
   }, [textOutputNeedsPermission])
 
   const rows = useMemo(() => {
@@ -50,7 +59,13 @@ export function PermissionsStep() {
         icon: MousePointer2,
         title: t('onboarding.permissions.textOutput'),
         desc: t('onboarding.permissions.textOutputDesc'),
-        state: textOutputNeedsPermission && accessibilityTrusted === false ? 'needed' : 'ready',
+        state: !textOutputNeedsPermission
+          ? 'ready'
+          : accessibilityTrusted === null
+            ? null
+            : accessibilityTrusted
+              ? 'ready'
+              : 'needed',
         action:
           textOutputNeedsPermission && accessibilityTrusted === false ? 'accessibility' : null,
       },
@@ -119,7 +134,7 @@ function PermissionRow({
   icon: React.ComponentType<{ size?: number; className?: string }>
   title: string
   desc: string
-  state: PermissionState
+  state: PermissionState | null
   action?: string | null
   onAccessibility: () => void
 }) {
@@ -133,7 +148,10 @@ function PermissionRow({
   const StateIcon = state === 'ready' ? Check : state === 'needed' ? AlertCircle : null
 
   return (
-    <div className="flex items-center gap-3 rounded-[10px] bg-bg-secondary px-3 py-2.5">
+    <div
+      aria-busy={state === null}
+      className="flex items-center gap-3 rounded-[10px] bg-bg-secondary px-3 py-2.5"
+    >
       <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] bg-bg-tertiary text-text-tertiary">
         <Icon size={14} />
       </div>
@@ -149,14 +167,14 @@ function PermissionRow({
         >
           {t('onboarding.permissions.fix')}
         </button>
-      ) : (
+      ) : state !== null ? (
         <span
           className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${stateClass}`}
         >
           {StateIcon && <StateIcon size={10} />}
           {t(`onboarding.permissions.status.${state}`)}
         </span>
-      )}
+      ) : null}
     </div>
   )
 }

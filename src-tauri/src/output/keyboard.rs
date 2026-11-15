@@ -3,7 +3,9 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 use crate::error::AppError;
 
-use super::{InsertResult, InsertionStrategy, OutputMode, TextOutput};
+#[cfg(not(target_os = "macos"))]
+use super::InsertionStrategy;
+use super::{InsertResult, OutputMode, TextOutput};
 
 /// Maximum characters per enigo.text() call to avoid input buffer overflow.
 const TYPE_CHUNK_SIZE: usize = 200;
@@ -120,15 +122,24 @@ pub fn check_keyboard_available() -> std::result::Result<(), String> {
 }
 
 pub struct KeyboardOutput {
+    guard: super::guarded::OutputGuard,
     #[cfg(target_os = "macos")]
     app_handle: tauri::AppHandle,
 }
 
 impl KeyboardOutput {
     pub fn new(app_handle: &tauri::AppHandle) -> Self {
+        Self::with_guard(app_handle, std::sync::Arc::new(|| true))
+    }
+
+    pub(crate) fn with_guard(
+        app_handle: &tauri::AppHandle,
+        guard: super::guarded::OutputGuard,
+    ) -> Self {
         #[cfg(target_os = "macos")]
         {
             Self {
+                guard,
                 app_handle: app_handle.clone(),
             }
         }
@@ -136,21 +147,23 @@ impl KeyboardOutput {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = app_handle;
-            Self {}
+            Self { guard }
         }
     }
 
     #[cfg(target_os = "macos")]
-    async fn type_text_on_main_thread(&self, text: &str) -> Result<(), AppError> {
+    async fn type_text_on_main_thread(&self, text: &str) -> Result<InsertResult, AppError> {
         let text = text.to_string();
         let timeout = macos_type_timeout(&text);
         let app_handle = self.app_handle.clone();
+        let guard = self.guard.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         app_handle
             .run_on_main_thread(move || {
-                let result = type_text_sync(&text);
-                let _ = tx.send(result);
+                super::scheduled::execute_if_waiting(tx, |is_waiting| {
+                    type_text_sync_while(&text, &|| is_waiting() && guard())
+                });
             })
             .map_err(|e| {
                 AppError::Output(format!(
@@ -164,7 +177,7 @@ impl KeyboardOutput {
             Ok(Err(_)) => Err(AppError::Output(
                 "Main thread keyboard output task was dropped".to_string(),
             )),
-            Err(_) => Err(AppError::Output(format!(
+            Err(_) => Err(AppError::OutputUnconfirmed(format!(
                 "Main thread keyboard output timed out after {:.0}s",
                 timeout.as_secs_f64()
             ))),
@@ -175,23 +188,23 @@ impl KeyboardOutput {
 #[async_trait]
 impl TextOutput for KeyboardOutput {
     async fn type_text(&self, text: &str) -> Result<InsertResult, AppError> {
+        #[cfg(not(target_os = "macos"))]
         let chars_inserted = text.chars().count();
 
         #[cfg(target_os = "macos")]
         {
-            self.type_text_on_main_thread(text).await?;
-            return Ok(InsertResult::inserted(
-                InsertionStrategy::Keyboard,
-                chars_inserted,
-            ));
+            return self.type_text_on_main_thread(text).await;
         }
 
         #[cfg(not(target_os = "macos"))]
         {
             let text = text.to_string();
-            tokio::task::spawn_blocking(move || type_text_sync(&text))
-                .await
-                .map_err(|e| AppError::Output(format!("Spawn blocking error: {}", e)))??;
+            let guard = self.guard.clone();
+            tokio::task::spawn_blocking(move || {
+                type_text_sync_progress(&text, guard.as_ref(), &std::cell::Cell::new(0))
+            })
+            .await
+            .map_err(|e| AppError::Output(format!("Spawn blocking error: {}", e)))??;
             Ok(InsertResult::inserted(
                 InsertionStrategy::Keyboard,
                 chars_inserted,
@@ -204,7 +217,24 @@ impl TextOutput for KeyboardOutput {
     }
 }
 
-fn type_text_sync(text: &str) -> Result<(), AppError> {
+#[cfg(target_os = "macos")]
+fn type_text_sync_while(
+    text: &str,
+    is_active: &dyn Fn() -> bool,
+) -> Result<InsertResult, AppError> {
+    let completed_chars = std::cell::Cell::new(0);
+    let result = type_text_sync_progress(text, is_active, &completed_chars);
+    super::keyboard_progress::finish_keyboard_attempt(result, completed_chars.get())
+}
+
+fn type_text_sync_progress(
+    text: &str,
+    is_active: &dyn Fn() -> bool,
+    completed_chars: &std::cell::Cell<usize>,
+) -> Result<(), AppError> {
+    if !is_active() {
+        return Err(AppError::Output("Keyboard output was cancelled".into()));
+    }
     super::windows_modifier_guard::wait_for_modifier_release()?;
 
     #[cfg(target_os = "linux")]
@@ -216,30 +246,59 @@ fn type_text_sync(text: &str) -> Result<(), AppError> {
         LinuxKeyboardBackend::Xdotool => {}
     }
 
-    let mut enigo = Enigo::new(&Settings::default())
+    #[cfg(target_os = "macos")]
+    let settings = Settings {
+        event_source_user_data: Some(super::event_identity::KEYBOARD_OUTPUT_MARKER),
+        ..Settings::default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let settings = Settings::default();
+    let enigo = Enigo::new(&settings)
         .map_err(|e| AppError::Output(format!("Failed to create Enigo: {:?}", e)))?;
+    let enigo = std::cell::RefCell::new(enigo);
 
     let lines: Vec<&str> = text.split('\n').collect();
     for (i, line) in lines.iter().enumerate() {
         if !line.is_empty() {
             for chunk in line.chars().collect::<Vec<_>>().chunks(TYPE_CHUNK_SIZE) {
+                if !is_active() {
+                    return Err(AppError::Output("Keyboard output was cancelled".into()));
+                }
                 let s: String = chunk.iter().collect();
                 enigo
+                    .borrow_mut()
                     .text(&s)
                     .map_err(|e| AppError::Output(format!("Failed to type text: {:?}", e)))?;
+                completed_chars.set(completed_chars.get() + chunk.len());
                 std::thread::sleep(std::time::Duration::from_millis(TYPE_CHUNK_DELAY_MS));
             }
         }
         if i < lines.len() - 1 {
-            enigo
-                .key(Key::Shift, Direction::Press)
-                .map_err(|e| AppError::Output(format!("Key error: {:?}", e)))?;
-            enigo
-                .key(Key::Return, Direction::Click)
-                .map_err(|e| AppError::Output(format!("Key error: {:?}", e)))?;
-            enigo
-                .key(Key::Shift, Direction::Release)
-                .map_err(|e| AppError::Output(format!("Key error: {:?}", e)))?;
+            if !is_active() {
+                return Err(AppError::Output("Keyboard output was cancelled".into()));
+            }
+            super::keyboard_progress::type_shifted_newline(
+                || {
+                    enigo
+                        .borrow_mut()
+                        .key(Key::Shift, Direction::Press)
+                        .map_err(|error| AppError::Output(format!("Key error: {error:?}")))
+                },
+                || {
+                    enigo
+                        .borrow_mut()
+                        .key(Key::Return, Direction::Click)
+                        .map_err(|error| AppError::Output(format!("Key error: {error:?}")))?;
+                    completed_chars.set(completed_chars.get() + 1);
+                    Ok(())
+                },
+                || {
+                    enigo
+                        .borrow_mut()
+                        .key(Key::Shift, Direction::Release)
+                        .map_err(|error| AppError::Output(format!("Key error: {error:?}")))
+                },
+            )?;
         }
     }
 

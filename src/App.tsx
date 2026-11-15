@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import i18n from './i18n'
 import { useTauriEvents } from './hooks/useTauriEvents'
+import { useMainUpdateEvents } from './hooks/useUpdateEvents'
+import { useInteractionSounds } from './hooks/useInteractionSounds'
 import { useTheme } from './hooks/useTheme'
 import { useAppStore } from './stores/appStore'
 import { useAuthStore } from './stores/authStore'
@@ -19,38 +22,58 @@ import { initDeepLinkListener } from './lib/deep-link'
 import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnFocus } from './lib/subscription-refresh-policy'
 import { Capsule } from './components/Capsule'
-import { Settings } from './components/Settings'
-import { History } from './components/History'
+import { SettingsModal, ModalFrame } from './components/Settings'
+import { PageContent } from './components/PageContent'
 import { Onboarding } from './components/Onboarding'
 import { MainLayout } from './components/MainLayout'
-import { HomePage } from './components/HomePage'
 import { UpgradePage } from './components/UpgradePage'
 import { AccountPage } from './components/AccountPage'
 import { AskPanel } from './components/AskPanel'
 import { ToastContainer } from './components/Toast'
 import { UpdatePrompt } from './components/UpdatePrompt'
+import { valuesEqual } from './lib/configValuesEqual'
+import { listen } from '@tauri-apps/api/event'
+import type { AppConfig } from './stores/appStore'
+
+function loadAuxiliaryConfig(failureMessage: string) {
+  let active = true
+  const changedKeys = new Set<string>()
+  const unsubscribe = useAppStore.subscribe((state, previous) => {
+    for (const key of Object.keys(state.config) as (keyof typeof state.config)[]) {
+      if (!valuesEqual(state.config[key], previous.config[key])) changedKeys.add(key)
+    }
+  })
+  getConfig()
+    .then((config) => {
+      if (!active) return
+      unsubscribe()
+      const current = useAppStore.getState().config
+      const preserved = Object.fromEntries(
+        Object.entries(current).filter(([key]) => changedKeys.has(key)),
+      )
+      useAppStore.getState().setConfig({ ...config, ...preserved })
+      const language = useAppStore.getState().config.ui_language
+      if (language && language !== i18n.language) {
+        i18n.changeLanguage(language)
+        localStorage.setItem('ui_language', language)
+      }
+    })
+    .catch(() => {
+      unsubscribe()
+      if (active) console.error(failureMessage)
+    })
+  return () => {
+    active = false
+    unsubscribe()
+  }
+}
 
 function CapsuleApp() {
   useTauriEvents()
   useTheme()
+  useInteractionSounds()
 
-  const setConfig = useAppStore((s) => s.setConfig)
-
-  useEffect(() => {
-    // Load config so DurationTimer gets the correct max_recording_seconds
-    getConfig()
-      .then((config) => {
-        setConfig(config)
-        // Restore UI language from config
-        if (config.ui_language && config.ui_language !== i18n.language) {
-          i18n.changeLanguage(config.ui_language)
-          localStorage.setItem('ui_language', config.ui_language)
-        }
-      })
-      .catch((e) => {
-        console.error('Failed to load config in capsule:', e)
-      })
-  }, [setConfig])
+  useEffect(() => loadAuxiliaryConfig('Failed to load config in capsule'), [])
 
   // Window show is handled by useCapsuleResize (setSize → setPosition → show),
   // which works on both Windows and macOS. The previous rAF-based show approach
@@ -60,21 +83,37 @@ function CapsuleApp() {
 
 function AskApp() {
   useTheme()
-  const setConfig = useAppStore((s) => s.setConfig)
-
+  useEffect(() => loadAuxiliaryConfig('Failed to load config in Ask app'), [])
   useEffect(() => {
-    getConfig()
-      .then((config) => {
-        setConfig(config)
-        if (config.ui_language && config.ui_language !== i18n.language) {
-          i18n.changeLanguage(config.ui_language)
-          localStorage.setItem('ui_language', config.ui_language)
-        }
+    let active = true
+    let unlisten: (() => void) | undefined
+    const release = (callback: () => void) => {
+      try {
+        Promise.resolve(callback()).catch(() => {})
+      } catch {
+        return
+      }
+    }
+    listen<Partial<AppConfig>>('config:patch', ({ payload }) => {
+      if (!active) return
+      useAppStore.getState().applyPersistedConfigPatch(payload)
+      if (payload.ui_language) {
+        i18n.changeLanguage(payload.ui_language)
+        localStorage.setItem('ui_language', payload.ui_language)
+      }
+    })
+      .then((callback) => {
+        if (active) unlisten = callback
+        else release(callback)
       })
-      .catch((e) => {
-        console.error('Failed to load config in Ask app:', e)
+      .catch(() => {
+        if (active) console.error('Failed to listen for Ask configuration changes')
       })
-  }, [setConfig])
+    return () => {
+      active = false
+      if (unlisten) release(unlisten)
+    }
+  }, [])
 
   return (
     <>
@@ -85,7 +124,9 @@ function AskApp() {
 }
 
 function MainApp() {
+  const { t } = useTranslation()
   useTauriEvents()
+  useMainUpdateEvents()
   useTheme()
 
   const onboardingCompleted = useAppStore((s) => s.onboardingCompleted)
@@ -100,59 +141,88 @@ function MainApp() {
   const setHotkeyRegistrationError = useAppStore((s) => s.setHotkeyRegistrationError)
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const { route, navigate } = useRoute()
+  const { route, page, modal, navigate, closeModal } = useRoute()
 
   useEffect(() => {
-    loadOnboardingCompleted().then(async (done) => {
-      setOnboardingCompleted(done)
-      if (done) {
-        try {
-          const [
-            config,
-            history,
-            dictionary,
-            correctionRules,
-            platformCapabilities,
-            hotkeyRegistrationError,
-          ] = await Promise.all([
-            getConfig(),
-            getHistory(200, 0),
-            getDictionary(),
-            getCorrectionRules(),
-            getPlatformCapabilities(),
-            getHotkeyRegistrationError(),
-          ])
-          setConfig(config)
-          setSavedConfig(config)
-          setHistory(history)
-          setDictionary(dictionary)
-          setCorrectionRules(correctionRules)
-          setPlatformCapabilities(platformCapabilities)
-          setHotkeyRegistrationError(hotkeyRegistrationError)
-          // Check macOS Accessibility permission
-          if (navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
-            checkAccessibilityPermission().then((trusted) => {
-              setAccessibilityTrusted(trusted)
-            })
+    let active = true
+    loadOnboardingCompleted()
+      .then(async (done) => {
+        if (!active) return
+        setOnboardingCompleted(done)
+        if (!done) {
+          try {
+            const config = await getConfig()
+            if (!active) return
+            setConfig(config)
+            setSavedConfig(config)
+            if (config.ui_language && config.ui_language !== i18n.language) {
+              await i18n.changeLanguage(config.ui_language)
+              if (!active) return
+              localStorage.setItem('ui_language', config.ui_language)
+            }
+          } catch {
+            if (active) setLoadError(true)
           }
-          // Restore UI language from config
-          if (config.ui_language && config.ui_language !== i18n.language) {
-            i18n.changeLanguage(config.ui_language)
-            localStorage.setItem('ui_language', config.ui_language)
-          }
-        } catch (e) {
-          console.error('Failed to load initial data:', e)
-          setLoadError(true)
         }
-      }
-      setLoaded(true)
-    })
+        if (done) {
+          try {
+            const [
+              config,
+              history,
+              dictionary,
+              correctionRules,
+              platformCapabilities,
+              hotkeyRegistrationError,
+            ] = await Promise.all([
+              getConfig(),
+              getHistory(200, 0),
+              getDictionary(),
+              getCorrectionRules(),
+              getPlatformCapabilities(),
+              getHotkeyRegistrationError(),
+            ])
+            if (!active) return
+            setConfig(config)
+            setSavedConfig(config)
+            setHistory(history)
+            setDictionary(dictionary)
+            setCorrectionRules(correctionRules)
+            setPlatformCapabilities(platformCapabilities)
+            setHotkeyRegistrationError(hotkeyRegistrationError)
+            // Check macOS Accessibility permission
+            if (navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
+              checkAccessibilityPermission().then((trusted) => {
+                if (active) setAccessibilityTrusted(trusted)
+              })
+            }
+            // Restore UI language from config
+            if (config.ui_language && config.ui_language !== i18n.language) {
+              i18n.changeLanguage(config.ui_language)
+              localStorage.setItem('ui_language', config.ui_language)
+            }
+          } catch (e) {
+            if (!active) return
+            console.error('Failed to load initial data:', e)
+            setLoadError(true)
+          }
+        }
+        if (active) setLoaded(true)
+      })
+      .catch(() => {
+        if (!active) return
+        setLoadError(true)
+        setLoaded(true)
+      })
 
     // Initialize auth session (non-blocking)
     useAuthStore.getState().initialize()
 
     // Initialize deep-link listener
-    initDeepLinkListener()
+    const stopDeepLinkListener = initDeepLinkListener()
+    return () => {
+      active = false
+      stopDeepLinkListener()
+    }
   }, [
     setOnboardingCompleted,
     setConfig,
@@ -200,18 +270,18 @@ function MainApp() {
   if (!loaded)
     return (
       <div className="flex items-center justify-center h-screen">
-        <span className="text-text-tertiary text-[13px]">Loading...</span>
+        <span className="text-text-tertiary text-[13px]">{i18n.t('common.loading')}</span>
       </div>
     )
   if (loadError)
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-3">
-        <span className="text-error text-[13px]">Failed to load application data.</span>
+        <span className="text-error text-[13px]">{i18n.t('common.loadFailed')}</span>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover transition-colors"
+          className="btn-accent px-4 py-2 text-[13px] cursor-pointer"
         >
-          Retry
+          {i18n.t('common.retry')}
         </button>
       </div>
     )
@@ -219,11 +289,22 @@ function MainApp() {
 
   return (
     <MainLayout>
-      {route === 'home' && <HomePage />}
-      {route === 'settings' && <Settings />}
-      {route === 'history' && <History />}
-      {route === 'upgrade' && <UpgradePage />}
-      {route === 'account' && <AccountPage />}
+      <PageContent page={page} />
+      {modal === 'settings' && <SettingsModal onClose={closeModal} />}
+      {modal === 'account' && (
+        <ModalFrame onClose={closeModal} maxWidth={560} title={t('account.title')}>
+          <div className="h-full overflow-y-auto bg-bg-elevated">
+            <AccountPage />
+          </div>
+        </ModalFrame>
+      )}
+      {modal === 'upgrade' && (
+        <ModalFrame onClose={closeModal} maxWidth={720} title={t('upgrade.title')}>
+          <div className="h-full overflow-y-auto bg-bg-elevated">
+            <UpgradePage />
+          </div>
+        </ModalFrame>
+      )}
       <UpdatePrompt />
       <ToastContainer />
     </MainLayout>

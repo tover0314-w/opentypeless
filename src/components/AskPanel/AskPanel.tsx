@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, Loader2, Mic, Square, X } from 'lucide-react'
+import { Check, Copy, Loader2, Mic, Square } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import {
   abortAskDictation,
+  resizeAskWindow,
   startAskDictation,
   stopAskDictation,
   takePendingAskMessage,
 } from '../../lib/tauri'
 import type { AskDictationResult, AskDictationStartResult } from '../../lib/tauri'
+import { AskAnswerCard } from './AskAnswerCard'
+import { capsuleErrorKeyFromPayload } from '../../lib/capsuleError'
 
 interface AskPanelProps {
   embedded?: boolean
@@ -28,7 +32,7 @@ function currentNativeWindow() {
 
 function safeUnlisten(unlisten: () => void) {
   try {
-    unlisten()
+    Promise.resolve(unlisten()).catch(() => {})
   } catch {
     // Tauri can reject stale listener cleanup during dev reloads.
   }
@@ -47,6 +51,10 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
   const ownsDictationRef = useRef(false)
   const ignoreNextLocalResultRef = useRef(false)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copyRevision = useRef(0)
+  const messageRevision = useRef(0)
+  const startupOwner = useRef<object | null>(null)
+  const startupRequest = useRef<Promise<AskDictationStartResult> | null>(null)
 
   useEffect(() => {
     loadingRef.current = loading
@@ -105,6 +113,8 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
 
   const beginDictation = useCallback(async () => {
     if (loadingRef.current || dictationStateRef.current !== 'idle') return
+    const owner = {}
+    startupOwner.current = owner
 
     ignoreNextLocalResultRef.current = false
     setResult(null)
@@ -114,22 +124,45 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
     setAskDictationState('recording')
     ownsDictationRef.current = true
     try {
-      applyRecordingStarted(await startAskDictation())
+      const request = startAskDictation()
+      startupRequest.current = request
+      const started = await request
+      if (startupOwner.current !== owner) return
+      if (loadingRef.current) return
+      startupOwner.current = null
+      startupRequest.current = null
+      applyRecordingStarted(started)
     } catch (e) {
+      if (startupOwner.current !== owner) return
+      startupOwner.current = null
+      startupRequest.current = null
       ownsDictationRef.current = false
-      setError(e instanceof Error ? e.message : String(e))
+      setBusy(false)
+      const message = e instanceof Error ? e.message : String(e)
+      setError(message === 'Ask cancelled' ? '' : message)
       setRecordingContext(null)
       setAskDictationState('idle')
     }
-  }, [applyRecordingStarted, setAskDictationState])
+  }, [applyRecordingStarted, setAskDictationState, setBusy])
 
   const finishDictation = useCallback(async () => {
     if (loadingRef.current || dictationStateRef.current !== 'recording') return
-
+    const owner = startupOwner.current
+    const pendingStartup = startupRequest.current
     setAskDictationState('processing')
     setBusy(true)
     setError('')
     setRecordingContext(null)
+    if (owner && pendingStartup) {
+      try {
+        await pendingStartup
+      } catch {
+        return
+      }
+      if (startupOwner.current !== owner) return
+    }
+    startupOwner.current = null
+    startupRequest.current = null
     ownsDictationRef.current = false
     try {
       const result = await stopAskDictation()
@@ -142,7 +175,8 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
       if (ignoreNextLocalResultRef.current) {
         ignoreNextLocalResultRef.current = false
       } else {
-        applyError(e instanceof Error ? e.message : String(e))
+        const message = e instanceof Error ? e.message : String(e)
+        if (message !== 'Ask cancelled') applyError(message)
       }
     } finally {
       ownsDictationRef.current = false
@@ -165,6 +199,8 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
   const dismissStandalone = useCallback(
     (ignorePendingResult = true) => {
       if (embedded) return
+      startupOwner.current = null
+      messageRevision.current += 1
       if (
         ignorePendingResult &&
         (loadingRef.current || dictationStateRef.current === 'processing')
@@ -190,10 +226,20 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
     if (embedded) return
 
     let cancelled = false
+    const startupRevision = messageRevision.current
     const unlisteners: Array<() => void> = []
+    const releaseListeners = () => {
+      unlisteners.splice(0).forEach(safeUnlisten)
+    }
+    const trackListener = (registration: Promise<() => void>) =>
+      registration.then((unlisten) => {
+        if (cancelled) safeUnlisten(unlisten)
+        else unlisteners.push(unlisten)
+      })
     const applyPendingMessage = async () => {
+      const revision = messageRevision.current
       const pending = await takePendingAskMessage()
-      if (cancelled || !pending) return
+      if (cancelled || revision !== messageRevision.current || !pending) return
       if (pending.kind === 'result') {
         applyResult(pending.payload)
       } else if (pending.kind === 'error') {
@@ -204,41 +250,46 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
     import('@tauri-apps/api/event')
       .then(({ listen }) =>
         Promise.all([
-          listen<AskResultPayload>('ask:result', (event) => {
-            if (!cancelled) {
-              applyResult(event.payload)
-              void takePendingAskMessage().catch(() => {})
-            }
-          }),
-          listen<string>('ask:error', (event) => {
-            if (!cancelled) {
-              applyError(event.payload)
-              void takePendingAskMessage().catch(() => {})
-            }
-          }),
+          trackListener(
+            listen<AskResultPayload>('ask:result', (event) => {
+              if (!cancelled) {
+                messageRevision.current += 1
+                applyResult(event.payload)
+                void takePendingAskMessage().catch(() => {})
+              }
+            }),
+          ),
+          trackListener(
+            listen<string>('ask:error', (event) => {
+              if (!cancelled) {
+                messageRevision.current += 1
+                applyError(event.payload)
+                void takePendingAskMessage().catch(() => {})
+              }
+            }),
+          ),
         ]),
       )
-      .then((listeners) => {
-        if (cancelled) {
-          listeners.forEach(safeUnlisten)
-        } else {
-          unlisteners.push(...listeners)
+      .then(() => {
+        if (!cancelled && startupRevision === messageRevision.current) {
           void applyPendingMessage().catch(() => {})
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        cancelled = true
+        releaseListeners()
+      })
 
     return () => {
       cancelled = true
-      unlisteners.forEach(safeUnlisten)
+      releaseListeners()
     }
   }, [applyError, applyResult, embedded])
 
   useEffect(() => {
     if (embedded) return
 
-    let cancelled = false
-    let unlistenFocus: (() => void) | null = null
+    // Typeless only closes the answer card from × or Esc; losing focus keeps it on screen.
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -246,32 +297,16 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
     }
 
     window.addEventListener('keydown', onKeyDown)
-    const nativeWindow = currentNativeWindow()
-    nativeWindow
-      ?.onFocusChanged((event) => {
-        if (cancelled || event.payload) return
-        dismissStandalone(true)
-      })
-      .then((unlisten) => {
-        if (cancelled) {
-          unlisten()
-        } else {
-          unlistenFocus = unlisten
-        }
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-      window.removeEventListener('keydown', onKeyDown)
-      if (unlistenFocus) safeUnlisten(unlistenFocus)
-    }
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [dismissStandalone, embedded])
 
   useEffect(() => {
     return () => {
+      const starting = startupOwner.current !== null
+      startupOwner.current = null
+      startupRequest.current = null
       if (!ownsDictationRef.current) return
-      if (dictationStateRef.current !== 'recording') return
+      if (!starting && dictationStateRef.current !== 'recording') return
       ownsDictationRef.current = false
       Promise.resolve(abortAskDictation()).catch(() => {})
     }
@@ -290,9 +325,11 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
 
   const copyAnswer = useCallback(() => {
     if (!answer) return
+    const revision = ++copyRevision.current
     navigator.clipboard
       .writeText(answer)
       .then(() => {
+        if (revision !== copyRevision.current) return
         setCopied(true)
         if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
         copiedTimerRef.current = setTimeout(() => setCopied(false), 1500)
@@ -301,10 +338,12 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
   }, [answer])
 
   useEffect(() => {
+    copyRevision.current += 1
     return () => {
+      copyRevision.current += 1
       if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
     }
-  }, [])
+  }, [result, error])
 
   const capsuleLabel =
     dictationState === 'recording'
@@ -314,7 +353,15 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
         : t('ask.ready')
   const capsuleActive = dictationState === 'recording' || dictationState === 'processing'
   const displayTitle = title === 'Ask' ? t('ask.title') : title
-  const resultText = error || answer
+  const errorKey = capsuleErrorKeyFromPayload(error)
+  const localizedError = !error
+    ? ''
+    : error === 'Ask is already busy' || error.toLowerCase().includes('voice operation is busy')
+      ? t('history.retryBusy')
+      : errorKey !== 'unknown'
+        ? t(`capsule.errors.${errorKey}`)
+        : error
+  const resultText = localizedError || answer
   const canCopyAnswer = Boolean(answer && !error && result?.output !== 'openedSearch')
   const recordingContextLabel = recordingContext?.usedSelectedText
     ? recordingContext.selectedTextTruncated
@@ -383,91 +430,30 @@ export function AskPanel({ embedded = false, showHeader = true, title = 'Ask' }:
       {dictationState === 'recording' && <Square size={13} />}
     </button>
   )
-  const standaloneCloseButton = (
-    <button
-      type="button"
-      aria-label={t('onboarding.layout.close')}
-      title={t('onboarding.layout.close')}
-      onClick={() => dismissStandalone(true)}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/70 bg-bg-primary/80 text-text-tertiary transition-colors hover:border-border-focus hover:text-text-primary"
-    >
-      <X size={14} />
-    </button>
-  )
 
-  const startStandaloneDrag = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest('button')) return
-    const window = currentNativeWindow()
-    void window?.startDragging().catch(() => {})
+  const openExternalLink = useCallback((url: string) => {
+    void openUrl(url).catch(() => console.error('Failed to open link'))
+  }, [])
+
+  const reportCardHeight = useCallback((height: number) => {
+    // Card height plus the 24px top / 16px bottom padding around it in the transparent window.
+    void resizeAskWindow(height + 40).catch(() => {})
   }, [])
 
   if (!embedded) {
     return (
-      <div
-        data-testid="ask-floating-note-backdrop"
-        onMouseDown={(event) => {
-          if (event.target === event.currentTarget) dismissStandalone(true)
-        }}
-        className="min-h-screen w-screen bg-transparent p-3 text-text-primary"
-      >
-        <section
-          data-testid="ask-floating-note"
-          onMouseDown={startStandaloneDrag}
-          className="flex max-h-[calc(100vh-24px)] w-full flex-col overflow-hidden rounded-[18px] border border-border/80 bg-bg-primary/95 shadow-[0_4px_14px_rgba(15,23,42,0.08)] backdrop-blur"
-        >
-          <div className="flex min-h-0 flex-col gap-2.5 p-3">
-            {!resultText && (
-              <div className="flex items-center justify-between gap-2 px-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-text-tertiary/50" />
-                  <span className="truncate text-[12px] font-medium text-text-primary">
-                    {displayTitle}
-                  </span>
-                </div>
-                {standaloneCloseButton}
-              </div>
-            )}
-            {resultText && (
-              <>
-                <div className="flex items-center justify-between gap-2 px-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className={`h-2 w-2 rounded-full ${
-                        error ? 'bg-error' : 'bg-text-tertiary/50'
-                      }`}
-                    />
-                    <span className="truncate text-[12px] font-medium text-text-primary">
-                      {displayTitle}
-                    </span>
-                    {result && (
-                      <span className="truncate text-[11px] text-text-tertiary">
-                        {contextLabel}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {copyAction}
-                    {standaloneCloseButton}
-                  </div>
-                </div>
-                <div className="min-h-0 overflow-y-auto rounded-[12px] border border-border bg-bg-secondary/65 px-3 py-2">
-                  {result && !error && result.output !== 'openedSearch' && (
-                    <p className="mb-2 text-[12px] leading-5 text-text-secondary">
-                      {result.question}
-                    </p>
-                  )}
-                  <p
-                    className={`whitespace-pre-wrap text-[13px] leading-5 ${
-                      error ? 'text-error' : 'text-text-primary'
-                    }`}
-                  >
-                    {resultText}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        </section>
+      <div className="flex min-h-screen w-screen flex-col items-center justify-end bg-transparent px-2 pb-4 pt-6 text-text-primary">
+        <AskAnswerCard
+          prompt={result && result.output !== 'openedSearch' ? result.question : null}
+          selectedText={result?.selectedText}
+          answer={resultText ? answer || null : null}
+          error={localizedError || null}
+          context={result && contextLabel !== t('ask.questionLabel') ? contextLabel : null}
+          canCopyAnswer={canCopyAnswer}
+          onClose={() => dismissStandalone(true)}
+          onOpenLink={openExternalLink}
+          onHeightChange={reportCardHeight}
+        />
       </div>
     )
   }

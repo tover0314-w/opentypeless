@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   claimDesktopAuthCallbackURL,
   createDesktopAuthCallbackURL,
@@ -7,7 +7,15 @@ import {
 } from '../desktop-auth-callback'
 import { clearOAuthState, getPendingOAuthVerifier } from '../deep-link'
 
+const actualSubtleCrypto = crypto.subtle
+
 describe('createDesktopAuthCallbackURL', () => {
+  afterEach(() => {
+    clearOAuthState()
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
   const fetchMock = vi.fn()
 
   beforeEach(() => {
@@ -21,6 +29,70 @@ describe('createDesktopAuthCallbackURL', () => {
     fetchMock.mockReset().mockResolvedValue(new Response(null, { status: 201 }))
     localStorage.clear()
   })
+
+  it('ends a stalled desktop proof registration without waiting for its response', async () => {
+    vi.useFakeTimers()
+    let release!: (response: Response) => void
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        release = resolve
+      }),
+    )
+    let completed = false
+    const pending = createDesktopAuthCallbackURL()
+      .catch((error: unknown) => error)
+      .finally(() => {
+        completed = true
+      })
+    try {
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(completed).toBe(true)
+      expect(await pending).toBeInstanceOf(DesktopAuthError)
+      expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
+      await expect(claimDesktopAuthCallbackURL()).resolves.not.toBeNull()
+    } finally {
+      release(new Response(null, { status: 201 }))
+      await pending
+    }
+  })
+
+  it('does not register proof after cancellation while the challenge is computing', async () => {
+    let finishDigest!: (digest: ArrayBuffer) => void
+    vi.mocked(crypto.subtle.digest).mockReturnValueOnce(
+      new Promise<ArrayBuffer>((resolve) => {
+        finishDigest = resolve
+      }),
+    )
+    const pending = createDesktopAuthCallbackURL().catch((error: unknown) => error)
+    clearOAuthState()
+    finishDigest(new Uint8Array(32).fill(7).buffer)
+    expect(await pending).toBeInstanceOf(Error)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it.each([201, 403])(
+    'releases an unused registration response body for HTTP %s',
+    async (status) => {
+      let finishCleanup!: () => void
+      const cancel = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishCleanup = resolve
+          }),
+      )
+      const stream = new ReadableStream<Uint8Array>({ cancel })
+      fetchMock.mockResolvedValueOnce(new Response(stream, { status }))
+      try {
+        const result = await createDesktopAuthCallbackURL().catch((error: unknown) => error)
+        if (status === 201) expect(typeof result).toBe('string')
+        else expect(result).toBeInstanceOf(DesktopAuthError)
+        expect(cancel).toHaveBeenCalledOnce()
+        expect(stream.locked).toBe(false)
+      } finally {
+        finishCleanup?.()
+      }
+    },
+  )
 
   it('registers PKCE and keeps only state in the email verification callback', async () => {
     await expect(createDesktopAuthCallbackURL()).resolves.toBe(
@@ -36,10 +108,46 @@ describe('createDesktopAuthCallbackURL', () => {
     expect(request.body).not.toContain('11111111111111111111111111111111'.repeat(2))
   })
 
+  it('registers the exact SHA-256 challenge using real Web Crypto without sending the verifier', async () => {
+    clearOAuthState()
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => '11111111-1111-4111-8111-111111111111'),
+      subtle: actualSubtleCrypto,
+    })
+    try {
+      const callback = await createDesktopAuthCallbackURL()
+      expect(fetchMock).toHaveBeenCalledOnce()
+      const [, request] = fetchMock.mock.calls[0]
+      const body = JSON.parse(request.body)
+      expect(body.challenge).toBe('4aJQf5oRFqaVLfpMcysc1RTwn54bCHF8i6T0VxgW5kU')
+      const state = new URL(callback).searchParams.get('desktop')!
+      const verifier = getPendingOAuthVerifier(state)
+      expect(verifier).toBe('11111111111141118111111111111111'.repeat(2))
+      expect(request.body).not.toContain(verifier)
+      expect(callback).not.toContain(verifier)
+      expect(callback).not.toContain(body.challenge)
+    } finally {
+      clearOAuthState()
+    }
+  })
+
   it('adds the selected UI language without exposing proof material', async () => {
     await expect(createDesktopAuthCallbackURL(undefined, 'zh-CN')).resolves.toBe(
       'https://www.opentypeless.com/auth/callback?desktop=11111111-1111-4111-8111-111111111111&locale=zh',
     )
+  })
+
+  it('initiates development handoff through the same-origin API while keeping the callback external', async () => {
+    vi.stubEnv('DEV', true)
+    vi.stubEnv('MODE', 'development')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://www.opentypeless.com')
+    clearOAuthState()
+    const callback = await createDesktopAuthCallbackURL()
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/__opentypeless_cloud/api/auth/desktop-handoff/initiate',
+    )
+    expect(callback).toMatch(/^https:\/\/www\.opentypeless\.com\/auth\/callback/)
+    clearOAuthState()
   })
 
   it('opens signup and verification on the Turnstile-protected web page', async () => {
@@ -118,5 +226,41 @@ describe('createDesktopAuthCallbackURL', () => {
     await expect(oldRegistration).resolves.toBeInstanceOf(DesktopAuthError)
     expect(getPendingOAuthVerifier(newState)).toBe(verifier)
     clearOAuthState()
+  })
+
+  it('does not clear a replacement flow with identical proof strings after an old failure', async () => {
+    let fail!: (error: Error) => void
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>((_resolve, reject) => {
+        fail = reject
+      }),
+    )
+    const old = createDesktopAuthCallbackURL().catch((error: unknown) => error)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const callback = await createDesktopAuthCallbackURL()
+    const state = new URL(callback).searchParams.get('desktop')!
+    const verifier = getPendingOAuthVerifier(state)
+    fail(new Error('Synthetic old registration failure'))
+    await old
+    expect(getPendingOAuthVerifier(state)).toBe(verifier)
+    expect(verifier).not.toBeNull()
+  })
+
+  it('rejects an old successful registration after an identical-proof flow replaces it', async () => {
+    let finish!: (response: Response) => void
+    fetchMock.mockReturnValueOnce(
+      new Promise<Response>((resolve) => {
+        finish = resolve
+      }),
+    )
+    const old = createDesktopAuthCallbackURL().catch((error: unknown) => error)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    const callback = await createDesktopAuthCallbackURL()
+    const state = new URL(callback).searchParams.get('desktop')!
+    const verifier = getPendingOAuthVerifier(state)
+    finish(new Response(null, { status: 201 }))
+    expect(await old).toBeInstanceOf(Error)
+    expect(getPendingOAuthVerifier(state)).toBe(verifier)
+    expect(verifier).not.toBeNull()
   })
 })

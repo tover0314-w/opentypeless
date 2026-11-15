@@ -35,10 +35,14 @@ export function AppContextMeta({
           <span className="shrink-0">{t('history.needsBrowserAccess')}</span>
         </>
       )}
-      <span aria-hidden="true" className="shrink-0">
-        ·
-      </span>
-      <span className="shrink-0">{time}</span>
+      {time && (
+        <>
+          <span aria-hidden="true" className="shrink-0">
+            ·
+          </span>
+          <span className="shrink-0">{time}</span>
+        </>
+      )}
       <span aria-hidden="true" className="shrink-0 max-[419px]:hidden">
         ·
       </span>

@@ -1,6 +1,13 @@
+pub mod archive;
+pub(crate) mod better_microphone;
 pub mod capture;
+pub(crate) mod device_notice;
+pub mod devices;
+pub mod output_mute;
+pub mod preview;
 
 pub use capture::{AudioCaptureHandle, AudioConfig, CaptureState};
+pub use devices::{list_input_devices, InputDeviceInfo};
 
 use std::{future::Future, time::Duration};
 
@@ -62,6 +69,47 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn cancelled_startup_drops_pending_provider_and_releases_the_start_lock() {
+        let operations = crate::voice_operation::VoiceOperations::default();
+        let operation = operations.begin_if(|| true).unwrap();
+        let start_lock = Arc::new(tokio::sync::Mutex::new(()));
+        let guard = start_lock.clone().lock_owned().await;
+        let provider_dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let provider_started = Arc::new(Notify::new());
+        let observed_drop = Arc::clone(&provider_dropped);
+        let observed_start = Arc::clone(&provider_started);
+        let cancellation = operation.cancel_receiver();
+        let startup = tokio::spawn(async move {
+            let _guard = guard;
+            crate::retry_audio::cancellable_retry(cancellation, async {
+                await_recording_startup(async { Ok::<_, &'static str>(42) }, async {
+                    let _cleanup = crate::voice_operation::OnDrop::new(move || {
+                        observed_drop.store(true, std::sync::atomic::Ordering::SeqCst);
+                    });
+                    observed_start.notify_one();
+                    std::future::pending::<Result<(), &'static str>>().await
+                })
+                .await
+            })
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), provider_started.notified())
+            .await
+            .unwrap();
+        assert!(start_lock.try_lock().is_err());
+        operations.abort_current(|| {});
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), startup)
+                .await
+                .unwrap()
+                .unwrap(),
+            None
+        );
+        assert!(provider_dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(start_lock.try_lock().is_ok());
+    }
 
     #[tokio::test]
     async fn audio_initialization_and_stt_connection_are_polled_concurrently() {
