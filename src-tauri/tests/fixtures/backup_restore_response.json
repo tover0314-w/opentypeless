@@ -1,0 +1,51 @@
+{
+  "correctionRules": [
+    {
+      "enabled": true,
+      "id": 1,
+      "pattern": "old",
+      "replacement": "new"
+    }
+  ],
+  "dictionary": [
+    {
+      "auto": false,
+      "id": 1,
+      "pronunciation": null,
+      "word": "Synthetic word"
+    }
+  ],
+  "history": [
+    {
+      "active_scene_id": null,
+      "active_scene_name": null,
+      "active_scene_prompt_chars": null,
+      "active_scene_prompt_truncated": false,
+      "active_scene_source": null,
+      "answer_text": "Synthetic answer",
+      "ask_intent": "ask_selection",
+      "browser_access_status": "not_applicable",
+      "citations": [
+        {
+          "title": "Source",
+          "url": "https://example.invalid/source"
+        }
+      ],
+      "context_family": "general",
+      "context_icon_key": "general",
+      "context_label": "General",
+      "context_profile_id": "general.native",
+      "created_at": "2026-11-20T00:00:00",
+      "duration_ms": null,
+      "has_audio": false,
+      "id": 1,
+      "language": null,
+      "mode": "ask",
+      "output_error": null,
+      "output_status": null,
+      "polished_text": "Synthetic question",
+      "provider_kind": "local",
+      "raw_text": "Synthetic question"
+    }
+  ]
+}

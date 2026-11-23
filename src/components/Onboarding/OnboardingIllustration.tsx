@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { Check, Lock, Mic, Sparkles } from 'lucide-react'
+import { Lock, Mic, Sparkles } from 'lucide-react'
 import { BrandMark } from '../MainLayout/BrandMark'
 import type { OnboardingStage } from './stages'
 
@@ -48,9 +48,6 @@ function ProviderArt() {
             className="flex items-center justify-between rounded-[10px] bg-fill-thin px-3 py-2.5"
           >
             <span className="text-[13px] text-text-secondary">{label}</span>
-            <span className="flex items-center gap-1 text-[12px] font-medium text-success">
-              <Check size={13} /> OK
-            </span>
           </div>
         ))}
       </div>

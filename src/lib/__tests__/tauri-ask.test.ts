@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import {
   askAnything,
+  dismissAskWindow,
+  getCloudBackupHistory,
   showAskWindow,
   startAskDictation,
   startAskFlow,
@@ -15,6 +17,19 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 describe('Ask Anything Tauri wrappers', () => {
+  it('reads backup history through a single bounded native snapshot command', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([])
+    await expect(getCloudBackupHistory()).resolves.toEqual([])
+    expect(invoke).toHaveBeenCalledWith('get_cloud_backup_history')
+  })
+
+  it.each([null, {}, [null], Array.from({ length: 5001 }, () => ({ raw_text: 'Synthetic' }))])(
+    'rejects malformed or overflowing backup snapshots before upload: %j',
+    async (response) => {
+      vi.mocked(invoke).mockResolvedValueOnce(response)
+      await expect(getCloudBackupHistory()).rejects.toThrow('Invalid backup history snapshot')
+    },
+  )
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -42,6 +57,12 @@ describe('Ask Anything Tauri wrappers', () => {
     await showAskWindow()
 
     expect(invoke).toHaveBeenCalledWith('show_ask_window')
+  })
+
+  it('dismisses Ask through the native focus restoration command', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined)
+    await dismissAskWindow()
+    expect(invoke).toHaveBeenCalledWith('dismiss_ask_window')
   })
 
   it('starts the voice-first Ask flow', async () => {

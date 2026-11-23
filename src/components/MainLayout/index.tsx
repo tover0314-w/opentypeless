@@ -92,10 +92,7 @@ export function MainLayout({ children }: Props) {
           </nav>
 
           <div className="mt-auto space-y-3 pb-3">
-            <UsageCard
-              onUpgrade={() => navigate('upgrade')}
-              onOpenModels={() => navigate('models')}
-            />
+            <UsageCard onUpgrade={() => navigate('upgrade')} />
             <div className="flex items-center border-t border-border-thin pt-3">
               <IconButton
                 label={t('nav.account')}
@@ -126,7 +123,11 @@ export function MainLayout({ children }: Props) {
         <div data-tauri-drag-region className="h-[12px] shrink-0" />
         <AccessibilityBanner />
         <CloudServiceBanner />
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div
+          className={`min-h-0 flex-1 ${page === 'home' ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        >
+          {children}
+        </div>
       </main>
     </div>
   )

@@ -14,25 +14,23 @@ if (-not (Test-Path -LiteralPath $signedDir)) {
   throw "Signed artifact directory was not found: $signedDir"
 }
 
-$version = $tagName.TrimStart('v')
-$signedFiles = Get-ChildItem -Path $signedDir -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
-$msi = $signedFiles | Where-Object { $_.Name -like '*_x64_en-US.msi' } | Select-Object -First 1
-$nsis = $signedFiles | Where-Object { $_.Name -like '*_x64-setup.exe' } | Select-Object -First 1
-
-if (-not $msi) {
-  $msi = $signedFiles | Where-Object { $_.Extension -eq '.msi' } | Select-Object -First 1
+$version = (& node scripts/validate-release-version.mjs "$tagName") -join "`n"
+if ($LASTEXITCODE -ne 0) {
+  throw 'Release version preflight failed before signing.'
 }
-if (-not $nsis) {
-  $nsis = $signedFiles | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+$version = $version.Trim()
+$selectionJson = (& node scripts/select-windows-release-artifacts.mjs "$signedDir" "$version") -join "`n"
+if ($LASTEXITCODE -ne 0) {
+  throw 'Windows installer selection failed before signing.'
 }
-if (-not $msi -or -not $nsis) {
-  throw 'Both signed MSI and NSIS installers are required.'
-}
+$selection = $selectionJson | ConvertFrom-Json
+$msi = Get-Item -LiteralPath $selection.msi
+$nsis = Get-Item -LiteralPath $selection.nsis
 
 function New-UpdaterSignature {
   param([Parameter(Mandatory = $true)][System.IO.FileInfo]$File)
 
-  $signature = (& npx tauri signer sign "$($File.FullName)") -join "`n"
+  $signature = (& npx tauri signer sign --app-version "$version" "$($File.FullName)") -join "`n"
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to generate updater signature for $($File.Name)."
   }

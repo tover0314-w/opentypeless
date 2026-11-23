@@ -1,14 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
-import { bindingFromHotkey, hotkeyFromBinding, isMacPlatform } from '../../stores/appStore'
+import {
+  bindingFromHotkey,
+  hotkeyFromBinding,
+  isMacPlatform,
+  isWindowsPlatform,
+} from '../../stores/appStore'
 import type { ShortcutBinding } from '../../stores/appStore'
-import { pauseHotkey, resumeHotkey } from '../../lib/tauri'
+import { useHotkeyCapture } from '../../hooks/useHotkeyCapture'
 import { hotkeyParts } from '../../lib/hotkeyLabels'
-import { SHORTCUT_ERROR_KEYS, validateShortcut } from '../../lib/shortcutRules'
+import {
+  nativeShortcutErrorKey,
+  SHORTCUT_ERROR_KEYS,
+  validateShortcut,
+} from '../../lib/shortcutRules'
+import { ShortcutCaptureState } from '../../lib/shortcutCaptureState'
+import { useFnShortcutCapture } from '../../hooks/useFnShortcutCapture'
 
 // Typeless allows up to four bindings per feature (`Ht = 4`).
 const MAX_BINDINGS = 4
+const SHORTCUT_EDITOR_STARTED = 'opentypeless:shortcut-editor-started'
 const MODIFIER_KEYS = ['Control', 'Shift', 'Alt', 'Meta']
 const NAMED_KEYS: Record<string, string> = {
   ' ': 'Space',
@@ -16,6 +28,29 @@ const NAMED_KEYS: Record<string, string> = {
   ArrowDown: 'Down',
   ArrowLeft: 'Left',
   ArrowRight: 'Right',
+}
+
+function physicalShortcutKey(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  const punctuation: Record<string, string> = {
+    Slash: '/',
+    Period: '.',
+    Comma: ',',
+    Semicolon: ';',
+    Minus: '-',
+    Equal: '=',
+    BracketLeft: '[',
+    BracketRight: ']',
+    Backslash: '\\',
+    Quote: "'",
+    Backquote: '`',
+  }
+  return punctuation[code] ?? null
+}
+
+function shortcutPlatform() {
+  return isMacPlatform() ? 'macos' : isWindowsPlatform() ? 'windows' : 'other'
 }
 
 interface Props {
@@ -26,8 +61,9 @@ interface Props {
   required?: boolean
   /** macOS Fn presets offered while recording, since the browser cannot see the Fn key. */
   presets?: Array<{ value: string; label: string }>
-  onChange: (bindings: ShortcutBinding[]) => void
+  onChange: (bindings: ShortcutBinding[], recorded?: boolean) => void
   label: string
+  maxBindings?: number
 }
 
 /** Typeless shortcut input (REA `Dx8DUWFx` `So`/`Dt`): keycap boxes with × and "Add another". */
@@ -38,18 +74,25 @@ export function ShortcutKeycapInput({
   presets = [],
   onChange,
   label,
+  maxBindings = MAX_BINDINGS,
 }: Props) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState<number | null>(null)
   const [error, setError] = useState<{ row: number; message: string } | null>(null)
   const rows = editing === bindings.length ? [...bindings, null] : bindings
 
+  const captureStatus = useHotkeyCapture(editing !== null)
+
   const stopEditing = useCallback(() => {
     setEditing(null)
-    resumeHotkey().catch(() => {})
   }, [])
 
   const commit = (row: number, binding: ShortcutBinding) => {
+    const availabilityError = nativeShortcutErrorKey(binding, shortcutPlatform())
+    if (availabilityError) {
+      setError({ row, message: t(availabilityError) })
+      return
+    }
     const others = [...otherBindings, ...bindings.filter((_, index) => index !== row)]
     const rule = validateShortcut(binding, others)
     if (rule) {
@@ -59,14 +102,13 @@ export function ShortcutKeycapInput({
     setError(null)
     const next = [...bindings]
     next[row] = binding
-    onChange(next)
+    onChange(next, true)
     stopEditing()
   }
 
   const startEditing = (row: number) => {
     setError(null)
     setEditing(row)
-    pauseHotkey().catch(() => {})
   }
 
   const remove = (row: number) => {
@@ -74,29 +116,62 @@ export function ShortcutKeycapInput({
     onChange(bindings.filter((_, index) => index !== row))
   }
 
+  const makePrimary = (row: number) => {
+    if (editing !== null || row <= 0 || row >= bindings.length) return
+    setError(null)
+    onChange([bindings[row], ...bindings.filter((_, index) => index !== row)])
+  }
+
   return (
     <div className="flex w-[204px] flex-col gap-2" role="group" aria-label={label}>
       {rows.map((binding, row) => (
-        <ShortcutBox
-          key={row}
-          binding={binding}
-          editing={editing === row}
-          error={error?.row === row ? error.message : null}
-          removable={!(required && bindings.length === 1) && binding !== null}
-          removeLabel={
-            required && bindings.length === 1 ? t('shortcuts.disable') : t('shortcuts.remove')
-          }
-          presets={presets}
-          onStart={() => startEditing(row)}
-          onCancel={() => {
-            setError(null)
-            stopEditing()
-          }}
-          onRecord={(recorded) => commit(row, recorded)}
-          onRemove={() => remove(row)}
-        />
+        <div key={row} className="flex flex-col gap-1">
+          <ShortcutBox
+            binding={binding}
+            editing={editing === row}
+            captureReady={captureStatus === 'ready'}
+            error={
+              editing === row && captureStatus === 'error'
+                ? t('settings.hotkeyRegistrationFailed')
+                : error?.row === row
+                  ? error.message
+                  : null
+            }
+            removable={!(required && bindings.length === 1) && binding !== null}
+            removeLabel={
+              required && bindings.length === 1 ? t('shortcuts.disable') : t('shortcuts.remove')
+            }
+            presets={presets}
+            onStart={() => startEditing(row)}
+            onCancel={() => {
+              setError(null)
+              stopEditing()
+            }}
+            onRecord={(recorded) => commit(row, recorded)}
+            onInvalid={(reason) =>
+              setError({ row, message: t(reason ?? 'settings.hotkeyInvalid') })
+            }
+            onRemove={() => remove(row)}
+          />
+          {bindings.length > 1 &&
+            binding !== null &&
+            (row === 0 ? (
+              <span className="px-1 text-[12px] text-text-tertiary">
+                {t('settings.shortcutPrimary')}
+              </span>
+            ) : (
+              <button
+                type="button"
+                disabled={editing !== null}
+                onClick={() => makePrimary(row)}
+                className="w-fit cursor-pointer rounded-[4px] border-none bg-transparent px-1 text-[12px] text-text-secondary hover:text-text-primary disabled:cursor-default disabled:opacity-40"
+              >
+                {t('settings.shortcutMakePrimary')}
+              </button>
+            ))}
+        </div>
       ))}
-      {editing === null && bindings.length > 0 && bindings.length < MAX_BINDINGS && (
+      {editing === null && bindings.length > 0 && bindings.length < maxBindings && (
         <button
           type="button"
           onClick={() => startEditing(bindings.length)}
@@ -125,41 +200,48 @@ export function ShortcutRecorderBox({
   presets = [],
   onSave,
   onCancel,
+  saveError = null,
 }: {
   binding: ShortcutBinding | null
   otherBindings: ShortcutBinding[]
   presets?: Array<{ value: string; label: string }>
   onSave: (binding: ShortcutBinding) => void
   onCancel: () => void
+  saveError?: string | null
 }) {
   const { t } = useTranslation()
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    pauseHotkey().catch(() => {})
-    return () => {
-      resumeHotkey().catch(() => {})
-    }
-  }, [])
+  const captureStatus = useHotkeyCapture(true)
 
   return (
     <ShortcutBox
       binding={binding}
       editing
-      error={error}
+      captureReady={captureStatus === 'ready'}
+      error={
+        captureStatus === 'error' ? t('settings.hotkeyRegistrationFailed') : (error ?? saveError)
+      }
       removable={false}
       removeLabel=""
       presets={presets}
       onStart={() => {}}
       onCancel={onCancel}
       onRecord={(recorded) => {
+        const availabilityError = nativeShortcutErrorKey(recorded, shortcutPlatform())
+        if (availabilityError) {
+          setError(t(availabilityError))
+          return
+        }
         const rule = validateShortcut(recorded, otherBindings)
         if (rule) {
           setError(t(SHORTCUT_ERROR_KEYS[rule]))
           return
         }
+        setError(null)
         onSave(recorded)
       }}
+      onInvalid={(reason) => setError(t(reason ?? 'settings.hotkeyInvalid'))}
       onRemove={() => {}}
     />
   )
@@ -168,6 +250,7 @@ export function ShortcutRecorderBox({
 function ShortcutBox({
   binding,
   editing,
+  captureReady,
   error,
   removable,
   removeLabel,
@@ -175,10 +258,12 @@ function ShortcutBox({
   onStart,
   onCancel,
   onRecord,
+  onInvalid,
   onRemove,
 }: {
   binding: ShortcutBinding | null
   editing: boolean
+  captureReady: boolean
   error: string | null
   removable: boolean
   removeLabel: string
@@ -186,54 +271,224 @@ function ShortcutBox({
   onStart: () => void
   onCancel: () => void
   onRecord: (binding: ShortcutBinding) => void
+  onInvalid: (reason?: string) => void
   onRemove: () => void
 }) {
   const { t } = useTranslation()
+  const errorId = useId()
+  const cancelEditing = useRef(onCancel)
+  cancelEditing.current = onCancel
   const isMac = isMacPlatform()
   const [pressed, setPressed] = useState<string[]>([])
   const boxRef = useRef<HTMLDivElement>(null)
+  const capture = useRef(new ShortcutCaptureState())
+  const captureRevoked = useRef(false)
+  const shiftSide = useRef<string | null>(null)
+  const altSide = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    captureRevoked.current = !editing
+    if (!editing) return
+    const cancelOtherEditor = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== errorId) {
+        captureRevoked.current = true
+        capture.current.cancel()
+        cancelEditing.current()
+      }
+    }
+    window.addEventListener(SHORTCUT_EDITOR_STARTED, cancelOtherEditor)
+    window.dispatchEvent(new CustomEvent(SHORTCUT_EDITOR_STARTED, { detail: errorId }))
+    return () => window.removeEventListener(SHORTCUT_EDITOR_STARTED, cancelOtherEditor)
+  }, [editing, errorId])
+  const submitChord = useCallback(
+    (chord: string[]) => {
+      setPressed(chord)
+      const modifierNames = new Set(['Ctrl', 'Command', 'Option', 'Alt', 'Shift', 'Super', 'Fn'])
+      const rightAltCombo =
+        isWindowsPlatform() &&
+        altSide.current === 'AltRight' &&
+        chord.includes('Alt') &&
+        (chord.length === 1 ||
+          (chord.length === 2 &&
+            (chord.includes('Space') ||
+              (chord.includes('Shift') &&
+                (shiftSide.current === 'ShiftLeft' || shiftSide.current === 'ShiftRight')))))
+      const normalized = rightAltCombo
+        ? chord.map((part) =>
+            part === 'Alt'
+              ? 'RightAlt'
+              : part === 'Shift'
+                ? shiftSide.current === 'ShiftRight'
+                  ? 'RightShift'
+                  : 'LeftShift'
+                : part,
+          )
+        : chord.length === 2 &&
+            chord.includes('Fn') &&
+            chord.includes('Shift') &&
+            shiftSide.current === 'ShiftLeft'
+          ? chord.map((part) => (part === 'Shift' ? 'LeftShift' : part))
+          : chord
+      modifierNames.add('RightAlt')
+      const ordered =
+        normalized.length === 1
+          ? normalized
+          : [
+              ...normalized.filter((part) => modifierNames.has(part)),
+              ...normalized.filter((part) => !modifierNames.has(part)),
+            ]
+      const binding = bindingFromHotkey(ordered.join('+'))
+      if (binding) onRecord(binding)
+      else {
+        const captured = {
+          primary: ordered[ordered.length - 1] ?? '',
+          modifiers: ordered.slice(0, -1),
+        }
+        const availabilityError = nativeShortcutErrorKey(captured, shortcutPlatform())
+        const rule = validateShortcut(captured, [])
+        const ordinaryKeys = ordered.filter((key) => !modifierNames.has(key))
+        onInvalid(
+          availabilityError ??
+            (rule
+              ? SHORTCUT_ERROR_KEYS[rule]
+              : ordinaryKeys.length > 1 || (ordered.length > 0 && ordinaryKeys.length === 0)
+                ? 'shortcuts.errorNativeCombination'
+                : undefined),
+        )
+      }
+    },
+    [onRecord, onInvalid],
+  )
+  const fnStatus = useFnShortcutCapture(editing && captureReady && isMac, (down) => {
+    if (!editing || !captureReady || captureRevoked.current) return
+    if (down) setPressed(capture.current.press('Fn'))
+    else {
+      const chord = capture.current.release('Fn')
+      if (chord) submitChord(chord)
+    }
+  })
+  const shownError =
+    error ??
+    (editing && captureReady && isMac && fnStatus === 'error'
+      ? t('settings.hotkeyRegistrationFailed')
+      : null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editing) {
+      captureRevoked.current = true
+      capture.current.cancel()
+      shiftSide.current = null
+      altSide.current = null
       setPressed([])
       return
     }
+    if (captureRevoked.current) return
     boxRef.current?.focus()
+    const outsideCapture = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      target !== document.body &&
+      target !== document.documentElement &&
+      !boxRef.current?.parentElement?.contains(target)
     const onKeyDown = (event: KeyboardEvent) => {
-      event.preventDefault()
-      event.stopPropagation()
-      if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (outsideCapture(event.target)) {
+        captureRevoked.current = true
+        capture.current.cancel()
+        setPressed([])
         onCancel()
         return
       }
+      if (captureRevoked.current) return
+      if (event.key === 'Shift' && (event.code === 'ShiftLeft' || event.code === 'ShiftRight'))
+        shiftSide.current = event.code
+      if (event.key === 'Alt' && (event.code === 'AltLeft' || event.code === 'AltRight'))
+        altSide.current = event.code
+      const physicalKey = physicalShortcutKey(event.code)
+      if (event.isComposing && !physicalKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        captureRevoked.current = true
+        capture.current.cancel()
+        setPressed([])
+        onCancel()
+        return
+      }
+      if (!captureReady) return
       const modifiers: string[] = []
       if (event.ctrlKey) modifiers.push('Ctrl')
       if (isMac && event.metaKey) modifiers.push('Command')
       if (event.altKey) modifiers.push(isMac ? 'Option' : 'Alt')
       if (event.shiftKey) modifiers.push('Shift')
       if (!isMac && event.metaKey) modifiers.push('Super')
+      for (const modifier of modifiers) capture.current.press(modifier)
       if (MODIFIER_KEYS.includes(event.key)) {
-        setPressed(modifiers)
+        const modifier =
+          event.key === 'Control'
+            ? 'Ctrl'
+            : event.key === 'Alt'
+              ? isMac
+                ? 'Option'
+                : 'Alt'
+              : event.key === 'Meta'
+                ? isMac
+                  ? 'Command'
+                  : 'Super'
+                : 'Shift'
+        setPressed(capture.current.press(modifier))
         return
       }
-      const named = NAMED_KEYS[event.key] ?? event.key
+      const named = physicalKey ?? NAMED_KEYS[event.key] ?? event.key
       const primary = named.length === 1 ? named.toUpperCase() : named
-      const binding = bindingFromHotkey([...modifiers, primary].join('+'))
-      if (binding) onRecord(binding)
+      setPressed(capture.current.press(primary))
     }
-    const onKeyUp = () => setPressed([])
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (outsideCapture(event.target) || captureRevoked.current) return
+      if (!captureReady) return
+      const modifiers: Record<string, string> = {
+        Control: 'Ctrl',
+        Shift: 'Shift',
+        Alt: isMac ? 'Option' : 'Alt',
+        Meta: isMac ? 'Command' : 'Super',
+      }
+      const key =
+        modifiers[event.key] ??
+        physicalShortcutKey(event.code) ??
+        NAMED_KEYS[event.key] ??
+        (event.key.length === 1 ? event.key.toUpperCase() : event.key)
+      const chord = capture.current.release(key)
+      if (chord) submitChord(chord)
+      if (event.key === 'Alt') altSide.current = null
+      if (event.key === 'Shift') shiftSide.current = null
+    }
+    const onBlur = () => {
+      captureRevoked.current = true
+      capture.current.cancel()
+      setPressed([])
+      onCancel()
+    }
+    const onFocusIn = (event: FocusEvent) => {
+      if (outsideCapture(event.target)) onBlur()
+    }
     window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('keyup', onKeyUp, true)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focusin', onFocusIn)
     return () => {
       window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('keyup', onKeyUp, true)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focusin', onFocusIn)
     }
-  }, [editing, isMac, onCancel, onRecord])
+  }, [editing, captureReady, isMac, onCancel, submitChord])
 
   useEffect(() => {
     if (!editing) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!boxRef.current?.parentElement?.contains(event.target as Node)) onCancel()
+      if (!boxRef.current?.parentElement?.contains(event.target as Node)) {
+        captureRevoked.current = true
+        capture.current.cancel()
+        setPressed([])
+        onCancel()
+      }
     }
     window.addEventListener('pointerdown', onPointerDown, true)
     return () => window.removeEventListener('pointerdown', onPointerDown, true)
@@ -248,15 +503,18 @@ function ShortcutBox({
         ref={boxRef}
         role="button"
         tabIndex={0}
+        aria-describedby={shownError ? errorId : undefined}
         aria-label={
           shown
             ? `${t('shortcuts.change')}: ${hotkeyParts(shown).join(' ')}`
-            : t('shortcuts.recordPlaceholder')
+            : t('settings.pressKeyCombination')
         }
         title={!editing && binding ? t('shortcuts.change') : undefined}
         data-editing={editing || undefined}
+        data-capture-ready={editing ? captureReady : undefined}
         onClick={editing ? undefined : onStart}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return
           if (!editing && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault()
             onStart()
@@ -265,7 +523,7 @@ function ShortcutBox({
         className={`relative flex min-h-10 w-full flex-wrap items-center gap-1 rounded-[10px] border bg-transparent p-[3px] outline-none transition-[border-color,box-shadow] ${
           removable && !editing ? 'pr-[34px]' : ''
         } ${
-          error
+          shownError
             ? 'border-error shadow-[0_0_0_2px_rgba(234,77,0,0.15)]'
             : editing
               ? 'border-border-focus shadow-[0_0_0_2px_rgba(42,187,167,0.15)]'
@@ -283,7 +541,7 @@ function ShortcutBox({
           ))
         ) : (
           <span className="px-2 py-1 text-[14px] leading-5 text-text-tertiary">
-            {t('shortcuts.recordPlaceholder')}
+            {t('settings.pressKeyCombination')}
           </span>
         )}
         {removable && !editing && (
@@ -307,6 +565,7 @@ function ShortcutBox({
             <button
               key={preset.value}
               type="button"
+              disabled={!captureReady}
               onClick={() => {
                 const presetBinding = bindingFromHotkey(preset.value)
                 if (presetBinding) onRecord(presetBinding)
@@ -318,7 +577,11 @@ function ShortcutBox({
           ))}
         </div>
       )}
-      {error && <p className="m-0 text-[12px] leading-4 text-error">{error}</p>}
+      {shownError && (
+        <p id={errorId} role="alert" className="m-0 text-[12px] leading-4 text-error">
+          {shownError}
+        </p>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type { AppConfig, ContextFamily, ContextProfileSummary } from '../../stor
 import { saveCustomAppMapping, updateCustomAppMapping } from '../../lib/tauri'
 import type { CustomAppMappingView, MappingCandidateView } from '../../lib/tauri'
 import { AppLogo } from '../AppLogo'
+import { Select } from '../shared/Select'
 
 const CONTEXT_FAMILIES: ContextFamily[] = [
   'email',
@@ -153,36 +154,33 @@ export function AppStyleMappingDialog({
             />
           </label>
 
-          <label className="block text-[11px] text-text-secondary">
-            {t('settings.mappingFamily')}
-            <select
+          <div className="text-[11px] text-text-secondary">
+            <span aria-hidden="true">{t('settings.mappingFamily')}</span>
+            <Select
+              aria-label={t('settings.mappingFamily')}
               value={family}
-              onChange={(event) => setFamily(event.target.value as ContextFamily)}
-              className="mt-1 w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[13px] text-text-primary outline-none focus:border-border-focus"
-            >
-              {CONTEXT_FAMILIES.map((value) => (
-                <option key={value} value={value}>
-                  {t(`contextFamilies.${value}`)}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(value) => setFamily(value as ContextFamily)}
+              className="mt-1"
+              options={CONTEXT_FAMILIES.map((value) => ({
+                value,
+                label: t(`contextFamilies.${value}`),
+              }))}
+            />
+          </div>
 
-          <label className="block text-[11px] text-text-secondary">
-            {t('settings.mappingScene')}
-            <select
+          <div className="text-[11px] text-text-secondary">
+            <span aria-hidden="true">{t('settings.mappingScene')}</span>
+            <Select
+              aria-label={t('settings.mappingScene')}
               value={sceneId}
-              onChange={(event) => setSceneId(event.target.value)}
-              className="mt-1 w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[13px] text-text-primary outline-none focus:border-border-focus"
-            >
-              <option value="">{t('settings.mappingNoScene')}</option>
-              {sceneOptions.map((scene) => (
-                <option key={scene.id} value={scene.id}>
-                  {scene.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={setSceneId}
+              className="mt-1"
+              options={[
+                { value: '', label: t('settings.mappingNoScene') },
+                ...sceneOptions.map((scene) => ({ value: scene.id, label: scene.label })),
+              ]}
+            />
+          </div>
 
           {error && <p className="text-[11px] text-error">{error}</p>}
         </div>

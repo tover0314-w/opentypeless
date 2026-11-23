@@ -59,6 +59,9 @@ pub trait SttProvider: Send + Sync {
     async fn recv_transcript(&mut self) -> Result<Option<TranscriptEvent>, AppError>;
     /// Disconnect and optionally return a final transcript (for file-based providers).
     async fn disconnect(&mut self) -> Result<Option<String>, AppError>;
+    fn take_retry_audio(&mut self) -> Option<crate::retry_audio::RetryAudio> {
+        None
+    }
     fn recording_limit_override_seconds(&self) -> Option<u32> {
         None
     }
@@ -120,6 +123,30 @@ pub fn create_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_upstream_stt_identifier_has_a_provider_factory_route() {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for (identifier, expected) in [
+            ("deepgram", "Deepgram Nova-3"),
+            ("assemblyai", "AssemblyAI"),
+            ("aliyun-qwen3-asr", "Aliyun Qwen3 Realtime ASR"),
+            ("volcengine-doubao", "Volcengine Doubao Realtime ASR"),
+            ("glm-asr", "glm-asr"),
+            ("openai-whisper", "openai-whisper"),
+            ("groq-whisper", "groq-whisper"),
+            ("siliconflow", "siliconflow"),
+            ("apple-speech", "Apple Speech"),
+            ("custom-whisper", "custom-whisper"),
+            ("cloud", "Cloud"),
+        ] {
+            let custom = (identifier == "custom-whisper").then(|| {
+                config::build_custom_whisper_config("http://localhost:8000/v1", "whisper").unwrap()
+            });
+            let provider = create_provider(identifier, custom, Some(client.clone())).unwrap();
+            assert_eq!(provider.name(), expected, "{identifier}");
+        }
+    }
 
     #[test]
     fn custom_whisper_requires_explicit_config() {

@@ -50,6 +50,7 @@ const RESERVED = [
   'cmd+h',
   'cmd+tab',
   'cmd+leftshift+tab',
+  'cmd+shift+tab',
   'cmd+space',
   'cmd+alt+escape',
   'cmd+,',
@@ -69,6 +70,7 @@ const RESERVED = [
   'ctrl+g',
   'ctrl+tab',
   'ctrl+leftshift+tab',
+  'ctrl+shift+tab',
   'alt+tab',
   'alt+f4',
   'f1',
@@ -97,6 +99,39 @@ const RESERVED_SET = new Set(RESERVED)
 
 function keysOf(binding: ShortcutBinding): string[] {
   return [...binding.modifiers, binding.primary]
+}
+
+export function hasUnsupportedNativeCombination(
+  binding: ShortcutBinding,
+  platform?: 'macos' | 'windows' | 'other',
+): boolean {
+  return nativeShortcutErrorKey(binding, platform) !== null
+}
+
+export function nativeShortcutErrorKey(
+  binding: ShortcutBinding,
+  platform?: 'macos' | 'windows' | 'other',
+): 'shortcuts.errorPlatform' | 'shortcuts.errorNativeCombination' | null {
+  const nativeKeys = new Set(['fn', 'rightalt'])
+  const presentNativeKeys = keysOf(binding).filter((key) => nativeKeys.has(key.toLowerCase()))
+  if (
+    platform &&
+    presentNativeKeys.some((key) =>
+      key.toLowerCase() === 'fn' ? platform !== 'macos' : platform !== 'windows',
+    )
+  )
+    return 'shortcuts.errorPlatform'
+  if (nativeKeys.has(binding.primary.toLowerCase()))
+    return binding.modifiers.length > 0 ? 'shortcuts.errorNativeCombination' : null
+  if (!binding.modifiers.some((modifier) => nativeKeys.has(modifier.toLowerCase()))) return null
+  return binding.modifiers.length !== 1 ||
+    !(
+      ['space', 'leftshift'].includes(binding.primary.toLowerCase()) ||
+      (binding.primary.toLowerCase() === 'rightshift' &&
+        binding.modifiers[0]?.toLowerCase() === 'rightalt')
+    )
+    ? 'shortcuts.errorNativeCombination'
+    : null
 }
 
 function identity(keys: string[]): string {

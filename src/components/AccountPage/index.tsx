@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   LogOut,
@@ -10,20 +10,16 @@ import {
   Mail,
   KeyRound,
   UserCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
-import { useAppStore } from '../../stores/appStore'
 import { API_BASE_URL } from '../../lib/constants'
-import { uploadBackup, downloadBackup, createCheckout, createPortalSession } from '../../lib/api'
-import { createBackupSettings, mergeBackupSettings } from '../../lib/backup-settings'
-import {
-  getConfig,
-  restoreBackupData,
-  setAutoStart,
-  updateConfig as persistConfig,
-} from '../../lib/tauri'
+import { usageWords } from '../../lib/usage-words'
+import { useRoute } from '../../lib/router'
+import { createPortalSession } from '../../lib/api'
+import { openDesktopCheckout } from '../../lib/desktop-checkout-order'
 import {
   EMAIL_VERIFICATION_STATE_TTL_MS,
   OAUTH_STATE_TTL_MS,
@@ -39,6 +35,11 @@ import { readPendingDesktopCheckout } from '../../lib/desktop-checkout-intent'
 import { shouldRefreshSubscriptionOnAccountOpen } from '../../lib/subscription-refresh-policy'
 import { PasswordDialog } from './PasswordDialog'
 import { PasswordField } from './PasswordField'
+import { useAccountBackup } from './useAccountBackup'
+import { QuotaBar } from './QuotaBar'
+import { HistorySyncAuthorization } from './HistorySyncAuthorization'
+import { toast } from '../toast-service'
+import { Modal } from '../shared/Modal'
 
 type Tab = 'signin' | 'signup'
 type AuthMode = 'auth' | 'forgot'
@@ -56,7 +57,7 @@ function accountErrorMessage(message: string | null, t: ReturnType<typeof useTra
       'Could not reach OpenTypeless cloud. Check your connection and try again.',
     )
   }
-  return message
+  return t('account.signInUnavailable')
 }
 
 function desktopAuthErrorMessage(
@@ -89,7 +90,7 @@ export function AccountPage({ embedded = false }: { embedded?: boolean } = {}) {
   } else if (!user) {
     content = <AuthForm />
   } else {
-    content = <AccountDetails />
+    content = <AccountDetails key={user.id} embedded={embedded} />
   }
 
   return embedded ? <div className="account-embedded">{content}</div> : content
@@ -103,7 +104,9 @@ function AuthForm() {
   const { signIn, loading, error, emailVerificationPending } = useAuthStore()
   const [localError, setLocalError] = useState<string | null>(null)
   const [oauthPending, setOauthPending] = useState<'google' | 'github' | 'browser' | null>(null)
+  const oauthDeadline = useRef<number | null>(null)
   const loginAttemptRef = useRef(0)
+  const clipboardAttemptRef = useRef<number | null>(null)
   const { t, i18n } = useTranslation()
   const authLocale = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const pendingCheckout = readPendingDesktopCheckout(localStorage)
@@ -119,17 +122,30 @@ function AuthForm() {
 
   // Keep the UI timeout aligned with the in-memory OAuth proof TTL.
   useEffect(() => {
-    if (!oauthPending) return
-    const timer = setTimeout(() => {
-      loginAttemptRef.current += 1
-      setOauthPending(null)
-      clearOAuthState()
-      setLocalError(t('account.oauthTimeout', 'Sign in timed out. Please try again.'))
-    }, OAUTH_STATE_TTL_MS)
+    if (!oauthPending) {
+      oauthDeadline.current = null
+      return
+    }
+    if (oauthDeadline.current === null) {
+      oauthDeadline.current =
+        performance.now() +
+        (oauthPending === 'browser' ? EMAIL_VERIFICATION_STATE_TTL_MS : OAUTH_STATE_TTL_MS)
+    }
+    const attempt = loginAttemptRef.current
+    const timer = setTimeout(
+      () => {
+        if (loginAttemptRef.current !== attempt) return
+        loginAttemptRef.current += 1
+        setOauthPending(null)
+        clearOAuthState()
+        setLocalError(t('account.oauthTimeout', 'Sign in timed out. Please try again.'))
+      },
+      Math.max(0, oauthDeadline.current - performance.now()),
+    )
     return () => clearTimeout(timer)
   }, [oauthPending, t])
 
-  const displayError = accountErrorMessage(localError ?? error, t)
+  const displayError = localError ?? accountErrorMessage(error, t)
 
   const handleBrowserAuth = async (browserMode: 'signup' | 'verify' | 'forgot') => {
     const attempt = ++loginAttemptRef.current
@@ -175,7 +191,7 @@ function AuthForm() {
 
   if (emailVerificationPending) {
     return (
-      <div className="max-w-[340px] mx-auto py-8 px-6 space-y-5 text-[13px] text-center">
+      <div className="account-auth space-y-5 text-[14px]">
         <Mail size={32} className="mx-auto text-text-secondary" aria-hidden="true" />
         <h2 className="text-[16px] font-semibold text-text-primary">
           {t('account.verifyEmailTitle', 'Check your email')}
@@ -198,7 +214,9 @@ function AuthForm() {
               ? t('account.sending', 'Sending...')
               : t('account.resendVerification', 'Resend verification email')}
           </button>
-          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
+          {displayError && (
+            <p className="text-error text-[12px] [overflow-wrap:anywhere]">{displayError}</p>
+          )}
           <button
             onClick={() => {
               loginAttemptRef.current += 1
@@ -243,43 +261,34 @@ function AuthForm() {
   }
 
   const handleClipboardOAuth = async () => {
+    const attempt = loginAttemptRef.current
+    if (clipboardAttemptRef.current === attempt) return
+    clipboardAttemptRef.current = attempt
+    const isCurrentAttempt = () => loginAttemptRef.current === attempt
     setLocalError(null)
     try {
       const text = (await readText()).trim()
-      const handled = await handleDeepLinkUrl(text)
+      if (!isCurrentAttempt()) return
+      const handled = await handleDeepLinkUrl(text, isCurrentAttempt)
+      if (!isCurrentAttempt()) return
       if (!handled) {
         setLocalError(t('account.oauthClipboardInvalid', 'No valid sign-in link found.'))
       }
     } catch {
+      if (!isCurrentAttempt()) return
       setLocalError(t('account.oauthClipboardInvalid', 'No valid sign-in link found.'))
+    } finally {
+      if (clipboardAttemptRef.current === attempt) clipboardAttemptRef.current = null
     }
   }
 
   if (oauthPending) {
     return (
-      <div className="max-w-[340px] mx-auto py-8 px-6 text-[13px] text-center">
-        <div
-          className="rounded-[20px] p-8 space-y-5"
-          style={{
-            background: 'var(--bg-elevated)',
-            boxShadow: `
-              0 4px 20px rgba(0,0,0,0.07),
-              0 10px 40px rgba(0,0,0,0.03),
-              inset 0 2px 6px rgba(255,255,255,0.8),
-              inset 0 -2px 6px rgba(0,0,0,0.05)
-            `,
-          }}
-        >
+      <div className="account-auth text-[14px] text-center">
+        <div className="space-y-5">
           {/* Provider icon with breathing animation */}
           <div className="flex justify-center">
-            <div
-              className="w-12 h-12 rounded-[14px] flex items-center justify-center animate-[soft-pulse_2s_ease-in-out_infinite]"
-              style={{
-                background: 'var(--bg-secondary)',
-                boxShadow:
-                  'inset 0 1px 3px rgba(255,255,255,0.6), inset 0 -1px 3px rgba(0,0,0,0.04)',
-              }}
-            >
+            <div className="w-12 h-12 rounded-[12px] flex items-center justify-center bg-bg-secondary">
               {oauthPending === 'browser' ? (
                 <UserCircle size={24} className="text-accent" />
               ) : oauthPending === 'google' ? (
@@ -327,23 +336,22 @@ function AuthForm() {
             </p>
           </div>
 
-          {/* Shimmer bar */}
-          <div className="h-1 rounded-full overflow-hidden bg-bg-secondary mx-8">
-            <div
-              className="h-full rounded-full animate-[shimmer-sweep_1.5s_ease-in-out_infinite]"
-              style={{
-                background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
-                width: '40%',
-              }}
+          <div className="flex justify-center">
+            <Loader2
+              size={18}
+              className="animate-spin text-accent motion-reduce:animate-none"
+              aria-hidden="true"
             />
           </div>
 
-          {displayError && <p className="text-error text-[12px]">{displayError}</p>}
+          {displayError && (
+            <p className="text-error text-[12px] [overflow-wrap:anywhere]">{displayError}</p>
+          )}
 
           <div className="flex flex-col gap-2">
             <button
               onClick={handleClipboardOAuth}
-              className="px-4 py-2 rounded-[10px] border border-border bg-bg-secondary text-text-primary text-[12px] cursor-pointer hover:bg-bg-tertiary transition-colors inline-flex items-center justify-center gap-2"
+              className="btn-outline min-h-10 px-4 text-[14px] cursor-pointer inline-flex items-center justify-center gap-2"
             >
               <ClipboardCheck size={14} />
               {t('account.completeFromClipboard', 'Complete from clipboard')}
@@ -354,7 +362,7 @@ function AuthForm() {
                 setOauthPending(null)
                 clearOAuthState()
               }}
-              className="px-4 py-2 rounded-[10px] border border-border bg-transparent text-text-secondary text-[12px] cursor-pointer hover:bg-bg-secondary transition-colors"
+              className="btn-outline min-h-10 px-4 text-[14px] cursor-pointer"
             >
               {t('account.cancel', 'Cancel')}
             </button>
@@ -367,14 +375,16 @@ function AuthForm() {
   const forgotMode = mode === 'forgot'
 
   return (
-    <div className="max-w-[340px] mx-auto py-8 px-6 space-y-5 text-[13px]">
-      <div className="text-center mb-2">
-        <h1 className="text-[18px] font-semibold text-text-primary">
+    <div className="account-auth space-y-5 text-[14px]">
+      <div className="mb-2">
+        <h1 className="text-[23px] leading-8 font-semibold text-text-primary">
           {forgotMode
             ? t('account.forgotPasswordTitle', 'Forgot your password?')
-            : t('account.title')}
+            : tab === 'signup'
+              ? t('account.signUp')
+              : t('account.signIn')}
         </h1>
-        <p className="text-text-secondary mt-1">
+        <p className="mt-2 text-[13px] leading-5 text-text-tertiary">
           {forgotMode
             ? t(
                 'account.forgotPasswordBrowserDescription',
@@ -394,41 +404,11 @@ function AuthForm() {
         </div>
       )}
 
-      {/* Tab switcher */}
-      {!forgotMode && (
-        <div className="flex border border-border rounded-[8px] overflow-hidden">
-          <button
-            onClick={() => {
-              setTab('signin')
-              setLocalError(null)
-            }}
-            className={`flex-1 py-2 text-[13px] font-medium border-none cursor-pointer transition-colors ${
-              tab === 'signin'
-                ? 'bg-bg-secondary text-text-primary'
-                : 'bg-transparent text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            {t('account.signIn')}
-          </button>
-          <button
-            onClick={() => {
-              setTab('signup')
-              setLocalError(null)
-            }}
-            className={`flex-1 py-2 text-[13px] font-medium border-none cursor-pointer transition-colors ${
-              tab === 'signup'
-                ? 'bg-bg-secondary text-text-primary'
-                : 'bg-transparent text-text-secondary hover:text-text-primary'
-            }`}
-          >
-            {t('account.signUp')}
-          </button>
-        </div>
-      )}
-
       {forgotMode ? (
         <div className="space-y-3">
-          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
+          {displayError && (
+            <p className="text-error text-[12px] [overflow-wrap:anywhere]">{displayError}</p>
+          )}
           <button
             type="button"
             onClick={() => handleBrowserAuth('forgot')}
@@ -450,19 +430,22 @@ function AuthForm() {
         </div>
       ) : tab === 'signin' ? (
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            type="email"
-            aria-label={t('account.email')}
-            autoComplete="email"
-            placeholder={t('account.email')}
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value)
-              useAuthStore.setState({ error: null })
-            }}
-            className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-secondary text-text-primary text-[13px] outline-none focus:border-accent transition-colors"
-            required
-          />
+          <label className="block text-[13px] text-text-secondary">
+            {t('account.email')}
+            <input
+              type="email"
+              aria-label={t('account.email')}
+              autoComplete="email"
+              placeholder={t('account.email')}
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                useAuthStore.setState({ error: null })
+              }}
+              className="field-control mt-2"
+              required
+            />
+          </label>
           <PasswordField
             label={t('account.password')}
             value={password}
@@ -471,6 +454,7 @@ function AuthForm() {
               useAuthStore.setState({ error: null })
             }}
             autoComplete="current-password"
+            showLabel
           />
           <div className="text-right">
             <button
@@ -485,7 +469,9 @@ function AuthForm() {
               {t('account.forgotPassword', 'Forgot password?')}
             </button>
           </div>
-          {displayError && <p className="text-red-500 text-[12px]">{displayError}</p>}
+          {displayError && (
+            <p className="text-error text-[12px] [overflow-wrap:anywhere]">{displayError}</p>
+          )}
           <button
             type="submit"
             disabled={loading}
@@ -516,7 +502,7 @@ function AuthForm() {
 
       {/* OAuth buttons */}
       {!forgotMode && (
-        <div className="space-y-2">
+        <div className="account-provider-actions space-y-2">
           <button
             onClick={() => handleOAuth('google')}
             className="w-full py-2 rounded-[8px] border border-border bg-transparent text-text-primary text-[13px] font-medium cursor-pointer hover:bg-bg-secondary transition-colors flex items-center justify-center gap-2"
@@ -552,11 +538,26 @@ function AuthForm() {
           </button>
         </div>
       )}
+      {!forgotMode && (
+        <div className="text-center">
+          <button
+            type="button"
+            className="text-[12px] text-accent hover:underline"
+            onClick={() => {
+              setTab(tab === 'signin' ? 'signup' : 'signin')
+              setLocalError(null)
+            }}
+          >
+            {tab === 'signin' ? t('account.signUp') : t('account.backToSignIn')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
-function AccountDetails() {
+function AccountDetails({ embedded }: { embedded: boolean }) {
+  const { navigate } = useRoute()
   const {
     user,
     plan,
@@ -567,17 +568,7 @@ function AccountDetails() {
     billingProvider,
     canManageBilling,
     canMigrateToStripe,
-    quotaModel,
-    displayWordsUsedEstimate,
-    displayWordsLimit,
-    displayWordsResetAt,
-    cloudWordsUsed,
-    cloudWordsLimit,
-    cloudWordsResetAt,
-    sttSecondsUsed,
-    sttSecondsLimit,
-    llmTokensUsed,
-    llmTokensLimit,
+    quotaDataAvailable,
     credentialCapability,
     subscriptionRefreshState,
     subscriptionRefreshLoading,
@@ -587,25 +578,90 @@ function AccountDetails() {
     loading,
     signOut,
     subscriptionRefreshedAt,
+    checkoutPending,
   } = useAuthStore()
-  const config = useAppStore((s) => s.config)
-  const history = useAppStore((s) => s.history)
-  const dictionary = useAppStore((s) => s.dictionary)
-  const correctionRules = useAppStore((s) => s.correctionRules)
-  const setConfig = useAppStore((s) => s.setConfig)
-  const setSavedConfig = useAppStore((s) => s.setSavedConfig)
-  const setHistory = useAppStore((s) => s.setHistory)
-  const setDictionary = useAppStore((s) => s.setDictionary)
-  const setCorrectionRules = useAppStore((s) => s.setCorrectionRules)
-  const { t } = useTranslation()
-  const [backupLoading, setBackupLoading] = useState(false)
-  const [backupMsg, setBackupMsg] = useState<string | null>(null)
+  const { t, i18n } = useTranslation()
+  const { backupLoading, backupMsg, handleBackup, handleRestore } = useAccountBackup()
   const [portalLoading, setPortalLoading] = useState(false)
   const [migrationLoading, setMigrationLoading] = useState(false)
   const [billingError, setBillingError] = useState<string | null>(null)
   const [securityOpen, setSecurityOpen] = useState(false)
+  const [restoreOwner, setRestoreOwner] = useState<typeof user>(null)
+  const restoreConfirmed = useRef(false)
+  useEffect(() => {
+    setRestoreOwner(null)
+    restoreConfirmed.current = false
+  }, [user])
   const passwordTriggerRef = useRef<HTMLButtonElement>(null)
   const subscriptionRefreshInFlightRef = useRef(false)
+  const lastManualRefresh = useRef<{ owner: typeof user; completedAt: number } | null>(null)
+  const signOutPending = useRef(false)
+  const accountMounted = useRef(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [retryingSubscription, setRetryingSubscription] = useState(false)
+  useEffect(() => {
+    accountMounted.current = true
+    return () => {
+      accountMounted.current = false
+    }
+  }, [])
+
+  const handleSignOut = () => {
+    if (!user || useAuthStore.getState().user !== user || signOutPending.current) return
+    signOutPending.current = true
+    setSigningOut(true)
+    const owner = user
+    void signOut()
+      .catch(() => {
+        if (!accountMounted.current) return
+        const currentUser = useAuthStore.getState().user
+        if (currentUser !== null && currentUser !== owner) return
+        toast.error(t('account.networkError'))
+      })
+      .finally(() => {
+        signOutPending.current = false
+        if (accountMounted.current) setSigningOut(false)
+      })
+  }
+
+  const retrySubscription = useCallback(
+    async (manual = false) => {
+      const owner = user
+      if (
+        !owner ||
+        useAuthStore.getState().user !== owner ||
+        subscriptionRefreshInFlightRef.current
+      ) {
+        return
+      }
+      const lastRefresh = lastManualRefresh.current
+      if (manual && lastRefresh?.owner === owner && Date.now() - lastRefresh.completedAt < 10_000) {
+        toast.error(t('account.subscriptionRefreshFrequent'))
+        return
+      }
+      subscriptionRefreshInFlightRef.current = true
+      setRetryingSubscription(true)
+      try {
+        await refreshSubscription()
+        if (manual && accountMounted.current && useAuthStore.getState().user === owner) {
+          if (useAuthStore.getState().subscriptionRefreshState === 'fresh') {
+            lastManualRefresh.current = { owner, completedAt: Date.now() }
+            toast.success(t('account.subscriptionRefreshSuccess'))
+          } else {
+            toast.error(t('account.subscriptionUnavailableBody'))
+          }
+        }
+      } catch {
+        if (accountMounted.current && useAuthStore.getState().user === owner) {
+          toast.error(t('account.subscriptionUnavailableBody'))
+        }
+      } finally {
+        subscriptionRefreshInFlightRef.current = false
+        if (accountMounted.current) setRetryingSubscription(false)
+      }
+    },
+    [refreshSubscription, t, user],
+  )
 
   useEffect(() => {
     if (
@@ -614,11 +670,8 @@ function AccountDetails() {
     ) {
       return
     }
-    subscriptionRefreshInFlightRef.current = true
-    void refreshSubscription().finally(() => {
-      subscriptionRefreshInFlightRef.current = false
-    })
-  }, [refreshSubscription, subscriptionRefreshedAt])
+    void retrySubscription()
+  }, [retrySubscription, subscriptionRefreshedAt])
 
   useEffect(() => {
     if (credentialCapability !== 'unknown') return
@@ -626,6 +679,9 @@ function AccountDetails() {
   }, [credentialCapability, refreshCredentialCapability])
 
   const hasCloudAccess = useAuthStore(hasManagedCloudAccess)
+  useEffect(() => {
+    if (!hasCloudAccess) setRestoreOwner(null)
+  }, [hasCloudAccess])
   const isAppSumo = source === 'appsumo'
   const isDirectLifetime = source === 'lifetime' || plan === 'lifetime_starter'
   const isCreemPaymentFailed =
@@ -641,72 +697,11 @@ function AccountDetails() {
     (billingProvider === 'creem' || billingProvider === 'stripe')
   const subscriptionUnavailable = subscriptionRefreshState === 'unavailable'
   const subscriptionStale = subscriptionRefreshState === 'stale'
-  const wordsUsed =
-    quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
-      ? displayWordsUsedEstimate
-      : cloudWordsUsed
-  const wordsLimit =
-    quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
-      ? displayWordsLimit
-      : cloudWordsLimit
-  const wordsResetAt =
-    quotaModel === 'legacy_dual_meter' && displayWordsLimit > 0
-      ? displayWordsResetAt
-      : cloudWordsResetAt
-
-  const handleBackup = async () => {
-    setBackupLoading(true)
-    setBackupMsg(null)
-    try {
-      const safeConfig = createBackupSettings(config)
-      await uploadBackup({
-        history,
-        dictionary: { entries: dictionary, correction_rules: correctionRules },
-        settings: safeConfig,
-      })
-      setBackupMsg(t('account.toast.backupOk'))
-    } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : t('account.toast.backupFail'))
-    } finally {
-      setBackupLoading(false)
-    }
-  }
-
-  const handleRestore = async () => {
-    setBackupLoading(true)
-    setBackupMsg(null)
-    let autoStartApplied = false
-    try {
-      const data = await downloadBackup()
-      if (data.settings) {
-        const restoredConfig = mergeBackupSettings(config, data.settings)
-        if (restoredConfig.auto_start !== config.auto_start) {
-          await setAutoStart(restoredConfig.auto_start)
-          autoStartApplied = true
-        }
-        try {
-          await persistConfig(restoredConfig)
-        } catch (error) {
-          if (autoStartApplied) await setAutoStart(config.auto_start).catch(() => {})
-          throw error
-        }
-        const persistedConfig = await getConfig().catch(() => restoredConfig)
-        setConfig(persistedConfig)
-        setSavedConfig(persistedConfig)
-      }
-      if (data.history != null || data.dictionary != null) {
-        const restoredData = await restoreBackupData(data.history ?? null, data.dictionary ?? null)
-        setHistory(restoredData.history)
-        setDictionary(restoredData.dictionary)
-        setCorrectionRules(restoredData.correctionRules)
-      }
-      setBackupMsg(t('account.toast.restoreOk'))
-    } catch (e) {
-      setBackupMsg(e instanceof Error ? e.message : t('account.toast.restoreFail'))
-    } finally {
-      setBackupLoading(false)
-    }
-  }
+  const {
+    used: wordsUsed,
+    limit: wordsLimit,
+    resetAt: wordsResetAt,
+  } = usageWords(useAuthStore.getState())
 
   const handleManageSubscription = async () => {
     setPortalLoading(true)
@@ -722,12 +717,11 @@ function AccountDetails() {
   }
 
   const handleMigrateToStripe = async () => {
+    if (!user) return
     setMigrationLoading(true)
     setBillingError(null)
     try {
-      const { url } = await createCheckout('desktop', 'pro_monthly')
-      await openUrl(url)
-      useAuthStore.setState({ checkoutPending: true })
+      await openDesktopCheckout(user.id, 'pro_monthly')
     } catch {
       setBillingError(t('upgrade.checkoutTemporarilyUnavailable'))
     } finally {
@@ -741,10 +735,14 @@ function AccountDetails() {
       : t('account.setPassword', 'Set password')
 
   return (
-    <div className="max-w-[400px] mx-auto py-8 px-6 space-y-5 text-[13px]">
-      <div className="text-center mb-2">
-        <h1 className="text-[18px] font-semibold text-text-primary">{t('account.title')}</h1>
-      </div>
+    <div className="account-details account-review space-y-4 text-[13px]">
+      {!embedded && (
+        <div className="mb-2">
+          <h1 className="text-[24px] leading-8 font-medium text-text-primary">
+            {t('account.title')}
+          </h1>
+        </div>
+      )}
 
       {(subscriptionStale || subscriptionUnavailable) && (
         <section
@@ -770,11 +768,11 @@ function AccountDetails() {
             </p>
             <button
               type="button"
-              onClick={() => void refreshSubscription()}
-              disabled={subscriptionRefreshLoading}
+              onClick={() => void retrySubscription(true)}
+              disabled={subscriptionRefreshLoading || retryingSubscription}
               className="h-7 shrink-0 rounded-[6px] border border-amber-400/30 bg-transparent px-2 text-[11px] font-medium text-text-primary transition-colors hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {subscriptionRefreshLoading
+              {subscriptionRefreshLoading || retryingSubscription
                 ? t('account.subscriptionRetrying', 'Checking...')
                 : t('account.subscriptionRetry', 'Try again')}
             </button>
@@ -783,17 +781,45 @@ function AccountDetails() {
       )}
 
       {/* User info */}
-      <div className="border border-border rounded-[10px] overflow-hidden">
-        <InfoRow label={t('account.email')} value={user!.email} />
-        {user!.name && <InfoRow label={t('account.name')} value={user!.name} />}
-        <InfoRow
-          label={t('account.plan')}
-          value={
-            subscriptionUnavailable
-              ? t('account.subscriptionStatusUnknown', 'Temporarily unavailable')
-              : displayName
-          }
-        />
+      <div className="account-profile-card">
+        <div data-account-profile="" className="flex min-w-0 items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="account-avatar" aria-hidden="true">
+              <UserCircle size={25} />
+            </span>
+            <div className="min-w-0">
+              <h2 className="m-0 break-words text-[18px] font-semibold leading-6 text-text-primary">
+                {user!.name || t('account.title')}
+              </h2>
+              <p className="m-0 mt-2 min-w-0 break-words text-[13px] leading-5 text-text-tertiary">
+                {user!.email}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-[6px] bg-fill-thin px-2 py-1 text-[12px] font-medium text-text-secondary">
+              {subscriptionUnavailable
+                ? t('account.subscriptionStatusUnknown', 'Temporarily unavailable')
+                : displayName}
+            </span>
+            {!subscriptionStale && !subscriptionUnavailable && (
+              <button
+                type="button"
+                aria-label={t('account.subscriptionRefresh')}
+                title={t('account.subscriptionRefresh')}
+                disabled={subscriptionRefreshLoading || retryingSubscription}
+                onClick={() => void retrySubscription(true)}
+                className="grid h-7 w-7 place-items-center rounded-full text-text-tertiary hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {subscriptionRefreshLoading || retryingSubscription ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw size={14} aria-hidden="true" />
+                )}
+              </button>
+            )}
+          </div>
+        </div>
         {(isAppSumo || isDirectLifetime) && (
           <InfoRow
             label={t('account.license', 'License')}
@@ -803,20 +829,22 @@ function AccountDetails() {
         {canManageSubscription && subscriptionEnd && (
           <InfoRow
             label={t('account.renews')}
-            value={new Date(subscriptionEnd).toLocaleDateString()}
+            value={new Date(subscriptionEnd).toLocaleDateString(i18n.language)}
           />
         )}
         {wordsResetAt && (
           <InfoRow
             label={t('account.resets', 'Resets')}
-            value={new Date(wordsResetAt).toLocaleDateString()}
+            value={new Date(wordsResetAt).toLocaleDateString(i18n.language)}
           />
         )}
       </div>
 
+      {user && <HistorySyncAuthorization key={user.id} owner={user} />}
+
       {/* Security */}
-      <section className="border border-border rounded-[10px] overflow-hidden">
-        <div className="min-h-10 px-3 py-2.5 flex items-center justify-between gap-3 bg-bg-secondary/50">
+      <section className="account-section">
+        <div className="min-h-10 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-text-primary font-medium">
             <KeyRound size={14} aria-hidden="true" />
             <span>{t('account.security', 'Security')}</span>
@@ -853,20 +881,30 @@ function AccountDetails() {
       )}
 
       {/* Quota */}
-      {wordsLimit > 0 ? (
-        <div className="border border-border rounded-[10px] overflow-hidden">
-          <div className="px-3 py-2.5 bg-bg-secondary/50 border-b border-border">
-            <h3 className="text-[13px] font-medium text-text-primary">
-              {t('account.cloudWordsThisMonth', 'Cloud words this month')}
+      {!subscriptionUnavailable && quotaDataAvailable !== false && wordsLimit > 0 ? (
+        <div className="account-quota-card">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-[13px] font-semibold text-text-primary">
+              {t('upgrade.cloudWords')}
             </h3>
+            {!isAppSumo && !isDirectLifetime && (
+              <button
+                type="button"
+                onClick={() => navigate('upgrade')}
+                className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover"
+              >
+                {t('upgrade.title')}
+              </button>
+            )}
           </div>
-          <div className="px-3 py-3 space-y-3">
+          <div className="py-4 space-y-3">
             <QuotaBar
-              label={t('account.cloudWords', 'Cloud words')}
+              label={t('onboarding.account.freePlanQuota')}
               used={wordsUsed}
               limit={wordsLimit}
               unit={t('account.quotaKWords', 'k words')}
               divisor={1000}
+              remaining
             />
             <p className="text-[11px] text-text-tertiary">
               {t(
@@ -876,43 +914,23 @@ function AccountDetails() {
             </p>
           </div>
         </div>
-      ) : sttSecondsLimit > 0 ? (
-        <div className="border border-border rounded-[10px] overflow-hidden">
-          <div className="px-3 py-2.5 bg-bg-secondary/50 border-b border-border">
-            <h3 className="text-[13px] font-medium text-text-primary">
-              {hasCloudAccess
-                ? t('account.usageThisMonth')
-                : t('account.freeCredit', 'Free Credit')}
-            </h3>
-          </div>
-          <div className="px-3 py-3 space-y-3">
-            <QuotaBar
-              label={t('upgrade.stt')}
-              used={sttSecondsUsed}
-              limit={sttSecondsLimit}
-              unit={sttSecondsLimit >= 3600 ? t('account.quotaHours') : t('account.quotaMin')}
-              divisor={sttSecondsLimit >= 3600 ? 3600 : 60}
-            />
-            <QuotaBar
-              label={t('upgrade.llm')}
-              used={llmTokensUsed}
-              limit={llmTokensLimit}
-              unit={t('account.quotaTokens')}
-              divisor={1000}
-            />
-          </div>
-        </div>
       ) : null}
 
       {/* Cloud backup (Pro) */}
       {hasCloudAccess && (
-        <div className="border border-border rounded-[10px] overflow-hidden">
-          <div className="px-3 py-2.5 bg-bg-secondary/50 border-b border-border">
+        <div className="account-section">
+          <div className="pb-2">
             <h3 className="text-[13px] font-medium text-text-primary">
               {t('account.cloudBackup')}
             </h3>
           </div>
-          <div className="px-3 py-3 space-y-2">
+          <div className="py-4 space-y-2">
+            <p className="text-[12px] leading-5 text-text-secondary">
+              {t(
+                'account.backupScope',
+                'Backs up settings, dictionary and up to 5000 history entries. Recordings are not included.',
+              )}
+            </p>
             <div className="flex gap-2">
               <button
                 onClick={handleBackup}
@@ -922,7 +940,11 @@ function AccountDetails() {
                 <Upload size={14} /> {t('account.backup')}
               </button>
               <button
-                onClick={handleRestore}
+                onClick={() => {
+                  if (!user || backupLoading || useAuthStore.getState().user !== user) return
+                  restoreConfirmed.current = false
+                  setRestoreOwner(user)
+                }}
                 disabled={backupLoading}
                 className="flex-1 py-2 rounded-[8px] border border-border bg-transparent text-text-primary text-[13px] font-medium cursor-pointer hover:bg-bg-secondary transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
               >
@@ -939,6 +961,48 @@ function AccountDetails() {
             )}
           </div>
         </div>
+      )}
+
+      {restoreOwner && restoreOwner === user && hasCloudAccess && (
+        <Modal
+          title={t('account.restoreConfirmTitle')}
+          role="alertdialog"
+          closeOnBackdrop={false}
+          onClose={() => setRestoreOwner(null)}
+        >
+          <p className="text-[13px] leading-5 text-text-secondary">
+            {t('account.restoreConfirmDescription')}
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              data-autofocus
+              onClick={() => setRestoreOwner(null)}
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={backupLoading}
+              onClick={() => {
+                if (
+                  restoreConfirmed.current ||
+                  backupLoading ||
+                  useAuthStore.getState().user !== restoreOwner ||
+                  !hasManagedCloudAccess(useAuthStore.getState())
+                )
+                  return
+                restoreConfirmed.current = true
+                setRestoreOwner(null)
+                void handleRestore()
+              }}
+            >
+              {t('account.restore')}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* Manage subscription (Pro) */}
@@ -983,16 +1047,22 @@ function AccountDetails() {
         </button>
       )}
 
+      {user && checkoutPending && (
+        <p role="status" className="text-text-secondary">
+          {t('upgrade.checkoutAwaitingConfirmation')}
+        </p>
+      )}
       {billingError && (
-        <p role="alert" className="text-center text-[12px] text-red-500">
+        <p role="alert" className="text-[12px] text-error [overflow-wrap:anywhere]">
           {billingError}
         </p>
       )}
 
       {/* Sign out */}
       <button
-        onClick={signOut}
-        className="w-full py-2 rounded-[8px] border border-border bg-transparent text-red-500 text-[13px] font-medium cursor-pointer hover:bg-red-500/5 transition-colors flex items-center justify-center gap-1.5"
+        onClick={handleSignOut}
+        disabled={signingOut}
+        className="btn-outline min-h-10 w-full text-error text-[14px] font-medium cursor-pointer hover:bg-error/5 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <LogOut size={14} />
         {t('account.signOut')}
@@ -1003,57 +1073,9 @@ function AccountDetails() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between px-3 py-2.5 border-b border-border last:border-b-0">
-      <span className="text-text-secondary">{label}</span>
-      <span className="text-text-primary">{value}</span>
-    </div>
-  )
-}
-
-function QuotaBar({
-  label,
-  used,
-  limit,
-  unit,
-  divisor,
-}: {
-  label: string
-  used: number
-  limit: number
-  unit: string
-  divisor: number
-}) {
-  const { t } = useTranslation()
-  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0
-  const usedDisplay = (used / divisor).toFixed(1)
-  const limitDisplay = (limit / divisor).toFixed(1)
-
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-[12px]">
-        <span className="text-text-secondary">{label}</span>
-        <span className="text-text-tertiary">
-          {usedDisplay} / {limitDisplay} {unit}
-        </span>
-      </div>
-      <div
-        className="h-1.5 bg-bg-secondary rounded-full overflow-hidden"
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={t('account.quotaUsage', {
-          label,
-          used: usedDisplay,
-          limit: limitDisplay,
-          unit,
-        })}
-      >
-        <div
-          className={`h-full rounded-full transition-all ${pct > 90 ? 'bg-red-500' : 'bg-accent'}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+    <div className="account-info-row grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-6 py-4 border-b border-border-thin last:border-b-0">
+      <span className="min-w-0 break-words text-text-secondary">{label}</span>
+      <span className="min-w-0 break-words text-right text-text-primary">{value}</span>
     </div>
   )
 }

@@ -1,4 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
+import { useAppStore } from '../stores/appStore'
+import { pendingConfigSaves } from './configSaveRegistry'
+import { ConfigCommitCursor } from './configCommit'
+import { isAppConfigSnapshot, isHotkeyConfigurationConsistent } from './appConfigSnapshot'
+import { validRestoreBackupResponse } from './restore-backup-validation'
+import { validBackupHistory } from './backup-history-validation'
+import { valuesEqual } from './configValuesEqual'
 import type {
   AppConfig,
   HistoryEntry,
@@ -13,6 +20,43 @@ import type {
 } from '../stores/appStore'
 
 // Pipeline commands
+export async function quitFromCapsule(): Promise<void> {
+  return invoke('quit_from_capsule')
+}
+
+export interface PracticeSnapshot {
+  session: string
+  phase:
+    | 'preparing'
+    | 'recording'
+    | 'transcribing'
+    | 'polishing'
+    | 'complete'
+    | 'error'
+    | 'cancelled'
+  rawText: string
+  polishPreview: string
+  result: string
+  level: number
+  error: { code: string; details?: string | null; retry_count: number } | null
+}
+
+export interface PracticeOptions {
+  mode: 'dictate' | 'translate' | 'ask'
+  askAction?: 'answer' | 'draft' | 'rewrite' | 'translate'
+  targetLanguage?: string
+  selectedText?: string
+}
+
+export const startPractice = (options?: PracticeOptions) =>
+  options === undefined
+    ? invoke<string>('start_practice')
+    : invoke<string>('start_practice', { options })
+export const stopPractice = (session: string) => invoke<void>('stop_practice', { session })
+export const cancelPractice = (session: string) => invoke<void>('cancel_practice', { session })
+export const getPractice = (session: string) =>
+  invoke<PracticeSnapshot>('get_practice', { session })
+
 export async function startRecording(): Promise<void> {
   return invoke('start_recording')
 }
@@ -25,8 +69,16 @@ export async function abortRecording(): Promise<void> {
   return invoke('abort_recording')
 }
 
-export async function setActiveTranslationTarget(code: string): Promise<TranslationConfig> {
-  return invoke('set_active_translation_target', { code })
+export async function setActiveTranslationTarget(
+  code: string,
+  expectedSessionId?: number,
+  expectedConfigEpoch?: string,
+): Promise<TranslationConfig> {
+  return invoke('set_active_translation_target', {
+    code,
+    ...(expectedSessionId === undefined ? {} : { expectedSessionId }),
+    ...(expectedConfigEpoch === undefined ? {} : { expectedConfigEpoch }),
+  })
 }
 
 export type AppMatcherType = 'native_bundle_id' | 'native_executable' | 'exact_web_host'
@@ -114,9 +166,95 @@ export async function getConfig(): Promise<AppConfig> {
   return invoke('get_config')
 }
 
-export async function updateConfig(config: AppConfig): Promise<void> {
+export async function getConfigCommit(
+  signal?: AbortSignal,
+): Promise<import('./configCommit').ConfigCommit<AppConfig>> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (signal?.aborted) throw new DOMException('Configuration read cancelled', 'AbortError')
+    try {
+      const commit =
+        await invoke<import('./configCommit').ConfigCommit<AppConfig>>('get_config_commit')
+      if (signal?.aborted) throw new DOMException('Configuration read cancelled', 'AbortError')
+      return commit
+    } catch (error) {
+      if (signal?.aborted) throw new DOMException('Configuration read cancelled', 'AbortError')
+      if (error !== 'Application settings are being updated' || attempt === 2) throw error
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', cancel)
+          reject(new DOMException('Configuration read cancelled', 'AbortError'))
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', cancel)
+          resolve()
+        }, 20)
+        signal?.addEventListener('abort', cancel, { once: true })
+        if (signal?.aborted) cancel()
+      })
+    }
+  }
+  throw new Error('Configuration read attempts exhausted')
+}
+
+export interface ConfigurationSaveReceipt {
+  config: AppConfig
+  savedRevision: number
+  inputActivation: 'active' | 'pending'
+  commit?: import('./configCommit').ConfigCommit<AppConfig>
+}
+
+export type SceneConfiguration = Pick<
+  AppConfig,
+  'custom_scenes' | 'system_scene_overrides' | 'active_scene' | 'family_scene_assignments'
+>
+
+function sceneConfiguration(config: AppConfig): SceneConfiguration {
+  return structuredClone({
+    custom_scenes: config.custom_scenes,
+    system_scene_overrides: config.system_scene_overrides,
+    active_scene: config.active_scene,
+    family_scene_assignments: config.family_scene_assignments,
+  })
+}
+
+export async function updateSceneConfiguration(
+  expected: AppConfig,
+  desired: AppConfig,
+  saveId: string,
+  activateSceneId?: string,
+): Promise<import('./configCommit').ConfigCommit<AppConfig>> {
+  return invoke('update_scene_configuration', {
+    expected: sceneConfiguration(expected),
+    desired: sceneConfiguration(desired),
+    saveId,
+    ...(activateSceneId === undefined ? {} : { activateSceneId }),
+  })
+}
+
+export async function setActiveScene(
+  sceneId: string | null,
+  saveId: string,
+): Promise<import('./configCommit').ConfigCommit<AppConfig>> {
+  return invoke('set_active_scene', { sceneId, saveId })
+}
+
+export function updateConfig(config: AppConfig): Promise<void>
+export function updateConfig(
+  config: AppConfig,
+  saveId: string | undefined,
+): Promise<ConfigurationSaveReceipt | void>
+export async function updateConfig(
+  config: AppConfig,
+  saveId?: string,
+): Promise<ConfigurationSaveReceipt | void> {
+  if (!isHotkeyConfigurationConsistent(config)) throw new Error('Invalid shortcut configuration')
   // Normal settings saves must never replay onboarding credentials.
-  return invoke('update_config', { config: configWithoutProviderSecrets(config) })
+  const receipt = await invoke<ConfigurationSaveReceipt | void>('update_config', {
+    config: configWithoutProviderSecrets(config),
+    ...(saveId === undefined ? {} : { saveId }),
+  })
+  return saveId === undefined ? undefined : receipt
 }
 
 export function configWithoutProviderSecrets(config: AppConfig): AppConfig {
@@ -124,6 +262,7 @@ export function configWithoutProviderSecrets(config: AppConfig): AppConfig {
 }
 
 export async function saveOnboardingConfig(config: AppConfig): Promise<AppConfig> {
+  if (!isHotkeyConfigurationConsistent(config)) throw new Error('Invalid shortcut configuration')
   if (config.stt_provider === 'custom-whisper' && config.stt_custom_api_key?.trim()) {
     await setCredential('stt', 'custom-whisper', config.stt_custom_api_key)
   } else if (
@@ -138,8 +277,39 @@ export async function saveOnboardingConfig(config: AppConfig): Promise<AppConfig
     await setCredential('llm', config.llm_provider, config.llm_api_key)
   }
   const sanitized = configWithoutProviderSecrets(config)
-  await updateConfig(sanitized)
-  return getConfig()
+  if (useAppStore.getState().configCommit === null) {
+    await updateConfig(sanitized)
+    if (useAppStore.getState().configCommit !== null) {
+      throw new Error('Onboarding configuration stream changed during saving')
+    }
+    const saved = await getConfig()
+    if (useAppStore.getState().configCommit !== null) {
+      throw new Error('Onboarding configuration stream changed during readback')
+    }
+    return saved
+  }
+  const saveId = crypto.randomUUID()
+  pendingConfigSaves.register(saveId, sanitized)
+  try {
+    const receipt = await updateConfig(sanitized, saveId)
+    if (!receipt?.commit) throw new Error('Onboarding configuration receipt is unavailable')
+    const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+    if (
+      !cursor.initialize(receipt.commit) ||
+      cursor.snapshot?.saveId !== saveId ||
+      cursor.snapshot?.revision !== receipt.savedRevision ||
+      !valuesEqual(cursor.snapshot?.config, receipt.config)
+    ) {
+      throw new Error('Onboarding configuration receipt is invalid')
+    }
+    const disposition = useAppStore.getState().applyConfigCommit(receipt.commit)
+    if (disposition !== 'accepted' && disposition !== 'duplicate') {
+      throw new Error('Onboarding configuration was superseded')
+    }
+    return structuredClone(receipt.config)
+  } finally {
+    pendingConfigSaves.retire(saveId)
+  }
 }
 
 export type RecordingLimitMode = 'auto' | 'custom'
@@ -229,6 +399,10 @@ export async function setCapsuleAutoHide(enabled: boolean): Promise<void> {
   return invoke('set_capsule_auto_hide', { enabled })
 }
 
+export async function retryTranscription(): Promise<string> {
+  return invoke('retry_transcription')
+}
+
 export interface MicrophoneInfo {
   name: string
   isDefault: boolean
@@ -237,6 +411,18 @@ export interface MicrophoneInfo {
 
 export async function listMicrophones(): Promise<MicrophoneInfo[]> {
   return invoke('list_microphones')
+}
+
+export async function startMicrophonePreview(device: string): Promise<number> {
+  return invoke('start_microphone_preview', { device })
+}
+
+export async function getMicrophonePreviewLevel(session: number): Promise<number> {
+  return invoke('get_microphone_preview_level', { session })
+}
+
+export async function stopMicrophonePreview(session: number): Promise<void> {
+  return invoke('stop_microphone_preview', { session })
 }
 
 export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
@@ -414,9 +600,11 @@ export async function benchLlmConnection(
 // LLM models
 export async function fetchLlmModels(
   apiKey: string,
-  provider: string,
-  baseUrl: string,
+  providerOrBaseUrl: string,
+  explicitBaseUrl?: string,
 ): Promise<string[]> {
+  const provider = explicitBaseUrl === undefined ? 'openai' : providerOrBaseUrl
+  const baseUrl = explicitBaseUrl === undefined ? providerOrBaseUrl : explicitBaseUrl
   return invoke('fetch_llm_models', { apiKey, provider, baseUrl })
 }
 
@@ -429,12 +617,12 @@ export async function updateAskHotkey(hotkey: string): Promise<void> {
   return invoke('update_ask_hotkey', { hotkey })
 }
 
-export async function pauseHotkey(): Promise<void> {
-  return invoke('pause_hotkey')
+export async function pauseHotkey(captureId?: string): Promise<void> {
+  return invoke('pause_hotkey', { captureId })
 }
 
-export async function resumeHotkey(): Promise<void> {
-  return invoke('resume_hotkey')
+export async function resumeHotkey(captureId?: string): Promise<void> {
+  return invoke('resume_hotkey', { captureId })
 }
 
 // Ask Anything
@@ -474,9 +662,17 @@ export type VoiceExecutionFallbackReason =
   | 'focus_restore_failed'
   | 'output_failed'
 
-export type AskResultOutput = 'popupAnswer' | 'openedSearch' | 'insertedText' | 'copiedFallback'
+export type AskResultOutput =
+  | 'popupAnswer'
+  | 'openedSearch'
+  | 'insertedText'
+  | 'copiedFallback'
+  | 'deliveryFailed'
+  | 'deliveryPrevented'
 
 export interface AskDictationResult {
+  citations?: Array<{ url: string; title: string }>
+  citationSupports?: Array<{ start: number; end: number; sourceIndex: number }>
   question: string
   answer: string
   intent: VoiceIntentKind
@@ -489,6 +685,7 @@ export interface AskDictationResult {
   fallbackReason: VoiceExecutionFallbackReason | null
   /** The selection the question was about, when Ask used selected text. */
   selectedText?: string | null
+  recovery?: boolean
 }
 
 export interface AskDictationStartResult {
@@ -501,12 +698,19 @@ export type PendingAskMessage =
   | { kind: 'recordingStarted'; payload: AskDictationStartResult }
   | { kind: 'error'; payload: string }
 
-export async function startAskDictation(): Promise<AskDictationStartResult> {
-  return invoke('start_ask_dictation')
+export async function startAskDictation(
+  webSearch = false,
+  webSearchQuote?: import('./askWebSearchCapability').AskWebSearchQuote,
+): Promise<AskDictationStartResult> {
+  return webSearch
+    ? invoke('start_ask_dictation', { webSearch: true, webSearchQuote })
+    : invoke('start_ask_dictation')
 }
 
-export async function stopAskDictation(): Promise<AskDictationResult> {
-  return invoke('stop_ask_dictation')
+export async function stopAskDictation(publishResult = false): Promise<AskDictationResult> {
+  return publishResult
+    ? invoke('stop_ask_dictation', { publishResult: true })
+    : invoke('stop_ask_dictation')
 }
 
 export async function stopAskFlow(): Promise<void> {
@@ -515,6 +719,10 @@ export async function stopAskFlow(): Promise<void> {
 
 export async function abortAskDictation(): Promise<void> {
   return invoke('abort_ask_dictation')
+}
+
+export async function dismissAskWindow(): Promise<void> {
+  return invoke('dismiss_ask_window')
 }
 
 export async function takePendingAskMessage(): Promise<PendingAskMessage | null> {
@@ -531,12 +739,113 @@ export async function getHistory(limit: number, offset: number): Promise<History
   return invoke('get_history', { limit, offset })
 }
 
+export async function getCloudBackupHistory(): Promise<HistoryEntry[]> {
+  const history = await invoke<unknown>('get_cloud_backup_history')
+  if (!Array.isArray(history) || !validBackupHistory(history)) {
+    throw new Error('Invalid backup history snapshot')
+  }
+  return history as HistoryEntry[]
+}
+
+export async function getCloudBackupSnapshot(): Promise<{
+  config: AppConfig
+  history: HistoryEntry[]
+  dictionary: DictionaryEntry[]
+  correctionRules: CorrectionRule[]
+}> {
+  const snapshot = await invoke<unknown>('get_cloud_backup_snapshot')
+  if (
+    !snapshot ||
+    typeof snapshot !== 'object' ||
+    !('config' in snapshot) ||
+    !isAppConfigSnapshot(snapshot.config) ||
+    !validRestoreBackupResponse(
+      Object.fromEntries(Object.entries(snapshot).filter(([key]) => key !== 'config')),
+    )
+  ) {
+    throw new Error('Invalid backup snapshot')
+  }
+  return snapshot as {
+    config: AppConfig
+    history: HistoryEntry[]
+    dictionary: DictionaryEntry[]
+    correctionRules: CorrectionRule[]
+  }
+}
+
+export async function searchHistoryPage(
+  query: string,
+  mode: 'all' | 'dictate' | 'ask',
+  limit: number,
+  beforeId: number | null,
+): Promise<HistoryEntry[]> {
+  return invoke('search_history_page', { query, mode, limit, beforeId })
+}
+
 export async function clearHistory(): Promise<void> {
   return invoke('clear_history')
 }
 
+export async function pruneHistoryRetention(
+  enabled: boolean,
+  retentionDays: number,
+): Promise<HistoryEntry[]> {
+  return invoke('prune_history_retention', { enabled, retentionDays })
+}
+
 export async function deleteHistoryEntry(id: number): Promise<boolean> {
   return invoke('delete_history_entry', { id })
+}
+
+export async function exportHistoryAudio(id: number): Promise<string> {
+  return invoke('export_history_audio', { id })
+}
+
+export type TrayUpdateStatus = 'idle' | 'checking' | 'downloading' | 'downloaded'
+
+export async function setTrayUpdateStatus(status: TrayUpdateStatus): Promise<void> {
+  return invoke('set_tray_update_status', { status })
+}
+
+export async function isDevelopmentBuild(): Promise<boolean> {
+  return invoke('is_development_build')
+}
+
+export async function copyPngToClipboard(png: Uint8Array): Promise<void> {
+  return invoke('copy_png_to_clipboard', png)
+}
+
+/** Rejects with `cancelled` when the user dismisses the save panel. */
+export async function savePngWithDialog(png: Uint8Array, fileName: string): Promise<string> {
+  return invoke('save_png_with_dialog', png, { headers: { 'x-file-name': fileName } })
+}
+
+export async function retryHistoryTranscription(id: number): Promise<string> {
+  while (historyRetryCancellation) {
+    await historyRetryCancellation
+  }
+  return invoke('retry_history_transcription', { id })
+}
+
+/** Typeless Undo (cancelled take) and Retry (failed take): re-run it and write it into the app. */
+export async function recoverUnfinishedTake(id: number): Promise<void> {
+  while (historyRetryCancellation) {
+    await historyRetryCancellation
+  }
+  return invoke('recover_unfinished_take', { id })
+}
+
+let historyRetryCancellation: Promise<void> | null = null
+
+export function cancelTranscriptionRetry(): Promise<void> {
+  if (historyRetryCancellation) return historyRetryCancellation
+  const cancellation = invoke<void>('cancel_transcription_retry')
+  historyRetryCancellation = cancellation
+  const clear = () => {
+    if (historyRetryCancellation === cancellation) historyRetryCancellation = null
+  }
+  void cancellation.then(clear, clear)
+  return cancellation
 }
 
 export interface DailyActivity {
@@ -561,8 +870,34 @@ export async function getUsageStats(): Promise<UsageStats> {
   return invoke('get_usage_stats')
 }
 
-export async function showSavedAskAnswer(question: string, answer: string): Promise<void> {
-  return invoke('show_saved_ask_answer', { question, answer })
+export class SavedAnswerOpenUnknownError extends Error {
+  constructor() {
+    super('Saved answer opening result unknown')
+    this.name = 'SavedAnswerOpenUnknownError'
+  }
+}
+
+export async function showSavedAskAnswer(
+  question: string,
+  answer: string,
+  historyId?: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const response = await Promise.race([
+      invoke('show_saved_ask_answer', {
+        question,
+        answer,
+        ...(historyId === undefined ? {} : { historyId }),
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new SavedAnswerOpenUnknownError()), 5000)
+      }),
+    ])
+    if (response !== null) throw new SavedAnswerOpenUnknownError()
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 export interface RestoreBackupResult {
@@ -571,11 +906,23 @@ export interface RestoreBackupResult {
   correctionRules: CorrectionRule[]
 }
 
+export async function validateBackupData(
+  history: unknown | null,
+  dictionary: unknown | null,
+): Promise<void> {
+  const response = await invoke<unknown>('validate_backup_data', { history, dictionary })
+  if (response !== null) throw new Error('Invalid backup validation response')
+}
+
 export async function restoreBackupData(
   history: unknown | null,
   dictionary: unknown | null,
 ): Promise<RestoreBackupResult> {
-  return invoke('restore_backup_data', { history, dictionary })
+  const response = await invoke<unknown>('restore_backup_data', { history, dictionary })
+  if (!validRestoreBackupResponse(response)) {
+    throw new Error('Invalid backup restoration response')
+  }
+  return response as RestoreBackupResult
 }
 
 // Dictionary
@@ -590,8 +937,17 @@ export async function addDictionaryEntry(
   return invoke('add_dictionary_entry', { word, pronunciation })
 }
 
+export interface WordAutoAddedPayload {
+  term: string
+  id: number
+}
+
 export async function removeDictionaryEntry(id: number): Promise<void> {
   return invoke('remove_dictionary_entry', { id })
+}
+
+export async function removeDictionaryEntries(ids: number[]): Promise<number> {
+  return invoke('remove_dictionary_entries', { ids })
 }
 
 export async function updateDictionaryEntry(
@@ -639,6 +995,7 @@ export interface DictionaryImportReport {
   skippedDuplicates: number
   skippedInvalid: number
   errors: DictionaryImportRowError[]
+  acceptedWords: string[]
 }
 
 export async function previewDictionaryImport(
@@ -693,26 +1050,12 @@ export async function waitForAccessibilityPermission({
   }
 }
 
-// Onboarding persistence via tauri-plugin-store
 export async function loadOnboardingCompleted(): Promise<boolean> {
-  try {
-    const { load } = await import('@tauri-apps/plugin-store')
-    const store = await load('settings.json')
-    const val = await store.get<boolean>('onboarding_completed')
-    return val === true
-  } catch {
-    return false
-  }
+  return invoke('load_onboarding_completed')
 }
 
 export async function saveOnboardingCompleted(): Promise<void> {
-  try {
-    const { load } = await import('@tauri-apps/plugin-store')
-    const store = await load('settings.json')
-    await store.set('onboarding_completed', true)
-  } catch (e) {
-    console.error('Failed to persist onboarding state:', e)
-  }
+  await invoke('save_onboarding_completed')
   // Typeless greets a newly onboarded user from the floating bar with the dictation key.
   try {
     const { emit } = await import('@tauri-apps/api/event')

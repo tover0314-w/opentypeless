@@ -13,14 +13,15 @@ import {
   startAskFlow,
 } from '../../lib/tauri'
 import type { HotkeyStatus } from '../../lib/tauri'
-import { LANGUAGES, UI_LANGUAGES } from '../../lib/constants'
+import { UI_LANGUAGES } from '../../lib/constants'
 import { Select } from '../shared/Select'
 import { SegmentedControl } from './shared/SegmentedControl'
 import { SettingsNotice, SettingsRow, SettingsSection } from './shared/SettingsRow'
 import { Toggle } from './shared/Toggle'
 import { ShortcutKeycapInput } from './ShortcutKeycapInput'
 import { MicrophoneSelect } from './MicrophoneSelect'
-import { TranslationTargets } from './TranslationTargets'
+import { queueShortcutCaptureSave } from '../../hooks/useHotkeyCapture'
+import { enqueueConfigSave } from './shared/useAutoSaveConfig'
 
 const MAC_ACCESSIBILITY_HOTKEY_ERROR = 'Accessibility permission may be denied'
 
@@ -142,8 +143,17 @@ export function GeneralPane() {
                 bindings={bindings[row.role]}
                 otherBindings={otherBindings(row.role)}
                 required={row.required}
+                maxBindings={row.role === 'pasteLast' ? 1 : 4}
                 presets={specialOptions[row.role]}
-                onChange={(next) => setBindings(row.role, next)}
+                onChange={(next, recorded) => {
+                  setBindings(row.role, next)
+                  const save = recorded
+                    ? queueShortcutCaptureSave(enqueueConfigSave)
+                    : enqueueConfigSave()
+                  void save.catch(() => {
+                    console.error('Failed to persist recorded shortcut')
+                  })
+                }}
               />
             </div>
           </SettingsRow>
@@ -172,29 +182,6 @@ export function GeneralPane() {
               updateConfig({ ui_language: value })
               invoke('refresh_tray_labels').catch(() => {})
             }}
-          />
-        </SettingsRow>
-        <SettingsRow
-          title={t('generalPane.translationTargets')}
-          description={t('generalPane.translationTargetsDesc')}
-        >
-          <TranslationTargets
-            value={config.translation}
-            onChange={(translation) => updateConfig({ translation })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          title={t('generalPane.dictationLanguage')}
-          description={t('generalPane.dictationLanguageDesc')}
-        >
-          <Select
-            aria-label={t('generalPane.dictationLanguage')}
-            value={config.stt_language}
-            options={LANGUAGES.map((lang) => ({
-              value: lang.value,
-              label: lang.labelKey ? t(lang.labelKey) : (lang.label ?? lang.value),
-            }))}
-            onChange={(value) => updateConfig({ stt_language: value })}
           />
         </SettingsRow>
       </SettingsSection>
@@ -353,7 +340,7 @@ export function GeneralPane() {
             />
           </div>
         </SettingsRow>
-        <SettingsRow title={t('settings.saveHistory')}>
+        <SettingsRow title={t('settings.saveHistory')} description={t('settings.saveHistoryDesc')}>
           <div className="flex justify-end">
             <Toggle
               ariaLabel={t('settings.saveHistory')}
@@ -362,6 +349,29 @@ export function GeneralPane() {
             />
           </div>
         </SettingsRow>
+        <SettingsRow title={t('history.saveAudio')} description={t('history.saveAudioDescription')}>
+          <div className="flex justify-end">
+            <Toggle
+              ariaLabel={t('history.saveAudio')}
+              checked={config.save_recording_audio}
+              onChange={(checked) => updateConfig({ save_recording_audio: checked })}
+            />
+          </div>
+        </SettingsRow>
+        {isMac && (
+          <SettingsRow
+            title={t('generalPane.autoLearnDictionary')}
+            description={t('generalPane.autoLearnDictionaryDesc')}
+          >
+            <div className="flex justify-end">
+              <Toggle
+                ariaLabel={t('generalPane.autoLearnDictionary')}
+                checked={config.auto_learn_dictionary}
+                onChange={(checked) => updateConfig({ auto_learn_dictionary: checked })}
+              />
+            </div>
+          </SettingsRow>
+        )}
         <SettingsRow title={t('settings.tryAsk')} description={t('generalPane.tryAskDesc')}>
           <div className="flex justify-end">
             <button

@@ -11,6 +11,12 @@ export function useInteractionSounds() {
   useEffect(() => {
     const cue = cueForTransition(previous.current, pipelineState)
     previous.current = pipelineState
-    if (cue && enabled) playInteractionCue(cue)
+    if (cue && enabled) {
+      try {
+        playInteractionCue(cue)
+      } catch {
+        return
+      }
+    }
   }, [enabled, pipelineState])
 }

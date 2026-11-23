@@ -22,6 +22,13 @@ export function paneFromHash(): SettingsTabId | null {
   if (!query) return null
   const requested = new URLSearchParams(query).get('pane')
   if (!requested) return null
-  if (requested in LEGACY_PANES) return LEGACY_PANES[requested]
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PANES, requested)) return LEGACY_PANES[requested]
   return SETTINGS_TABS.some((tab) => tab.id === requested) ? (requested as SettingsTabId) : null
+}
+
+/** `check` token on `#/settings?pane=about&check=…`: open the update dialog once per token. */
+export function updateCheckFromHash(): string | null {
+  const query = window.location.hash.split('?')[1]
+  if (!query) return null
+  return new URLSearchParams(query).get('check')
 }

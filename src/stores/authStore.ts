@@ -6,9 +6,11 @@ import {
 } from '../lib/auth-client'
 import {
   clearSessionTokenFromMemory,
+  CloudSessionDisabledError,
   loadSessionToken,
   markCloudSessionAuthenticated,
   persistSessionToken,
+  persistOwnedSessionToken,
   registerCloudSessionInvalidation,
 } from '../lib/cloud-session'
 import {
@@ -30,18 +32,55 @@ import {
   loadLastKnownSubscription,
   saveLastKnownSubscription,
 } from '../lib/last-known-subscription'
-import { clearPendingDesktopCheckout } from '../lib/desktop-checkout-intent'
+import { accountSnapshotMatches, isSubscriptionStatus } from '../lib/subscription-validation'
+import {
+  clearPendingDesktopCheckout,
+  readDesktopCheckoutOrder,
+} from '../lib/desktop-checkout-intent'
+import type { AskWebSearchCapability } from '../lib/askWebSearchCapability'
 
-let sttWarningShown = false
-let llmWarningShown = false
-let cloudWordsWarningShown = false
-let subscriptionRefreshInFlight: Promise<void> | null = null
+let subscriptionRefreshInFlight: {
+  userId: string
+  generation: number
+  promise: Promise<void>
+} | null = null
+let credentialRequestId = 0
+let authenticationGeneration = 0
+
+function requireCurrentAuthentication(generation: number): void {
+  if (generation !== authenticationGeneration) {
+    throw new Error('Authentication request superseded')
+  }
+}
 
 export interface AuthUser {
   id: string
   email: string
   name: string | null
   emailVerified: boolean
+}
+
+function authenticatedUser(value: unknown): AuthUser {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid account response')
+  }
+  const user = value as Record<string, unknown>
+  if (
+    typeof user.id !== 'string' ||
+    !user.id.trim() ||
+    typeof user.email !== 'string' ||
+    !user.email.trim() ||
+    (user.name != null && typeof user.name !== 'string') ||
+    (user.emailVerified !== undefined && typeof user.emailVerified !== 'boolean')
+  ) {
+    throw new Error('Invalid account response')
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    name: typeof user.name === 'string' ? user.name : null,
+    emailVerified: user.emailVerified === true,
+  }
 }
 
 export type CredentialCapability = 'unknown' | 'present' | 'none'
@@ -61,11 +100,14 @@ interface AuthState {
   canManageBilling: boolean
   canMigrateToStripe: boolean
   quotaModel: QuotaModel
+  quotaDataAvailable?: boolean
   credentialCapability: CredentialCapability
   subscriptionRefreshState: SubscriptionRefreshState
   subscriptionRefreshLoading: boolean
   subscriptionLastVerifiedAt: string | null
   subscriptionRefreshError: string | null
+  askWebSearchCapability: AskWebSearchCapability | null
+  askWebSearchAccountId: string | null
 
   // Quotas
   displayWordsUsedEstimate: number
@@ -110,7 +152,11 @@ interface AuthState {
   invalidateCloudSession: () => Promise<void>
   signOut: () => Promise<void>
   refreshSubscription: () => Promise<void>
-  handleDeepLinkToken: (token: string) => Promise<void>
+  handleDeepLinkToken: (
+    token: string,
+    isCurrentOwner?: () => boolean,
+    signal?: AbortSignal,
+  ) => Promise<void>
 }
 
 export function hasManagedCloudAccess(
@@ -137,9 +183,21 @@ export function hasManagedCloudAccess(
   return isActiveCloudPlan(state.plan)
 }
 
-function credentialCapabilityFromAccounts(
-  accounts: Array<{ providerId: string }>,
-): CredentialCapability {
+function credentialCapabilityFromAccounts(accounts: unknown): CredentialCapability {
+  if (
+    !Array.isArray(accounts) ||
+    accounts.some(
+      (account) =>
+        account === null ||
+        typeof account !== 'object' ||
+        Array.isArray(account) ||
+        typeof account.providerId !== 'string' ||
+        !account.providerId.trim() ||
+        account.providerId !== account.providerId.trim(),
+    )
+  ) {
+    throw new Error('Invalid account security response')
+  }
   return accounts.some((account) => account.providerId === 'credential') ? 'present' : 'none'
 }
 
@@ -157,11 +215,14 @@ function signedOutCloudState() {
     canManageBilling: false,
     canMigrateToStripe: false,
     quotaModel: 'legacy_dual_meter' as const,
+    quotaDataAvailable: false,
     credentialCapability: 'unknown' as const,
     subscriptionRefreshState: 'unknown' as const,
     subscriptionRefreshLoading: false,
     subscriptionLastVerifiedAt: null,
     subscriptionRefreshError: null,
+    askWebSearchCapability: null,
+    askWebSearchAccountId: null,
     displayWordsUsedEstimate: 0,
     displayWordsLimit: 0,
     displayWordsResetAt: null,
@@ -194,6 +255,7 @@ function subscriptionStateFromStatus(status: SubscriptionStatus) {
     canManageBilling: status.canManageBilling === true,
     canMigrateToStripe: status.canMigrateToStripe === true,
     quotaModel: status.quotaModel,
+    quotaDataAvailable: status.quotaDataAvailable,
     displayWordsUsedEstimate: status.displayWordsUsedEstimate,
     displayWordsLimit: status.displayWordsLimit,
     displayWordsResetAt: status.displayWordsResetAt,
@@ -226,6 +288,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   subscriptionRefreshLoading: false,
   subscriptionLastVerifiedAt: null,
   subscriptionRefreshError: null,
+  askWebSearchCapability: null,
+  askWebSearchAccountId: null,
   displayWordsUsedEstimate: 0,
   displayWordsLimit: 0,
   displayWordsResetAt: null,
@@ -245,56 +309,71 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   subscriptionRefreshedAt: null,
 
   initialize: async () => {
+    set({ askWebSearchCapability: null, askWebSearchAccountId: null })
+    const generation = ++authenticationGeneration
     try {
       set({ loading: true, error: null })
       const savedToken = await loadSessionToken()
+      requireCurrentAuthentication(generation)
       const { data: session, error: sessionError } = await authClient.getSession()
+      requireCurrentAuthentication(generation)
       if (sessionError) {
         throw new Error(sessionError.message ?? 'Failed to restore cloud session')
       }
+      if (session === null && (savedToken || get().user)) {
+        await get().invalidateCloudSession()
+        return
+      }
       if (session?.user) {
+        const user = authenticatedUser(session.user)
         set({
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.name ?? null,
-            emailVerified: session.user.emailVerified === true,
-          },
+          ...(get().user?.id !== user.id ? signedOutCloudState() : {}),
+          emailVerificationPending: false,
+          pendingEmail: null,
+          credentialCapability: get().user?.id === user.id ? get().credentialCapability : 'unknown',
+          user,
         })
         if (savedToken) {
           markCloudSessionAuthenticated()
         }
-        try {
-          await get().refreshCredentialCapability()
-        } catch (error) {
-          console.warn('Failed to restore account security capability:', error)
-        }
-        await get().refreshSubscription()
+        const accountSecurity = get()
+          .refreshCredentialCapability()
+          .catch(() => {
+            console.warn('Failed to restore account security capability')
+          })
+        await Promise.all([accountSecurity, get().refreshSubscription()])
+        requireCurrentAuthentication(generation)
       }
     } catch (error) {
+      if (generation !== authenticationGeneration) return
       const message = error instanceof Error ? error.message : String(error)
-      console.warn('Failed to restore cloud session:', message)
+      console.warn('Failed to restore cloud session')
       set({ error: message })
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 
   signIn: async (email, password, options) => {
-    set({ loading: true, error: null })
+    const generation = ++authenticationGeneration
+    set({
+      loading: true,
+      error: null,
+      askWebSearchCapability: null,
+      askWebSearchAccountId: null,
+    })
+    let responseToken: string | null = null
     try {
       const { data, error } = await authClient.signIn.email(
         { email, password },
         {
           onSuccess: async (ctx) => {
-            const token = ctx.response.headers.get('set-auth-token')
-            if (token) {
-              await persistSessionToken(token)
-              markCloudSessionAuthenticated()
-            }
+            requireCurrentAuthentication(generation)
+            responseToken = ctx.response.headers.get('set-auth-token')
           },
         },
       )
+      requireCurrentAuthentication(generation)
       if (error) {
         if (error.code === 'EMAIL_NOT_VERIFIED') {
           set({ emailVerificationPending: true, pendingEmail: email })
@@ -303,6 +382,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               email,
               callbackURL: options.verificationCallbackURL,
             })
+            requireCurrentAuthentication(generation)
             if (verification.error) {
               throw new Error(verification.error.message ?? 'Failed to send verification email')
             }
@@ -311,28 +391,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
         throw new Error(error.message ?? 'Sign in failed')
       }
-      if (data?.user) {
+      if (!data?.user) throw new Error('Sign in failed')
+      const user = authenticatedUser(data.user)
+      const token = data.token?.trim() ? data.token : responseToken
+      if (!token?.trim()) throw new Error('Sign in failed')
+      await persistSessionToken(token, () => generation === authenticationGeneration)
+      requireCurrentAuthentication(generation)
+      markCloudSessionAuthenticated()
+      if (data.user) {
         set({
-          user: {
-            id: data.user.id,
-            email: data.user.email,
-            name: data.user.name ?? null,
-            emailVerified: data.user.emailVerified === true,
-          },
+          ...(get().user?.id !== user.id ? signedOutCloudState() : {}),
+          emailVerificationPending: false,
+          pendingEmail: null,
+          credentialCapability: get().user?.id === user.id ? get().credentialCapability : 'unknown',
+          user,
         })
-        await get().refreshCredentialCapability()
-        await get().refreshSubscription()
+        const accountSecurity = get()
+          .refreshCredentialCapability()
+          .catch(() => {
+            requireCurrentAuthentication(generation)
+            set({ credentialCapability: 'unknown' })
+            console.warn('Failed to load account security after sign-in')
+          })
+        await Promise.all([accountSecurity, get().refreshSubscription()])
+        requireCurrentAuthentication(generation)
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Sign in failed'
-      set({ error: msg })
+      if (generation === authenticationGeneration && e instanceof CloudSessionDisabledError) {
+        set({ ...signedOutCloudState(), loading: false })
+      }
+      if (generation === authenticationGeneration) set({ error: msg })
       throw e
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 
   signUp: async (email, password, name, options) => {
+    const generation = ++authenticationGeneration
     set({ loading: true, error: null, emailVerificationPending: false })
     try {
       const { error } = await authClient.signUp.email(
@@ -346,29 +443,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         },
         {
           onSuccess: async (ctx) => {
+            requireCurrentAuthentication(generation)
             const token = ctx.response.headers.get('set-auth-token')
             if (token) {
-              await persistSessionToken(token)
+              await persistSessionToken(token, () => generation === authenticationGeneration)
+              requireCurrentAuthentication(generation)
               markCloudSessionAuthenticated()
             }
           },
         },
       )
+      requireCurrentAuthentication(generation)
       if (error) throw new Error(error.message ?? 'Sign up failed')
       // Email verification is required — don't set user yet
       set({ emailVerificationPending: true, pendingEmail: email })
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Sign up failed'
-      set({ error: msg })
+      if (generation === authenticationGeneration && e instanceof CloudSessionDisabledError) {
+        set({ ...signedOutCloudState(), loading: false })
+      }
+      if (generation === authenticationGeneration) set({ error: msg })
       throw e
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 
   resendVerification: async (options) => {
     const email = get().pendingEmail
     if (!email) return
+    const generation = authenticationGeneration
     set({ loading: true, error: null })
     try {
       const { error } = await authClient.sendVerificationEmail({
@@ -380,41 +484,56 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error) throw new Error(error.message ?? 'Failed to resend')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to resend verification email'
-      set({ error: msg })
+      if (generation === authenticationGeneration) set({ error: msg })
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 
   requestPasswordReset: async (email, locale) => {
+    const generation = authenticationGeneration
     set({ loading: true, error: null })
     try {
       await requestOpenTypelessPasswordReset(email, locale)
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to request password reset'
-      set({ error: message })
+      if (generation === authenticationGeneration) set({ error: message })
       throw e
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 
   refreshCredentialCapability: async () => {
-    const result = await authClient.listAccounts()
-    if (result.error) {
+    const requestId = ++credentialRequestId
+    const user = get().user
+    try {
+      const result = await authClient.listAccounts()
+      if (get().user !== user || requestId !== credentialRequestId) return
+      if (result.error) {
+        throw new Error(result.error.message ?? 'Failed to load account security')
+      }
+      set({ credentialCapability: credentialCapabilityFromAccounts(result.data) })
+    } catch (error) {
+      if (get().user !== user || requestId !== credentialRequestId) return
       set({ credentialCapability: 'unknown' })
-      throw new Error(result.error.message ?? 'Failed to load account security')
+      throw error
     }
-    set({ credentialCapability: credentialCapabilityFromAccounts(result.data ?? []) })
   },
 
   changePassword: async (currentPassword, newPassword) => {
     const state = get()
     if (!state.user) throw new Error('Authentication required')
+    const requireSameAccount = () => {
+      if (get().user !== state.user) {
+        throw new Error(i18n.t('account.changedDuringPasswordUpdate'))
+      }
+    }
 
     let capability = state.credentialCapability
     if (capability === 'unknown') {
       await state.refreshCredentialCapability()
+      requireSameAccount()
       capability = get().credentialCapability
     }
     if (capability === 'unknown') throw new Error('Failed to load account security')
@@ -428,7 +547,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
 
         await setOpenTypelessPassword(newPassword)
-        await get().refreshCredentialCapability()
+        requireSameAccount()
+        try {
+          await get().refreshCredentialCapability()
+        } catch {
+          console.warn('Failed to refresh account security after password setup')
+        }
       } else {
         if (!currentPassword) throw new Error('Current password is required')
 
@@ -445,63 +569,104 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             },
           },
         )
+        requireSameAccount()
         if (result.error) throw new Error(result.error.message ?? 'Failed to change password')
 
         const rotatedToken = result.data?.token ?? responseToken
         if (!rotatedToken) throw new Error('Password changed but the new session token was missing')
-        await persistSessionToken(rotatedToken)
+        await persistSessionToken(rotatedToken, () => get().user === state.user)
+        requireSameAccount()
         markCloudSessionAuthenticated()
         await get().refreshSubscription()
       }
+      requireSameAccount()
       toast(i18n.t('account.passwordChanged', 'Password updated'), 'success')
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to change password'
-      set({ error: message })
+      if (get().user === state.user && e instanceof CloudSessionDisabledError) {
+        set({ ...signedOutCloudState(), loading: false, error: message })
+      }
+      if (get().user === state.user) set({ error: message })
       throw e
     } finally {
-      set({ loading: false })
+      if (get().user === state.user) set({ loading: false })
     }
   },
 
   invalidateCloudSession: async () => {
+    const generation = ++authenticationGeneration
     const userId = get().user?.id
-    try {
-      await persistSessionToken(null)
-    } catch (e) {
-      clearSessionTokenFromMemory()
-      console.error('Failed to clear session token in backend:', e)
-    }
+    clearSessionTokenFromMemory()
     if (userId) clearLastKnownSubscription(localStorage, userId)
     clearPendingDesktopCheckout(localStorage)
-    set(signedOutCloudState())
-    sttWarningShown = false
-    llmWarningShown = false
-    cloudWordsWarningShown = false
+    set({ ...signedOutCloudState(), loading: false })
+    try {
+      await persistSessionToken(null)
+    } catch {
+      if (generation === authenticationGeneration) clearSessionTokenFromMemory()
+      console.error('Failed to clear session token in backend')
+    }
+    if (generation !== authenticationGeneration) return
     toast(i18n.t('account.sessionExpired', 'Your cloud session expired. Sign in again.'), 'error')
   },
 
   signOut: async () => {
+    const generation = ++authenticationGeneration
     const userId = get().user?.id
+    set({ ...signedOutCloudState(), loading: false })
+    const token = await loadSessionToken().catch(() => null)
+    if (generation !== authenticationGeneration) return
+    const clearLocal = persistSessionToken(
+      null,
+      () => generation === authenticationGeneration,
+    ).catch(() => {
+      if (generation === authenticationGeneration) clearSessionTokenFromMemory()
+      console.error('Failed to clear session token in backend')
+    })
+    clearSessionTokenFromMemory()
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        const failure = new Error('Remote sign-out timed out')
+        controller.abort(failure)
+        reject(failure)
+      }, 30_000)
+    })
     try {
-      await authClient.signOut()
+      const result = await Promise.race([
+        authClient.signOut({
+          fetchOptions: {
+            headers: { Authorization: token ? `Bearer ${token}` : '' },
+            signal: controller.signal,
+          },
+        }),
+        deadline,
+      ])
+      if (result?.error) throw new Error('Remote sign-out failed')
     } finally {
-      await persistSessionToken(null).catch((e: unknown) => {
-        clearSessionTokenFromMemory()
-        console.error('Failed to clear session token in backend:', e)
-      })
-      if (userId) clearLastKnownSubscription(localStorage, userId)
-      clearPendingDesktopCheckout(localStorage)
-      set(signedOutCloudState())
-      sttWarningShown = false
-      llmWarningShown = false
-      cloudWordsWarningShown = false
+      clearTimeout(timeout)
+      await clearLocal
+      if (generation === authenticationGeneration) {
+        if (userId) clearLastKnownSubscription(localStorage, userId)
+        clearPendingDesktopCheckout(localStorage)
+        set({ ...signedOutCloudState(), loading: false })
+      }
     }
   },
 
   refreshSubscription: () => {
     const userId = get().user?.id
     if (!userId) return Promise.resolve()
-    if (subscriptionRefreshInFlight) return subscriptionRefreshInFlight
+    const generation = authenticationGeneration
+    const isCurrentSession = () =>
+      get().user?.id === userId && generation === authenticationGeneration
+    if (
+      subscriptionRefreshInFlight?.userId === userId &&
+      subscriptionRefreshInFlight.generation === generation
+    ) {
+      return subscriptionRefreshInFlight.promise
+    }
 
     const refresh = (async () => {
       if (!get().subscriptionLastVerifiedAt) {
@@ -515,106 +680,116 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
 
-      set({ subscriptionRefreshLoading: true, subscriptionRefreshError: null })
+      set({
+        subscriptionRefreshLoading: true,
+        subscriptionRefreshError: null,
+        askWebSearchCapability: null,
+        askWebSearchAccountId: null,
+      })
       try {
         const status = await getSubscriptionStatus()
-        if (get().user?.id !== userId) return
+        if (!isCurrentSession()) return
+        if (!isSubscriptionStatus(status)) {
+          throw new Error('Invalid subscription response')
+        }
+        if (!accountSnapshotMatches(status, userId)) {
+          throw new Error('Subscription account does not match the authenticated user')
+        }
         const verifiedAt = new Date().toISOString()
         set({
           ...subscriptionStateFromStatus(status),
           subscriptionRefreshState: 'fresh',
           subscriptionLastVerifiedAt: verifiedAt,
           subscriptionRefreshedAt: Date.now(),
+          askWebSearchCapability: status.accountSnapshot?.askWebSearchCapability ?? null,
+          askWebSearchAccountId: status.accountSnapshot?.askWebSearchCapability ? userId : null,
         })
         saveLastKnownSubscription(localStorage, userId, status, verifiedAt)
         try {
           await syncManagedSttCapability(status.accountSnapshot ?? null, userId)
-        } catch (error) {
-          console.warn('Failed to sync managed STT capability; using the safe fallback.', error)
+        } catch {
+          if (!isCurrentSession()) return
+          console.warn('Failed to sync managed STT capability; using the safe fallback.')
         }
-        // Clear checkout pending flag after first post-checkout refresh
-        if (get().checkoutPending) {
+        if (!isCurrentSession()) return
+        // Tracked purchases are completed by the order lookup, not the account refresh.
+        if (get().checkoutPending && !readDesktopCheckoutOrder(localStorage, userId)) {
           set({ checkoutPending: false })
         }
-        const wordsUsed =
-          status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
-            ? status.displayWordsUsedEstimate
-            : status.cloudWordsUsed
-        const wordsLimit =
-          status.quotaModel === 'legacy_dual_meter' && status.displayWordsLimit > 0
-            ? status.displayWordsLimit
-            : status.cloudWordsLimit
-        if (wordsLimit > 0 && wordsUsed / wordsLimit >= 0.9) {
-          if (!cloudWordsWarningShown) {
-            toast(i18n.t('account.cloudQuotaWarning', 'Cloud words are almost used up.'), 'error')
-            cloudWordsWarningShown = true
-          }
-          sttWarningShown = true
-          llmWarningShown = true
-        } else {
-          cloudWordsWarningShown = false
-        }
-        if (
-          status.sttSecondsLimit > 0 &&
-          status.sttSecondsUsed / status.sttSecondsLimit >= 0.9 &&
-          !sttWarningShown
-        ) {
-          toast(i18n.t('account.sttQuotaWarning'), 'error')
-          sttWarningShown = true
-        }
-        if (
-          status.llmTokensLimit > 0 &&
-          status.llmTokensUsed / status.llmTokensLimit >= 0.9 &&
-          !llmWarningShown
-        ) {
-          toast(i18n.t('account.llmQuotaWarning'), 'error')
-          llmWarningShown = true
-        }
       } catch (e) {
-        if (get().user?.id !== userId) return
+        if (!isCurrentSession()) return
         const message = e instanceof Error ? e.message : String(e)
         set({
           subscriptionRefreshState: get().subscriptionLastVerifiedAt ? 'stale' : 'unavailable',
           subscriptionRefreshError: message,
+          askWebSearchCapability: null,
+          askWebSearchAccountId: null,
         })
-        console.warn('Failed to refresh subscription status:', message)
+        console.warn('Failed to refresh subscription status')
       } finally {
-        if (get().user?.id === userId) set({ subscriptionRefreshLoading: false })
+        if (isCurrentSession()) set({ subscriptionRefreshLoading: false })
       }
     })()
-    subscriptionRefreshInFlight = refresh
+    subscriptionRefreshInFlight = { userId, generation, promise: refresh }
     void refresh.finally(() => {
-      if (subscriptionRefreshInFlight === refresh) subscriptionRefreshInFlight = null
+      if (subscriptionRefreshInFlight?.promise === refresh) subscriptionRefreshInFlight = null
     })
     return refresh
   },
 
-  handleDeepLinkToken: async (token: string) => {
+  handleDeepLinkToken: async (token: string, flowOwner, signal) => {
+    set({ askWebSearchCapability: null, askWebSearchAccountId: null })
+    const isCurrentOwner = () => (flowOwner?.() ?? true) && !signal?.aborted
+    const generation = ++authenticationGeneration
+    const requireOwner = () => {
+      requireCurrentAuthentication(generation)
+      if (!isCurrentOwner()) throw new Error('Authentication request cancelled')
+    }
     try {
+      requireOwner()
       set({ loading: true, error: null })
-      await persistSessionToken(token)
-      markCloudSessionAuthenticated()
-      const { data: session } = await authClient.getSession({
+      const { data: session, error: sessionError } = await authClient.getSession({
         fetchOptions: {
           headers: { Authorization: `Bearer ${token}` },
+          ...(signal ? { signal } : {}),
         },
       })
+      requireOwner()
+      if (sessionError || !session?.user) {
+        throw new Error('Failed to authenticate with token')
+      }
+      const user = authenticatedUser(session.user)
+      const ownsCommit = () => generation === authenticationGeneration && isCurrentOwner()
+      if (flowOwner) await persistOwnedSessionToken(token, ownsCommit, signal)
+      else await persistSessionToken(token, ownsCommit)
+      requireCurrentAuthentication(generation)
+      markCloudSessionAuthenticated()
       if (session?.user) {
         set({
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.name ?? null,
-            emailVerified: session.user.emailVerified === true,
-          },
+          ...(get().user?.id !== user.id ? signedOutCloudState() : {}),
+          emailVerificationPending: false,
+          pendingEmail: null,
+          credentialCapability: get().user?.id === user.id ? get().credentialCapability : 'unknown',
+          user,
         })
-        await get().refreshCredentialCapability()
-        await get().refreshSubscription()
+        const accountSecurity = get()
+          .refreshCredentialCapability()
+          .catch(() => {
+            console.warn('Failed to load account security after OAuth sign-in')
+          })
+        await Promise.all([accountSecurity, get().refreshSubscription()])
+        requireCurrentAuthentication(generation)
       }
-    } catch {
-      set({ error: 'Failed to authenticate with token' })
+    } catch (error) {
+      if (generation === authenticationGeneration && error instanceof CloudSessionDisabledError) {
+        set({ ...signedOutCloudState(), loading: false })
+      }
+      if (generation === authenticationGeneration && isCurrentOwner()) {
+        set({ error: 'Failed to authenticate with token' })
+      }
+      throw error
     } finally {
-      set({ loading: false })
+      if (generation === authenticationGeneration) set({ loading: false })
     }
   },
 }))

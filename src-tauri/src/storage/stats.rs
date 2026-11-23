@@ -68,7 +68,7 @@ pub fn count_words(text: &str) -> u64 {
 pub fn compute_usage_stats(samples: &[StatsSample], today: NaiveDate) -> UsageStats {
     let mut by_day: std::collections::BTreeMap<NaiveDate, (u64, u64)> = Default::default();
     let mut total_words = 0;
-    let mut total_audio_ms: i64 = 0;
+    let mut total_audio_ms: u128 = 0;
     let mut timed_words = 0;
 
     for sample in samples {
@@ -78,7 +78,7 @@ pub fn compute_usage_stats(samples: &[StatsSample], today: NaiveDate) -> UsageSt
         day.0 += words;
         day.1 += 1;
         if let Some(duration) = sample.duration_ms.filter(|duration| *duration > 0) {
-            total_audio_ms += duration;
+            total_audio_ms += duration as u128;
             timed_words += words;
         }
     }
@@ -116,7 +116,7 @@ pub fn compute_usage_stats(samples: &[StatsSample], today: NaiveDate) -> UsageSt
     UsageStats {
         total_words,
         total_sessions: samples.len() as u64,
-        total_audio_seconds: (total_audio_ms / 1000).max(0) as u64,
+        total_audio_seconds: (total_audio_ms / 1000).min(u64::MAX as u128) as u64,
         average_wpm,
         minutes_saved,
         active_days: by_day.len() as u64,
@@ -174,6 +174,23 @@ mod tests {
         assert_eq!(stats.average_wpm, Some(120));
         // 12 words take 0.3 min to type at 40 WPM; 0.1 min was spoken.
         assert_eq!(stats.minutes_saved, 0);
+    }
+
+    #[test]
+    fn large_imported_durations_do_not_overflow_the_total() {
+        let stats = compute_usage_stats(
+            &[
+                sample("2026-11-04", "one", Some(i64::MAX)),
+                sample("2026-11-04", "two", Some(i64::MAX)),
+            ],
+            day("2026-11-04"),
+        );
+        assert_eq!(
+            stats.total_audio_seconds,
+            ((i64::MAX as u128 * 2) / 1000) as u64
+        );
+        assert_eq!(stats.total_words, 2);
+        assert_eq!(stats.average_wpm, Some(0));
     }
 
     #[test]

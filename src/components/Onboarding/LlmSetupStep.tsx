@@ -7,6 +7,8 @@ import {
   llmProviderRequiresApiKey,
 } from '../../lib/constants'
 import { testLlmConnection, fetchLlmModels } from '../../lib/tauri'
+import { Select } from '../shared/Select'
+import { ModelInput } from '../shared/ModelInput'
 import { CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react'
 
 export function LlmSetupStep() {
@@ -19,6 +21,9 @@ export function LlmSetupStep() {
   const [models, setModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const testRequestId = useRef(0)
+  const testPending = useRef(false)
+  const modelRequestId = useRef(0)
   const fallbackProvider =
     (ONBOARDING_LLM_PROVIDERS[0]?.value as LlmProvider | undefined) ?? 'zhipu'
   const selectedProvider: LlmProvider = ONBOARDING_LLM_PROVIDERS.some(
@@ -27,6 +32,42 @@ export function LlmSetupStep() {
     ? config.llm_provider
     : fallbackProvider
   const requiresApiKey = llmProviderRequiresApiKey(selectedProvider)
+  const endpointIdentity = JSON.stringify([
+    selectedProvider,
+    config.llm_api_key,
+    config.llm_base_url,
+  ])
+  const testIdentity = JSON.stringify([endpointIdentity, config.llm_model])
+  const previousEndpointIdentity = useRef(endpointIdentity)
+  const previousTestIdentity = useRef(testIdentity)
+
+  useEffect(() => {
+    if (previousTestIdentity.current === testIdentity) return
+    previousTestIdentity.current = testIdentity
+    testRequestId.current += 1
+    testPending.current = false
+    setLlmTestStatus('idle')
+  }, [testIdentity, setLlmTestStatus])
+
+  useEffect(() => {
+    if (previousEndpointIdentity.current === endpointIdentity) return
+    previousEndpointIdentity.current = endpointIdentity
+    modelRequestId.current += 1
+    setModels([])
+    setFetchingModels(false)
+  }, [endpointIdentity])
+
+  useEffect(
+    () => () => {
+      testRequestId.current += 1
+      modelRequestId.current += 1
+      if (testPending.current) {
+        testPending.current = false
+        setLlmTestStatus('idle')
+      }
+    },
+    [setLlmTestStatus],
+  )
 
   useEffect(() => {
     if (selectedProvider === config.llm_provider) return
@@ -49,14 +90,15 @@ export function LlmSetupStep() {
 
   const doFetchModels = useCallback(async (apiKey: string, provider: string, baseUrl: string) => {
     if (!baseUrl) return
+    const requestId = ++modelRequestId.current
     setFetchingModels(true)
     try {
       const list = await fetchLlmModels(apiKey, provider, baseUrl)
-      setModels(list)
+      if (requestId === modelRequestId.current) setModels(list)
     } catch {
-      setModels([])
+      if (requestId === modelRequestId.current) setModels([])
     } finally {
-      setFetchingModels(false)
+      if (requestId === modelRequestId.current) setFetchingModels(false)
     }
   }, [])
 
@@ -73,6 +115,9 @@ export function LlmSetupStep() {
   }, [config.llm_api_key, config.llm_base_url, doFetchModels, requiresApiKey, selectedProvider])
 
   const handleTest = async () => {
+    if (testPending.current) return
+    const requestId = ++testRequestId.current
+    testPending.current = true
     setLlmTestStatus('testing')
     try {
       const ok = await testLlmConnection(
@@ -81,19 +126,22 @@ export function LlmSetupStep() {
         config.llm_base_url,
         config.llm_model,
       )
-      setLlmTestStatus(ok ? 'success' : 'error')
+      if (requestId === testRequestId.current) setLlmTestStatus(ok ? 'success' : 'error')
     } catch {
-      setLlmTestStatus('error')
+      if (requestId === testRequestId.current) setLlmTestStatus('error')
+    } finally {
+      if (requestId === testRequestId.current) testPending.current = false
     }
   }
 
   return (
     <div className="space-y-5">
       <Field label={t('onboarding.llm.serviceLabel')}>
-        <select
+        <Select
+          aria-label={t('onboarding.llm.serviceLabel')}
           value={selectedProvider}
-          onChange={(e) => {
-            const provider = e.target.value as typeof config.llm_provider
+          onChange={(value) => {
+            const provider = value as typeof config.llm_provider
             const defaults = LLM_DEFAULT_CONFIG[provider]
             updateConfig({
               llm_provider: provider,
@@ -103,14 +151,8 @@ export function LlmSetupStep() {
             setLlmTestStatus('idle')
             setModels([])
           }}
-          className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
-        >
-          {ONBOARDING_LLM_PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {t(p.labelKey)}
-            </option>
-          ))}
-        </select>
+          options={ONBOARDING_LLM_PROVIDERS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
+        />
       </Field>
 
       {requiresApiKey && (
@@ -118,18 +160,20 @@ export function LlmSetupStep() {
           <div className="flex gap-2">
             <input
               type="password"
+              aria-label={t('onboarding.llm.apiKeyLabel')}
               value={config.llm_api_key}
               onChange={(e) => {
                 updateConfig({ llm_api_key: e.target.value })
                 setLlmTestStatus('idle')
               }}
               placeholder={t('onboarding.llm.apiKeyPlaceholder')}
-              className="flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+              className="field-control min-w-0 flex-1"
             />
             <button
+              type="button"
               onClick={handleTest}
               disabled={!config.llm_api_key || llmTestStatus === 'testing'}
-              className="px-4 py-2.5 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              className="btn-outline flex h-10 shrink-0 cursor-pointer items-center gap-1.5 px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
               {t('onboarding.llm.testButton')}
@@ -141,26 +185,22 @@ export function LlmSetupStep() {
 
       <Field label={t('onboarding.llm.modelLabel')}>
         <div className="flex gap-2">
-          <div className="relative flex-1">
-            <input
-              list="onboarding-llm-model-list"
+          <div className="relative min-w-0 flex-1">
+            <ModelInput
+              label={t('onboarding.llm.modelLabel')}
               value={config.llm_model}
-              onChange={(e) => updateConfig({ llm_model: e.target.value })}
+              models={models}
+              onChange={(model) => updateConfig({ llm_model: model })}
               placeholder={t('onboarding.llm.modelPlaceholder')}
-              className="w-full px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
             />
-            <datalist id="onboarding-llm-model-list">
-              {models.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
           </div>
           <button
+            type="button"
             onClick={() => doFetchModels(config.llm_api_key, selectedProvider, config.llm_base_url)}
             disabled={
               fetchingModels || !config.llm_base_url || (requiresApiKey && !config.llm_api_key)
             }
-            className="px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-secondary cursor-pointer hover:border-border-focus disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+            className="btn-outline grid h-10 w-10 shrink-0 cursor-pointer place-items-center disabled:cursor-not-allowed disabled:opacity-40"
             title={t('onboarding.llm.fetchModelsTitle')}
           >
             <RefreshCw size={14} className={fetchingModels ? 'animate-spin' : ''} />
@@ -176,19 +216,20 @@ export function LlmSetupStep() {
       <Field label={t('onboarding.llm.baseUrlLabel')}>
         <div className="flex gap-2">
           <input
+            aria-label={t('onboarding.llm.baseUrlLabel')}
             value={config.llm_base_url}
             onChange={(e) => updateConfig({ llm_base_url: e.target.value })}
             placeholder={
               LLM_DEFAULT_CONFIG[selectedProvider]?.baseUrl ?? 'https://api.openai.com/v1'
             }
-            className="min-w-0 flex-1 px-3 py-2.5 bg-bg-secondary border border-border rounded-[10px] text-[13px] text-text-primary outline-none focus:border-border-focus transition-colors"
+            className="field-control min-w-0 flex-1"
           />
           {!requiresApiKey && (
             <button
               type="button"
               onClick={handleTest}
               disabled={!config.llm_base_url || llmTestStatus === 'testing'}
-              className="px-4 py-2.5 bg-accent text-white rounded-[10px] text-[13px] border-none cursor-pointer hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+              className="btn-outline flex h-10 shrink-0 cursor-pointer items-center gap-1.5 px-4 text-[13px] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {llmTestStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
               {t('onboarding.llm.testButton')}

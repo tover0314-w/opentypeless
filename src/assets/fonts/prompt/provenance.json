@@ -1,0 +1,15 @@
+{
+  "sourceRepository": "https://github.com/google/fonts",
+  "commit": "7af0d90b4d532ffa4b041937b560c6df4e7b1e95",
+  "directory": "ofl/prompt",
+  "license": "SIL-OFL-1.1",
+  "modified": false,
+  "files": {
+    "Prompt-Regular.ttf": "dbd497803cec3caffbc6b7f599ca6fed8beea0ed7e0ad1e098130c5ebbc4fd42",
+    "Prompt-Medium.ttf": "6a42451be692eba473c639f4bcdc6c6d9160a3d632319a64287e3ed1fae15d6b",
+    "Prompt-SemiBold.ttf": "3285c9e6a4ebc480a6476a1a26b44d6eb0f9874025fa96e42afd52172b7f02b9",
+    "Prompt-Bold.ttf": "02813ca4f93c1df27e271f10fef3db6e34e66751ae1f4a3ed82ae06cb20150ea"
+  },
+  "upstreamLicenseSha256": "1d08c63944e639bbfe8a1b81e3c6a63836806c126b3573b9cda0db83fd27ffe9",
+  "licenseTextNormalization": "CRLF converted to LF and trailing whitespace removed; license words unchanged"
+}

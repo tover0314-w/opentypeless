@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, Mic, MousePointer2, Globe2, Speech, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
@@ -16,7 +16,7 @@ type PermissionRowModel = {
   icon: React.ComponentType<{ size?: number; className?: string }>
   title: string
   desc: string
-  state: PermissionState
+  state: PermissionState | null
   action?: 'accessibility' | null
 }
 
@@ -24,6 +24,10 @@ export function PermissionsStep() {
   const { t } = useTranslation()
   const config = useAppStore((s) => s.config)
   const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null)
+  const [requestFailed, setRequestFailed] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+  const pendingRequest = useRef(false)
+  const requestGeneration = useRef(0)
   const textOutputNeedsPermission = needsMacAccessibility(config)
 
   useEffect(() => {
@@ -31,9 +35,18 @@ export function PermissionsStep() {
       setAccessibilityTrusted(true)
       return
     }
+    let active = true
+    setAccessibilityTrusted(null)
     checkAccessibilityPermission()
-      .then(setAccessibilityTrusted)
-      .catch(() => setAccessibilityTrusted(false))
+      .then((trusted) => {
+        if (active) setAccessibilityTrusted(trusted === true)
+      })
+      .catch(() => {
+        if (active) setAccessibilityTrusted(false)
+      })
+    return () => {
+      active = false
+    }
   }, [textOutputNeedsPermission])
 
   const rows = useMemo(() => {
@@ -50,9 +63,17 @@ export function PermissionsStep() {
         icon: MousePointer2,
         title: t('onboarding.permissions.textOutput'),
         desc: t('onboarding.permissions.textOutputDesc'),
-        state: textOutputNeedsPermission && accessibilityTrusted === false ? 'needed' : 'ready',
+        state: !textOutputNeedsPermission
+          ? 'ready'
+          : accessibilityTrusted === null
+            ? null
+            : accessibilityTrusted
+              ? 'ready'
+              : 'needed',
         action:
-          textOutputNeedsPermission && accessibilityTrusted === false ? 'accessibility' : null,
+          textOutputNeedsPermission && (accessibilityTrusted === false || requestFailed)
+            ? 'accessibility'
+            : null,
       },
       {
         id: 'browserApps',
@@ -73,24 +94,50 @@ export function PermissionsStep() {
       })
     }
     return items
-  }, [accessibilityTrusted, config.stt_provider, t, textOutputNeedsPermission])
+  }, [accessibilityTrusted, config.stt_provider, requestFailed, t, textOutputNeedsPermission])
 
   const handleAccessibility = async () => {
-    await requestAccessibilityPermission()
-    const trusted = await waitForAccessibilityPermission()
-    setAccessibilityTrusted(trusted)
-    if (trusted) {
-      await resumeHotkey().catch((error) => {
-        console.error('Failed to re-register hotkeys after Accessibility grant:', error)
-      })
+    if (pendingRequest.current) return
+    const generation = requestGeneration.current
+    pendingRequest.current = true
+    setRequesting(true)
+    setRequestFailed(false)
+    try {
+      const trusted =
+        accessibilityTrusted === true
+          ? await checkAccessibilityPermission()
+          : await requestAccessibilityPermission().then(() => waitForAccessibilityPermission())
+      if (generation !== requestGeneration.current) return
+      if (typeof trusted !== 'boolean') throw new Error('Invalid permission response')
+      setAccessibilityTrusted(trusted)
+      if (trusted) await resumeHotkey()
+    } catch {
+      if (generation === requestGeneration.current) setRequestFailed(true)
+    } finally {
+      if (generation === requestGeneration.current) {
+        pendingRequest.current = false
+        setRequesting(false)
+      }
     }
   }
+  useEffect(() => {
+    setRequesting(false)
+    return () => {
+      requestGeneration.current += 1
+      pendingRequest.current = false
+    }
+  }, [textOutputNeedsPermission])
 
   return (
     <div className="space-y-3">
       <p className="text-[13px] leading-relaxed text-text-secondary">
         {t('onboarding.permissions.subtitle')}
       </p>
+      {requestFailed && (
+        <p role="alert" className="text-[13px] text-error">
+          {t('common.saveFailed')}
+        </p>
+      )}
       <div className="space-y-2">
         {rows.map((row) => (
           <PermissionRow
@@ -101,6 +148,7 @@ export function PermissionsStep() {
             state={row.state}
             action={row.action}
             onAccessibility={handleAccessibility}
+            requesting={requesting}
           />
         ))}
       </div>
@@ -115,13 +163,15 @@ function PermissionRow({
   state,
   action,
   onAccessibility,
+  requesting,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string }>
   title: string
   desc: string
-  state: PermissionState
+  state: PermissionState | null
   action?: string | null
   onAccessibility: () => void
+  requesting: boolean
 }) {
   const { t } = useTranslation()
   const stateClass =
@@ -133,30 +183,34 @@ function PermissionRow({
   const StateIcon = state === 'ready' ? Check : state === 'needed' ? AlertCircle : null
 
   return (
-    <div className="flex items-center gap-3 rounded-[10px] bg-bg-secondary px-3 py-2.5">
+    <div
+      aria-busy={state === null}
+      className="flex items-start gap-4 rounded-[12px] bg-fill-thin p-6"
+    >
       <div className="grid h-7 w-7 shrink-0 place-items-center rounded-[8px] bg-bg-tertiary text-text-tertiary">
         <Icon size={14} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-medium text-text-primary">{title}</p>
-        <p className="truncate text-[11px] text-text-tertiary">{desc}</p>
+        <p className="text-[16px] leading-5 font-medium text-text-primary">{title}</p>
+        <p className="mt-4 text-[14px] leading-[22px] text-text-tertiary">{desc}</p>
       </div>
       {action === 'accessibility' ? (
         <button
           type="button"
           onClick={onAccessibility}
-          className="shrink-0 rounded-[7px] border border-border bg-bg-primary px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:text-text-primary"
+          disabled={requesting}
+          className="shrink-0 rounded-[18px] border border-border bg-bg-primary px-3 py-1.5 text-[14px] leading-5 font-normal text-text-secondary hover:text-text-primary disabled:opacity-40"
         >
           {t('onboarding.permissions.fix')}
         </button>
-      ) : (
+      ) : state !== null ? (
         <span
           className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${stateClass}`}
         >
           {StateIcon && <StateIcon size={10} />}
           {t(`onboarding.permissions.status.${state}`)}
         </span>
-      )}
+      ) : null}
     </div>
   )
 }

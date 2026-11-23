@@ -1,36 +1,61 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, Check, Copy, Mic, Sparkles, X } from 'lucide-react'
-import { MarkdownView } from '../../lib/markdown'
+import { CitedAnswer, type CitationSupport } from './CitedAnswer'
 import { BrandMark } from '../MainLayout/BrandMark'
+import { copyAnswer } from '../../lib/copyAnswer'
+import { toast } from '../toast-service'
+import { AskSources, type AskCitation } from './AskSources'
 
 // Typeless answer-card geometry (REA: CARD_MIN_HEIGHT 400, CARD_MAX_HEIGHT 700, width 744).
 const PROMPT_COLLAPSED_PX = 44
 const COPIED_RESET_MS = 3000
 
 function useCopy() {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(
-    () => () => {
+  const mounted = useRef(false)
+  const copyRequestId = useRef(0)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      copyRequestId.current += 1
       if (timer.current) clearTimeout(timer.current)
-    },
-    [],
-  )
-  const copy = useCallback((text: string) => {
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true)
-        if (timer.current) clearTimeout(timer.current)
-        timer.current = setTimeout(() => setCopied(false), COPIED_RESET_MS)
-      })
-      .catch(() => {})
+    }
   }, [])
+  const copy = useCallback(
+    (text: string, rendered?: HTMLElement | null) => {
+      const requestId = ++copyRequestId.current
+      copyAnswer(text, rendered)
+        .then(() => {
+          if (!mounted.current || requestId !== copyRequestId.current) return
+          setCopied(true)
+          if (timer.current) clearTimeout(timer.current)
+          timer.current = setTimeout(() => setCopied(false), COPIED_RESET_MS)
+        })
+        .catch(() => {
+          if (!mounted.current || requestId !== copyRequestId.current) return
+          if (timer.current) clearTimeout(timer.current)
+          setCopied(false)
+          toast.error(t('history.failedToCopy'))
+        })
+    },
+    [t],
+  )
   return { copied, copy }
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+function CopyButton({
+  text,
+  label,
+  renderedRef,
+}: {
+  text: string
+  label: string
+  renderedRef?: { current: HTMLDivElement | null }
+}) {
   const { t } = useTranslation()
   const { copied, copy } = useCopy()
   return (
@@ -38,7 +63,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       type="button"
       aria-label={label}
       title={copied ? t('ask.copied') : t('ask.copy')}
-      onClick={() => copy(text)}
+      onClick={() => copy(text, renderedRef?.current)}
       className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[6px] border-none cursor-pointer transition-colors ${
         copied
           ? 'bg-fill-selected text-success'
@@ -54,15 +79,26 @@ function PromptBlock({ prompt, selectedText }: { prompt: string; selectedText?: 
   const { t } = useTranslation()
   const contentRef = useRef<HTMLDivElement>(null)
   const [overflowing, setOverflowing] = useState(false)
+  const [contentHeight, setContentHeight] = useState<number>()
   const [expanded, setExpanded] = useState(false)
 
   useLayoutEffect(() => {
     const node = contentRef.current
-    if (node) setOverflowing(node.scrollHeight > PROMPT_COLLAPSED_PX + 1)
+    if (!node) return
+    const measure = () => {
+      setContentHeight(node.scrollHeight)
+      setOverflowing(node.scrollHeight > PROMPT_COLLAPSED_PX + 1)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    for (const child of Array.from(node.children)) observer.observe(child)
+    return () => observer.disconnect()
   }, [prompt, selectedText])
 
   const collapsed = overflowing && !expanded
-  const copyText = selectedText ? `${prompt}\n${selectedText}` : prompt
+  const copyText = selectedText ? (prompt ? `${prompt}\n${selectedText}` : selectedText) : prompt
 
   return (
     <div className="flex items-start gap-2 px-2" data-testid="ask-prompt">
@@ -71,7 +107,7 @@ function PromptBlock({ prompt, selectedText }: { prompt: string; selectedText?: 
         <div
           ref={contentRef}
           className="overflow-hidden transition-[max-height] duration-300 ease-in-out"
-          style={{ maxHeight: collapsed ? PROMPT_COLLAPSED_PX : 2000 }}
+          style={{ maxHeight: collapsed ? PROMPT_COLLAPSED_PX : contentHeight }}
         >
           <p className="m-0 whitespace-pre-wrap break-words text-[14px] leading-[22px] text-text-secondary">
             {prompt}
@@ -107,12 +143,14 @@ function PromptBlock({ prompt, selectedText }: { prompt: string; selectedText?: 
           </div>
         )}
       </div>
-      <CopyButton text={copyText} label={t('ask.copyQuestion')} />
+      <CopyButton key={copyText} text={copyText} label={t('ask.copyQuestion')} />
     </div>
   )
 }
 
 export interface AskAnswerCardProps {
+  citationSupports?: CitationSupport[]
+  citations?: AskCitation[]
   prompt?: string | null
   selectedText?: string | null
   answer?: string | null
@@ -120,6 +158,7 @@ export interface AskAnswerCardProps {
   /** Small status line such as "Opened Google search" for non-answer routes. */
   context?: string | null
   canCopyAnswer?: boolean
+  draggable?: boolean
   onClose: () => void
   onOpenLink?: (url: string) => void
   /** Reports the card's rendered height so the host window can hug it. */
@@ -134,12 +173,16 @@ export function AskAnswerCard({
   error,
   context,
   canCopyAnswer = true,
+  draggable = true,
+  citations,
+  citationSupports,
   onClose,
   onOpenLink,
   onHeightChange,
 }: AskAnswerCardProps) {
   const { t } = useTranslation()
   const cardRef = useRef<HTMLElement>(null)
+  const answerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const node = cardRef.current
@@ -159,11 +202,12 @@ export function AskAnswerCard({
     <section
       ref={cardRef}
       data-testid="ask-floating-note"
-      className="flex max-h-[700px] w-[744px] max-w-full flex-col gap-4 overflow-hidden rounded-[16px] border border-border bg-bg-bottom p-4 shadow-float"
+      data-ask-material="glass"
+      className={`ask-result-glass flex ${onHeightChange ? 'max-h-[700px]' : 'max-h-[min(700px,calc(100vh-40px))]'} w-[744px] max-w-full flex-col gap-4 overflow-hidden rounded-[20px] border border-border p-5`}
     >
       <header
         className="relative flex h-5 shrink-0 items-center justify-center"
-        data-tauri-drag-region
+        data-tauri-drag-region={draggable ? true : undefined}
       >
         <span className="flex items-center gap-1.5 text-[15px] font-semibold text-text-primary">
           <BrandMark size={16} />
@@ -180,8 +224,14 @@ export function AskAnswerCard({
         </button>
       </header>
 
-      <div className="-mr-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-4">
-        {prompt && !error && <PromptBlock prompt={prompt} selectedText={selectedText} />}
+      <div className="-mr-5 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-5">
+        {(prompt || selectedText) && !error && (
+          <PromptBlock
+            key={JSON.stringify([prompt, selectedText])}
+            prompt={prompt ?? ''}
+            selectedText={selectedText}
+          />
+        )}
 
         {error ? (
           <div className="flex items-start gap-2 rounded-[12px] border border-border-thin bg-bg-primary px-4 py-3">
@@ -195,9 +245,9 @@ export function AskAnswerCard({
           </div>
         ) : (
           answer && (
-            <div className="overflow-hidden rounded-[12px] border border-border-thin bg-bg-primary">
-              <div className="flex h-[51px] items-center justify-between border-b border-border-thin py-3 pl-4 pr-3">
-                <span className="flex items-center gap-2 text-[16px] font-semibold leading-5 text-text-secondary">
+            <div className="shrink-0 border-t border-border-thin">
+              <div className="flex min-h-[44px] items-center justify-between gap-3 py-3">
+                <span className="flex min-w-0 items-center gap-2 text-[13px] font-medium leading-5 text-text-tertiary">
                   <Sparkles size={16} aria-hidden="true" />
                   {t('ask.answerTitle')}
                   {context && (
@@ -206,11 +256,24 @@ export function AskAnswerCard({
                     </span>
                   )}
                 </span>
-                {canCopyAnswer && <CopyButton text={answer} label={t('ask.copyAnswer')} />}
+                {canCopyAnswer && (
+                  <CopyButton
+                    key={answer}
+                    text={answer}
+                    label={t('ask.copyAnswer')}
+                    renderedRef={answerRef}
+                  />
+                )}
               </div>
-              <div className="select-text px-4 py-3">
-                <MarkdownView source={answer} onOpenLink={onOpenLink} className="answer-markdown" />
+              <div ref={answerRef} className="select-text py-2">
+                <CitedAnswer
+                  answer={answer}
+                  citations={citations}
+                  supports={citationSupports}
+                  onOpenLink={onOpenLink}
+                />
               </div>
+              <AskSources citations={citations} onOpenLink={onOpenLink} />
             </div>
           )
         )}

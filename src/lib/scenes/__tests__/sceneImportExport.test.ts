@@ -12,6 +12,124 @@ const existingScene: CustomScene = {
 }
 
 describe('scene import/export', () => {
+  it.each([null, false, 'invalid', {}, { scenes: {} }, { version: 1 }])(
+    'rejects malformed scene pack envelopes',
+    (pack) => {
+      expect(() =>
+        importCustomScenesJson(JSON.stringify(pack), {
+          existingIds: new Set(),
+          createId: () => 'unused',
+          nowIso: () => '2026-11-04',
+        }),
+      ).toThrow('Invalid scene pack structure')
+    },
+  )
+
+  it.each([[], { scenes: [] }, { version: 1, scenes: [] }])(
+    'accepts supported empty scene packs',
+    (pack) => {
+      const result = importCustomScenesJson(JSON.stringify(pack), {
+        existingIds: new Set(),
+        createId: () => 'unused',
+        nowIso: () => '2026-11-04',
+      })
+      expect(result.scenes).toEqual([])
+      expect(result.report.totalRecords).toBe(0)
+    },
+  )
+
+  it('fails after bounded ID collisions rather than looping indefinitely', () => {
+    let attempts = 0
+    expect(() =>
+      importCustomScenesJson(JSON.stringify([existingScene]), {
+        existingIds: new Set([existingScene.id]),
+        createId: () => {
+          attempts += 1
+          if (attempts > 100) throw new Error('Generator exceeded test budget')
+          return existingScene.id
+        },
+        nowIso: () => '2026-11-04',
+      }),
+    ).toThrow('Could not generate a unique scene ID')
+    expect(attempts).toBe(100)
+  })
+
+  it('reports non-object records instead of silently removing them from totals', () => {
+    const result = importCustomScenesJson(
+      JSON.stringify({ scenes: [null, 'invalid', 12, [], existingScene] }),
+      { existingIds: new Set(), createId: () => 'unused', nowIso: () => '2026-11-04' },
+    )
+    expect(result.scenes).toEqual([existingScene])
+    expect(result.report).toEqual({
+      totalRecords: 5,
+      imported: 1,
+      skippedInvalid: 4,
+      skippedLimit: 0,
+      renamedConflicts: 0,
+    })
+    expect(result.skipped).toBe(4)
+  })
+
+  it.each([2, 0, '1', null])('rejects an unsupported declared scene version %s', (version) => {
+    expect(() =>
+      importCustomScenesJson(JSON.stringify({ version, scenes: [existingScene] }), {
+        existingIds: new Set(),
+        createId: () => 'unused',
+        nowIso: () => '2026-11-04',
+      }),
+    ).toThrow('Unsupported scene pack version')
+  })
+
+  it.each([[existingScene], { scenes: [existingScene] }, { version: 1, scenes: [existingScene] }])(
+    'preserves supported versioned and legacy packs',
+    (pack) => {
+      const result = importCustomScenesJson(JSON.stringify(pack), {
+        existingIds: new Set(),
+        createId: () => 'unused',
+        nowIso: () => '2026-11-04',
+      })
+      expect(result.scenes).toEqual([existingScene])
+    },
+  )
+
+  it('bounds imported text by Unicode characters without splitting surrogate pairs', () => {
+    const result = importCustomScenesJson(
+      JSON.stringify({
+        scenes: [
+          {
+            id: 'unicode',
+            name: `${'a'.repeat(79)}😀tail`,
+            description: `${'b'.repeat(239)}𠮷tail`,
+            promptTemplate: `${'c'.repeat(3999)}😀tail`,
+          },
+        ],
+      }),
+      { existingIds: new Set(), createId: () => 'unused', nowIso: () => '2026-11-04' },
+    )
+    expect(result.scenes[0].name).toBe(`${'a'.repeat(79)}😀`)
+    expect(result.scenes[0].description).toBe(`${'b'.repeat(239)}𠮷`)
+    expect(result.scenes[0].prompt_template).toBe(`${'c'.repeat(3999)}😀`)
+  })
+
+  it('round trips a full supported scene pack below the file size limit', () => {
+    const scenes = Array.from({ length: 100 }, (_, index) => ({
+      ...existingScene,
+      id: `custom_${index}`,
+      name: '名'.repeat(80),
+      description: '述'.repeat(240),
+      prompt_template: '文'.repeat(4000),
+    }))
+    const json = serializeCustomScenes(scenes, '2026-11-04T00:00:00.000Z')
+    expect(new TextEncoder().encode(json).length).toBeLessThan(5 * 1024 * 1024)
+    const imported = importCustomScenesJson(json, {
+      existingIds: new Set(),
+      createId: () => 'unused',
+      nowIso: () => '2026-11-04T00:00:00.000Z',
+    })
+    expect(imported.scenes).toEqual(scenes)
+    expect(imported.skipped).toBe(0)
+  })
+
   it('serializes custom scenes into a portable versioned JSON payload', () => {
     const json = serializeCustomScenes([existingScene], '2026-07-06T00:00:00.000Z')
     const payload = JSON.parse(json)

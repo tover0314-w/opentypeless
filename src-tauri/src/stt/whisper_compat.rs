@@ -5,7 +5,7 @@ use crate::error::AppError;
 use super::{SttConfig, SttProvider, TranscriptEvent};
 
 /// Configuration for a Whisper-compatible HTTP file-upload STT provider.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WhisperCompatConfig {
     pub provider_name: String,
     pub endpoint: String,
@@ -19,6 +19,7 @@ pub struct WhisperCompatConfig {
 /// Max audio buffer: ~24 MB PCM ≈ 12.5 min at 16kHz 16-bit mono.
 /// Keeps the resulting WAV under 25 MB (OpenAI/Groq limit).
 const MAX_AUDIO_BYTES: usize = 24 * 1024 * 1024;
+const MAX_TRANSCRIPTION_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 // Three HTTP attempts, two backoffs (1s + 2s), and a small finalization margin.
 pub const FINALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(198);
@@ -46,7 +47,7 @@ impl WhisperCompatProvider {
             provider_config,
             stt_config: None,
             audio_buffer: Vec::new(),
-            client: reqwest::Client::new(),
+            client: crate::build_shared_http_client(),
         }
     }
 
@@ -138,7 +139,6 @@ impl SttProvider for WhisperCompatProvider {
 
         let audio_len_secs = self.audio_buffer.len() as f64 / (config.sample_rate as f64 * 2.0);
         let wav_data = Self::build_wav(&self.audio_buffer, config.sample_rate);
-        self.audio_buffer.clear();
         tracing::info!(
             "{}: sending {:.1}s of audio for transcription",
             self.provider_config.provider_name,
@@ -183,12 +183,28 @@ impl SttProvider for WhisperCompatProvider {
             match resp_result {
                 Ok(resp) => {
                     let status = resp.status();
-                    let body = resp.text().await.map_err(upload_error)?;
-
                     if status.is_success() {
-                        let v: serde_json::Value = serde_json::from_str(&body)
-                            .map_err(|e| AppError::Config(e.to_string()))?;
-                        let text = v["text"].as_str().unwrap_or("").trim().to_string();
+                        let v = crate::cloud_request::read_json_response_with_limit(
+                            resp,
+                            MAX_TRANSCRIPTION_RESPONSE_BYTES,
+                        )
+                        .await?;
+                        if v.get("error").is_some_and(|error| !error.is_null()) {
+                            return Err(AppError::Config(
+                                "Transcription service returned an error response".to_string(),
+                            ));
+                        }
+                        let text = v
+                            .get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or_else(|| {
+                                AppError::Config(
+                                    "Transcription response must contain a string text field"
+                                        .to_string(),
+                                )
+                            })?
+                            .trim()
+                            .to_string();
 
                         tracing::info!(
                             "{} transcription: {} chars",
@@ -196,20 +212,14 @@ impl SttProvider for WhisperCompatProvider {
                             text.len()
                         );
 
+                        self.audio_buffer.clear();
                         return Ok(if text.is_empty() { None } else { Some(text) });
                     } else if status.as_u16() >= 500 && attempt < 2 {
-                        let truncate_at = body
-                            .char_indices()
-                            .take_while(|&(i, _)| i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(body.len());
                         tracing::warn!(
-                            "{} server error {} (attempt {}/3): {}",
+                            "{} server error {} (attempt {}/3)",
                             self.provider_config.provider_name,
                             status,
-                            attempt + 1,
-                            &body[..truncate_at]
+                            attempt + 1
                         );
                         attempt += 1;
                         tokio::time::sleep(std::time::Duration::from_millis(
@@ -218,23 +228,10 @@ impl SttProvider for WhisperCompatProvider {
                         .await;
                         continue;
                     } else {
-                        // Truncate at a valid UTF-8 char boundary to avoid panic on multi-byte chars
-                        let truncate_at = body
-                            .char_indices()
-                            .take_while(|&(i, _)| i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(body.len());
-                        let sanitized = &body[..truncate_at];
-                        tracing::error!(
-                            "{} HTTP {}: {}",
-                            self.provider_config.provider_name,
-                            status,
-                            sanitized
-                        );
+                        tracing::error!("{} HTTP {}", self.provider_config.provider_name, status);
                         return Err(AppError::Api {
                             status: status.as_u16(),
-                            body: sanitized.to_string(),
+                            body: String::new(),
                         });
                     }
                 }
@@ -256,6 +253,14 @@ impl SttProvider for WhisperCompatProvider {
         }
     }
 
+    fn take_retry_audio(&mut self) -> Option<crate::retry_audio::RetryAudio> {
+        crate::retry_audio::RetryAudio::new(
+            self.provider_config.clone(),
+            self.stt_config.clone()?,
+            std::mem::take(&mut self.audio_buffer),
+        )
+    }
+
     fn name(&self) -> &str {
         &self.provider_config.provider_name
     }
@@ -264,6 +269,390 @@ impl SttProvider for WhisperCompatProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct CapturedLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for CapturedLog {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CapturedLog {
+        fn subscriber(&self, level: tracing::Level) -> impl tracing::Subscriber + Send + Sync {
+            let writer = self.clone();
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(level)
+                .with_writer(move || writer.clone())
+                .finish()
+        }
+
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    fn read_upload(socket: &mut std::net::TcpStream) -> Vec<u8> {
+        use std::io::Read;
+        socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0; 4096];
+        loop {
+            let received = socket.read(&mut buffer).unwrap();
+            assert!(received > 0, "upload ended before the complete request");
+            request.extend_from_slice(&buffer[..received]);
+            assert!(request.len() <= 64 * 1024, "test upload exceeded its bound");
+            let Some(headers_end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&request[..headers_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|length| length.trim().parse::<usize>().unwrap())
+                })
+                .expect("multipart upload has a content length");
+            if request.len() >= headers_end + 4 + content_length {
+                return request;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_preserves_model_language_auth_and_wav_contract() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let request = read_upload(&mut socket);
+            let response = "{\"text\":\"  Test transcript  \"}";
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+            request
+        });
+        let mut provider = WhisperCompatProvider::with_client(
+            WhisperCompatConfig {
+                provider_name: "test-whisper".into(),
+                endpoint: format!("http://{address}/v1/audio/transcriptions"),
+                model: "test-model".into(),
+                extra_fields: vec![("stream".into(), "false".into())],
+                api_key_required: true,
+            },
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        );
+        provider
+            .connect(&SttConfig {
+                api_key: "test-token".into(),
+                language: Some("zh".into()),
+                ..SttConfig::default()
+            })
+            .await
+            .unwrap();
+        let pcm = [1, 0, 2, 0];
+        provider.send_audio(&pcm).await.unwrap();
+        assert_eq!(
+            provider.disconnect().await.unwrap().as_deref(),
+            Some("Test transcript")
+        );
+        assert!(provider.take_retry_audio().is_none());
+        let request = server.join().unwrap();
+        let text = String::from_utf8_lossy(&request);
+        assert!(text.starts_with("POST /v1/audio/transcriptions HTTP/1.1"));
+        assert!(text
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-token"));
+        for field in [
+            "name=\"model\"\r\n\r\ntest-model",
+            "name=\"language\"\r\n\r\nzh",
+            "name=\"stream\"\r\n\r\nfalse",
+            "filename=\"audio.wav\"",
+            "Content-Type: audio/wav",
+        ] {
+            assert!(text.contains(field), "missing upload field: {field}");
+        }
+        let wav = WhisperCompatProvider::build_wav(&pcm, 16000);
+        assert!(request.windows(wav.len()).any(|bytes| bytes == wav));
+    }
+
+    #[tokio::test]
+    async fn error_response_excludes_echoed_secret_from_logs_and_internal_error() {
+        use std::io::Write;
+        use tracing::instrument::WithSubscriber;
+
+        let captured = CapturedLog::default();
+        let subscriber = captured.subscriber(tracing::Level::ERROR);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let synthetic_secret = "synthetic-whisper-secret";
+        let response = format!("Denied {synthetic_secret}: synthetic private transcript");
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_upload(&mut socket);
+            write!(
+                socket,
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+        });
+        let mut provider = WhisperCompatProvider::with_client(
+            WhisperCompatConfig {
+                provider_name: "test-whisper".into(),
+                endpoint: format!("http://{address}/transcriptions"),
+                model: "test-model".into(),
+                extra_fields: vec![],
+                api_key_required: true,
+            },
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        );
+        provider
+            .connect(&SttConfig {
+                api_key: synthetic_secret.into(),
+                ..SttConfig::default()
+            })
+            .await
+            .unwrap();
+        provider.send_audio(&[1, 0, 2, 0]).await.unwrap();
+        let error = provider
+            .disconnect()
+            .with_subscriber(subscriber)
+            .await
+            .unwrap_err();
+        server.join().unwrap();
+        let logs = captured.text();
+        assert!(logs.contains("test-whisper HTTP 400"));
+        assert!(!logs.contains(synthetic_secret));
+        assert!(!logs.contains("synthetic private transcript"));
+        assert!(matches!(error, AppError::Api { status: 400, .. }));
+        assert!(!error.to_string().contains(synthetic_secret));
+        assert!(!error.to_string().contains("synthetic private transcript"));
+        assert_eq!(error.to_user_error().details.as_deref(), Some("HTTP 400"));
+        assert_eq!(provider.take_retry_audio().unwrap().pcm, [1, 0, 2, 0]);
+    }
+
+    #[tokio::test]
+    async fn server_error_retries_exclude_response_content_and_keep_audio() {
+        use std::io::Write;
+        use tracing::instrument::WithSubscriber;
+
+        let captured = CapturedLog::default();
+        let subscriber = captured.subscriber(tracing::Level::WARN);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for _attempt in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                read_upload(&mut socket);
+                let response = "synthetic-secret synthetic private transcript";
+                write!(
+                    socket,
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                )
+                .unwrap();
+            }
+        });
+        let mut provider = WhisperCompatProvider::with_client(
+            WhisperCompatConfig {
+                provider_name: "test-whisper".into(),
+                endpoint: format!("http://{address}/transcriptions"),
+                model: "test-model".into(),
+                extra_fields: vec![],
+                api_key_required: true,
+            },
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        );
+        provider
+            .connect(&SttConfig {
+                api_key: "synthetic-secret".into(),
+                ..SttConfig::default()
+            })
+            .await
+            .unwrap();
+        provider.send_audio(&[1, 0, 2, 0]).await.unwrap();
+        let error = provider
+            .disconnect()
+            .with_subscriber(subscriber)
+            .await
+            .unwrap_err();
+        server.join().unwrap();
+        let logs = captured.text();
+        assert!(logs.contains("(attempt 1/3)"));
+        assert!(logs.contains("(attempt 2/3)"));
+        assert!(logs.contains("test-whisper HTTP 503"));
+        assert!(!logs.contains("synthetic-secret"));
+        assert!(!logs.contains("synthetic private transcript"));
+        assert!(matches!(error, AppError::Api { status: 503, ref body } if body.is_empty()));
+        assert_eq!(error.to_user_error().details.as_deref(), Some("HTTP 503"));
+        assert_eq!(provider.take_retry_audio().unwrap().pcm, [1, 0, 2, 0]);
+    }
+
+    #[tokio::test]
+    async fn oversized_success_rejects_response_and_preserves_retry_audio() {
+        use std::io::Write;
+        for declared_length in [true, false] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                read_upload(&mut socket);
+                if declared_length {
+                    let _ = socket.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 8388609\r\nConnection: close\r\n\r\n",
+                    );
+                } else {
+                    let body = serde_json::json!({"text": "x".repeat(8 * 1024 * 1024)}).to_string();
+                    let _ = write!(socket, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{body}");
+                }
+            });
+            let mut provider = WhisperCompatProvider::with_client(
+                WhisperCompatConfig {
+                    provider_name: "test-whisper".into(),
+                    endpoint: format!("http://{address}/transcriptions"),
+                    model: "test-model".into(),
+                    extra_fields: vec![],
+                    api_key_required: false,
+                },
+                reqwest::Client::builder().no_proxy().build().unwrap(),
+            );
+            provider.connect(&SttConfig::default()).await.unwrap();
+            provider.send_audio(&[1, 0, 2, 0]).await.unwrap();
+            let result = provider.disconnect().await;
+            server.join().unwrap();
+            let error = result.unwrap_err();
+            assert!(matches!(error, AppError::Config(_)), "{error:?}");
+            assert!(error.to_string().contains("too large"));
+            assert_eq!(provider.take_retry_audio().unwrap().pcm, [1, 0, 2, 0]);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_success_keeps_audio_for_retry() {
+        use std::io::Write;
+        for body in [
+            "{}",
+            "{\"text\":42}",
+            "{\"text\":null}",
+            "{\"text\":\"synthetic transcript\",\"error\":{\"message\":\"synthetic failure\"}}",
+        ] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                read_upload(&mut socket);
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            });
+            let mut provider = WhisperCompatProvider::with_client(
+                WhisperCompatConfig {
+                    provider_name: "test-whisper".into(),
+                    endpoint: format!("http://{address}/v1/audio/transcriptions"),
+                    model: "test-model".into(),
+                    extra_fields: vec![],
+                    api_key_required: false,
+                },
+                reqwest::Client::builder().no_proxy().build().unwrap(),
+            );
+            provider.connect(&SttConfig::default()).await.unwrap();
+            provider.send_audio(&[1, 0, 2, 0]).await.unwrap();
+            let result = provider.disconnect().await;
+            let retained = provider.take_retry_audio();
+            server.join().unwrap();
+            assert!(
+                matches!(result, Err(AppError::Config(_))),
+                "{body}: {result:?}"
+            );
+            assert_eq!(retained.unwrap().pcm, [1, 0, 2, 0]);
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_audio_can_be_replayed_and_is_cleared_after_success() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for response in [
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"text\":\"Recovered\"}",
+            ] {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .unwrap();
+                let mut request = vec![0; 8192];
+                let mut received = 0;
+                loop {
+                    let read = socket.read(&mut request[received..]).unwrap();
+                    assert!(read > 0);
+                    received += read;
+                    let Some(headers_end) = request[..received]
+                        .windows(4)
+                        .position(|bytes| bytes == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let headers = String::from_utf8_lossy(&request[..headers_end]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    if received >= headers_end + 4 + length {
+                        break;
+                    }
+                }
+                assert!(request[..received].windows(4).any(|bytes| bytes == b"RIFF"));
+                socket.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let mut provider = WhisperCompatProvider::new(WhisperCompatConfig {
+            provider_name: "custom-whisper".to_string(),
+            endpoint: format!("http://{address}/transcriptions"),
+            model: "test".to_string(),
+            extra_fields: vec![],
+            api_key_required: false,
+        });
+        provider.connect(&SttConfig::default()).await.unwrap();
+        provider.send_audio(&[1, 0, 2, 0]).await.unwrap();
+        assert!(provider.disconnect().await.is_err());
+        let retained = provider.take_retry_audio().unwrap();
+        let mut replay = WhisperCompatProvider::new(retained.provider);
+        replay.connect(&retained.config).await.unwrap();
+        replay.send_audio(&retained.pcm).await.unwrap();
+        assert_eq!(
+            replay.disconnect().await.unwrap(),
+            Some("Recovered".to_string())
+        );
+        assert!(replay.take_retry_audio().is_none());
+        server.join().unwrap();
+    }
 
     #[tokio::test]
     async fn incomplete_response_body_is_reported_as_a_transport_error() {
@@ -291,6 +680,11 @@ mod tests {
         provider.send_audio(&[0, 0]).await.unwrap();
         let error = provider.disconnect().await.unwrap_err();
         assert!(matches!(error, AppError::Network(_)), "{error:?}");
+        let retry = provider
+            .take_retry_audio()
+            .expect("failed upload keeps its audio");
+        assert_eq!(retry.pcm, [0, 0]);
+        assert!(provider.take_retry_audio().is_none());
         server.join().unwrap();
     }
 

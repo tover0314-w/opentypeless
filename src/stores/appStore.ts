@@ -1,6 +1,18 @@
 import { create } from 'zustand'
+import { normalizeLanguageVariants, type LanguageVariants } from '../lib/languageVariants'
+import type { CapsuleErrorKey } from '../lib/capsuleError'
 import type { CapsuleRecordingStyle } from '../lib/capsuleView'
 import { TARGET_LANGUAGES } from '../lib/constants'
+import { valuesEqual } from '../lib/configValuesEqual'
+import { mergeHotkeyDraft } from '../lib/mergeHotkeyDraft'
+import {
+  ConfigCommitCursor,
+  type ConfigCommit,
+  type ConfigCommitDisposition,
+} from '../lib/configCommit'
+import { isAppConfigSnapshot } from '../lib/appConfigSnapshot'
+import { mergeAppConfigDraft } from '../lib/appConfigMergePolicy'
+import { pendingConfigSaves } from '../lib/configSaveRegistry'
 
 export type PipelineState =
   | 'idle'
@@ -55,7 +67,7 @@ export type InsertStatus = 'inserted' | 'copiedFallback' | 'failed' | 'partially
 export type HotkeyMode = 'hold' | 'toggle' | 'auto'
 export type Theme = 'light' | 'dark' | 'system'
 export type PolishChineseScript = 'preserve' | 'simplified' | 'traditional'
-export type PolishStyle = 'minimal' | 'clean' | 'structured' | 'professional'
+export type PolishStyle = 'minimal' | 'clean' | 'structured' | 'professional' | 'custom'
 export type SceneSource = 'custom' | 'builtin' | 'cloud'
 export type ContextFamily =
   | 'email'
@@ -100,6 +112,7 @@ export interface PlatformCapabilities {
 }
 
 export interface HistoryEntry {
+  has_audio?: boolean
   id: number
   created_at: string
   context_profile_id: string
@@ -121,6 +134,8 @@ export interface HistoryEntry {
   output_error: string | null
   mode?: 'dictate' | 'translate' | 'ask'
   answer_text?: string | null
+  ask_intent?: 'open_question' | 'ask_selection' | null
+  citation_supports?: Array<{ start: number; end: number; sourceIndex: number }>
 }
 
 export interface ContextProfileSummary {
@@ -146,6 +161,7 @@ export interface DictionaryEntry {
   id: number
   word: string
   pronunciation: string | null
+  auto?: boolean
 }
 
 export interface CorrectionRule {
@@ -213,6 +229,7 @@ export interface AppConfig {
   polish_style: PolishStyle
   polish_custom_prompt: string
   polish_chinese_script: PolishChineseScript
+  language_variants: LanguageVariants
   custom_scenes: CustomScene[]
   system_scene_overrides: SystemSceneOverride[]
   active_scene: ActiveScene | null
@@ -249,6 +266,9 @@ export interface AppConfig {
   mute_background_audio: boolean
   /** macOS: keep the app icon in the Dock. */
   show_in_dock: boolean
+  save_recording_audio: boolean
+  /** macOS: learn names the user corrects right after dictating. */
+  auto_learn_dictionary: boolean
 }
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'error'
@@ -296,6 +316,9 @@ interface AppState {
   setConfig: (config: AppConfig) => void
   updateConfig: (partial: Partial<AppConfig>) => void
   applyPersistedConfigPatch: (patch: Partial<AppConfig>) => void
+  configCommit: ConfigCommit<AppConfig> | null
+  initializeConfigCommit: (commit: unknown) => boolean
+  applyConfigCommit: (commit: unknown) => ConfigCommitDisposition
 
   // History
   history: HistoryEntry[]
@@ -337,7 +360,15 @@ interface AppState {
 
   // Pipeline error
   pipelineError: string | null
-  setPipelineError: (error: string | null) => void
+  pipelineErrorKey: CapsuleErrorKey | null
+  pipelineErrorMessageKey: string | null
+  retryAvailable: boolean
+  setRetryAvailable: (available: boolean) => void
+  /** History row of the failed take shown in the error alert; Retry re-runs it in full. */
+  failedTakeId: number | null
+  setFailedTakeId: (id: number | null) => void
+  setPipelineErrorKey: (key: CapsuleErrorKey | null) => void
+  setPipelineError: (error: string | null, messageKey?: string) => void
 
   // macOS Accessibility permission
   accessibilityTrusted: boolean
@@ -368,6 +399,7 @@ export const isWindowsPlatform = () =>
 
 function defaultDictationHotkey(): string {
   if (isMacPlatform()) return 'Fn'
+  if (isWindowsPlatform()) return 'RightAlt'
   return 'Ctrl+/'
 }
 
@@ -381,6 +413,7 @@ function defaultDictationHotkeyMode(): HotkeyMode {
 
 function defaultAskHotkey(): string {
   if (isMacPlatform()) return 'Fn+Space'
+  if (isWindowsPlatform()) return 'RightAlt+Space'
   return 'Ctrl+.'
 }
 
@@ -391,6 +424,7 @@ function defaultPasteLastHotkey(): string {
 
 function defaultTranslateHotkey(): string | null {
   if (isMacPlatform()) return 'Fn+LeftShift'
+  if (isWindowsPlatform()) return 'RightAlt+RightShift'
   return 'Ctrl+Shift+/'
 }
 
@@ -441,12 +475,33 @@ function normalizePrimary(value: string): string | null {
     return: 'Enter',
     escape: 'Escape',
     esc: 'Escape',
+    arrowup: 'Up',
+    up: 'Up',
+    arrowdown: 'Down',
+    down: 'Down',
+    arrowleft: 'Left',
+    left: 'Left',
+    arrowright: 'Right',
+    right: 'Right',
+    home: 'Home',
+    end: 'End',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+    insert: 'Insert',
+    delete: 'Delete',
+    backspace: 'Backspace',
     leftshift: 'LeftShift',
     left_shift: 'LeftShift',
     'left-shift': 'LeftShift',
     shiftleft: 'LeftShift',
     shift_left: 'LeftShift',
     'shift-left': 'LeftShift',
+    rightshift: 'RightShift',
+    right_shift: 'RightShift',
+    'right-shift': 'RightShift',
+    shiftright: 'RightShift',
+    shift_right: 'RightShift',
+    'shift-right': 'RightShift',
     slash: '/',
     '/': '/',
     period: '.',
@@ -464,6 +519,12 @@ function normalizePrimary(value: string): string | null {
     '[': '[',
     bracketright: ']',
     ']': ']',
+    backslash: '\\',
+    '\\': '\\',
+    quote: "'",
+    "'": "'",
+    backquote: '`',
+    '`': '`',
   }
   const nativePrimary: Record<string, string> = {
     fn: 'Fn',
@@ -475,19 +536,16 @@ function normalizePrimary(value: string): string | null {
     alt_right: 'RightAlt',
     'alt-right': 'RightAlt',
   }
-  if (nativePrimary[lower]) return nativePrimary[lower]
-  if (named[lower]) return named[lower]
+  if (Object.prototype.hasOwnProperty.call(nativePrimary, lower)) return nativePrimary[lower]
+  if (Object.prototype.hasOwnProperty.call(named, lower)) return named[lower]
   if (/^f([1-9]|1[0-2])$/.test(lower)) return lower.toUpperCase()
   if (/^[a-z0-9]$/.test(lower)) return lower.toUpperCase()
   return null
 }
 
 export function bindingFromHotkey(value: string): ShortcutBinding | null {
-  const parts = value
-    .split('+')
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return null
+  const parts = value.split('+').map((part) => part.trim())
+  if (parts.some((part) => part.length === 0)) return null
 
   const primary = normalizePrimary(parts[parts.length - 1])
   if (!primary) return null
@@ -497,7 +555,7 @@ export function bindingFromHotkey(value: string): ShortcutBinding | null {
   for (const part of parts.slice(0, -1)) {
     const modifier = normalizeModifier(part)
     if (!modifier) return null
-    const semantic = modifier === 'Option' || modifier === 'Alt' ? 'Alt' : modifier
+    const semantic = modifier === 'Option' ? 'Alt' : modifier === 'Command' ? 'Super' : modifier
     if (seen.has(semantic)) return null
     seen.add(semantic)
     modifiers.push(modifier)
@@ -511,7 +569,7 @@ export function hotkeyFromBinding(binding: ShortcutBinding): string {
   return [...binding.modifiers, binding.primary].join('+')
 }
 
-const MAX_HOTKEY_BINDINGS_PER_ROLE = 3
+const MAX_HOTKEY_BINDINGS_PER_ROLE = 4
 
 function normalizeBinding(binding: ShortcutBinding | null | undefined): ShortcutBinding | null {
   if (!binding) return null
@@ -702,6 +760,7 @@ function syncTranslationConfig(previous: AppConfig, partial: Partial<AppConfig>)
 
 function syncHotkeyConfig(previous: AppConfig, partial: Partial<AppConfig>): AppConfig {
   const merged = syncTranslationConfig(previous, partial)
+  merged.language_variants = normalizeLanguageVariants(merged.language_variants)
   if (partial.hotkeys) {
     const hotkeys = { ...partial.hotkeys }
     const listsChanged =
@@ -731,9 +790,51 @@ function syncHotkeyConfig(previous: AppConfig, partial: Partial<AppConfig>): App
     return syncTypedHotkeysToLegacy({ ...merged, hotkeys })
   }
   if ('hotkey' in partial || 'ask_hotkey' in partial || 'hotkey_mode' in partial) {
+    if (
+      'hotkey_mode' in partial &&
+      !('hotkey' in partial) &&
+      !('ask_hotkey' in partial) &&
+      merged.hotkeys
+    ) {
+      return syncTypedHotkeysToLegacy({
+        ...merged,
+        hotkeys: {
+          ...merged.hotkeys,
+          dictationMode: isHotkeyMode(partial.hotkey_mode)
+            ? partial.hotkey_mode
+            : previous.hotkeys.dictationMode,
+        },
+      })
+    }
     return syncLegacyHotkeysToTyped(merged)
   }
   return merged.hotkeys ? merged : syncLegacyHotkeysToTyped(merged)
+}
+
+function modelStateForConfigChange(previous: AppConfig, next: AppConfig) {
+  const sttChanged = (
+    [
+      'stt_provider',
+      'stt_api_key',
+      'stt_custom_api_key',
+      'stt_custom_base_url',
+      'stt_custom_model',
+      'stt_volcengine_resource_id',
+      'stt_aliyun_qwen_region',
+    ] as const
+  ).some((field) => previous[field] !== next[field])
+  const endpointChanged =
+    previous.llm_provider !== next.llm_provider ||
+    previous.llm_base_url !== next.llm_base_url ||
+    previous.llm_api_key !== next.llm_api_key
+  const modelChanged = previous.llm_model !== next.llm_model
+  return {
+    ...(sttChanged ? { sttTestStatus: 'idle' as TestStatus, sttLatencyMs: null } : {}),
+    ...(endpointChanged ? { llmModels: [] as string[] } : {}),
+    ...(endpointChanged || modelChanged
+      ? { llmTestStatus: 'idle' as TestStatus, llmLatencyMs: null }
+      : {}),
+  }
 }
 
 const defaultConfig: AppConfig = {
@@ -761,6 +862,7 @@ const defaultConfig: AppConfig = {
   polish_style: 'clean',
   polish_custom_prompt: '',
   polish_chinese_script: 'preserve',
+  language_variants: {},
   custom_scenes: [],
   system_scene_overrides: [],
   active_scene: null,
@@ -809,6 +911,8 @@ const defaultConfig: AppConfig = {
   interaction_sounds: true,
   mute_background_audio: true,
   show_in_dock: true,
+  save_recording_audio: true,
+  auto_learn_dictionary: true,
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -820,7 +924,10 @@ export const useAppStore = create<AppState>((set) => ({
   setRecordingStyle: (recordingStyle) => set({ recordingStyle }),
 
   audioVolume: 0,
-  setAudioVolume: (audioVolume) => set({ audioVolume }),
+  setAudioVolume: (audioVolume) =>
+    set({
+      audioVolume: Number.isFinite(audioVolume) ? Math.min(1, Math.max(0, audioVolume)) : 0,
+    }),
   partialTranscript: '',
   setPartialTranscript: (partialTranscript) => set({ partialTranscript }),
   finalTranscript: '',
@@ -840,13 +947,107 @@ export const useAppStore = create<AppState>((set) => ({
   setLastContext: (lastContext) => set({ lastContext }),
 
   config: defaultConfig,
-  setConfig: (config) => set((s) => ({ config: syncHotkeyConfig(s.config, config) })),
-  updateConfig: (partial) => set((s) => ({ config: syncHotkeyConfig(s.config, partial) })),
+  configCommit: null,
+  initializeConfigCommit: (incoming) => {
+    let initialized = false
+    set((state) => {
+      const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+      if (state.configCommit) cursor.initialize(state.configCommit)
+      const handshake = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+      if (!handshake.initialize(incoming)) return state
+      const read = handshake.snapshot!
+      if (
+        state.configCommit &&
+        read.configEpoch === state.configCommit.configEpoch &&
+        read.revision === state.configCommit.revision &&
+        read.saveId === null &&
+        valuesEqual(read.config, state.configCommit.config)
+      ) {
+        initialized = true
+        return state
+      }
+      if (!cursor.initialize(incoming)) return state
+      const accepted = cursor.snapshot!
+      initialized = true
+      if (valuesEqual(state.configCommit, accepted)) return state
+      try {
+        const config = mergeAppConfigDraft(
+          state.savedConfig ?? defaultConfig,
+          state.config,
+          accepted.config,
+        )
+        return {
+          configCommit: accepted,
+          config,
+          savedConfig: structuredClone(accepted.config),
+          ...modelStateForConfigChange(state.config, config),
+        }
+      } catch {
+        initialized = false
+        return state
+      }
+    })
+    return initialized
+  },
+  applyConfigCommit: (incoming) => {
+    let disposition: ConfigCommitDisposition = 'invalid'
+    set((state) => {
+      const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+      if (state.configCommit) cursor.initialize(state.configCommit)
+      disposition = cursor.accept(incoming)
+      if (disposition !== 'accepted') return state
+      const accepted = cursor.snapshot!
+      try {
+        const submitted = accepted.saveId ? pendingConfigSaves.snapshot(accepted.saveId) : null
+        const baseline = submitted ?? state.savedConfig ?? state.configCommit!.config
+        const config = mergeAppConfigDraft(baseline, state.config, accepted.config)
+        return {
+          configCommit: accepted,
+          config,
+          savedConfig: structuredClone(accepted.config),
+          ...modelStateForConfigChange(state.config, config),
+        }
+      } catch {
+        disposition = 'invalid'
+        return state
+      }
+    })
+    return disposition
+  },
+  setConfig: (incoming) =>
+    set((state) => {
+      const config = syncHotkeyConfig(state.config, incoming)
+      return { config, ...modelStateForConfigChange(state.config, config) }
+    }),
+  updateConfig: (partial) =>
+    set((state) => {
+      const config = syncHotkeyConfig(state.config, partial)
+      return { config, ...modelStateForConfigChange(state.config, config) }
+    }),
   applyPersistedConfigPatch: (patch) =>
-    set((s) => ({
-      config: syncHotkeyConfig(s.config, patch),
-      savedConfig: s.savedConfig ? syncHotkeyConfig(s.savedConfig, patch) : s.savedConfig,
-    })),
+    set((state) => {
+      if (state.configCommit !== null) return state
+      const incoming = { ...patch }
+      if (state.savedConfig && !valuesEqual(state.config.hotkeys, state.savedConfig.hotkeys)) {
+        const persisted = syncHotkeyConfig(state.savedConfig, patch).hotkeys
+        incoming.hotkeys = mergeHotkeyDraft(
+          state.config.hotkeys,
+          state.savedConfig.hotkeys,
+          persisted,
+        )
+        delete incoming.hotkey
+        delete incoming.ask_hotkey
+        delete incoming.hotkey_mode
+      }
+      const config = syncHotkeyConfig(state.config, incoming)
+      return {
+        config,
+        savedConfig: state.savedConfig
+          ? syncHotkeyConfig(state.savedConfig, patch)
+          : state.savedConfig,
+        ...modelStateForConfigChange(state.config, config),
+      }
+    }),
 
   history: [],
   setHistory: (history) => set({ history }),
@@ -880,7 +1081,20 @@ export const useAppStore = create<AppState>((set) => ({
   setLlmModels: (llmModels) => set({ llmModels }),
 
   pipelineError: null,
-  setPipelineError: (pipelineError) => set({ pipelineError }),
+  pipelineErrorKey: null,
+  pipelineErrorMessageKey: null,
+  retryAvailable: false,
+  setRetryAvailable: (retryAvailable) => set({ retryAvailable }),
+  failedTakeId: null,
+  setFailedTakeId: (failedTakeId) => set({ failedTakeId }),
+  setPipelineErrorKey: (pipelineErrorKey) => set({ pipelineErrorKey }),
+  setPipelineError: (pipelineError, messageKey) =>
+    set((state) => ({
+      pipelineError,
+      pipelineErrorMessageKey: pipelineError === null ? null : (messageKey ?? null),
+      pipelineErrorKey: pipelineError === null ? null : state.pipelineErrorKey,
+      failedTakeId: pipelineError === null ? null : state.failedTakeId,
+    })),
 
   accessibilityTrusted: true,
   setAccessibilityTrusted: (accessibilityTrusted) => set({ accessibilityTrusted }),

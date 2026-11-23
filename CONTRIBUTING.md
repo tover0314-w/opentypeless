@@ -8,6 +8,8 @@ Thanks for your interest in contributing! This guide covers everything you need 
 2. Clone the repo and run `npm install`
 3. Start development: `npm run tauri dev`
 
+The package declares Rust 1.90 or newer to match the patched desktop runtime and updater dependencies. Local verification uses Rust 1.96; Rust 1.90 itself still needs a dedicated minimum-toolchain build check.
+
 ## How to Contribute
 
 | Type | Process |

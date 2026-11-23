@@ -2,9 +2,10 @@ import { useTranslation } from 'react-i18next'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { BookOpen, ExternalLink, MessageCircleQuestion, Sparkles, ScrollText } from 'lucide-react'
 import { APP_REPO_URL } from '../../lib/constants'
+import type { PracticeOptions } from '../../lib/tauri'
 
 interface Props {
-  onExploreFeatures?: () => void
+  onExploreFeatures?: (mode: PracticeOptions['mode']) => void
 }
 
 export function HelpPane({ onExploreFeatures }: Props) {
@@ -26,14 +27,19 @@ export function HelpPane({ onExploreFeatures }: Props) {
           </div>
           <p className="mt-1 text-text-tertiary">{t('settingsModal.help.exploreDescription')}</p>
         </div>
-        <button
-          type="button"
-          onClick={onExploreFeatures}
-          disabled={!onExploreFeatures}
-          className="btn-primary shrink-0 cursor-pointer px-5 py-2 text-[14px] font-medium disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {t('settingsModal.help.start')}
-        </button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {(['dictate', 'translate', 'ask'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onExploreFeatures?.(mode)}
+              disabled={!onExploreFeatures}
+              className="cursor-pointer rounded-full border border-border bg-bg-elevated px-4 py-2 text-[14px] font-medium disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t(`home.modes.${mode}.title`)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="divide-y divide-border-thin">

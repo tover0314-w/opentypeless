@@ -1,4 +1,4 @@
-import { isMacPlatform, useAppStore } from '../stores/appStore'
+import { isMacPlatform, isWindowsPlatform, useAppStore } from '../stores/appStore'
 import type { ShortcutBinding } from '../stores/appStore'
 
 export type VoiceShortcutRole = 'dictation' | 'ask' | 'translate' | 'pasteLast'
@@ -8,6 +8,7 @@ export function useVoiceShortcuts() {
   const hotkeys = useAppStore((s) => s.config.hotkeys)
   const updateConfig = useAppStore((s) => s.updateConfig)
   const isMac = isMacPlatform()
+  const isWindows = isWindowsPlatform()
 
   const bindings: Record<VoiceShortcutRole, ShortcutBinding[]> = {
     dictation: hotkeys.dictationBindings?.length ? hotkeys.dictationBindings : [hotkeys.dictation],
@@ -28,14 +29,26 @@ export function useVoiceShortcuts() {
   ]
 
   const specialOptions: Record<VoiceShortcutRole, Array<{ value: string; label: string }>> = {
-    dictation: isMac ? [{ value: 'Fn', label: 'Fn' }] : [],
-    ask: isMac ? [{ value: 'Fn+Space', label: 'Fn + Space' }] : [],
-    translate: isMac ? [{ value: 'Fn+LeftShift', label: 'Fn + Left Shift' }] : [],
+    dictation: isMac
+      ? [{ value: 'Fn', label: 'Fn' }]
+      : isWindows
+        ? [{ value: 'RightAlt', label: 'Right Alt' }]
+        : [],
+    ask: isMac
+      ? [{ value: 'Fn+Space', label: 'Fn + Space' }]
+      : isWindows
+        ? [{ value: 'RightAlt+Space', label: 'Right Alt + Space' }]
+        : [],
+    translate: isMac
+      ? [{ value: 'Fn+LeftShift', label: 'Fn + Left Shift' }]
+      : isWindows
+        ? [{ value: 'RightAlt+RightShift', label: 'Right Alt + Right Shift' }]
+        : [],
     pasteLast: [],
   }
 
   const setBindings = (role: VoiceShortcutRole, next: ShortcutBinding[]) => {
-    const nextHotkeys = { ...hotkeys }
+    const nextHotkeys = { ...useAppStore.getState().config.hotkeys }
     if (role === 'dictation') {
       if (next.length === 0) return
       nextHotkeys.dictationBindings = next
@@ -52,5 +65,18 @@ export function useVoiceShortcuts() {
     updateConfig({ hotkeys: nextHotkeys })
   }
 
-  return { bindings, otherBindings, specialOptions, setBindings }
+  const setPrimaryBinding = (role: VoiceShortcutRole, binding: ShortcutBinding) => {
+    const current = useAppStore.getState().config.hotkeys
+    const currentBindings =
+      role === 'dictation'
+        ? current.dictationBindings
+        : role === 'ask'
+          ? current.askBindings
+          : role === 'translate'
+            ? current.translateBindings
+            : []
+    setBindings(role, [binding, ...(currentBindings ?? []).slice(1)])
+  }
+
+  return { bindings, otherBindings, specialOptions, setBindings, setPrimaryBinding }
 }

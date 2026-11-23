@@ -18,6 +18,13 @@ use super::user_mappings::{
 const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(2);
 const DEFAULT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetObservation {
+    Matched,
+    Changed,
+    Unavailable,
+}
+
 #[derive(Clone, Copy, Debug)]
 enum RefreshSignal {
     Normal,
@@ -81,9 +88,15 @@ pub struct ContextDetectorHandle {
 }
 
 impl ContextDetectorHandle {
-    pub fn start_default(mapping_store: UserAppMappingStore) -> Self {
+    pub fn start_default(
+        mapping_store: UserAppMappingStore,
+        enabled: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> Self {
         Self::start_with_mapping_store(
-            default_source(),
+            Arc::new(super::platform::PrivacyGuardedSource::new(
+                default_source(),
+                enabled,
+            )),
             mapping_store,
             DEFAULT_REFRESH_INTERVAL,
             DEFAULT_STALE_AFTER,
@@ -183,7 +196,7 @@ impl ContextDetectorHandle {
         } else {
             None
         };
-        let candidate_template = if stale {
+        let candidate_template = if !enabled || stale {
             None
         } else {
             cached.candidate_template.clone()
@@ -277,13 +290,29 @@ impl ContextDetectorHandle {
     }
 
     pub fn target_still_matches_now(&self, expected: &TargetAppGuard) -> bool {
+        self.observe_target_now(expected) == TargetObservation::Matched
+    }
+
+    pub fn observe_target_now(&self, expected: &TargetAppGuard) -> TargetObservation {
         if expected.is_empty() {
-            return true;
+            return TargetObservation::Matched;
         }
-        self.source
-            .collect()
-            .map(|signals| expected.matches(&TargetAppGuard::from(&signals)))
-            .unwrap_or(false)
+        let Some(current) = self.source.target_identity() else {
+            return TargetObservation::Unavailable;
+        };
+        if expected.has_known_mismatch(&current) {
+            return TargetObservation::Changed;
+        }
+        if expected.process_id.is_some() && current.process_id.is_none()
+            || expected.native_identity.is_some() && current.native_identity.is_none()
+        {
+            return TargetObservation::Unavailable;
+        }
+        if expected.matches(&current) {
+            TargetObservation::Matched
+        } else {
+            TargetObservation::Changed
+        }
     }
 
     pub fn restore_target_application(&self, expected: &TargetAppGuard) -> bool {
@@ -520,6 +549,68 @@ mod tests {
     }
 
     #[test]
+    fn immediate_target_observation_distinguishes_unavailable_from_changed() {
+        let source = Arc::new(FakeSource::new(Some(gmail_signals())));
+        let handle = detector(source.clone());
+        let expected = TargetAppGuard {
+            process_id: Some(42),
+            native_identity: Some("com.google.Chrome".into()),
+        };
+        assert_eq!(
+            handle.observe_target_now(&expected),
+            TargetObservation::Matched
+        );
+        source.set(None);
+        assert_eq!(
+            handle.observe_target_now(&expected),
+            TargetObservation::Unavailable
+        );
+        source.set(Some(ContextSignals {
+            process_id: Some(77),
+            native_identity: Some("synthetic-other-app".into()),
+            ..Default::default()
+        }));
+        assert_eq!(
+            handle.observe_target_now(&expected),
+            TargetObservation::Changed
+        );
+    }
+
+    #[test]
+    fn incomplete_target_identity_is_unavailable_not_changed() {
+        let source = Arc::new(FakeSource::new(Some(ContextSignals {
+            process_id: Some(42),
+            ..Default::default()
+        })));
+        let handle = detector(source);
+        let expected = TargetAppGuard {
+            process_id: Some(42),
+            native_identity: Some("synthetic-app".into()),
+        };
+        assert_eq!(
+            handle.observe_target_now(&expected),
+            TargetObservation::Unavailable
+        );
+    }
+
+    #[test]
+    fn known_process_change_is_not_hidden_by_missing_application_identity() {
+        let source = Arc::new(FakeSource::new(Some(ContextSignals {
+            process_id: Some(77),
+            ..Default::default()
+        })));
+        let handle = detector(source);
+        let expected = TargetAppGuard {
+            process_id: Some(42),
+            native_identity: Some("synthetic-app".into()),
+        };
+        assert_eq!(
+            handle.observe_target_now(&expected),
+            TargetObservation::Changed
+        );
+    }
+
+    #[test]
     fn context_snapshot_cache_publishes_focus_refresh_without_blocking_readers() {
         let source = Arc::new(FakeSource::new(Some(gmail_signals())));
         let handle = detector(source.clone());
@@ -638,6 +729,23 @@ mod tests {
 
         handle.shutdown_for_test();
         assert!(handle.latest_mapping_candidate().is_none());
+    }
+
+    #[test]
+    fn disabled_context_does_not_publish_mapping_candidate() {
+        let source = Arc::new(FakeSource::new(Some(gmail_signals())));
+        let handle = detector(source);
+        wait_for_profile(&handle, "email.gmail");
+        handle.snapshot_for_recording();
+        assert!(handle.latest_mapping_candidate().is_some());
+        let disabled = handle.snapshot_for_recording_enabled(false);
+        assert!(handle.latest_mapping_candidate().is_none());
+        assert!(disabled.mapped_scene_id.is_none());
+        assert!(disabled.browser_target.is_none());
+        assert_eq!(
+            disabled.browser_access_status,
+            BrowserAccessStatus::NotApplicable
+        );
     }
 
     #[test]

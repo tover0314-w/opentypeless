@@ -1,12 +1,20 @@
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { useAuthStore } from '../stores/authStore'
 import { API_BASE_URL } from './constants'
+import { cloudFetch } from './cloudTransport'
+import { refreshDesktopCheckout } from './desktop-checkout-order'
 
 /** Pending OAuth state for CSRF validation. */
 let pendingOAuthState: string | null = null
 let pendingOAuthVerifier: string | null = null
 let pendingOAuthTimer: ReturnType<typeof setTimeout> | null = null
-let pendingOAuthExchange: { state: string; code: string; result: Promise<boolean> } | null = null
+let pendingOAuthExchange: {
+  state: string
+  code: string
+  result: Promise<boolean>
+  owners: Set<() => boolean>
+} | null = null
+let pendingOAuthFlow: { state: string; cancelExchange?: () => void } | null = null
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
 export const EMAIL_VERIFICATION_STATE_TTL_MS = 60 * 60 * 1000
 
@@ -17,7 +25,11 @@ export function generateOAuthState(ttlMs = OAUTH_STATE_TTL_MS): string {
   const verifier = `${crypto.randomUUID().replace(/-/g, '')}${crypto.randomUUID().replace(/-/g, '')}`
   pendingOAuthState = state
   pendingOAuthVerifier = verifier
-  pendingOAuthTimer = setTimeout(() => clearOAuthState(state), ttlMs)
+  const flow = { state }
+  pendingOAuthFlow = flow
+  pendingOAuthTimer = setTimeout(() => {
+    if (pendingOAuthFlow === flow) clearOAuthState(state)
+  }, ttlMs)
   return state
 }
 
@@ -38,9 +50,16 @@ export function getPendingOAuthVerifier(state: string): string | null {
   return null
 }
 
+export function captureOAuthFlowOwner(state: string): () => boolean {
+  const flow = pendingOAuthFlow
+  return () => flow !== null && flow.state === state && pendingOAuthFlow === flow
+}
+
 /** Clear pending OAuth state (e.g. user cancelled or timed out). */
 export function clearOAuthState(expectedState?: string): void {
-  if (expectedState !== undefined && pendingOAuthState !== expectedState) return
+  if (expectedState !== undefined && pendingOAuthFlow?.state !== expectedState) return
+  pendingOAuthFlow?.cancelExchange?.()
+  pendingOAuthFlow = null
   pendingOAuthState = null
   pendingOAuthVerifier = null
   pendingOAuthExchange = null
@@ -50,15 +69,45 @@ export function clearOAuthState(expectedState?: string): void {
   }
 }
 
-export async function initDeepLinkListener() {
-  try {
-    await onOpenUrl(async (urls) => {
-      for (const rawUrl of urls) {
-        await handleDeepLinkUrl(rawUrl)
+export function initDeepLinkListener(): () => void {
+  let active = true
+  const ownsListener = () => active
+  let unlisten: (() => void) | null = null
+  const release = (stop: () => void) => {
+    try {
+      Promise.resolve(stop()).catch(() => {})
+    } catch {
+      return
+    }
+  }
+  void onOpenUrl(async (urls) => {
+    if (!active) return
+    for (const rawUrl of urls) {
+      if (!active) return
+      try {
+        await handleDeepLinkUrl(rawUrl, ownsListener)
+      } catch {
+        if (active) console.error('[deep-link] callback processing failed')
       }
+    }
+  })
+    .then((stop) => {
+      if (!active) release(stop)
+      else unlisten = stop
     })
-  } catch {
-    // Deep link plugin not available (e.g. web dev mode)
+    .catch(() => {})
+  return () => {
+    if (!active) return
+    active = false
+    const exchange = pendingOAuthExchange
+    if (
+      exchange?.owners.delete(ownsListener) &&
+      !Array.from(exchange.owners).some((owner) => owner())
+    ) {
+      clearOAuthState(exchange.state)
+    }
+    if (unlisten) release(unlisten)
+    unlisten = null
   }
 }
 
@@ -67,7 +116,11 @@ function isValidToken(token: string): boolean {
   return /^[\w\-._~+/]+=*$/.test(token) && token.length >= 10 && token.length <= 4096
 }
 
-export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
+export async function handleDeepLinkUrl(
+  rawUrl: string,
+  isCurrentOwner: () => boolean = () => true,
+): Promise<boolean> {
+  if (!isCurrentOwner()) return false
   let url: URL
   try {
     url = new URL(rawUrl)
@@ -77,17 +130,19 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
 
   // Only accept our custom scheme
   if (url.protocol !== 'opentypeless:') return false
+  if (url.username || url.password || url.port) return false
 
   const path = url.hostname ? url.hostname + url.pathname : url.pathname.replace(/^\/+/, '')
   const params = url.searchParams
-  console.log('[deep-link] received:', `${url.protocol}${path}`)
 
   // opentypeless://auth/callback?code=xxx&state=yyy
   if (path === 'auth/callback' || path === 'auth/callback/') {
+    if (params.getAll('code').length !== 1 || params.getAll('state').length !== 1) return false
     const code = params.get('code')
     const state = params.get('state')
     const expectedState = pendingOAuthState
     const verifier = pendingOAuthVerifier
+    const flow = pendingOAuthFlow
 
     // Reject tokens when no OAuth flow was initiated (prevents external injection)
     if (!expectedState) {
@@ -98,17 +153,22 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
     if (state !== expectedState) {
       return false
     }
-    if (!code || !verifier) return false
+    if (!code?.trim() || !verifier || !flow) return false
     if (pendingOAuthExchange) {
-      return pendingOAuthExchange.state === state && pendingOAuthExchange.code === code
-        ? pendingOAuthExchange.result
-        : false
+      if (pendingOAuthExchange.state !== state || pendingOAuthExchange.code !== code) return false
+      pendingOAuthExchange.owners.add(isCurrentOwner)
+      const result = await pendingOAuthExchange.result
+      return isCurrentOwner() && result
     }
-    const result = exchangeOAuthCode(code, expectedState, verifier)
-    const exchange = { state: expectedState, code, result }
+    const owners = new Set([isCurrentOwner])
+    const result = exchangeOAuthCode(code, expectedState, verifier, flow, () =>
+      Array.from(owners).some((owner) => owner()),
+    )
+    const exchange = { state: expectedState, code, result, owners }
     pendingOAuthExchange = exchange
     try {
-      return await result
+      const completed = await result
+      return isCurrentOwner() && completed
     } finally {
       if (pendingOAuthExchange === exchange) pendingOAuthExchange = null
     }
@@ -116,7 +176,10 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
 
   // opentypeless://checkout/success
   if (path === 'checkout/success' || path === 'checkout/success/') {
-    await useAuthStore.getState().refreshSubscription()
+    const user = useAuthStore.getState().user
+    if (!user) return false
+    await (refreshDesktopCheckout(user.id) ?? useAuthStore.getState().refreshSubscription())
+    if (!isCurrentOwner() || useAuthStore.getState().user !== user) return false
     window.location.hash = '#/upgrade'
     return true
   }
@@ -124,24 +187,110 @@ export async function handleDeepLinkUrl(rawUrl: string): Promise<boolean> {
   return false
 }
 
-async function exchangeOAuthCode(code: string, state: string, verifier: string): Promise<boolean> {
+async function readOAuthExchange(response: Response, deadline: Promise<never>): Promise<unknown> {
+  if (!response.body) throw new Error('Invalid OAuth exchange response')
+  const declaredLength = response.headers.get('Content-Length')
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > 65536) {
+    void response.body.cancel().catch(() => {})
+    throw new Error('OAuth exchange response too large')
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let bytes = 0
+  let text = ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/auth/desktop-handoff/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, verifier }),
-    })
-    if (!response.ok) return false
-    const result = (await response.json()) as { token?: unknown }
+    while (true) {
+      const chunk = await Promise.race([reader.read(), deadline])
+      if (chunk.done) break
+      bytes += chunk.value.byteLength
+      if (bytes > 65536) throw new Error('OAuth exchange response too large')
+      text += decoder.decode(chunk.value, { stream: true })
+    }
+    text += decoder.decode()
+    return JSON.parse(text)
+  } catch (error) {
+    void reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+async function exchangeOAuthCode(
+  code: string,
+  state: string,
+  verifier: string,
+  flow: { state: string; cancelExchange?: () => void },
+  isCurrentOwner: () => boolean,
+): Promise<boolean> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    flow.cancelExchange = () => {
+      const error = new Error('OAuth exchange cancelled')
+      controller.abort(error)
+      reject(error)
+    }
+    timer = setTimeout(() => {
+      const error = new Error('OAuth exchange timed out')
+      controller.abort(error)
+      reject(error)
+    }, 30_000)
+  })
+  try {
+    const response = await Promise.race([
+      cloudFetch(`${API_BASE_URL}/api/auth/desktop-handoff/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, verifier }),
+        signal: controller.signal,
+      }).then((response) => {
+        if (controller.signal.aborted) {
+          void response.body?.cancel().catch(() => {})
+          controller.signal.throwIfAborted()
+        }
+        return response
+      }),
+      deadline,
+    ])
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {})
+      return false
+    }
+    const result = await readOAuthExchange(response, deadline)
+    controller.signal.throwIfAborted()
+    clearTimeout(timer)
+    flow.cancelExchange = () => controller.abort(new Error('OAuth validation cancelled'))
+    if (result === null || typeof result !== 'object' || Array.isArray(result) || 'error' in result)
+      return false
+    if (!('token' in result)) return false
     const token = result.token
     if (typeof token !== 'string' || !isValidToken(token)) return false
     // Ignore an exchange that finished after cancellation, expiry, or a new login.
-    if (pendingOAuthState !== state || pendingOAuthVerifier !== verifier) return false
-    clearOAuthState(state)
-    await useAuthStore.getState().handleDeepLinkToken(token)
+    if (
+      !isCurrentOwner() ||
+      pendingOAuthFlow !== flow ||
+      pendingOAuthState !== state ||
+      pendingOAuthVerifier !== verifier
+    )
+      return false
+    pendingOAuthState = null
+    pendingOAuthVerifier = null
+    await useAuthStore
+      .getState()
+      .handleDeepLinkToken(
+        token,
+        () => isCurrentOwner() && pendingOAuthFlow === flow,
+        controller.signal,
+      )
+    if (!isCurrentOwner() || pendingOAuthFlow !== flow) return false
     window.location.hash = '#/account'
     return true
   } catch {
     return false
+  } finally {
+    clearTimeout(timer)
+    delete flow.cancelExchange
+    if (pendingOAuthFlow === flow && pendingOAuthState === null) clearOAuthState(state)
   }
 }

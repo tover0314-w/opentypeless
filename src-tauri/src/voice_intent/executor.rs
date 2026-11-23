@@ -99,28 +99,26 @@ async fn execute_insert(
             .await
             .unwrap_or(false);
         if !restored {
-            let _ = backend.copy_to_clipboard(request.generated_output).await;
-            let _ = backend.popup_answer(request.generated_output).await;
-            return result(
+            return copy_with_optional_popup(
                 request.intent,
-                None,
-                VoiceExecutionStatus::CopiedFallback,
-                Some(VoiceExecutionFallbackReason::FocusRestoreFailed),
-            );
+                request.generated_output,
+                VoiceExecutionFallbackReason::FocusRestoreFailed,
+                true,
+                backend,
+            )
+            .await;
         }
     }
 
     if !backend.target_matches(request.target_guard) {
-        let _ = backend.copy_to_clipboard(request.generated_output).await;
-        if request.restore_target_before_insert {
-            let _ = backend.popup_answer(request.generated_output).await;
-        }
-        return result(
+        return copy_with_optional_popup(
             request.intent,
-            None,
-            VoiceExecutionStatus::CopiedFallback,
-            Some(VoiceExecutionFallbackReason::TargetChanged),
-        );
+            request.generated_output,
+            VoiceExecutionFallbackReason::TargetChanged,
+            request.restore_target_before_insert,
+            backend,
+        )
+        .await;
     }
 
     match backend.insert_at_cursor(request.generated_output).await {
@@ -147,6 +145,28 @@ async fn execute_insert(
             )
         }
     }
+}
+
+async fn copy_with_optional_popup(
+    intent: &VoiceIntent,
+    output: &str,
+    reason: VoiceExecutionFallbackReason,
+    attempt_popup: bool,
+    backend: &mut dyn VoiceExecutionBackend,
+) -> VoiceExecutionResult {
+    let copied = backend.copy_to_clipboard(output).await.is_ok();
+    let popup_accepted = attempt_popup && backend.popup_answer(output).await.is_ok();
+    let (status, placement) = if copied {
+        (VoiceExecutionStatus::CopiedFallback, None)
+    } else if popup_accepted {
+        (
+            VoiceExecutionStatus::PopupFallback,
+            Some(VoiceOutputPlacement::PopupAnswer),
+        )
+    } else {
+        (VoiceExecutionStatus::Failed, None)
+    };
+    result(intent, placement, status, Some(reason))
 }
 
 async fn execute_replacement(
@@ -421,6 +441,86 @@ mod tests {
             selected_text_available,
             restore_target_before_insert,
             flags,
+        }
+    }
+
+    #[tokio::test]
+    async fn insertion_fallback_requires_successful_delivery_receipts() {
+        let draft = intent(VoiceIntentKind::DraftInsert);
+        for (restore, restored, copied, popup, expected_status, expected_placement) in [
+            (
+                true,
+                false,
+                false,
+                true,
+                VoiceExecutionStatus::PopupFallback,
+                Some(VoiceOutputPlacement::PopupAnswer),
+            ),
+            (
+                true,
+                false,
+                false,
+                false,
+                VoiceExecutionStatus::Failed,
+                None,
+            ),
+            (
+                true,
+                true,
+                false,
+                true,
+                VoiceExecutionStatus::PopupFallback,
+                Some(VoiceOutputPlacement::PopupAnswer),
+            ),
+            (true, true, false, false, VoiceExecutionStatus::Failed, None),
+            (
+                false,
+                false,
+                false,
+                true,
+                VoiceExecutionStatus::Failed,
+                None,
+            ),
+            (
+                true,
+                false,
+                true,
+                false,
+                VoiceExecutionStatus::CopiedFallback,
+                None,
+            ),
+        ] {
+            let mut backend = FakeBackend {
+                restore_succeeds: restored,
+                copy_fails: !copied,
+                popup_fails: !popup,
+                ..Default::default()
+            };
+            let execution = execute_voice_intent(
+                request(
+                    &draft,
+                    "recoverable answer",
+                    false,
+                    restore,
+                    VoiceRoutingFlags::default(),
+                ),
+                &mut backend,
+            )
+            .await;
+            assert_eq!(
+                execution.status, expected_status,
+                "{restore}/{restored}/{copied}/{popup}"
+            );
+            assert_eq!(execution.actual_placement, expected_placement);
+            assert!(!backend.actions.contains(&"insert_at_cursor"));
+            assert_eq!(
+                execution.fallback_reason,
+                Some(if restore && !restored {
+                    VoiceExecutionFallbackReason::FocusRestoreFailed
+                } else {
+                    VoiceExecutionFallbackReason::TargetChanged
+                })
+            );
         }
     }
 

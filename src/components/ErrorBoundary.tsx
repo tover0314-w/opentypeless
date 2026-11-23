@@ -1,4 +1,4 @@
-import { Component, type ReactNode, type ErrorInfo } from 'react'
+import { Component, type ReactNode } from 'react'
 import i18n from '../i18n'
 
 interface Props {
@@ -7,21 +7,20 @@ interface Props {
 
 interface State {
   hasError: boolean
-  error: Error | null
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { hasError: false }
   }
 
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error }
+  static getDerivedStateFromError(): State {
+    return { hasError: true }
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info.componentStack)
+  componentDidCatch() {
+    console.error('Application rendering failed')
   }
 
   render() {
@@ -29,9 +28,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="p-8 flex flex-col items-center justify-center h-screen font-sans text-text-primary">
           <h2 className="mb-2">{i18n.t('error.somethingWentWrong')}</h2>
-          <p className="text-text-secondary mb-4">
-            {this.state.error?.message || i18n.t('error.unexpectedError')}
-          </p>
+          <p className="text-text-secondary mb-4">{i18n.t('error.unexpectedError')}</p>
           <button
             onClick={() => window.location.reload()}
             className="px-6 py-2 rounded-[6px] border border-border bg-bg-secondary cursor-pointer text-sm"

@@ -163,15 +163,17 @@ pub async fn set_family_scene_assignment(
     config_manager: tauri::State<'_, crate::storage::ConfigManager>,
     input: SetFamilySceneAssignmentInput,
 ) -> Result<Vec<FamilySceneAssignment>, String> {
-    let mut config = config_manager
+    config_manager
         .load()
         .await
         .map_err(|error| error.to_string())?;
-    set_family_assignment_value(&mut config, input.family, input.scene_id)?;
-    config_manager
-        .save(&config)
-        .await
+    let (revision, config) = config_manager
+        .try_update_current_config_commit(|current| {
+            set_family_assignment_value(current, input.family, input.scene_id)
+                .map_err(anyhow::Error::msg)
+        })
         .map_err(|error| error.to_string())?;
+    super::config::emit_config_commit(&app, config_manager.config_epoch(), revision, &config);
     let assignments = config.family_scene_assignments;
     let _ = app.emit(
         "config:patch",

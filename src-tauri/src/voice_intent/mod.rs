@@ -13,6 +13,49 @@ use normalize::NormalizedUtterance;
 
 pub struct VoiceIntentRouter;
 
+pub(crate) fn is_explicit_ask_transformation(question: &str) -> bool {
+    if [
+        CommandLocale::En,
+        CommandLocale::ZhHans,
+        CommandLocale::ZhHant,
+    ]
+    .iter()
+    .any(|locale| guard_reason(*locale, question).is_some())
+    {
+        return false;
+    }
+    let view = NormalizedUtterance::new(question);
+    [
+        "translate",
+        "rewrite",
+        "rephrase",
+        "please translate",
+        "please rewrite",
+        "please rephrase",
+        "翻译",
+        "翻譯",
+        "帮我翻译",
+        "幫我翻譯",
+        "请翻译",
+        "請翻譯",
+        "把这段翻译成",
+        "把這段翻譯成",
+        "将选中文字翻译成",
+        "將選取文字翻譯成",
+        "改写",
+        "改寫",
+        "帮我改写",
+        "幫我改寫",
+        "润色这段",
+        "潤色這段",
+    ]
+    .iter()
+    .any(|prefix| {
+        view.starts_with_prefix(prefix, prefix.is_ascii())
+            && view.payload_after_prefix(prefix).is_some()
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VoiceProviderWorkPlan {
     pub provider_call_limit: u8,
@@ -157,7 +200,7 @@ fn route_dictate(
             VoiceOutputPlacement::ReplaceSelection,
             grammar::exact_confidence(view),
             None,
-            None,
+            grammar::translation_target(locale, view).map(str::to_string),
             Some(locale),
             None,
         );
@@ -279,12 +322,20 @@ fn route_translate_mode(request: &VoiceRouteRequest<'_>) -> VoiceIntent {
                 Some(RouteFallbackReason::FeatureDisabled),
             );
         }
+        let target = match resolve_locale(request.speech_language, request.utterance) {
+            LocaleResolution::Supported(locale)
+                if guard_reason(locale, request.utterance).is_none() =>
+            {
+                grammar::translation_target(locale, &NormalizedUtterance::new(request.utterance))
+            }
+            _ => None,
+        };
         return intent(
             VoiceIntentKind::TranslateSelection,
             VoiceOutputPlacement::ReplaceSelection,
             1.0,
             None,
-            None,
+            target.map(str::to_string),
             None,
             None,
         );
@@ -472,6 +523,69 @@ mod tests {
             has_selected_text,
             speech_language,
             flags: VoiceRoutingFlags::default(),
+        }
+    }
+
+    #[test]
+    fn spoken_translation_target_is_carried_only_for_explicit_supported_commands() {
+        for (utterance, language, target) in [
+            ("translate this into Japanese", "en", "ja"),
+            ("把这段翻译成日语", "zh-CN", "ja"),
+            ("把這段翻譯成法語", "zh-TW", "fr"),
+            ("translate this to German.", "en", "de"),
+        ] {
+            let routed = VoiceIntentRouter::route(request(
+                VoiceMode::Dictate,
+                utterance,
+                true,
+                SpeechLanguageMode::Explicit(language),
+            ));
+            assert_eq!(routed.kind, VoiceIntentKind::TranslateSelection);
+            assert_eq!(routed.payload.as_deref(), Some(target));
+        }
+        let quoted = VoiceIntentRouter::route(request(
+            VoiceMode::Dictate,
+            "don't translate this to Japanese",
+            true,
+            SpeechLanguageMode::Explicit("en"),
+        ));
+        assert_ne!(quoted.kind, VoiceIntentKind::TranslateSelection);
+    }
+
+    #[test]
+    fn spoken_translation_target_preserves_defaults_and_ordinary_dictation() {
+        for (mode, utterance, selected, expected) in [
+            (VoiceMode::Translate, "把这段翻译成日语", true, "ja"),
+            (
+                VoiceMode::Translate,
+                "translate this into French",
+                true,
+                "fr",
+            ),
+            (
+                VoiceMode::Translate,
+                "translate this into Klingon",
+                true,
+                "en",
+            ),
+            (VoiceMode::Translate, "selected text", true, "en"),
+            (
+                VoiceMode::Dictate,
+                "translate this into Japanese",
+                false,
+                "en",
+            ),
+            (VoiceMode::Ask, "translate this into Japanese", true, "en"),
+        ] {
+            let routed = VoiceIntentRouter::route(request(
+                mode,
+                utterance,
+                selected,
+                SpeechLanguageMode::Automatic,
+            ));
+            let configured = String::from("en");
+            assert_eq!(routed.translation_target(&configured), expected);
+            assert_eq!(configured, "en");
         }
     }
 
@@ -748,7 +862,34 @@ mod tests {
                 "case {}",
                 case.id
             );
-            assert_eq!(result.payload, case.expected_payload, "case {}", case.id);
+            if result.kind == VoiceIntentKind::TranslateSelection {
+                assert_eq!(case.expected_payload, None, "legacy case {}", case.id);
+                let expected_target = if case.utterance.contains("English")
+                    || case.utterance.contains("英文")
+                {
+                    Some("en")
+                } else if case.utterance.contains("Spanish") {
+                    Some("es")
+                } else if case.utterance.contains("French") || case.utterance.contains("法文") {
+                    Some("fr")
+                } else if case.utterance.contains("Japanese") || case.utterance.contains("日文") {
+                    Some("ja")
+                } else if case.utterance.contains("Chinese") {
+                    Some("zh")
+                } else if case.utterance.contains("German") {
+                    Some("de")
+                } else {
+                    panic!("Translation corpus needs an explicit target: {}", case.id);
+                };
+                assert_eq!(
+                    result.payload.as_deref(),
+                    expected_target,
+                    "case {}",
+                    case.id
+                );
+            } else {
+                assert_eq!(result.payload, case.expected_payload, "case {}", case.id);
+            }
             assert_eq!(
                 result.fallback_reason, case.expected_fallback_reason,
                 "case {}",

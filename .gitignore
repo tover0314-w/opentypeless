@@ -13,6 +13,7 @@ node_modules
 # Build output
 dist
 dist-ssr
+onboarding-preview-dist/
 
 # Environment & secrets
 *.local

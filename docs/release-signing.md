@@ -1,5 +1,60 @@
 # Release Signing Setup
 
+## Checkout And Authorization Boundary
+
+The production workflow names described below refer to the separate CI/CD
+repository, not to workflows implemented in every application checkout.
+In the parity worktree reviewed on 2026-11-20, the workflow directory contains
+CI, a notarization-status query, and an unsigned Windows local-test workflow;
+it does not contain the production macOS/Linux release, Windows release,
+stapling, or finalization workflows described below. Their current remote
+contents and configured secrets have not been verified in this review.
+
+A configured updater endpoint or public key does not establish possession of
+the corresponding private signing key, a matching signed release, or a
+successful installation. Likewise, a locally available Developer ID identity
+does not authorize its use. Obtain explicit approval before signing, uploading
+to Apple, dispatching release workflows, pushing source, or publishing assets.
+Do not treat local test packages or documentation as evidence that these
+production gates have passed.
+
+## Local macOS Review Candidates
+
+Local review packages must preserve a stable signing identity across builds.
+Do not substitute an ad-hoc signature for a certificate-backed identity when
+testing Accessibility permission continuity. A successful `codesign --verify`
+checks signature integrity, not whether existing TCC grants match the new build.
+
+Before handing off a candidate:
+
+1. Copy the built app into a distinct candidate directory; do not overwrite a
+   package the user is testing.
+2. Select the exact available Developer ID Application identity fingerprint,
+   rather than the first certificate with a matching display name. Keep the
+   bundle identifier and team identity consistent.
+3. Sign with the project entitlements, hardened runtime and a secure timestamp.
+   Read back the entitlements and designated requirement. Reject an ad-hoc
+   candidate for cross-version permission testing.
+4. With explicit upload authorization, submit the archive to Apple using a
+   Keychain credential profile. Record the submission ID immediately; resume
+   that submission after a timeout instead of uploading it again.
+5. Require an `Accepted` result, staple and validate the ticket, then verify the
+   signature and require `spctl --assess --type execute` to accept the app.
+6. Generate the delivery ZIP after stapling. Record the source/build identity,
+   app and ZIP hashes, architecture, version and remaining failed gates.
+7. Test the actual app process. The first transition from ad-hoc to Developer ID
+   may require a new Accessibility grant. Verify recovery without relaunching,
+   then verify permission continuity with a subsequent distinct build.
+
+Never put passwords or private keys in repository files or command arguments.
+Use secure local credential input. Do not reset TCC, weaken Gatekeeper, remove
+quarantine attributes, or add private Apple entitlements to make a candidate
+appear accepted.
+
+Signing and notarization do not certify feature parity, automatic text receipt,
+dependency security or cross-platform release readiness. Those gates remain
+independent.
+
 OpenTypeless releases are built in `toverwu-qaq/opentypeless` and published to
 `tover0314-w/opentypeless`.
 

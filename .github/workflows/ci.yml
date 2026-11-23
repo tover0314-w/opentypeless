@@ -14,14 +14,18 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: '24'
           cache: 'npm'
 
-      - run: npm ci
+      - run: npm ci --engine-strict --ignore-scripts
       - run: npx tsc --noEmit
       - run: npx eslint src/
       - run: npx prettier --check src/
       - run: npx vitest run
+      - run: npm run test:release-version
+      - run: npm run test:windows-release-artifacts
+      - run: node --test scripts/__tests__/font-provenance.test.mjs
+      - run: npm run build
 
   check-rust:
     strategy:
@@ -47,10 +51,10 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: '24'
           cache: 'npm'
 
-      - run: npm ci
+      - run: npm ci --engine-strict --ignore-scripts
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -81,29 +85,30 @@ jobs:
         run: ./.github/scripts/prepare-linuxdeploy-wrapper.sh "$(uname -m)"
 
       - run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
-      - run: cargo clippy --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - run: cargo clippy --locked --all-targets --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml -- -D warnings
       - name: Run Rust tests
-        run: cargo test --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml
 
-  audit:
+  audit-frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: '24'
           cache: 'npm'
 
       - run: npm audit --audit-level=high
+
+  audit-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
         run: cargo install cargo-audit
 
-      # wayland-scanner 0.31.10 is currently the latest release and still pins
-      # quick-xml 0.39 for Wayland protocol code generation. The vulnerable XML
-      # parser path is not used for runtime user input; remove these ignores once
-      # wayland-scanner publishes a quick-xml >=0.41 compatible release.
-      - run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+      - run: cargo audit --file src-tauri/Cargo.lock --deny unsound

@@ -9,7 +9,7 @@ const KEY_LABELS: Record<string, string> = {
 
 /** "LeftShift" → "Left Shift", "MouseButton4" → "Mouse 4" (Typeless key label rules). */
 export function keyLabel(part: string): string {
-  if (KEY_LABELS[part]) return KEY_LABELS[part]
+  if (Object.prototype.hasOwnProperty.call(KEY_LABELS, part)) return KEY_LABELS[part]
   const mouse = /^MouseButton(\d+)$/.exec(part)
   if (mouse) return `Mouse ${mouse[1]}`
   return part.replace(/^(Left|Right)([A-Z])/, '$1 $2')
@@ -24,7 +24,8 @@ export function hotkeyParts(hotkey: string): string[] {
 }
 
 function formatBinding(binding: ShortcutBinding | null | undefined): string | null {
-  return binding ? [...binding.modifiers, binding.primary].join('+') : null
+  if (!binding?.primary.trim()) return null
+  return [...binding.modifiers, binding.primary].join('+')
 }
 
 /** First configured binding per voice feature, which is what Typeless teaches in its hints. */

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import i18n from './i18n'
 import { useTauriEvents } from './hooks/useTauriEvents'
+import { useConfigSync } from './hooks/useConfigSync'
+import { useHistorySyncScheduler } from './hooks/useHistorySyncScheduler'
+import { useMainUpdateEvents } from './hooks/useUpdateEvents'
 import { useInteractionSounds } from './hooks/useInteractionSounds'
 import { useTheme } from './hooks/useTheme'
 import { useAppStore } from './stores/appStore'
@@ -8,7 +12,6 @@ import { useAuthStore } from './stores/authStore'
 import { useRoute } from './lib/router'
 import {
   loadOnboardingCompleted,
-  getConfig,
   getHistory,
   getDictionary,
   getCorrectionRules,
@@ -18,15 +21,13 @@ import {
 } from './lib/tauri'
 import { initDeepLinkListener } from './lib/deep-link'
 import { readPendingDesktopCheckout } from './lib/desktop-checkout-intent'
+import { refreshDesktopCheckout } from './lib/desktop-checkout-order'
 import { shouldRefreshSubscriptionOnFocus } from './lib/subscription-refresh-policy'
 import { Capsule } from './components/Capsule'
 import { SettingsModal, ModalFrame } from './components/Settings'
-import { History } from './components/History'
-import { DictionaryPage } from './components/Dictionary'
-import { ModelsPage } from './components/ModelsPage'
+import { PageContent } from './components/PageContent'
 import { Onboarding } from './components/Onboarding'
 import { MainLayout } from './components/MainLayout'
-import { HomePage } from './components/HomePage'
 import { UpgradePage } from './components/UpgradePage'
 import { AccountPage } from './components/AccountPage'
 import { AskPanel } from './components/AskPanel'
@@ -34,27 +35,10 @@ import { ToastContainer } from './components/Toast'
 import { UpdatePrompt } from './components/UpdatePrompt'
 
 function CapsuleApp() {
-  useTauriEvents()
+  useConfigSync()
+  useTauriEvents({ legacyConfigEvents: false })
   useTheme()
   useInteractionSounds()
-
-  const setConfig = useAppStore((s) => s.setConfig)
-
-  useEffect(() => {
-    // Load config so DurationTimer gets the correct max_recording_seconds
-    getConfig()
-      .then((config) => {
-        setConfig(config)
-        // Restore UI language from config
-        if (config.ui_language && config.ui_language !== i18n.language) {
-          i18n.changeLanguage(config.ui_language)
-          localStorage.setItem('ui_language', config.ui_language)
-        }
-      })
-      .catch((e) => {
-        console.error('Failed to load config in capsule:', e)
-      })
-  }, [setConfig])
 
   // Window show is handled by useCapsuleResize (setSize → setPosition → show),
   // which works on both Windows and macOS. The previous rAF-based show approach
@@ -63,22 +47,8 @@ function CapsuleApp() {
 }
 
 function AskApp() {
+  useConfigSync()
   useTheme()
-  const setConfig = useAppStore((s) => s.setConfig)
-
-  useEffect(() => {
-    getConfig()
-      .then((config) => {
-        setConfig(config)
-        if (config.ui_language && config.ui_language !== i18n.language) {
-          i18n.changeLanguage(config.ui_language)
-          localStorage.setItem('ui_language', config.ui_language)
-        }
-      })
-      .catch((e) => {
-        console.error('Failed to load config in Ask app:', e)
-      })
-  }, [setConfig])
 
   return (
     <>
@@ -89,13 +59,15 @@ function AskApp() {
 }
 
 function MainApp() {
-  useTauriEvents()
+  const { t } = useTranslation()
+  const configSyncStatus = useConfigSync()
+  useHistorySyncScheduler()
+  useTauriEvents({ legacyConfigEvents: false })
+  useMainUpdateEvents()
   useTheme()
 
   const onboardingCompleted = useAppStore((s) => s.onboardingCompleted)
   const setOnboardingCompleted = useAppStore((s) => s.setOnboardingCompleted)
-  const setConfig = useAppStore((s) => s.setConfig)
-  const setSavedConfig = useAppStore((s) => s.setSavedConfig)
   const setHistory = useAppStore((s) => s.setHistory)
   const setDictionary = useAppStore((s) => s.setDictionary)
   const setCorrectionRules = useAppStore((s) => s.setCorrectionRules)
@@ -107,60 +79,63 @@ function MainApp() {
   const { route, page, modal, navigate, closeModal } = useRoute()
 
   useEffect(() => {
-    loadOnboardingCompleted().then(async (done) => {
-      setOnboardingCompleted(done)
-      if (done) {
-        try {
-          const [
-            config,
-            history,
-            dictionary,
-            correctionRules,
-            platformCapabilities,
-            hotkeyRegistrationError,
-          ] = await Promise.all([
-            getConfig(),
-            getHistory(200, 0),
-            getDictionary(),
-            getCorrectionRules(),
-            getPlatformCapabilities(),
-            getHotkeyRegistrationError(),
-          ])
-          setConfig(config)
-          setSavedConfig(config)
-          setHistory(history)
-          setDictionary(dictionary)
-          setCorrectionRules(correctionRules)
-          setPlatformCapabilities(platformCapabilities)
-          setHotkeyRegistrationError(hotkeyRegistrationError)
-          // Check macOS Accessibility permission
-          if (navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
-            checkAccessibilityPermission().then((trusted) => {
-              setAccessibilityTrusted(trusted)
-            })
+    let active = true
+    loadOnboardingCompleted()
+      .then(async (done) => {
+        if (!active) return
+        setOnboardingCompleted(done)
+        if (done) {
+          try {
+            const [
+              history,
+              dictionary,
+              correctionRules,
+              platformCapabilities,
+              hotkeyRegistrationError,
+            ] = await Promise.all([
+              getHistory(200, 0),
+              getDictionary(),
+              getCorrectionRules(),
+              getPlatformCapabilities(),
+              getHotkeyRegistrationError(),
+            ])
+            if (!active) return
+            setHistory(history)
+            setDictionary(dictionary)
+            setCorrectionRules(correctionRules)
+            setPlatformCapabilities(platformCapabilities)
+            setHotkeyRegistrationError(hotkeyRegistrationError)
+            // Check macOS Accessibility permission
+            if (navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
+              checkAccessibilityPermission().then((trusted) => {
+                if (active) setAccessibilityTrusted(trusted)
+              })
+            }
+          } catch (e) {
+            if (!active) return
+            console.error('Failed to load initial data:', e)
+            setLoadError(true)
           }
-          // Restore UI language from config
-          if (config.ui_language && config.ui_language !== i18n.language) {
-            i18n.changeLanguage(config.ui_language)
-            localStorage.setItem('ui_language', config.ui_language)
-          }
-        } catch (e) {
-          console.error('Failed to load initial data:', e)
-          setLoadError(true)
         }
-      }
-      setLoaded(true)
-    })
+        if (active) setLoaded(true)
+      })
+      .catch(() => {
+        if (!active) return
+        setLoadError(true)
+        setLoaded(true)
+      })
 
     // Initialize auth session (non-blocking)
     useAuthStore.getState().initialize()
 
     // Initialize deep-link listener
-    initDeepLinkListener()
+    const stopDeepLinkListener = initDeepLinkListener()
+    return () => {
+      active = false
+      stopDeepLinkListener()
+    }
   }, [
     setOnboardingCompleted,
-    setConfig,
-    setSavedConfig,
     setHistory,
     setDictionary,
     setCorrectionRules,
@@ -171,43 +146,46 @@ function MainApp() {
 
   const user = useAuthStore((s) => s.user)
   const authLoading = useAuthStore((s) => s.loading)
+  const hasPendingCheckout = useAuthStore((s) => s.checkoutPending)
 
   useEffect(() => {
     if (!loaded || authLoading || !user || route !== 'account') return
     if (readPendingDesktopCheckout(localStorage)) navigate('upgrade')
   }, [authLoading, loaded, navigate, route, user])
 
-  // Subscription changes are event-driven. Focus refresh is reserved for a pending checkout.
   useEffect(() => {
     if (!loaded || !user) return
 
     let refreshInFlight = false
     const refreshPendingCheckout = () => {
       const { checkoutPending } = useAuthStore.getState()
-      if (!shouldRefreshSubscriptionOnFocus(checkoutPending) || refreshInFlight) return
+      if (refreshInFlight || document.visibilityState === 'hidden') return
+      const tracked = refreshDesktopCheckout(user.id)
+      if (!tracked && !shouldRefreshSubscriptionOnFocus(checkoutPending)) return
       refreshInFlight = true
-      void useAuthStore
-        .getState()
-        .refreshSubscription()
-        .finally(() => {
-          refreshInFlight = false
-        })
+      void (tracked ?? useAuthStore.getState().refreshSubscription()).finally(() => {
+        refreshInFlight = false
+      })
     }
 
+    refreshPendingCheckout()
+    const poll = hasPendingCheckout ? window.setInterval(refreshPendingCheckout, 15_000) : undefined
     window.addEventListener('focus', refreshPendingCheckout)
-
+    document.addEventListener('visibilitychange', refreshPendingCheckout)
     return () => {
+      window.clearInterval(poll)
       window.removeEventListener('focus', refreshPendingCheckout)
+      document.removeEventListener('visibilitychange', refreshPendingCheckout)
     }
-  }, [loaded, user])
+  }, [hasPendingCheckout, loaded, route, user])
 
-  if (!loaded)
+  if (!loaded || configSyncStatus === 'loading')
     return (
       <div className="flex items-center justify-center h-screen">
         <span className="text-text-tertiary text-[13px]">{i18n.t('common.loading')}</span>
       </div>
     )
-  if (loadError)
+  if (loadError || configSyncStatus === 'error')
     return (
       <div className="flex flex-col items-center justify-center h-screen gap-3">
         <span className="text-error text-[13px]">{i18n.t('common.loadFailed')}</span>
@@ -223,20 +201,17 @@ function MainApp() {
 
   return (
     <MainLayout>
-      {page === 'home' && <HomePage />}
-      {page === 'history' && <History />}
-      {page === 'dictionary' && <DictionaryPage />}
-      {page === 'models' && <ModelsPage />}
+      <PageContent page={page} />
       {modal === 'settings' && <SettingsModal onClose={closeModal} />}
       {modal === 'account' && (
-        <ModalFrame onClose={closeModal} maxWidth={560}>
+        <ModalFrame onClose={closeModal} maxWidth={560} title={t('account.title')}>
           <div className="h-full overflow-y-auto bg-bg-elevated">
             <AccountPage />
           </div>
         </ModalFrame>
       )}
       {modal === 'upgrade' && (
-        <ModalFrame onClose={closeModal} maxWidth={720}>
+        <ModalFrame onClose={closeModal} maxWidth={720} title={t('upgrade.title')}>
           <div className="h-full overflow-y-auto bg-bg-elevated">
             <UpgradePage />
           </div>

@@ -6,6 +6,14 @@ use crate::SessionTokenStore;
 use crate::{api_base_url, with_desktop_client_version};
 use tauri::Emitter;
 
+fn ensure_stt_configuration_window(label: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err("STT configuration requests are only allowed from the main window".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn get_stt_recording_capability(
     state: tauri::State<'_, storage::ConfigManager>,
@@ -25,26 +33,32 @@ pub async fn get_stt_recording_capability(
 }
 
 #[tauri::command]
-pub async fn cache_managed_stt_capability(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, storage::ConfigManager>,
+pub async fn cache_managed_stt_capability<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
     account_snapshot: stt::capabilities::AuthenticatedAccountSnapshot,
     expected_user_id: String,
 ) -> Result<stt::capabilities::ResolvedRecordingLimit, String> {
+    ensure_stt_configuration_window(window.label())?;
+    let state = tauri::Manager::try_state::<storage::ConfigManager>(&app)
+        .ok_or_else(|| "STT configuration state is unavailable".to_string())?;
     let now = chrono::Utc::now().timestamp();
     let managed_state = stt::capabilities::managed_state_from_authenticated_snapshot(
         account_snapshot,
         &expected_user_id,
         now,
     )?;
-    let mut config = state.load().await.map_err(|error| error.to_string())?;
-    let previous_max_seconds = config.max_recording_seconds;
-    config.managed_stt_capability_state = managed_state;
-    config.recompute_recording_limit_mirror();
-    state
-        .save(&config)
-        .await
+    state.load().await.map_err(|error| error.to_string())?;
+    let mut previous_max_seconds = 0;
+    let (revision, config) = state
+        .try_update_current_config_commit(|current| {
+            previous_max_seconds = current.max_recording_seconds;
+            current.managed_stt_capability_state = managed_state;
+            current.recompute_recording_limit_mirror();
+            Ok(())
+        })
         .map_err(|error| error.to_string())?;
+    super::config::emit_config_commit(&app, state.config_epoch(), revision, &config);
     if config.max_recording_seconds != previous_max_seconds {
         let _ = app.emit(
             "config:patch",
@@ -57,21 +71,24 @@ pub async fn cache_managed_stt_capability(
 }
 
 #[tauri::command]
-pub async fn clear_managed_stt_capability(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, storage::ConfigManager>,
+pub async fn clear_managed_stt_capability<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let mut config = state.load().await.map_err(|error| error.to_string())?;
-    if config.managed_stt_capability_state.is_none() {
-        return Ok(());
-    }
-    let previous_max_seconds = config.max_recording_seconds;
-    config.managed_stt_capability_state = None;
-    config.recompute_recording_limit_mirror();
-    state
-        .save(&config)
-        .await
+    ensure_stt_configuration_window(window.label())?;
+    let state = tauri::Manager::try_state::<storage::ConfigManager>(&app)
+        .ok_or_else(|| "STT configuration state is unavailable".to_string())?;
+    state.load().await.map_err(|error| error.to_string())?;
+    let mut previous_max_seconds = 0;
+    let (revision, config) = state
+        .try_update_current_config_commit(|current| {
+            previous_max_seconds = current.max_recording_seconds;
+            current.managed_stt_capability_state = None;
+            current.recompute_recording_limit_mirror();
+            Ok(())
+        })
         .map_err(|error| error.to_string())?;
+    super::config::emit_config_commit(&app, state.config_epoch(), revision, &config);
     if config.max_recording_seconds != previous_max_seconds {
         let _ = app.emit(
             "config:patch",
@@ -313,7 +330,7 @@ fn build_stt_provider_diagnostics(
                 Ok(cfg) => SttProviderDiagnostics {
                     provider: provider.to_string(),
                     kind: "localCompatible".to_string(),
-                    endpoint: Some(cfg.endpoint),
+                    endpoint: diagnostic_endpoint(&cfg.endpoint),
                     model: Some(cfg.model),
                     requires_api_key: cfg.api_key_required,
                     api_key_configured,
@@ -360,6 +377,15 @@ fn build_stt_provider_diagnostics(
     }
 }
 
+fn diagnostic_endpoint(endpoint: &str) -> Option<String> {
+    let mut endpoint = url::Url::parse(endpoint).ok()?;
+    endpoint.set_query(None);
+    endpoint.set_fragment(None);
+    endpoint.set_username("").ok()?;
+    endpoint.set_password(None).ok()?;
+    Some(endpoint.to_string())
+}
+
 async fn check_openai_whisper_model(client: &reqwest::Client, api_key: &str) -> Result<(), String> {
     let resp = client
         .get("https://api.openai.com/v1/models/whisper-1")
@@ -367,7 +393,7 @@ async fn check_openai_whisper_model(client: &reqwest::Client, api_key: &str) -> 
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::error::request_error_message)?;
 
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
@@ -377,13 +403,15 @@ async fn check_openai_whisper_model(client: &reqwest::Client, api_key: &str) -> 
 }
 
 #[tauri::command]
-pub fn get_stt_provider_diagnostics(
+pub fn get_stt_provider_diagnostics<R: tauri::Runtime>(
+    window: tauri::Window<R>,
     api_key: String,
     provider: String,
     custom_base_url: Option<String>,
     custom_model: Option<String>,
     provider_region: Option<String>,
 ) -> Result<SttProviderDiagnostics, String> {
+    ensure_stt_configuration_window(window.label())?;
     let resolved_api_key = if provider == "cloud" {
         String::new()
     } else {
@@ -403,7 +431,8 @@ pub fn get_stt_provider_diagnostics(
 #[tauri::command]
 // Keep these as explicit IPC fields so older desktop callers remain wire-compatible.
 #[allow(clippy::too_many_arguments)]
-pub async fn test_stt_connection(
+pub async fn test_stt_connection<R: tauri::Runtime>(
+    window: tauri::Window<R>,
     api_key: String,
     provider: String,
     custom_base_url: Option<String>,
@@ -413,6 +442,7 @@ pub async fn test_stt_connection(
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<bool, String> {
+    ensure_stt_configuration_window(window.label())?;
     if provider.is_empty() {
         return Ok(false);
     }
@@ -435,11 +465,13 @@ pub async fn test_stt_connection(
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::error::request_error_message)?;
         if !resp.status().is_success() {
             return Ok(false);
         }
-        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let body = crate::cloud_request::read_json_response_with_limit(resp, 65536)
+            .await
+            .map_err(|error| error.to_string())?;
         return Ok(has_managed_cloud_access(&body));
     }
 
@@ -458,7 +490,7 @@ pub async fn test_stt_connection(
                 .timeout(std::time::Duration::from_secs(10))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(crate::error::request_error_message)?;
             Ok(resp.status().is_success())
         }
         "assemblyai" => {
@@ -468,7 +500,7 @@ pub async fn test_stt_connection(
                 .timeout(std::time::Duration::from_secs(10))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(crate::error::request_error_message)?;
             Ok(resp.status().is_success())
         }
         stt::volcengine::VOLCENGINE_DOUBAO_PROVIDER => Ok(check_volcengine_doubao_connection(
@@ -517,7 +549,10 @@ pub async fn test_stt_connection(
                 request = request.header("Authorization", format!("Bearer {}", api_key));
             }
 
-            let resp = request.send().await.map_err(|e| e.to_string())?;
+            let resp = request
+                .send()
+                .await
+                .map_err(crate::error::request_error_message)?;
             Ok(resp.status().is_success())
         }
     }
@@ -526,6 +561,166 @@ pub async fn test_stt_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_capability_ipc_rejects_auxiliary_windows_before_configuration_access() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                cache_managed_stt_capability,
+                clear_managed_stt_capability
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["main", "capsule", "ask", "unknown"] {
+            let webview = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            for command in [
+                "cache_managed_stt_capability",
+                "clear_managed_stt_capability",
+            ] {
+                let response = tauri::test::get_ipc_response(
+                    &webview,
+                    tauri::webview::InvokeRequest {
+                        cmd: command.to_string(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: "tauri://localhost".parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                            "accountSnapshot": {
+                                "schemaVersion": 1,
+                                "userId": "synthetic-user",
+                                "generatedAt": "2026-11-12T00:00:00Z",
+                                "managedSttCapabilities": null
+                            },
+                            "expectedUserId": "synthetic-user"
+                        })),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                    },
+                );
+                let expected = if label == "main" {
+                    "STT configuration state is unavailable"
+                } else {
+                    "STT configuration requests are only allowed from the main window"
+                };
+                assert_eq!(response.unwrap_err(), serde_json::json!(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn main_stt_diagnostics_ipc_preserves_custom_configuration_without_exposing_key() {
+        let app = tauri::test::mock_builder()
+            .invoke_handler(tauri::generate_handler![get_stt_provider_diagnostics])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let response = tauri::test::get_ipc_response(
+            &webview,
+            tauri::webview::InvokeRequest {
+                cmd: "get_stt_provider_diagnostics".to_string(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                    "apiKey": "synthetic-private-key",
+                    "provider": "custom-whisper",
+                    "customBaseUrl": "http://127.0.0.1:8000/v1",
+                    "customModel": "synthetic-local-model"
+                })),
+                headers: Default::default(),
+                invoke_key: tauri::test::INVOKE_KEY.to_string(),
+            },
+        );
+        let diagnostics = response
+            .unwrap()
+            .deserialize::<serde_json::Value>()
+            .unwrap();
+        assert_eq!(diagnostics["provider"], "custom-whisper");
+        assert_eq!(diagnostics["kind"], "localCompatible");
+        assert_eq!(diagnostics["model"], "synthetic-local-model");
+        assert_eq!(
+            diagnostics["endpoint"],
+            "http://127.0.0.1:8000/v1/audio/transcriptions"
+        );
+        assert_eq!(diagnostics["ready"], true);
+        assert_eq!(diagnostics["apiKeyConfigured"], true);
+        assert!(!diagnostics.to_string().contains("synthetic-private-key"));
+    }
+
+    #[test]
+    fn auxiliary_stt_configuration_ipc_is_denied_before_provider_access() {
+        let app = tauri::test::mock_builder()
+            .manage(SessionTokenStore(
+                std::sync::Arc::new(std::sync::Mutex::new("synthetic-token".to_string())),
+                std::sync::atomic::AtomicBool::new(false),
+                std::sync::Mutex::new(uuid::Uuid::new_v4().to_string()),
+            ))
+            .manage(reqwest::Client::new())
+            .invoke_handler(tauri::generate_handler![
+                get_stt_provider_diagnostics,
+                test_stt_connection,
+                bench_stt_connection
+            ])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["capsule", "ask"] {
+            let webview = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            for command in [
+                "get_stt_provider_diagnostics",
+                "test_stt_connection",
+                "bench_stt_connection",
+            ] {
+                let response = tauri::test::get_ipc_response(
+                    &webview,
+                    tauri::webview::InvokeRequest {
+                        cmd: command.to_string(),
+                        callback: tauri::ipc::CallbackFn(0),
+                        error: tauri::ipc::CallbackFn(1),
+                        url: "tauri://localhost".parse().unwrap(),
+                        body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                            "apiKey": "synthetic-key",
+                            "provider": "cloud"
+                        })),
+                        headers: Default::default(),
+                        invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                    },
+                );
+                assert_eq!(
+                    response.unwrap_err(),
+                    serde_json::json!(
+                        "STT configuration requests are only allowed from the main window"
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stt_configuration_checks_window_before_credentials_or_network() {
+        let source = include_str!("stt.rs");
+        for signature in [
+            "pub fn get_stt_provider_diagnostics<",
+            "pub async fn test_stt_connection<",
+            "pub async fn bench_stt_connection<",
+        ] {
+            let command = source
+                .split(&format!("\n{signature}"))
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            let guard = command.find("ensure_stt_configuration_window(window.label())?;");
+            assert!(guard.is_some(), "{signature} must check its caller");
+            assert!(guard.unwrap() < command.find("if ").unwrap());
+        }
+    }
 
     #[test]
     fn resolves_custom_whisper_test_config() {
@@ -576,6 +771,29 @@ mod tests {
         assert!(!diagnostics.requires_api_key);
         assert!(diagnostics.ready);
         assert!(diagnostics.issues.is_empty());
+    }
+
+    #[test]
+    fn custom_whisper_diagnostics_omit_queries_without_changing_request_config() {
+        let base_url = "https://example.com/v1?api_key=private-query&api-version=2026-01-01";
+        let diagnostics = build_stt_provider_diagnostics(
+            stt::config::CUSTOM_WHISPER_PROVIDER,
+            "",
+            Some(base_url),
+            Some("whisper"),
+            None,
+        );
+        assert_eq!(
+            diagnostics.endpoint.as_deref(),
+            Some("https://example.com/v1/audio/transcriptions")
+        );
+        assert!(!serde_json::to_string(&diagnostics)
+            .unwrap()
+            .contains("private-query"));
+        let request_config = stt::config::build_custom_whisper_config(base_url, "whisper").unwrap();
+        assert!(request_config.endpoint.contains("api_key=private-query"));
+        assert!(request_config.endpoint.contains("api-version=2026-01-01"));
+        assert!(diagnostics.ready);
     }
 
     #[test]
@@ -719,7 +937,8 @@ mod tests {
 #[tauri::command]
 // Keep these as explicit IPC fields so older desktop callers remain wire-compatible.
 #[allow(clippy::too_many_arguments)]
-pub async fn bench_stt_connection(
+pub async fn bench_stt_connection<R: tauri::Runtime>(
+    window: tauri::Window<R>,
     api_key: String,
     provider: String,
     custom_base_url: Option<String>,
@@ -729,6 +948,7 @@ pub async fn bench_stt_connection(
     token_store: tauri::State<'_, SessionTokenStore>,
     client: tauri::State<'_, reqwest::Client>,
 ) -> Result<u32, String> {
+    ensure_stt_configuration_window(window.label())?;
     if provider.is_empty() {
         return Err("No provider specified".to_string());
     }
@@ -751,12 +971,14 @@ pub async fn bench_stt_connection(
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::error::request_error_message)?;
         let elapsed = t0.elapsed().as_millis() as u32;
         if !resp.status().is_success() {
             return Err("Request failed".to_string());
         }
-        let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let body = crate::cloud_request::read_json_response_with_limit(resp, 65536)
+            .await
+            .map_err(|error| error.to_string())?;
         if !has_managed_cloud_access(&body) {
             return Err("Cloud plan required".to_string());
         }
@@ -779,7 +1001,7 @@ pub async fn bench_stt_connection(
                 .timeout(std::time::Duration::from_secs(10))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(crate::error::request_error_message)?;
             let elapsed = t0.elapsed().as_millis() as u32;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));
@@ -794,7 +1016,7 @@ pub async fn bench_stt_connection(
                 .timeout(std::time::Duration::from_secs(10))
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(crate::error::request_error_message)?;
             let elapsed = t0.elapsed().as_millis() as u32;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));
@@ -850,7 +1072,10 @@ pub async fn bench_stt_connection(
                 request = request.header("Authorization", format!("Bearer {}", api_key));
             }
 
-            let resp = request.send().await.map_err(|e| e.to_string())?;
+            let resp = request
+                .send()
+                .await
+                .map_err(crate::error::request_error_message)?;
             let elapsed = t0.elapsed().as_millis() as u32;
             if !resp.status().is_success() {
                 return Err(format!("HTTP {}", resp.status()));

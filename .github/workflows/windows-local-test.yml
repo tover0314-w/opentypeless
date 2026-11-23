@@ -1,0 +1,62 @@
+name: Windows Local Test Package
+
+on:
+  push:
+    branches:
+      - 'test/windows-local-*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Verify tools
+        shell: pwsh
+        run: |
+          node --version
+          rustc --version
+          cargo --version
+          cmake --version
+          rustup target add x86_64-pc-windows-msvc
+      - run: npm ci --engine-strict --ignore-scripts
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+      - name: Run strict Windows Clippy
+        run: cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Run Windows tests
+        run: cargo test --locked --target x86_64-pc-windows-msvc --manifest-path src-tauri/Cargo.toml
+      - name: Build unsigned internal installer
+        run: npx tauri build --debug --target x86_64-pc-windows-msvc --bundles nsis --no-sign --ci --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
+      - name: Collect package and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path windows-test-package | Out-Null
+          $installers = @(Get-ChildItem src-tauri/target/x86_64-pc-windows-msvc/debug/bundle/nsis/*.exe)
+          if ($installers.Count -eq 0) { throw "Windows installer not found" }
+          Copy-Item $installers.FullName windows-test-package/
+          Copy-Item src-tauri/target/x86_64-pc-windows-msvc/debug/opentypeless.exe windows-test-package/
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md windows-test-package/
+          Copy-Item src/assets/fonts/prompt/OFL.txt windows-test-package/Prompt-OFL.txt
+          "Internal unsigned test build. Not a stable release. Source: $env:GITHUB_SHA" | Set-Content windows-test-package/BUILD-INFO.txt
+          Get-ChildItem windows-test-package/ -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content windows-test-package/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: OpenTypeless-windows-x64-test
+          path: windows-test-package/
+          retention-days: 7
+          if-no-files-found: error

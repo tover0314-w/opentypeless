@@ -8,6 +8,8 @@
 
 <h1 align="center">OpenTypeless</h1>
 
+> **Development branch:** This Typeless-parity reconstruction is not release-ready. Local tests and debug builds do not establish full feature parity, real-service acceptance, security clearance, or signed installer/update verification. Download and signing descriptions below refer to published releases, not this worktree. See [the current delivery checklist](docs/typeless-parity/2026-11-14-current-delivery-checklist.md) for remaining gates.
+
 <p align="center">
   Open-source alternative to Wispr Flow and Superwhisper for AI voice input, rewriting, and voice Q&A on macOS, Windows, and Linux.
 </p>
@@ -161,6 +163,27 @@ Most desktop dictation tools stop at transcription. OpenTypeless adds the AI rew
 
 ## Features
 
+### Current development limitations
+
+This working tree is not a release-readiness certification. Source capabilities
+and internal test packages do not establish that every feature works on every
+supported platform.
+
+- Manual custom/built-in scene activation, save-and-activate and built-in scene
+  copying have visible controls again. Component and native tests do not replace
+  end-to-end persistence, failure recovery and real application-context checks.
+- Opening a search-engine page is distinct from a web-grounded Ask answer:
+  retrieved sources and citations are not implemented as a complete flow.
+- Cloud backup is not continuous multi-device synchronization.
+- Streaming response previews do not establish that incremental insertion is
+  active in the target application.
+- Cross-device Fn/Fn+Space behavior, Windows monitor recovery, translation
+  target save/stop consistency and update security still have open gates.
+
+See [the current Mac completion audit](docs/architecture/2026-11-17-mac-completion-audit.md)
+for evidence and remaining requirements. These limitations do not authorize
+removing existing capabilities or changing the approved visual design.
+
 | Area              | Highlights                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Voice capture     | Native Fn / Right Alt hotkeys on macOS/Windows, Linux Ctrl defaults, multiple bindings per workflow, hold or toggle mode, floating capsule states, idle auto-hide |
@@ -212,7 +235,7 @@ sequenceDiagram
 
 1. Download the latest build for your platform from [Releases](https://github.com/tover0314-w/opentypeless/releases).
 2. Choose **BYOK** for full provider control or **Cloud** if you want managed quota without API keys.
-3. Pick speech recognition and AI polish providers in Settings.
+3. Pick speech recognition and AI polish providers on the **Models** page.
 4. Set one or more shortcuts for Dictation, Ask Anything, and Translation.
 5. Open any desktop app, press the hotkey, speak, and let OpenTypeless type the polished result.
 
@@ -225,7 +248,7 @@ Download the latest version for your platform:
 | Platform | File                                         |
 | -------- | -------------------------------------------- |
 | Windows  | `.msi` installer or `.exe` setup             |
-| macOS    | Universal `.dmg` for Apple Silicon and Intel |
+| macOS    | `.dmg`; check each artifact's CPU architecture |
 | Linux    | `.AppImage` / `.deb` / `.rpm`                |
 
 ## Installation Notes
@@ -234,26 +257,24 @@ Release signing differs by platform while distribution is being improved. Always
 
 ### Windows
 
-Windows SmartScreen may show "Windows protected your PC":
-
-1. Click **More info**
-2. Click **Run anyway**
-
-If the installer shows a publisher validation warning:
-
-1. Right-click the `.msi` file → **Properties**
-2. Check **Unblock** at the bottom → **Apply**
-3. Run the installer again
+If Windows SmartScreen or publisher validation blocks the installer, stop and
+verify the artifact's source, published checksum and signing status. Report the
+exact warning and version to the maintainers. Internal unsigned test installers
+are not stable releases; do not disable platform protections to treat them as
+verified distribution builds.
 
 ### macOS
 
-macOS builds are Developer ID signed. If Gatekeeper still blocks first launch while notarization/stapling catches up, remove the quarantine attribute:
+Check the specific artifact's architecture, minimum macOS version, Developer ID
+signature and notarization status. A valid signature alone does not establish
+notarization or successful Gatekeeper assessment. If first launch is blocked,
+keep platform protections enabled and report the exact warning, version and
+artifact checksum rather than removing quarantine.
 
-```bash
-xattr -cr /Applications/OpenTypeless.app
-```
-
-Then open the app normally.
+The internal Mac2050 test application from 2026-11-15 is arm64 only, with an
+executable minimum macOS version of 11.0; it is not a verified universal release
+for Intel Macs. Other artifacts require their own architecture and installation
+verification.
 
 ### Linux
 
@@ -289,6 +310,8 @@ Global hotkeys can still depend on the desktop environment. If the matching help
 - [Rust](https://rustup.rs/) (stable toolchain)
 - Platform-specific dependencies for Tauri: see [Tauri Prerequisites](https://v2.tauri.app/start/prerequisites/)
 
+The package declares Rust 1.90 or newer to match the patched desktop runtime and updater dependencies. Local verification uses Rust 1.96; Rust 1.90 itself still needs a dedicated minimum-toolchain build check.
+
 ## Getting Started
 
 ```bash
@@ -306,11 +329,11 @@ The built application will be in `src-tauri/target/release/bundle/`.
 
 ## Configuration
 
-All settings are accessible from the in-app Settings panel:
+Open **Models** below Home in the sidebar for speech recognition and AI polish configuration. General preferences remain in Settings; dictionary, scenes, and account options have their existing entries.
 
 - **Speech Recognition** — choose STT provider and enter your API key
 - **AI Polish** — choose an LLM provider and model, enable app-aware writing, manage per-app style mappings, and configure selected-text context
-- **General** — manage multiple Dictation, Ask Anything, and Translation shortcuts, output mode, auto-start, and idle capsule visibility
+- **General** — manage multiple Dictation, Ask Anything, and Translation shortcuts, output mode, auto-start, and idle capsule visibility; primary shortcuts can also be edited directly on Home
 - **Dictionary** — add or import custom terms, export your dictionary, and create local correction rules for recurring transcription mistakes
 - **Scenes** — built-in and local prompt templates with import/export for reusable writing styles
 - **Account / Upgrade** — sign in, check cloud words, manage Pro or Lifetime Starter access
@@ -338,7 +361,7 @@ All core features — recording, transcription, AI polish, keyboard/clipboard ou
 
 To run OpenTypeless without any cloud dependency:
 
-1. Choose any non-Cloud STT and LLM provider in Settings
+1. Choose any non-Cloud STT and LLM provider on the **Models** page
 2. Enter your own API keys
 3. That's it — no account or internet connection to www.opentypeless.com is needed
 

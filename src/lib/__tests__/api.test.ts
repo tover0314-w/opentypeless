@@ -6,6 +6,7 @@ const invalidateCloudSessionOnce = vi.hoisted(() => vi.fn().mockResolvedValue(un
 const loadSessionToken = vi.hoisted(() => vi.fn().mockResolvedValue(null))
 
 vi.mock('../cloud-session', () => ({
+  captureCloudSessionOwner: () => () => true,
   invalidateCloudSessionOnce,
   loadSessionToken,
 }))
@@ -23,6 +24,62 @@ describe('ApiError', () => {
 })
 
 describe('request() via getSubscriptionStatus', () => {
+  it('rejects oversized declared subscription responses before parsing them', async () => {
+    const json = vi.fn().mockResolvedValue({ plan: 'free' })
+    const cancel = vi.fn().mockResolvedValue(undefined)
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'Content-Length': '1048577' }),
+      body: { cancel },
+      json,
+    } as unknown as Response)
+    const { getSubscriptionStatus } = await import('../api')
+    await expect(getSubscriptionStatus()).rejects.toThrow('Cloud response exceeds size limit')
+    expect(json).not.toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    { plan: 'unknown-plan' },
+    { cloudWordsLimit: -1 },
+    { displayWordsResetAt: {} },
+    {
+      accountSnapshot: {
+        schemaVersion: 1,
+        userId: 'user-1',
+        generatedAt: '2026-11-12T00:00:00Z',
+        managedSttCapabilities: {
+          version: 1,
+          maxRecordingSeconds: -1,
+          maxMultipartBytes: 100,
+          formats: [],
+        },
+      },
+    },
+  ])('rejects malformed normalized subscription data: %j', async (patch) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ plan: 'pro', ...patch }),
+    } as Response)
+    const { getSubscriptionStatus } = await import('../api')
+    await expect(getSubscriptionStatus()).rejects.toThrow('Invalid subscription response')
+  })
+
+  it.each([
+    { canManageBilling: 'true' },
+    { canMigrateToStripe: 1 },
+    { cancelAtPeriodEnd: null },
+    { billingProvider: 'unknown-provider' },
+    { entitlementVersion: 'private-detail' },
+  ])('rejects invalid explicit billing fields before applying defaults: %j', async (patch) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ plan: 'pro', source: 'creem', ...patch }),
+    } as Response)
+    const { getSubscriptionStatus } = await import('../api')
+    await expect(getSubscriptionStatus()).rejects.toThrow('Invalid subscription response')
+  })
+
   beforeEach(() => {
     loadSessionToken.mockResolvedValue(null)
     vi.stubGlobal(
@@ -88,6 +145,81 @@ describe('request() via getSubscriptionStatus', () => {
     expect(result.quotaModel).toBe('legacy_dual_meter')
     expect(result.displayWordsLimit).toBe(100000)
     expect(result.sttSecondsLimit).toBe(36000)
+  })
+
+  it.each([
+    { response: { plan: 'free', quotaModel: 'cloud_words' }, available: false },
+    {
+      response: { plan: 'free', quotaModel: 'cloud_words', quotaDataAvailable: true },
+      available: false,
+    },
+    {
+      response: {
+        plan: 'free',
+        quotaModel: 'legacy_dual_meter',
+        quotaDataAvailable: false,
+        displayWordsUsedEstimate: 250,
+        displayWordsLimit: 2000,
+      },
+      available: false,
+    },
+    {
+      response: {
+        plan: 'free',
+        quotaModel: 'cloud_words',
+        quotaDataAvailable: false,
+        cloudWordsUsed: 0,
+        cloudWordsLimit: 2000,
+      },
+      available: false,
+    },
+    {
+      response: {
+        plan: 'free',
+        quotaModel: 'legacy_dual_meter',
+        displayWordsUsedEstimate: 0,
+        displayWordsLimit: 0,
+      },
+      available: true,
+    },
+    {
+      response: {
+        plan: 'free',
+        quotaModel: 'legacy_dual_meter',
+        cloudWordsUsed: 250,
+        cloudWordsLimit: 2000,
+      },
+      available: true,
+    },
+    {
+      response: { plan: 'free', quotaModel: 'cloud_words', cloudWordsUsed: 0, cloudWordsLimit: 0 },
+      available: true,
+    },
+  ])(
+    'preserves whether word quota was actually returned: $available',
+    async ({ response, available }) => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(response),
+      } as Response)
+      const { getSubscriptionStatus } = await import('../api')
+      expect((await getSubscriptionStatus()).quotaDataAvailable).toBe(available)
+    },
+  )
+
+  it.each(['false', null, 1])('rejects an invalid quota availability flag: %j', async (flag) => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        plan: 'free',
+        quotaModel: 'cloud_words',
+        quotaDataAvailable: flag,
+        cloudWordsUsed: 0,
+        cloudWordsLimit: 2000,
+      }),
+    } as Response)
+    const { getSubscriptionStatus } = await import('../api')
+    await expect(getSubscriptionStatus()).rejects.toThrow('Invalid subscription response')
   })
 
   it('uses the explicit billing provider without breaking the legacy source field', async () => {
@@ -225,6 +357,38 @@ describe('request() error handling', () => {
     expect(invalidateCloudSessionOnce).toHaveBeenCalledTimes(1)
   })
 
+  it('does not log private details when cloud session cleanup fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    invalidateCloudSessionOnce.mockRejectedValueOnce(
+      new Error('synthetic-private-vault-session-detail'),
+    )
+    const { parseCloudError } = await import('../api')
+    const error = parseCloudError(401, {
+      error: { code: 'AUTH_SESSION_INVALID', message: 'Session expired' },
+    })
+
+    await vi.waitFor(() => expect(log).toHaveBeenCalled())
+    expect(log).toHaveBeenCalledExactlyOnceWith('Failed to invalidate cloud session')
+    expect(error).toMatchObject({ status: 401, code: 'AUTH_SESSION_INVALID' })
+  })
+
+  it.each([400, 403, 429, 500, 503])(
+    'does not invalidate an account for a non-401 session-invalid envelope: %s',
+    async (status) => {
+      const { parseCloudError } = await import('../api')
+      const error = parseCloudError(status, {
+        error: { code: 'AUTH_SESSION_INVALID', message: 'Synthetic service failure' },
+      })
+
+      expect(error).toMatchObject({
+        status,
+        code: 'AUTH_SESSION_INVALID',
+        message: 'Synthetic service failure',
+      })
+      expect(invalidateCloudSessionOnce).not.toHaveBeenCalled()
+    },
+  )
+
   it.each([
     ['AUTH_REQUIRED', 401, 'Authentication required'],
     ['QUOTA_EXCEEDED', 403, 'Cloud quota exceeded'],
@@ -270,6 +434,25 @@ describe('createCheckout', () => {
     vi.restoreAllMocks()
   })
 
+  it('uses the approved lifetime default only when checkout is explicitly requested', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ url: 'https://checkout.stripe.com/xxx' }),
+      }),
+    )
+    const { createCheckout } = await import('../api')
+    expect(fetch).not.toHaveBeenCalled()
+    await createCheckout()
+    expect(fetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/checkout/create`,
+      expect.objectContaining({
+        body: JSON.stringify({ origin: 'desktop', product: 'lifetime_starter' }),
+      }),
+    )
+  })
+
   it('sends POST with origin and checkout product in body', async () => {
     vi.stubGlobal(
       'fetch',
@@ -293,9 +476,264 @@ describe('createCheckout', () => {
   })
 })
 
+it('queries checkout progress using the saved order and accepts the server payment contract', async () => {
+  const intentId = '00000000-0000-4000-8000-000000000001'
+  const paid = {
+    checkoutIntentId: intentId,
+    status: 'paid',
+    product: 'pro_monthly',
+    provider: 'stripe',
+    entitlementActive: true,
+  }
+  const { getCheckoutOrderStatus } = await import('../api')
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json(paid))
+  await expect(getCheckoutOrderStatus(intentId)).resolves.toEqual({
+    status: 'paid',
+    product: 'pro_monthly',
+    provider: 'stripe',
+  })
+  expect(fetch).toHaveBeenLastCalledWith(
+    `${API_BASE}/api/checkout/status?intent_id=${intentId}`,
+    expect.objectContaining({ credentials: 'include' }),
+  )
+
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ ...paid, checkoutIntentId: '00000000-0000-4000-8000-000000000002' }),
+  )
+  await expect(getCheckoutOrderStatus(intentId)).rejects.toThrow('Invalid checkout status response')
+})
+
 describe('proxyStt', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it.each(['success', 'failure', 'timeout'])(
+    'removes its credential-wait abort listener after %s',
+    async (outcome) => {
+      vi.useFakeTimers()
+      const added = vi.spyOn(AbortSignal.prototype, 'addEventListener')
+      const removed = vi.spyOn(AbortSignal.prototype, 'removeEventListener')
+      const credentialFailure = new Error('Synthetic credential unavailable')
+      if (outcome === 'failure') loadSessionToken.mockRejectedValueOnce(credentialFailure)
+      if (outcome === 'timeout') loadSessionToken.mockReturnValueOnce(new Promise(() => {}))
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ text: 'synthetic speech' }) }),
+      )
+      try {
+        const { proxyStt } = await import('../api')
+        const pending = proxyStt(new Blob(['synthetic audio']), 'en').catch(
+          (error: unknown) => error,
+        )
+        if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(60_000)
+        const result = await pending
+        if (outcome === 'success') expect(result).toEqual({ text: 'synthetic speech' })
+        if (outcome === 'failure') expect(result).toBe(credentialFailure)
+        if (outcome === 'timeout') expect(result).toMatchObject({ name: 'AbortError' })
+        const ownListener = added.mock.calls.find(([type]) => type === 'abort')
+        expect(ownListener).toBeDefined()
+        expect(removed).toHaveBeenCalledWith('abort', ownListener![1])
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it.each(['speech', 'subscription'])(
+    'does not dispatch a timed-out %s request after credentials finish loading',
+    async (endpoint) => {
+      vi.useFakeTimers()
+      let finishCredentials!: (token: string | null) => void
+      loadSessionToken.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishCredentials = resolve
+        }),
+      )
+      const transport = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ text: 'synthetic speech', plan: 'free' }),
+      })
+      vi.stubGlobal('fetch', transport)
+      try {
+        const { proxyStt, getSubscriptionStatus } = await import('../api')
+        let settled = false
+        const request = (
+          endpoint === 'speech'
+            ? proxyStt(new Blob(['synthetic audio']), 'en')
+            : getSubscriptionStatus()
+        )
+          .catch((error: unknown) => error)
+          .finally(() => {
+            settled = true
+          })
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(settled).toBe(true)
+        finishCredentials('synthetic-session')
+        expect(await request).toMatchObject({ name: 'AbortError' })
+        expect(transport).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        finishCredentials(null)
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it.each(['speech', 'subscription'])(
+    'does not invalidate an account for a timed-out %s error body',
+    async (endpoint) => {
+      vi.useFakeTimers()
+      invalidateCloudSessionOnce.mockClear()
+      let started = false
+      let finishBody!: (body: unknown) => void
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 401,
+          statusText: 'Unauthorized',
+          json: () => {
+            started = true
+            return new Promise((resolve) => {
+              finishBody = resolve
+            })
+          },
+        }),
+      )
+      try {
+        const { proxyStt, getSubscriptionStatus } = await import('../api')
+        const request = (
+          endpoint === 'speech'
+            ? proxyStt(new Blob(['synthetic audio']), 'en')
+            : getSubscriptionStatus()
+        ).catch((error: unknown) => error)
+        await vi.waitFor(() => expect(started).toBe(true))
+        await vi.advanceTimersByTimeAsync(60_000)
+        finishBody({ error: { code: 'AUTH_SESSION_INVALID', message: 'Session expired' } })
+        expect(await request).toMatchObject({ name: 'AbortError' })
+        expect(invalidateCloudSessionOnce).not.toHaveBeenCalled()
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        finishBody?.({})
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it.each(['speech', 'subscription'])(
+    'keeps the %s timeout active until the successful response body finishes',
+    async (endpoint) => {
+      vi.useFakeTimers()
+      let started = false
+      let signal!: AbortSignal
+      let finishBody!: (body: { text: string }) => void
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (_url, options) => {
+          signal = options.signal
+          return {
+            ok: true,
+            json: () => {
+              started = true
+              return new Promise<{ text: string }>((resolve) => {
+                finishBody = resolve
+              })
+            },
+          }
+        }),
+      )
+      try {
+        const { proxyStt, getSubscriptionStatus } = await import('../api')
+        const request = (
+          endpoint === 'speech'
+            ? proxyStt(new Blob(['synthetic audio']), 'en')
+            : getSubscriptionStatus()
+        ).catch((error: unknown) => error)
+        await vi.waitFor(() => expect(started).toBe(true))
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(signal.aborted).toBe(true)
+        finishBody({ text: 'synthetic late response' })
+        expect(await request).toMatchObject({ name: 'AbortError' })
+      } finally {
+        finishBody?.({ text: 'synthetic cleanup' })
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it.each(['speech', 'subscription'])(
+    'clears the %s timeout after a normal response',
+    async (endpoint) => {
+      vi.useFakeTimers()
+      let signal!: AbortSignal
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (_url, options) => {
+          signal = options.signal
+          return {
+            ok: true,
+            json: async () =>
+              endpoint === 'speech' ? { text: 'synthetic speech' } : { plan: 'free' },
+          }
+        }),
+      )
+      try {
+        const { proxyStt, getSubscriptionStatus } = await import('../api')
+        await (endpoint === 'speech'
+          ? proxyStt(new Blob(['synthetic audio']), 'en')
+          : getSubscriptionStatus())
+        expect(vi.getTimerCount()).toBe(0)
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(signal.aborted).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it('rejects a stalled successful body when its timeout aborts the response', async () => {
+    vi.useFakeTimers()
+    const cancellation = new DOMException('Synthetic response timeout', 'AbortError')
+    let started = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url, options) => ({
+        ok: true,
+        json: () => {
+          started = true
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(cancellation), { once: true })
+          })
+        },
+      })),
+    )
+    try {
+      const { proxyStt } = await import('../api')
+      const request = proxyStt(new Blob(['synthetic audio']), 'en').catch((error: unknown) => error)
+      await vi.waitFor(() => expect(started).toBe(true))
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(await request).toBe(cancellation)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves cancellation while reading an error response', async () => {
+    const cancellation = new DOMException('Synthetic cancelled response', 'AbortError')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: () => Promise.reject(cancellation),
+      }),
+    )
+    const { proxyStt } = await import('../api')
+    await expect(proxyStt(new Blob(['synthetic audio']), 'en')).rejects.toBe(cancellation)
   })
 
   it('sends the desktop client version without forcing a JSON content type', async () => {

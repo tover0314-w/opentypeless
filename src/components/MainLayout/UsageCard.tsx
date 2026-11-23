@@ -1,80 +1,76 @@
 import { useTranslation } from 'react-i18next'
-import { KeyRound } from 'lucide-react'
-import { useAppStore } from '../../stores/appStore'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
 import { usageWords } from '../../lib/usage-words'
 
 interface Props {
   onUpgrade: () => void
-  onOpenModels: () => void
 }
 
-export function UsageCard({ onUpgrade, onOpenModels }: Props) {
-  const { t } = useTranslation()
+export function UsageCard({ onUpgrade }: Props) {
+  const { t, i18n } = useTranslation()
   const auth = useAuthStore()
   const hasCloudAccess = useAuthStore(hasManagedCloudAccess)
-  const usesCloud = useAppStore(
-    (s) => s.config.stt_provider === 'cloud' || s.config.llm_provider === 'cloud',
-  )
   const { used, limit } = usageWords(auth)
-  const formatter = new Intl.NumberFormat()
+  const quotaLabel = t('onboarding.account.freePlanQuota')
+  const formatter = new Intl.NumberFormat(i18n.language)
+  const remaining = Math.max(0, Math.min(limit, limit - used))
 
-  if (!usesCloud && !hasCloudAccess) {
-    return (
-      <div className="rounded-[16px] bg-bg-elevated p-4 shadow-sm">
-        <div className="flex items-center gap-2 text-[14px] font-medium text-text-primary">
-          <KeyRound size={15} className="text-accent" />
-          {t('shell.byokTitle')}
-        </div>
-        <p className="mt-1 text-[12px] leading-[18px] text-text-tertiary">
-          {t('shell.byokDescription')}
-        </p>
-        <button
-          type="button"
-          onClick={onOpenModels}
-          className="btn-outline mt-3 w-full cursor-pointer py-1.5 text-[13px] font-medium"
-        >
-          {t('shell.manageModels')}
-        </button>
-      </div>
-    )
-  }
-
-  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0
+  const pct = limit > 0 ? (remaining / limit) * 100 : 0
   const atLimit = limit > 0 && used >= limit
+  const quotaAvailable =
+    Boolean(auth.user) &&
+    auth.subscriptionRefreshState !== 'unavailable' &&
+    auth.quotaDataAvailable !== false &&
+    (limit > 0 || auth.subscriptionRefreshState === 'fresh')
 
   return (
     <div className="rounded-[16px] bg-bg-elevated p-4 shadow-sm">
       <div className="text-[14px] text-text-secondary">
-        {hasCloudAccess ? t('shell.cloudWordsTitle') : t('shell.getMoreWords')}
+        {auth.plan === 'free' ? t('shell.planFree') : t('shell.cloudWordsTitle')}
       </div>
-      {limit > 0 && (
+      <div className="mt-2 text-[12px] text-text-tertiary">{quotaLabel}</div>
+      {!quotaAvailable && <div className="mt-2 text-[14px] text-text-tertiary">—</div>}
+      {quotaAvailable && (
         <>
           <div
             className={`mt-2 text-[14px] font-semibold tabular-nums ${atLimit ? 'text-error' : 'text-text-primary'}`}
           >
             {t('shell.wordsUsage', {
-              used: formatter.format(used),
+              used: formatter.format(remaining),
               limit: formatter.format(limit),
             })}
           </div>
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-fill-tough">
+          {limit > 0 && (
             <div
-              className={`h-full rounded-full ${atLimit ? 'bg-error' : 'bg-action'}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+              role="progressbar"
+              aria-label={quotaLabel}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={pct}
+              aria-valuetext={t('shell.wordsUsage', {
+                used: formatter.format(remaining),
+                limit: formatter.format(limit),
+              })}
+              className="mt-1.5 h-1 overflow-hidden rounded-full bg-fill-tough"
+            >
+              <div
+                className={`h-full rounded-full ${atLimit ? 'bg-error' : 'bg-action'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          )}
+          {atLimit && (
+            <p className="m-0 mt-2 text-[12px] leading-4 text-error">{t('shell.quotaReached')}</p>
+          )}
         </>
       )}
-      {!hasCloudAccess && (
-        <button
-          type="button"
-          onClick={onUpgrade}
-          className="btn-accent mt-3 min-h-[40px] w-full cursor-pointer text-[15px] font-semibold"
-        >
-          {t('nav.upgrade')}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onUpgrade}
+        className="upgrade-action btn-accent mt-3 min-h-[40px] w-full cursor-pointer text-[15px] font-semibold"
+      >
+        {auth.user && hasCloudAccess ? t('shell.getMoreWords') : t('nav.upgrade')}
+      </button>
     </div>
   )
 }

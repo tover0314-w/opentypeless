@@ -1,25 +1,33 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, Copy, Download, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import {
   useAppStore,
   type AppConfig,
+  type ActiveScene,
   type ContextFamily,
   type CustomScene,
   type FamilySceneAssignment,
   type SystemSceneOverride,
 } from '../../stores/appStore'
-import { setFamilySceneAssignment, updateConfig as persistConfig } from '../../lib/tauri'
+import {
+  setFamilySceneAssignment,
+  updateConfig as persistConfig,
+  updateSceneConfiguration,
+  setActiveScene,
+} from '../../lib/tauri'
 import { importCustomScenesJson, serializeCustomScenes } from '../../lib/scenes/sceneImportExport'
 import { AppLogo } from '../AppLogo'
+import { Select } from '../shared/Select'
+import { valuesEqual } from '../../lib/configValuesEqual'
+import { pendingConfigSaves } from '../../lib/configSaveRegistry'
+import { ConfigCommitCursor } from '../../lib/configCommit'
+import { isAppConfigSnapshot } from '../../lib/appConfigSnapshot'
+import { BUILTIN_SCENES, type BuiltInScene } from '../../lib/scenes/builtinScenes'
 
-interface EditorState {
-  mode: 'create' | 'edit' | 'system'
-  id: string | null
-  name: string
-  description: string
-  promptTemplate: string
-}
+import { SceneEditor, type EditorState } from './SceneEditor'
+
+const MAX_SCENE_IMPORT_BYTES = 5 * 1024 * 1024
 
 const APP_WRITING_MODES: Array<{
   family: Exclude<ContextFamily, 'general'>
@@ -171,23 +179,80 @@ export function ScenesPane() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement | null>(null)
+  const importRequestId = useRef(0)
+  const editorSavePending = useRef(false)
+  const [editorSaving, setEditorSaving] = useState(false)
+  const duplicateSavePending = useRef(false)
+  const [duplicatingScene, setDuplicatingScene] = useState(false)
 
-  const saveConfigPatch = async (patch: Partial<AppConfig>): Promise<boolean> => {
+  useEffect(
+    () => () => {
+      importRequestId.current += 1
+    },
+    [],
+  )
+
+  const saveConfigPatch = async (
+    patch: Partial<AppConfig>,
+    activateSceneId?: string,
+  ): Promise<boolean> => {
     const previousConfig = useAppStore.getState().config
     const previousSavedConfig = useAppStore.getState().savedConfig
     const nextConfig = { ...previousConfig, ...patch }
     const nextPersistedConfig = { ...(previousSavedConfig ?? previousConfig), ...patch }
     setConfig(nextConfig)
+    const submittedConfig = useAppStore.getState().config
     setSaveError(null)
+    let registeredSaveId: string | null = null
     try {
+      const versioned = useAppStore.getState().configCommit !== null
+      if (versioned) {
+        registeredSaveId = crypto.randomUUID()
+        pendingConfigSaves.register(registeredSaveId, nextPersistedConfig)
+      }
+      if (registeredSaveId) {
+        const commit = await updateSceneConfiguration(
+          previousSavedConfig ?? previousConfig,
+          nextPersistedConfig,
+          registeredSaveId,
+          activateSceneId,
+        )
+        const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+        if (!cursor.initialize(commit) || cursor.snapshot?.saveId !== registeredSaveId) {
+          throw new Error('Scene save receipt invalid')
+        }
+        const disposition = useAppStore.getState().applyConfigCommit(commit)
+        if (disposition !== 'accepted' && disposition !== 'duplicate') {
+          throw new Error('Scene save superseded')
+        }
+        return true
+      }
       await persistConfig(nextPersistedConfig)
-      if (previousSavedConfig) applyPersistedConfigPatch(patch)
-      else setSavedConfig(nextPersistedConfig)
+      if (useAppStore.getState().configCommit !== null) {
+        throw new Error('Scene configuration stream changed during saving')
+      }
+      if (previousSavedConfig) {
+        const currentSavedConfig = useAppStore.getState().savedConfig ?? previousSavedConfig
+        setSavedConfig({ ...currentSavedConfig, ...patch })
+      } else setSavedConfig(nextPersistedConfig)
       return true
     } catch {
-      setConfig(previousConfig)
+      if (useAppStore.getState().savedConfig !== previousSavedConfig) {
+        setSaveError(t('scenes.failedToSave'))
+        return false
+      }
+      const currentConfig = useAppStore.getState().config
+      const restoredConfig = { ...currentConfig }
+      for (const key of Object.keys(patch) as Array<keyof AppConfig>) {
+        if (valuesEqual(currentConfig[key], submittedConfig[key])) {
+          Object.assign(restoredConfig, { [key]: previousConfig[key] })
+        }
+      }
+      setConfig(restoredConfig)
       setSaveError(t('scenes.failedToSave'))
       return false
+    } finally {
+      if (registeredSaveId !== null) pendingConfigSaves.retire(registeredSaveId)
     }
   }
 
@@ -208,7 +273,36 @@ export function ScenesPane() {
   }
 
   const handleClearActiveScene = async () => {
-    await saveConfigPatch({ active_scene: null })
+    if (useAppStore.getState().configCommit === null) {
+      await saveConfigPatch({ active_scene: null })
+      return
+    }
+    const previous = useAppStore.getState().config
+    const savedBefore = useAppStore.getState().savedConfig
+    const submitted = { ...previous, active_scene: null }
+    const saveId = crypto.randomUUID()
+    setSaveError(null)
+    try {
+      pendingConfigSaves.register(saveId, { ...(savedBefore ?? previous), active_scene: null })
+      setConfig(submitted)
+      const commit = await setActiveScene(null, saveId)
+      const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+      if (!cursor.initialize(commit) || cursor.snapshot?.saveId !== saveId) {
+        throw new Error('Scene activation receipt invalid')
+      }
+      const disposition = useAppStore.getState().applyConfigCommit(commit)
+      if (disposition !== 'accepted' && disposition !== 'duplicate') {
+        throw new Error('Scene activation superseded')
+      }
+    } catch {
+      const current = useAppStore.getState()
+      if (current.savedConfig === savedBefore && current.config.active_scene === null) {
+        setConfig({ ...current.config, active_scene: previous.active_scene })
+      }
+      setSaveError(t('scenes.failedToSave'))
+    } finally {
+      pendingConfigSaves.retire(saveId)
+    }
   }
 
   const handleStartEdit = (scene: CustomScene) => {
@@ -234,7 +328,19 @@ export function ScenesPane() {
     })
   }
 
-  const handleSaveEditor = async () => {
+  const handleSaveEditor = async (activate = false) => {
+    if (editorSavePending.current) return
+    editorSavePending.current = true
+    setEditorSaving(true)
+    try {
+      await saveEditor(activate)
+    } finally {
+      editorSavePending.current = false
+      setEditorSaving(false)
+    }
+  }
+
+  const saveEditor = async (activate: boolean) => {
     if (!editor) return
     const name = editor.name.trim()
     const description = editor.description.trim()
@@ -252,7 +358,7 @@ export function ScenesPane() {
         nextOverride,
       ]
       if (await saveConfigPatch({ system_scene_overrides: nextOverrides })) {
-        setEditor(null)
+        setEditor((current) => (current === editor ? null : current))
       }
       return
     }
@@ -285,19 +391,77 @@ export function ScenesPane() {
       nextScenes = [...config.custom_scenes, savedScene]
     }
 
-    if (await saveConfigPatch({ custom_scenes: nextScenes })) setEditor(null)
+    const active: ActiveScene = {
+      id: savedScene.id,
+      source: 'custom',
+      name: savedScene.name,
+      prompt_template: savedScene.prompt_template,
+    }
+    if (
+      await saveConfigPatch(
+        { custom_scenes: nextScenes, ...(activate ? { active_scene: active } : {}) },
+        activate ? savedScene.id : undefined,
+      )
+    ) {
+      setEditor((current) => (current === editor ? null : current))
+    }
   }
 
-  const handleDuplicateCustom = async (scene: CustomScene) => {
-    const timestamp = nowIso()
-    const copy: CustomScene = {
-      ...scene,
-      id: createSceneId(),
-      name: t('scenes.copyName', { name: scene.name }),
-      created_at: timestamp,
-      updated_at: timestamp,
+  const handleActivateScene = async (scene: CustomScene | BuiltInScene) => {
+    const active: ActiveScene = {
+      id: scene.id,
+      source: 'source' in scene ? 'builtin' : 'custom',
+      name: 'nameKey' in scene ? t(scene.nameKey) : scene.name,
+      prompt_template: 'promptTemplate' in scene ? scene.promptTemplate : scene.prompt_template,
     }
-    await saveConfigPatch({ custom_scenes: [...config.custom_scenes, copy] })
+    if (useAppStore.getState().configCommit === null) {
+      await saveConfigPatch({ active_scene: active })
+      return
+    }
+    const saveId = crypto.randomUUID()
+    try {
+      const baseline = useAppStore.getState().savedConfig ?? useAppStore.getState().config
+      pendingConfigSaves.register(saveId, { ...baseline, active_scene: active })
+      const commit = await setActiveScene(scene.id, saveId)
+      const cursor = new ConfigCommitCursor<AppConfig>(isAppConfigSnapshot)
+      if (!cursor.initialize(commit) || cursor.snapshot?.saveId !== saveId) {
+        throw new Error('Scene activation receipt invalid')
+      }
+      const disposition = useAppStore.getState().applyConfigCommit(commit)
+      if (disposition !== 'accepted' && disposition !== 'duplicate') {
+        throw new Error('Scene activation superseded')
+      }
+      setSaveError(null)
+    } catch {
+      setSaveError(t('scenes.failedToSave'))
+    } finally {
+      pendingConfigSaves.retire(saveId)
+    }
+  }
+
+  const handleDuplicateScene = async (scene: CustomScene | BuiltInScene) => {
+    if (duplicateSavePending.current) return
+    duplicateSavePending.current = true
+    setDuplicatingScene(true)
+    try {
+      const timestamp = nowIso()
+      const copy: CustomScene = {
+        id: createSceneId(),
+        name: t('scenes.copyName', {
+          name: 'nameKey' in scene ? t(scene.nameKey) : scene.name,
+        }),
+        description: 'descriptionKey' in scene ? t(scene.descriptionKey) : scene.description,
+        prompt_template: 'promptTemplate' in scene ? scene.promptTemplate : scene.prompt_template,
+        created_at: timestamp,
+        updated_at: timestamp,
+      }
+      await saveConfigPatch({
+        custom_scenes: [...useAppStore.getState().config.custom_scenes, copy],
+      })
+    } finally {
+      duplicateSavePending.current = false
+      setDuplicatingScene(false)
+    }
   }
 
   const handleDeleteCustom = async (scene: CustomScene) => {
@@ -333,14 +497,21 @@ export function ScenesPane() {
 
   const handleImportCustomScenes = async (file: File | undefined) => {
     if (!file) return
+    const requestId = ++importRequestId.current
     setSaveError(null)
     setMergeMsg(null)
     setMergeOk(false)
 
     try {
+      if (file.size > MAX_SCENE_IMPORT_BYTES) {
+        setSaveError(t('scenes.importFailed'))
+        return
+      }
       const json = await readFileText(file)
+      if (requestId !== importRequestId.current) return
+      const currentScenes = useAppStore.getState().config.custom_scenes
       const result = importCustomScenesJson(json, {
-        existingIds: new Set(config.custom_scenes.map((scene) => scene.id)),
+        existingIds: new Set(currentScenes.map((scene) => scene.id)),
         createId: createSceneId,
         nowIso,
       })
@@ -351,9 +522,9 @@ export function ScenesPane() {
       }
 
       const saved = await saveConfigPatch({
-        custom_scenes: [...config.custom_scenes, ...result.scenes],
+        custom_scenes: [...currentScenes, ...result.scenes],
       })
-      if (!saved) return
+      if (!saved || requestId !== importRequestId.current) return
       const importNotes = [
         result.report.skippedInvalid > 0
           ? t('scenes.importSkippedInvalid', { count: result.report.skippedInvalid })
@@ -375,11 +546,12 @@ export function ScenesPane() {
           .join(' · '),
       )
       setTimeout(() => {
+        if (requestId !== importRequestId.current) return
         setMergeMsg(null)
         setMergeOk(false)
       }, 3000)
     } catch {
-      setSaveError(t('scenes.importFailed'))
+      if (requestId === importRequestId.current) setSaveError(t('scenes.importFailed'))
     }
   }
 
@@ -466,10 +638,12 @@ export function ScenesPane() {
 
         {editor && (
           <SceneEditor
+            saving={editorSaving}
             editor={editor}
             onChange={setEditor}
             onCancel={() => setEditor(null)}
-            onSave={handleSaveEditor}
+            onSave={() => void handleSaveEditor()}
+            onSaveAndActivate={() => void handleSaveEditor(true)}
           />
         )}
 
@@ -517,7 +691,9 @@ export function ScenesPane() {
                 copied={copiedId === scene.id}
                 onCopy={() => handleCopyPrompt(scene.id, scene.prompt_template)}
                 onEdit={() => handleStartEdit(scene)}
-                onDuplicate={() => handleDuplicateCustom(scene)}
+                onDuplicate={() => void handleDuplicateScene(scene)}
+                duplicationPending={duplicatingScene}
+                onActivate={() => void handleActivateScene(scene)}
                 onDelete={() => setDeleteCandidateId(scene.id)}
                 confirmingDelete={deleteCandidateId === scene.id}
                 onCancelDelete={() => setDeleteCandidateId(null)}
@@ -526,6 +702,30 @@ export function ScenesPane() {
             ))}
           </div>
         )}
+        <details className="rounded-[8px] border border-border">
+          <summary className="cursor-pointer px-3 py-3 text-[13px] text-text-secondary">
+            {t('scenes.builtInScenes')}
+          </summary>
+          <div className="space-y-2 px-3 pb-3">
+            {BUILTIN_SCENES.map((scene) => (
+              <LocalSceneCard
+                key={scene.id}
+                id={scene.id}
+                name={t(scene.nameKey)}
+                description={t(scene.descriptionKey)}
+                promptTemplate={scene.promptTemplate}
+                active={
+                  config.active_scene?.id === scene.id && config.active_scene.source === 'builtin'
+                }
+                copied={copiedId === scene.id}
+                onCopy={() => handleCopyPrompt(scene.id, scene.promptTemplate)}
+                onActivate={() => void handleActivateScene(scene)}
+                onDuplicate={() => void handleDuplicateScene(scene)}
+                duplicationPending={duplicatingScene}
+              />
+            ))}
+          </div>
+        </details>
       </section>
 
       {mergeMsg && (
@@ -582,94 +782,19 @@ function AppWritingModes({
               </div>
             </div>
 
-            <label className="block min-w-0 text-[11px] text-text-secondary">
-              <span className="sr-only">{selectLabel}</span>
-              <select
-                aria-label={selectLabel}
-                value={selectedSceneId}
-                onChange={(event) => onChange(mode.family, event.target.value)}
-                className="w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[12px] text-text-primary outline-none focus:border-border-focus"
-              >
-                <option value="">{t(`scenes.systemModes.${mode.family}`)}</option>
-                {sceneOptions.map((scene) => (
-                  <option key={scene.id} value={scene.id}>
-                    {scene.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Select
+              aria-label={selectLabel}
+              value={selectedSceneId}
+              onChange={(value) => onChange(mode.family, value)}
+              className="min-w-0"
+              options={[
+                { value: '', label: t(`scenes.systemModes.${mode.family}`) },
+                ...sceneOptions.map((scene) => ({ value: scene.id, label: scene.name })),
+              ]}
+            />
           </div>
         )
       })}
-    </div>
-  )
-}
-
-function SceneEditor({
-  editor,
-  onChange,
-  onCancel,
-  onSave,
-}: {
-  editor: EditorState
-  onChange: (editor: EditorState) => void
-  onCancel: () => void
-  onSave: () => void
-}) {
-  const { t } = useTranslation()
-  const canSave = editor.name.trim().length > 0 && editor.promptTemplate.trim().length > 0
-
-  return (
-    <div className="space-y-3 rounded-[8px] border border-border bg-bg-secondary px-3 py-3">
-      {editor.mode === 'system' ? (
-        <p className="text-[13px] font-medium text-text-primary">{editor.name}</p>
-      ) : (
-        <>
-          <label className="block text-[12px] text-text-secondary">
-            <span className="block mb-1">{t('scenes.sceneName')}</span>
-            <input
-              value={editor.name}
-              onChange={(e) => onChange({ ...editor, name: e.target.value })}
-              maxLength={80}
-              className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-            />
-          </label>
-          <label className="block text-[12px] text-text-secondary">
-            <span className="block mb-1">{t('scenes.sceneDescription')}</span>
-            <input
-              value={editor.description}
-              onChange={(e) => onChange({ ...editor, description: e.target.value })}
-              maxLength={240}
-              className="w-full px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-            />
-          </label>
-        </>
-      )}
-      <label className="block text-[12px] text-text-secondary">
-        <span className="block mb-1">{t('scenes.promptTemplate')}</span>
-        <textarea
-          value={editor.promptTemplate}
-          onChange={(e) => onChange({ ...editor, promptTemplate: e.target.value })}
-          maxLength={4000}
-          rows={5}
-          className="w-full resize-y px-3 py-2 rounded-[8px] border border-border bg-bg-primary text-[13px] text-text-primary outline-none focus:border-border-focus"
-        />
-      </label>
-      <div className="flex items-center justify-end gap-2">
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 rounded-[8px] border border-border bg-transparent text-[12px] text-text-secondary cursor-pointer hover:text-text-primary transition-colors"
-        >
-          {t('common.cancel')}
-        </button>
-        <button
-          onClick={onSave}
-          disabled={!canSave}
-          className="px-3 py-1.5 rounded-[8px] border border-border bg-bg-primary text-[12px] text-text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {t('common.save')}
-        </button>
-      </div>
     </div>
   )
 }
@@ -684,11 +809,13 @@ function LocalSceneCard({
   onCopy,
   onEdit,
   onDuplicate,
+  duplicationPending = false,
   onDelete,
   confirmingDelete = false,
   onCancelDelete,
   onConfirmDelete,
   onReset,
+  onActivate,
 }: {
   id: string
   name: string
@@ -699,11 +826,13 @@ function LocalSceneCard({
   onCopy: () => void
   onEdit?: () => void
   onDuplicate?: () => void
+  duplicationPending?: boolean
   onDelete?: () => void
   confirmingDelete?: boolean
   onCancelDelete?: () => void
   onConfirmDelete?: () => void
   onReset?: () => void
+  onActivate?: () => void
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
@@ -742,6 +871,16 @@ function LocalSceneCard({
             {promptTemplate}
           </pre>
           <div className="flex items-center gap-3 flex-wrap">
+            {onActivate && (
+              <button
+                type="button"
+                onClick={onActivate}
+                disabled={active}
+                className="text-[12px] text-accent disabled:opacity-50"
+              >
+                {t(active ? 'scenes.active' : 'scenes.activate')}
+              </button>
+            )}
             <button
               onClick={onCopy}
               aria-label={`Copy prompt for ${name}`}
@@ -752,8 +891,10 @@ function LocalSceneCard({
             </button>
             {onDuplicate && (
               <button
+                type="button"
                 onClick={onDuplicate}
-                className="text-[12px] text-accent bg-transparent border-none cursor-pointer hover:opacity-80"
+                disabled={duplicationPending}
+                className="text-[12px] text-accent bg-transparent border-none cursor-pointer hover:opacity-80 disabled:cursor-default disabled:opacity-50"
               >
                 {t('scenes.duplicate')}
               </button>

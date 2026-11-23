@@ -1,6 +1,7 @@
 import type { CheckoutProduct } from './constants'
 
 const STORAGE_KEY = 'opentypeless.desktop-checkout-intent.v1'
+const TRACKED_ORDER_PREFIX = 'opentypeless.desktop-checkout-order.v1:'
 const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1000
 export const DESKTOP_CHECKOUT_INTENT_TTL_MS = 30 * 60 * 1000
 
@@ -67,4 +68,35 @@ export function readPendingDesktopCheckout(
 
 export function clearPendingDesktopCheckout(storage: Pick<Storage, 'removeItem'>) {
   discardPendingDesktopCheckout(storage)
+}
+
+export function isCheckoutIntentId(value: unknown): value is string {
+  return typeof value === 'string' && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value)
+}
+
+export function rememberDesktopCheckoutOrder(
+  storage: Pick<Storage, 'setItem'>,
+  userId: string,
+  intentId: string,
+) {
+  storage.setItem(TRACKED_ORDER_PREFIX + userId, intentId)
+}
+
+export function readDesktopCheckoutOrder(storage: Pick<Storage, 'getItem'>, userId: string) {
+  try {
+    const intent = storage.getItem(TRACKED_ORDER_PREFIX + userId)
+    return isCheckoutIntentId(intent) ? intent : null
+  } catch {
+    return null
+  }
+}
+
+export function clearDesktopCheckoutOrder(
+  storage: Pick<Storage, 'getItem' | 'removeItem'>,
+  userId: string,
+  intentId: string,
+) {
+  if (readDesktopCheckoutOrder(storage, userId) === intentId) {
+    storage.removeItem(TRACKED_ORDER_PREFIX + userId)
+  }
 }

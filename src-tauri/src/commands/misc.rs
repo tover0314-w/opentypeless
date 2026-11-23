@@ -14,6 +14,48 @@ use std::sync::Arc;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+fn request_capsule_exit(window_label: &str, busy: bool, exit: impl FnOnce()) -> Result<(), String> {
+    if window_label != "capsule" {
+        return Err("This exit action is only available from the capsule".to_string());
+    }
+    if busy {
+        return Err("Finish the current voice operation before exiting".to_string());
+    }
+    exit();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn quit_from_capsule(window: tauri::Window, app: tauri::AppHandle) -> Result<(), String> {
+    if window.label() != "capsule" {
+        return Err("This exit action is only available from the capsule".to_string());
+    }
+    let pipeline = app.state::<pipeline::PipelineHandle>();
+    let _guard = pipeline.try_voice_start_guard()?;
+    let busy = pipeline.current_state() != pipeline::PipelineState::Idle
+        || app
+            .state::<crate::commands::ask::AskDictationState>()
+            .is_busy()
+        || app.state::<crate::practice::PracticeState>().is_busy();
+    request_capsule_exit(window.label(), busy, || app.exit(0))
+}
+
+#[cfg(test)]
+mod capsule_exit_tests {
+    use super::request_capsule_exit;
+
+    #[test]
+    fn only_idle_capsule_can_request_normal_exit() {
+        for label in ["main", "ask", "unknown"] {
+            assert!(request_capsule_exit(label, false, || panic!("must not exit")).is_err());
+        }
+        assert!(request_capsule_exit("capsule", true, || panic!("must not exit")).is_err());
+        let called = std::cell::Cell::new(false);
+        assert!(request_capsule_exit("capsule", false, || called.set(true)).is_ok());
+        assert!(called.get());
+    }
+}
+
 #[tauri::command]
 pub fn request_browser_access(
     detector: tauri::State<'_, ContextDetectorHandle>,
@@ -150,7 +192,15 @@ pub(crate) fn register_configured_shortcuts(
     app: &tauri::AppHandle,
     config: &storage::AppConfig,
 ) -> Result<(), String> {
-    register_configured_shortcuts_guarded(app, config)
+    let supervisor = app.state::<HotkeySupervisor>();
+    let _installation_reservation = crate::hotkey::reserve_input_installation(app)
+        .ok_or_else(|| "Input installation is waiting for the active session".to_string())?;
+    register_configured_shortcuts_for_generation(
+        app,
+        config,
+        &supervisor,
+        supervisor.snapshot().generation,
+    )
 }
 
 pub(crate) fn register_configured_shortcuts_for_generation(
@@ -160,62 +210,125 @@ pub(crate) fn register_configured_shortcuts_for_generation(
     generation: u64,
 ) -> Result<(), String> {
     run_if_hotkey_generation_current(supervisor, generation, || {
-        register_configured_shortcuts_guarded(app, config)
+        register_configured_shortcuts_guarded(app, config, generation)
     })
 }
 
 fn register_configured_shortcuts_guarded(
     app: &tauri::AppHandle,
     config: &storage::AppConfig,
+    generation: u64,
 ) -> Result<(), String> {
     let hotkeys = effective_hotkey_config(config);
     let plan =
         crate::hotkey::hotkey_registration_plan_from_config(&hotkeys).map_err(|e| e.to_string())?;
 
-    app.global_shortcut()
-        .unregister_all()
-        .map_err(|e| e.to_string())?;
+    let report = crate::hotkey_registration::register_adapters(
+        &plan.global,
+        || {
+            app.global_shortcut()
+                .unregister_all()
+                .map_err(|error| error.to_string())
+        },
+        |registered| {
+            app.global_shortcut()
+                .register(registered.shortcut)
+                .map_err(|error| {
+                    format!(
+                        "{} hotkey at index {} failed to register: {error}",
+                        registered.role.as_str(),
+                        registered.index
+                    )
+                })
+        },
+        || {
+            let Some(native_runtime) = app.try_state::<NativeHotkeyRuntime>() else {
+                return if plan.native.is_empty() {
+                    Ok(())
+                } else {
+                    Err("Native shortcut runtime is unavailable".into())
+                };
+            };
+            let native_bindings: Vec<NativeHotkeyBinding> = plan
+                .native
+                .iter()
+                .map(|registered| NativeHotkeyBinding {
+                    role: registered.role,
+                    index: registered.index,
+                    trigger: registered.trigger,
+                })
+                .collect();
+            let handle = app.clone();
+            let event_bindings = native_bindings.clone();
+            native_runtime.install_with_acceptance(
+                native_bindings,
+                crate::input_session::InputMode::from_config(&hotkeys.dictation_mode)
+                    .ok_or_else(|| "Invalid dictation mode".to_string())?,
+                Arc::new(move |event| {
+                    let parent_binding = event.parent_trigger.map(|trigger| trigger.canonical());
+                    crate::hotkey::handle_input_binding_event_at(
+                        handle.clone(),
+                        event.role,
+                        &match event_bindings.iter().find(|binding| {
+                            binding.role == event.role && binding.index == event.index
+                        }) {
+                            Some(binding) => binding.trigger.canonical(),
+                            None => return false,
+                        },
+                        event.state,
+                        event.occurred_at,
+                        parent_binding.as_deref(),
+                    )
+                }),
+            )
+        },
+    );
 
-    for registered in &plan.global {
-        app.global_shortcut()
-            .register(registered.shortcut)
-            .map_err(|error| {
-                format!(
-                    "{} hotkey at index {} failed to register: {error}",
-                    registered.role.as_str(),
-                    registered.index
-                )
-            })?;
+    let mut bindings: Vec<crate::hotkey_controller::BindingRegistration> = plan
+        .global
+        .iter()
+        .zip(&report.global)
+        .map(
+            |(binding, result)| crate::hotkey_controller::BindingRegistration {
+                role: binding.role.as_str().into(),
+                index: binding.index,
+                error: result.as_ref().err().cloned(),
+            },
+        )
+        .collect();
+    bindings.extend(plan.native.iter().map(|binding| {
+        crate::hotkey_controller::BindingRegistration {
+            role: binding.role.as_str().into(),
+            index: binding.index,
+            error: report.native.as_ref().err().cloned(),
+        }
+    }));
+    let supervisor = app.state::<HotkeySupervisor>();
+    #[cfg(target_os = "macos")]
+    {
+        let trusted = pipeline::is_accessibility_trusted();
+        supervisor.observe_accessibility(trusted);
+        if !supervisor.record_native_permission_blocked(
+            generation,
+            !plan.native.is_empty() && report.native.is_err() && !trusted,
+        ) {
+            return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.into());
+        }
+    }
+    if !supervisor.record_binding_results(generation, bindings.clone()) {
+        return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.into());
     }
 
-    if let Some(native_runtime) = app.try_state::<NativeHotkeyRuntime>() {
-        let native_bindings: Vec<NativeHotkeyBinding> = plan
-            .native
-            .iter()
-            .map(|registered| NativeHotkeyBinding {
-                role: registered.role,
-                index: registered.index,
-                trigger: registered.trigger,
-            })
-            .collect();
-        let handle = app.clone();
-        native_runtime.install(
-            native_bindings,
-            hotkeys.dictation_mode == "hold",
-            Arc::new(move |event| {
-                crate::hotkey::handle_hotkey_role_event(handle.clone(), event.role, event.state);
-            }),
-        )?;
-    }
+    crate::hotkey::stage_input_installation(app, generation, hotkeys, &plan, &bindings);
+    crate::escape_cancel::resync(app);
 
-    if let Some(role_cache) = app.try_state::<HotkeyRoleCache>() {
-        *role_cache.0.lock().unwrap_or_else(|e| e.into_inner()) = plan;
+    match report.error() {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
-
-    Ok(())
 }
 
-fn effective_hotkey_config(config: &storage::AppConfig) -> storage::HotkeyConfig {
+pub(crate) fn effective_hotkey_config(config: &storage::AppConfig) -> storage::HotkeyConfig {
     let typed_dictation = config.hotkeys.dictation.to_hotkey_string();
     let typed_ask = config
         .hotkeys
@@ -381,8 +494,35 @@ fn hotkey_role_status(
             );
         }
 
-        if snapshot.state == HotkeySupervisorState::Disabled {
+        if snapshot.state == HotkeySupervisorState::Disabled && context.registration_error.is_none()
+        {
             return status("unavailable", "disabled", None, None);
+        }
+        if matches!(
+            snapshot.state,
+            HotkeySupervisorState::Installed
+                | HotkeySupervisorState::Failed
+                | HotkeySupervisorState::WaitingPermission
+        ) {
+            if let Some(bindings) = &snapshot.bindings {
+                if let Some(binding) = bindings
+                    .iter()
+                    .find(|binding| binding.role == role && binding.index == index)
+                {
+                    return match &binding.error {
+                        Some(error) => status(
+                            adapter,
+                            "failed",
+                            Some(error.clone()),
+                            Some(HotkeyStatusError {
+                                code: "registrationFailed".into(),
+                                message: error.clone(),
+                            }),
+                        ),
+                        None => status(adapter, "installed", None, None),
+                    };
+                }
+            }
         }
     }
 
@@ -631,7 +771,7 @@ fn config_requires_accessibility_permission(
         return false;
     }
 
-    config.output_mode == "keyboard" || config_uses_macos_native_hotkey(config)
+    config.insertion_strategy != "clipboardCopyOnly" || config_uses_macos_native_hotkey(config)
 }
 
 fn config_uses_macos_native_hotkey(config: &storage::AppConfig) -> bool {
@@ -639,7 +779,13 @@ fn config_uses_macos_native_hotkey(config: &storage::AppConfig) -> bool {
     crate::hotkey::hotkey_registration_plan_from_config_for_platform(&hotkeys, "macos")
         .map(|plan| {
             plan.native.iter().any(|registered| {
-                registered.trigger == crate::native_hotkey::NativeHotkeyTrigger::Fn
+                matches!(
+                    registered.trigger,
+                    crate::native_hotkey::NativeHotkeyTrigger::Fn
+                        | crate::native_hotkey::NativeHotkeyTrigger::FnSpace
+                        | crate::native_hotkey::NativeHotkeyTrigger::FnLeftShift
+                        | crate::native_hotkey::NativeHotkeyTrigger::FnKey(_)
+                )
             })
         })
         .unwrap_or(false)
@@ -874,6 +1020,22 @@ pub fn refresh_tray_labels(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_tray_update_status(app: tauri::AppHandle, status: String) -> Result<(), String> {
+    let status = tray::TrayUpdateStatus::parse(&status)
+        .ok_or_else(|| format!("Unknown update status: {status}"))?;
+    if tray::set_update_status(status) {
+        tray::refresh_tray(&app);
+    }
+    Ok(())
+}
+
+/// Debug builds run from `target/`, where the updater cannot replace the app bundle.
+#[tauri::command]
+pub fn is_development_build() -> bool {
+    cfg!(debug_assertions)
+}
+
+#[tauri::command]
 pub fn check_accessibility_permission() -> bool {
     pipeline::is_accessibility_trusted()
 }
@@ -948,14 +1110,61 @@ pub async fn get_system_diagnostics(
     ))
 }
 
+fn apply_legacy_hotkey_candidate(
+    current: &mut storage::AppConfig,
+    previous: &storage::AppConfig,
+    candidate: &storage::AppConfig,
+) -> anyhow::Result<()> {
+    if current.hotkeys != previous.hotkeys {
+        return Err(anyhow::anyhow!(
+            "Shortcut configuration changed during registration"
+        ));
+    }
+    crate::hotkey::validate_hotkey_config(&candidate.hotkeys)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    current.hotkeys = candidate.hotkeys.clone();
+    current.hotkey = candidate.hotkey.clone();
+    current.ask_hotkey = candidate.ask_hotkey.clone();
+    current.hotkey_mode = candidate.hotkey_mode.clone();
+    Ok(())
+}
+
+fn commit_legacy_hotkey_candidate(
+    state: &storage::ConfigManager,
+    previous: &storage::AppConfig,
+    candidate: &storage::AppConfig,
+) -> Result<(u64, storage::AppConfig), String> {
+    state
+        .try_update_current_config_commit(|current| {
+            apply_legacy_hotkey_candidate(current, previous, candidate)
+        })
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn update_hotkey(
+    window: tauri::Window,
     app: tauri::AppHandle,
     config_state: tauri::State<'_, storage::ConfigManager>,
     hotkey_error: tauri::State<'_, HotkeyRegistrationError>,
     hotkey_supervisor: tauri::State<'_, HotkeySupervisor>,
     hotkey: String,
 ) -> Result<(), String> {
+    ensure_shortcut_capture_window(window.label())?;
+    let transaction = app.try_state::<crate::hotkey::HotkeyConfigTransaction>();
+    let _transaction = match transaction.as_ref() {
+        Some(transaction) => Some(transaction.0.lock().await),
+        None => None,
+    };
+    if !hotkey_supervisor.settings_registration_allowed() {
+        return Err("Shortcut recovery or editing is in progress".into());
+    }
+    if app
+        .try_state::<HotkeySupervisor>()
+        .is_some_and(|supervisor| !supervisor.capture_allows_registration())
+    {
+        return Err("Shortcut editing is in progress".to_string());
+    }
     let previous = config_state.load().await.map_err(|e| e.to_string())?;
     let mut config = previous.clone();
     let binding = storage::ShortcutBinding::from_hotkey(&hotkey)
@@ -969,42 +1178,105 @@ pub async fn update_hotkey(
     config.hotkey = hotkey;
     config.normalize_values();
 
+    let installation_reservation = if crate::hotkey::input_configuration_busy(&app) {
+        None
+    } else {
+        crate::hotkey::reserve_input_installation(&app)
+    };
+    if installation_reservation.is_none() {
+        crate::hotkey::validate_hotkey_config(&config.hotkeys)
+            .map_err(|error| error.to_string())?;
+        let (revision, committed) =
+            commit_legacy_hotkey_candidate(&config_state, &previous, &config)?;
+        crate::commands::config::emit_config_commit(
+            &app,
+            config_state.config_epoch(),
+            revision,
+            &committed,
+        );
+        return Ok(());
+    }
+
     let generation = hotkey_supervisor.wake_for_settings_change();
     if let Err(error) = crate::commands::config::refresh_hotkey_runtime_with_rollback(
         &previous,
         &config,
-        |candidate| register_configured_shortcuts(&app, candidate),
+        |candidate| {
+            register_configured_shortcuts_for_generation(
+                &app,
+                candidate,
+                &hotkey_supervisor,
+                generation,
+            )
+        },
     ) {
-        if let Some(rollback_error) = error.rollback_error {
-            hotkey_supervisor.record_registration_failure(generation, rollback_error.clone());
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(rollback_error);
-        } else {
-            hotkey_supervisor.record_registration_success(generation);
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        if error.registration_error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+            return Err(error.registration_error);
         }
+        crate::commands::config::commit_input_registration_feedback(
+            &app,
+            &hotkey_supervisor,
+            generation,
+            &hotkey_error,
+            error.rollback_error,
+        );
         return Err(error.registration_error);
     }
-    hotkey_supervisor.record_registration_success(generation);
-    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
-
-    if let Err(error) = config_state.save(&config).await.map_err(|e| e.to_string()) {
-        let rollback_generation = hotkey_supervisor.wake_for_settings_change();
-        if let Err(rollback_error) = register_configured_shortcuts(&app, &previous) {
-            hotkey_supervisor
-                .record_registration_failure(rollback_generation, rollback_error.clone());
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(rollback_error);
+    let committed = commit_legacy_hotkey_candidate(&config_state, &previous, &config);
+    if let Err(error) = committed.as_ref() {
+        let error = error.clone();
+        let Some(rollback_generation) = hotkey_supervisor.begin_rollback(generation) else {
+            return Err(error);
+        };
+        if let Err(rollback_error) = register_configured_shortcuts_for_generation(
+            &app,
+            &previous,
+            &hotkey_supervisor,
+            rollback_generation,
+        ) {
+            if rollback_error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+                return Err(error);
+            }
+            crate::commands::config::commit_input_registration_feedback(
+                &app,
+                &hotkey_supervisor,
+                rollback_generation,
+                &hotkey_error,
+                Some(rollback_error),
+            );
         } else {
-            hotkey_supervisor.record_registration_success(rollback_generation);
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            crate::commands::config::commit_input_registration_feedback(
+                &app,
+                &hotkey_supervisor,
+                rollback_generation,
+                &hotkey_error,
+                None,
+            );
         }
         return Err(error);
     }
+
+    let (revision, committed) = committed?;
+    crate::commands::config::emit_config_commit(
+        &app,
+        config_state.config_epoch(),
+        revision,
+        &committed,
+    );
+    crate::commands::config::commit_input_registration_feedback(
+        &app,
+        &hotkey_supervisor,
+        generation,
+        &hotkey_error,
+        None,
+    );
 
     Ok(())
 }
 
 #[tauri::command]
 pub async fn update_ask_hotkey(
+    window: tauri::Window,
     app: tauri::AppHandle,
     config_state: tauri::State<'_, storage::ConfigManager>,
     hotkey_error: tauri::State<'_, HotkeyRegistrationError>,
@@ -1012,6 +1284,21 @@ pub async fn update_ask_hotkey(
     ask_cache: tauri::State<'_, AskHotkeyCache>,
     hotkey: String,
 ) -> Result<(), String> {
+    ensure_shortcut_capture_window(window.label())?;
+    let transaction = app.try_state::<crate::hotkey::HotkeyConfigTransaction>();
+    let _transaction = match transaction.as_ref() {
+        Some(transaction) => Some(transaction.0.lock().await),
+        None => None,
+    };
+    if !hotkey_supervisor.settings_registration_allowed() {
+        return Err("Shortcut recovery or editing is in progress".into());
+    }
+    if app
+        .try_state::<HotkeySupervisor>()
+        .is_some_and(|supervisor| !supervisor.capture_allows_registration())
+    {
+        return Err("Shortcut editing is in progress".to_string());
+    }
     let previous = config_state.load().await.map_err(|e| e.to_string())?;
     let mut config = previous.clone();
     if hotkey.trim().is_empty() {
@@ -1030,47 +1317,129 @@ pub async fn update_ask_hotkey(
     config.ask_hotkey = hotkey;
     config.normalize_values();
 
+    let installation_reservation = if crate::hotkey::input_configuration_busy(&app) {
+        None
+    } else {
+        crate::hotkey::reserve_input_installation(&app)
+    };
+    if installation_reservation.is_none() {
+        crate::hotkey::validate_hotkey_config(&config.hotkeys)
+            .map_err(|error| error.to_string())?;
+        let (revision, committed) =
+            commit_legacy_hotkey_candidate(&config_state, &previous, &config)?;
+        crate::commands::config::emit_config_commit(
+            &app,
+            config_state.config_epoch(),
+            revision,
+            &committed,
+        );
+        return Ok(());
+    }
+
     let generation = hotkey_supervisor.wake_for_settings_change();
     if let Err(error) = crate::commands::config::refresh_hotkey_runtime_with_rollback(
         &previous,
         &config,
-        |candidate| register_configured_shortcuts(&app, candidate),
+        |candidate| {
+            register_configured_shortcuts_for_generation(
+                &app,
+                candidate,
+                &hotkey_supervisor,
+                generation,
+            )
+        },
     ) {
-        if let Some(rollback_error) = error.rollback_error {
-            hotkey_supervisor.record_registration_failure(generation, rollback_error.clone());
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(rollback_error);
-        } else {
-            hotkey_supervisor.record_registration_success(generation);
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        if error.registration_error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+            return Err(error.registration_error);
         }
+        crate::commands::config::commit_input_registration_feedback(
+            &app,
+            &hotkey_supervisor,
+            generation,
+            &hotkey_error,
+            error.rollback_error,
+        );
         return Err(error.registration_error);
     }
-    hotkey_supervisor.record_registration_success(generation);
-    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *ask_cache.0.lock().unwrap_or_else(|e| e.into_inner()) = config.ask_hotkey.clone();
-
-    if let Err(error) = config_state.save(&config).await.map_err(|e| e.to_string()) {
-        let rollback_generation = hotkey_supervisor.wake_for_settings_change();
-        if let Err(rollback_error) = register_configured_shortcuts(&app, &previous) {
-            hotkey_supervisor
-                .record_registration_failure(rollback_generation, rollback_error.clone());
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(rollback_error);
+    let committed = commit_legacy_hotkey_candidate(&config_state, &previous, &config);
+    if let Err(error) = committed.as_ref() {
+        let error = error.clone();
+        let Some(rollback_generation) = hotkey_supervisor.begin_rollback(generation) else {
+            return Err(error);
+        };
+        if let Err(rollback_error) = register_configured_shortcuts_for_generation(
+            &app,
+            &previous,
+            &hotkey_supervisor,
+            rollback_generation,
+        ) {
+            if rollback_error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+                return Err(error);
+            }
+            crate::commands::config::commit_input_registration_feedback(
+                &app,
+                &hotkey_supervisor,
+                rollback_generation,
+                &hotkey_error,
+                Some(rollback_error),
+            );
         } else {
-            hotkey_supervisor.record_registration_success(rollback_generation);
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            crate::commands::config::commit_input_registration_feedback(
+                &app,
+                &hotkey_supervisor,
+                rollback_generation,
+                &hotkey_error,
+                None,
+            );
         }
         *ask_cache.0.lock().unwrap_or_else(|e| e.into_inner()) = previous.ask_hotkey;
         return Err(error);
     }
+
+    let (revision, committed) = committed?;
+    crate::commands::config::emit_config_commit(
+        &app,
+        config_state.config_epoch(),
+        revision,
+        &committed,
+    );
+    *ask_cache.0.lock().unwrap_or_else(|e| e.into_inner()) = config.ask_hotkey.clone();
+    crate::commands::config::commit_input_registration_feedback(
+        &app,
+        &hotkey_supervisor,
+        generation,
+        &hotkey_error,
+        None,
+    );
 
     Ok(())
 }
 
 /// Temporarily unregister all global shortcuts so the webview can capture key events.
 #[tauri::command]
-pub fn pause_hotkey(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(hotkey_supervisor) = app.try_state::<HotkeySupervisor>() {
+pub fn pause_hotkey<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    app: tauri::AppHandle<R>,
+    capture_id: Option<String>,
+) -> Result<(), String> {
+    ensure_shortcut_capture_window(window.label())?;
+    if let Some(capture_id) = capture_id.as_deref() {
+        if uuid::Uuid::parse_str(capture_id).is_err() {
+            return Err("Invalid shortcut capture identity".to_string());
+        }
+        app.state::<HotkeySupervisor>()
+            .acquire_capture(window.label(), capture_id)?;
+    } else if let Some(hotkey_supervisor) = app.try_state::<HotkeySupervisor>() {
         hotkey_supervisor.disable();
+    }
+    crate::hotkey::suspend_input_session(&app);
+    crate::escape_cancel::set_paused(&app, true);
+    {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "capsule:alert_dismiss",
+            serde_json::json!({"kind": "shortcut_guide"}),
+        );
     }
 
     let result = app
@@ -1088,30 +1457,525 @@ pub fn pause_hotkey(app: tauri::AppHandle) -> Result<(), String> {
 /// Re-register the current hotkey from config after recording is done.
 #[tauri::command]
 pub async fn resume_hotkey(
+    window: tauri::Window,
     app: tauri::AppHandle,
     config_state: tauri::State<'_, storage::ConfigManager>,
     hotkey_error: tauri::State<'_, HotkeyRegistrationError>,
     hotkey_supervisor: tauri::State<'_, HotkeySupervisor>,
+    capture_id: Option<String>,
 ) -> Result<(), String> {
-    let config = config_state.load().await.map_err(|e| e.to_string())?;
-    let generation = hotkey_supervisor.begin_registration_attempt();
-    match register_configured_shortcuts(&app, &config) {
+    ensure_shortcut_capture_window(window.label())?;
+    let transaction = app.state::<crate::hotkey::HotkeyConfigTransaction>();
+    let _transaction = transaction.0.lock().await;
+    let (lease_generation, generation) =
+        hotkey_supervisor.begin_capture_resume(capture_id.as_deref())?;
+    if lease_generation.is_some_and(|lease_generation| {
+        !hotkey_supervisor.capture_recovery_is_current(lease_generation)
+    }) {
+        return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+    }
+    let previously_native = app.try_state::<HotkeyRoleCache>().is_some_and(|cache| {
+        !cache
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .native
+            .is_empty()
+    });
+    let config = match config_state.load().await {
+        Ok(config) => config,
+        Err(error) => {
+            let error = error.to_string();
+            if !hotkey_supervisor.fail_capture_recovery(
+                generation,
+                lease_generation,
+                error.clone(),
+                crate::hotkey_controller::RecoveryFailure::Temporary,
+                || {
+                    crate::escape_cancel::set_paused(&app, false);
+                    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+                },
+            ) {
+                return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+            }
+            return Err(error);
+        }
+    };
+    let plan = match crate::hotkey::hotkey_registration_plan_from_config_for_platform(
+        &effective_hotkey_config(&config),
+        std::env::consts::OS,
+    ) {
+        Ok(plan) => plan,
+        Err(error) => {
+            let error = error.to_string();
+            if !hotkey_supervisor.fail_capture_recovery(
+                generation,
+                lease_generation,
+                error.clone(),
+                crate::hotkey_controller::RecoveryFailure::InvalidConfiguration,
+                || {
+                    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+                },
+            ) {
+                return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+            }
+            return Err(error);
+        }
+    };
+    if previously_native || !plan.native.is_empty() {
+        if let Err(error) = crate::shortcut_release::wait_for_release(
+            || {
+                app.try_state::<NativeHotkeyRuntime>()
+                    .and_then(|runtime| runtime.observed_native_chord_pressed())
+                    .unwrap_or_else(crate::shortcut_release::native_key_pressed)
+            },
+            || {
+                hotkey_supervisor.is_current_generation(generation)
+                    && lease_generation.is_none_or(|lease_generation| {
+                        hotkey_supervisor.capture_recovery_is_current(lease_generation)
+                    })
+            },
+            std::time::Duration::from_secs(10),
+        )
+        .await
+        {
+            if error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+                return Err(error);
+            }
+            if !hotkey_supervisor.fail_capture_recovery(
+                generation,
+                lease_generation,
+                error.clone(),
+                if !pipeline::is_accessibility_trusted() {
+                    crate::hotkey_controller::RecoveryFailure::PermissionRequired
+                } else if !crate::shortcut_release::input_monitoring_trusted() {
+                    crate::hotkey_controller::RecoveryFailure::InputMonitoringRequired
+                } else {
+                    crate::hotkey_controller::RecoveryFailure::ReleaseUnconfirmed
+                },
+                || {
+                    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+                },
+            ) {
+                return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+            }
+            return Err(error);
+        }
+    }
+    if let Some(lease_generation) = lease_generation {
+        if !hotkey_supervisor.confirm_capture_released(lease_generation, Some(false)) {
+            return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+        }
+    }
+    let Some(_installation_reservation) = crate::hotkey::reserve_input_installation(&app) else {
+        let error = "Input installation is waiting for the active session".to_string();
+        if !hotkey_supervisor.fail_capture_recovery(
+            generation,
+            lease_generation,
+            error.clone(),
+            crate::hotkey_controller::RecoveryFailure::Temporary,
+            || {
+                *hotkey_error
+                    .0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(error.clone());
+            },
+        ) {
+            return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+        }
+        return Err(error);
+    };
+    match run_if_hotkey_generation_current(&hotkey_supervisor, generation, || {
+        crate::escape_cancel::set_paused(&app, false);
+        register_configured_shortcuts_guarded(&app, &config, generation)
+    }) {
         Ok(()) => {
-            hotkey_supervisor.record_registration_success(generation);
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            if !hotkey_supervisor.finish_capture_registration(
+                generation,
+                lease_generation,
+                None,
+                || {
+                    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    crate::hotkey::publish_saved_input_configuration(&app, generation);
+                },
+            ) {
+                return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+            }
             Ok(())
         }
         Err(error) => {
-            hotkey_supervisor.record_registration_failure(generation, error.clone());
-            *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+            if error == HOTKEY_REGISTRATION_SUPERSEDED_ERROR {
+                return Err(error);
+            }
+            if !hotkey_supervisor.finish_capture_registration(
+                generation,
+                lease_generation,
+                Some(error.clone()),
+                || {
+                    *hotkey_error.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(error.clone());
+                    crate::hotkey::publish_saved_input_configuration(&app, generation);
+                },
+            ) {
+                return Err(HOTKEY_REGISTRATION_SUPERSEDED_ERROR.to_string());
+            }
             Err(error)
         }
+    }
+}
+
+fn ensure_shortcut_capture_window(label: &str) -> Result<(), String> {
+    if label == "main" {
+        Ok(())
+    } else {
+        Err("Shortcut capture is only allowed from the main window".to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_hotkey_candidate_preserves_current_non_shortcut_settings_and_rejects_conflicts() {
+        let previous = storage::AppConfig::default();
+        let mut candidate = previous.clone();
+        candidate.hotkeys = storage::HotkeyConfig::from_legacy("Ctrl+K", "Ctrl+J", "toggle");
+        candidate.normalize_values();
+        let mut current = previous.clone();
+        current.microphone_device = "concurrent-device".into();
+        current.history_enabled = false;
+        apply_legacy_hotkey_candidate(&mut current, &previous, &candidate).unwrap();
+        assert_eq!(current.microphone_device, "concurrent-device");
+        assert!(!current.history_enabled);
+        assert_eq!(current.hotkeys, candidate.hotkeys);
+        assert_eq!(current.hotkey, candidate.hotkey);
+        let committed = serde_json::to_value(&current).unwrap();
+        assert!(apply_legacy_hotkey_candidate(&mut current, &previous, &previous).is_err());
+        assert_eq!(serde_json::to_value(current).unwrap(), committed);
+    }
+
+    #[test]
+    fn invalid_legacy_hotkey_candidate_leaves_current_configuration_unchanged() {
+        let previous = storage::AppConfig::default();
+        let mut current = previous.clone();
+        let mut candidate = previous.clone();
+        candidate.hotkeys.ask = Some(candidate.hotkeys.dictation.clone());
+        candidate.hotkeys.ask_bindings = vec![candidate.hotkeys.dictation.clone()];
+        let snapshot = serde_json::to_value(&current).unwrap();
+        assert!(apply_legacy_hotkey_candidate(&mut current, &previous, &candidate).is_err());
+        assert_eq!(serde_json::to_value(current).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn disabled_registration_preserves_the_actual_failure_reason() {
+        let config = storage::AppConfig {
+            hotkey: "Ctrl+/".to_string(),
+            ask_hotkey: "Ctrl+.".to_string(),
+            ..storage::AppConfig::default()
+        };
+        let supervisor = HotkeySupervisor::default();
+        supervisor.disable();
+        let status = hotkey_status_for_with_capability_and_supervisor(
+            &config,
+            Some("Shortcut release query requires Input Monitoring permission".to_string()),
+            platform::capabilities(),
+            Some(supervisor.snapshot()),
+        );
+        assert_eq!(status.roles[0].state, "failed");
+        assert_eq!(
+            status.roles[0]
+                .last_error
+                .as_ref()
+                .map(|error| error.message.as_str()),
+            Some("Shortcut release query requires Input Monitoring permission"),
+        );
+    }
+
+    #[test]
+    fn invalid_resume_plan_records_disabled_feedback_before_returning() {
+        let production = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        let command = production
+            .split("pub async fn resume_hotkey(")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
+        let plan = command
+            .split("let plan =")
+            .nth(1)
+            .unwrap()
+            .split("if previously_native")
+            .next()
+            .unwrap();
+        assert!(plan.contains("fail_capture_recovery"));
+        assert!(plan.contains("HOTKEY_REGISTRATION_SUPERSEDED_ERROR"));
+    }
+
+    #[test]
+    fn release_failure_feedback_keeps_current_registration_disabled_without_retry() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.begin_registration_attempt();
+        let mut feedback = None;
+        assert!(supervisor.record_disabled_with_feedback(generation, || {
+            feedback = Some("release unknown");
+        }));
+        assert_eq!(feedback, Some("release unknown"));
+        assert_eq!(supervisor.snapshot().state, HotkeySupervisorState::Disabled);
+        assert_eq!(supervisor.next_retry_delay(), None);
+        supervisor.disable();
+        assert!(!supervisor.record_disabled_with_feedback(generation, || {
+            feedback = Some("stale failure");
+        }));
+        assert_eq!(feedback, Some("release unknown"));
+    }
+
+    #[test]
+    fn a_new_pause_remains_disabled_after_registration_feedback_finishes() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.begin_registration_attempt();
+        let feedback = Arc::new(std::sync::Mutex::new(None));
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let registration_supervisor = supervisor.clone();
+        let registration_feedback = Arc::clone(&feedback);
+        let registration = std::thread::spawn(move || {
+            registration_supervisor.record_registration_result(generation, None, || {
+                entered_sender.send(()).unwrap();
+                release_receiver
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+                *registration_feedback.lock().unwrap() = Some("registered");
+            })
+        });
+        entered_receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        let pause_supervisor = supervisor.clone();
+        let pause = std::thread::spawn(move || pause_supervisor.disable());
+        release_sender.send(()).unwrap();
+        assert!(registration.join().unwrap());
+        let next_generation = pause.join().unwrap();
+        assert!(next_generation > generation);
+        assert_eq!(supervisor.snapshot().state, HotkeySupervisorState::Disabled);
+        assert_eq!(*feedback.lock().unwrap(), Some("registered"));
+        assert!(
+            !supervisor.record_registration_result(generation, None, || {
+                *feedback.lock().unwrap() = Some("stale");
+            })
+        );
+        assert_eq!(*feedback.lock().unwrap(), Some("registered"));
+    }
+
+    #[test]
+    fn superseded_registration_results_do_not_update_shared_error_feedback() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.begin_registration_attempt();
+        supervisor.disable();
+        let mut feedback = Some("new editor error".to_string());
+        assert!(
+            !supervisor.record_registration_result(generation, None, || {
+                feedback = None;
+            })
+        );
+        assert!(!supervisor.record_registration_result(
+            generation,
+            Some("old registration failure".to_string()),
+            || {
+                feedback = Some("old registration failure".to_string());
+            },
+        ));
+        assert_eq!(feedback.as_deref(), Some("new editor error"));
+        assert_eq!(supervisor.snapshot().state, HotkeySupervisorState::Disabled);
+    }
+
+    #[test]
+    fn shortcut_resume_records_config_load_failure_before_returning() {
+        let production = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        let command = production
+            .split("pub async fn resume_hotkey(")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
+        assert!(command.contains("match config_state.load().await"));
+        let failure = command.split("Err(error) =>").nth(1).unwrap();
+        assert!(failure.contains("fail_capture_recovery"));
+        assert!(failure.contains("HOTKEY_REGISTRATION_SUPERSEDED_ERROR"));
+    }
+
+    #[test]
+    fn shortcut_resume_keeps_its_generation_across_async_config_loading() {
+        let production = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        let command = production
+            .split("pub async fn resume_hotkey(")
+            .nth(1)
+            .unwrap()
+            .split("\n}\n")
+            .next()
+            .unwrap();
+        assert!(
+            command.find("begin_capture_resume(").unwrap()
+                < command.find("config_state.load().await").unwrap()
+        );
+        assert!(command.contains("run_if_hotkey_generation_current"));
+    }
+
+    #[test]
+    fn legacy_shortcut_success_paths_emit_owned_commits_without_full_snapshot_save() {
+        let source = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        for signature in [
+            "pub async fn update_hotkey(",
+            "pub async fn update_ask_hotkey(",
+        ] {
+            let command = source
+                .split(signature)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            assert_eq!(
+                command.matches("commit_legacy_hotkey_candidate(").count(),
+                2
+            );
+            assert_eq!(command.matches("emit_config_commit(").count(), 2);
+            assert!(!command.contains(".save(&config)"));
+        }
+    }
+
+    #[test]
+    fn legacy_shortcut_updates_activate_only_after_config_is_saved() {
+        let source = include_str!("misc.rs");
+        for signature in [
+            "pub async fn update_hotkey(",
+            "pub async fn update_ask_hotkey(",
+        ] {
+            let command = source
+                .split(signature)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            let save = command.rfind("commit_legacy_hotkey_candidate(").unwrap();
+            let activation = command
+                .rfind("crate::commands::config::commit_input_registration_feedback(")
+                .unwrap();
+            assert!(save < activation);
+        }
+    }
+
+    #[test]
+    fn auxiliary_pause_hotkey_ipc_is_denied_before_accessing_system_shortcuts() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.begin_registration_attempt();
+        supervisor.record_registration_success(generation);
+        let expected = supervisor.snapshot();
+        let app = tauri::test::mock_builder()
+            .manage(supervisor.clone())
+            .invoke_handler(tauri::generate_handler![pause_hotkey])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        for label in ["capsule", "ask"] {
+            let webview = tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap();
+            let response = tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: "pause_hotkey".to_string(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            );
+            assert_eq!(
+                response.unwrap_err(),
+                serde_json::json!("Shortcut capture is only allowed from the main window")
+            );
+            assert_eq!(supervisor.snapshot(), expected);
+        }
+    }
+
+    #[test]
+    fn shortcut_capture_window_policy_rejects_auxiliary_and_unknown_windows() {
+        assert!(ensure_shortcut_capture_window("main").is_ok());
+        for label in ["capsule", "ask", "", "Main", "main-other"] {
+            assert!(ensure_shortcut_capture_window(label).is_err());
+        }
+    }
+
+    #[test]
+    fn shortcut_capture_commands_check_window_before_changing_runtime_state() {
+        let production = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        for (signature, mutation) in [
+            ("pub fn pause_hotkey<", "hotkey_supervisor.disable()"),
+            (
+                "pub async fn resume_hotkey(",
+                "crate::escape_cancel::set_paused(",
+            ),
+        ] {
+            let command = production
+                .split(signature)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            let guard = command.find("ensure_shortcut_capture_window(window.label())?;");
+            assert!(guard.is_some(), "{signature} must check its caller");
+            assert!(guard.unwrap() < command.find(mutation).unwrap());
+        }
+    }
+
+    #[test]
+    fn legacy_shortcut_updates_check_window_before_loading_or_registering() {
+        let production = include_str!("misc.rs")
+            .split("\n#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap();
+        for signature in [
+            "pub async fn update_hotkey(",
+            "pub async fn update_ask_hotkey(",
+        ] {
+            let command = production
+                .split(signature)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            let guard = command.find("ensure_shortcut_capture_window(window.label())?;");
+            assert!(guard.is_some(), "{signature} must check its caller");
+            assert!(guard.unwrap() < command.find("config_state.load()").unwrap());
+            assert!(
+                guard.unwrap()
+                    < command
+                        .find("register_configured_shortcuts_for_generation(")
+                        .unwrap()
+            );
+        }
+    }
 
     #[test]
     fn hotkey_status_marks_valid_distinct_bindings() {
@@ -1356,6 +2220,52 @@ mod tests {
             Some("registrationFailed")
         );
         assert_eq!(status.roles[1].state, "failed");
+    }
+
+    #[test]
+    fn indexed_registration_results_do_not_mark_a_working_fn_role_failed() {
+        let mut config = storage::AppConfig::default();
+        config.hotkey = "Fn".into();
+        config.ask_hotkey = "Ctrl+.".into();
+        config.hotkeys = storage::HotkeyConfig::from_legacy(
+            &config.hotkey,
+            &config.ask_hotkey,
+            &config.hotkey_mode,
+        );
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.begin_registration_attempt();
+        assert!(supervisor.record_binding_results(
+            generation,
+            vec![
+                crate::hotkey_controller::BindingRegistration {
+                    role: "dictation".into(),
+                    index: 0,
+                    error: None,
+                },
+                crate::hotkey_controller::BindingRegistration {
+                    role: "ask".into(),
+                    index: 0,
+                    error: Some("occupied".into()),
+                },
+            ],
+        ));
+        supervisor.record_registration_failure(generation, "occupied".into());
+        let status = hotkey_status_for_with_capability_and_supervisor(
+            &config,
+            Some("occupied".into()),
+            platform::capabilities(),
+            Some(supervisor.snapshot()),
+        );
+        let dictation = status
+            .roles
+            .iter()
+            .find(|role| role.role == "dictation")
+            .unwrap();
+        let ask = status.roles.iter().find(|role| role.role == "ask").unwrap();
+        assert_eq!(dictation.state, "installed");
+        assert!(dictation.last_error.is_none());
+        assert_eq!(ask.state, "failed");
+        assert_eq!(ask.last_error.as_ref().unwrap().message, "occupied");
     }
 
     #[test]
@@ -1648,6 +2558,60 @@ mod tests {
             accessibility.action.as_deref(),
             Some("openAccessibilitySettings")
         );
+    }
+
+    #[test]
+    fn diagnostics_requires_accessibility_for_fn_combinations_with_copy_only_output() {
+        let caps = platform::PlatformCapabilities {
+            os: "macos".into(),
+            session_type: "unknown".into(),
+            global_hotkey_reliable: true,
+            keyboard_output_reliable: true,
+            clipboard_auto_paste_reliable: true,
+        };
+        for (dictation, ask) in [("Fn+LeftShift", "Command+."), ("Ctrl+/", "Fn+Space")] {
+            let config = storage::AppConfig {
+                output_mode: "clipboard".into(),
+                insertion_strategy: "clipboardCopyOnly".into(),
+                hotkey: dictation.into(),
+                ask_hotkey: ask.into(),
+                hotkey_mode: "hold".into(),
+                hotkeys: storage::HotkeyConfig::from_legacy(dictation, ask, "hold"),
+                ..Default::default()
+            };
+            let row = accessibility_diagnostic_row(&config, &caps, false, "synthetic-time");
+            assert_eq!(row.status, DiagnosticStatus::Error);
+            assert_eq!(row.action.as_deref(), Some("openAccessibilitySettings"));
+        }
+    }
+
+    #[test]
+    fn accessibility_diagnostics_distinguishes_clipboard_paste_from_copy_only() {
+        let caps = platform::PlatformCapabilities {
+            os: "macos".into(),
+            session_type: "unknown".into(),
+            global_hotkey_reliable: true,
+            keyboard_output_reliable: true,
+            clipboard_auto_paste_reliable: true,
+        };
+        for (strategy, expected) in [
+            ("clipboardPaste", DiagnosticStatus::Error),
+            ("clipboardCopyOnly", DiagnosticStatus::NotApplicable),
+        ] {
+            let config = storage::AppConfig {
+                output_mode: "clipboard".into(),
+                insertion_strategy: strategy.into(),
+                hotkey: "Ctrl+/".into(),
+                ask_hotkey: "".into(),
+                hotkey_mode: "hold".into(),
+                hotkeys: storage::HotkeyConfig::from_legacy("Ctrl+/", "", "hold"),
+                ..Default::default()
+            };
+            assert_eq!(
+                accessibility_diagnostic_row(&config, &caps, false, "synthetic-time").status,
+                expected
+            );
+        }
     }
 
     #[test]

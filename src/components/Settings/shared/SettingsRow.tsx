@@ -16,7 +16,7 @@ export function SettingsSection({
   label?: string
 }) {
   return (
-    <section aria-label={label ?? title} className="mb-10 last:mb-0">
+    <section aria-label={label ?? title} className="settings-section mb-8 last:mb-0">
       <div className="mb-1 flex items-center gap-2 border-b border-border-thin pb-4">
         <h3 className="m-0 flex min-w-0 flex-1 items-center gap-2 text-[16px] font-medium leading-6 text-text-tertiary">
           {Icon && <Icon size={18} strokeWidth={1.8} />}
@@ -42,18 +42,29 @@ export function SettingsRow({
   stacked?: boolean
 }) {
   return (
-    <div className={`py-4 ${stacked ? 'space-y-3' : 'flex items-start justify-between gap-8'}`}>
-      <div className="min-w-0 flex-1">
-        <div className="text-[14px] font-semibold leading-5 text-text-primary">{title}</div>
+    <div className={stacked ? 'settings-row-stacked' : 'settings-row'}>
+      <div className="settings-row-label min-w-0">
+        <div className="text-[14px] font-medium leading-5 text-text-primary">{title}</div>
         {description && (
           <div className="mt-1 text-[14px] leading-5 text-text-tertiary">{description}</div>
         )}
       </div>
-      {children && (
-        <div className={stacked ? '' : 'flex w-[280px] shrink-0 flex-col items-stretch gap-1.5'}>
-          {children}
-        </div>
-      )}
+      {children && <div className="settings-row-control">{children}</div>}
+    </div>
+  )
+}
+
+export function SettingsControlGroup({
+  children,
+  action,
+}: {
+  children: React.ReactNode
+  action?: React.ReactNode
+}) {
+  return (
+    <div className={`settings-control-group${action ? '' : ' settings-control-group-single'}`}>
+      <div className="settings-control-input">{children}</div>
+      {action && <div className="settings-control-action">{action}</div>}
     </div>
   )
 }

@@ -8,6 +8,8 @@
 
 <h1 align="center">OpenTypeless</h1>
 
+> **开发分支说明：** 当前 Typeless 复刻工作尚未达到发行要求。本地测试和调试构建不代表完整功能对齐、真实服务验收、安全通过或签名安装与更新验证。下方下载和签名说明针对已发布版本，不适用于当前工作树；剩余门槛见[当前交付清单](docs/typeless-parity/2026-11-11-current-delivery-checklist.md)。
+
 <p align="center">
   开源版 Wispr Flow / Superwhisper：面向 macOS、Windows 和 Linux 的 AI 语音输入、改写和语音问答工具。
 </p>
@@ -116,13 +118,29 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 
 ## 功能特性
 
+### 当前开发版本的限制
+
+当前工作树不是上线验收证明。源码包含能力或内部包构建成功，不代表所有平台
+的实际使用都已通过。
+
+- 当前场景设置仍缺自定义/内置场景的手动激活、保存并激活和内置场景复制入口；
+  场景存储和元数据支持不等于这些操作已恢复。
+- 打开搜索引擎网页不等于带真实检索来源和引用的 Ask 回答，后者尚无完整闭环。
+- 云备份不等于多设备持续同步。
+- 流式响应预览不等于目标应用已经启用边生成边插入。
+- 跨 Mac 的 Fn/Fn+Space、Windows 监听恢复、翻译目标保存/停止一致性及更新安全
+  仍有未关闭门槛。
+
+实际证据和剩余要求见[当前交付审计](docs/architecture/2026-11-16-objective-audit.md)。
+这些限制不代表允许删除原有能力或修改已批准的设计风格。
+
 - 🎙️ 默认对齐 Typeless 风格热键：macOS `Fn`，Windows `Right Alt`，Linux `Ctrl+/`
 - ❓ 独立 Ask Anything 热键：macOS `Fn+Space`，Windows `Right Alt+Space`，Linux `Ctrl+.`
 - 💊 浮动胶囊显示准备、录音、转写、润色、Ask thinking 等状态，空闲时可自动隐藏
 - 🗣️ 接入 6+ 语音识别服务商，并支持 macOS Apple Speech 与自托管 Whisper 兼容端点
 - 🤖 多种大模型润色文本：OpenAI、DeepSeek、Claude、Gemini、Ollama 等
 - ✨ 润色风格：轻改、清爽、结构化、专业
-- ⚡ 流式输出，边生成边打字
+- ⚡ 流式响应预览；目标应用的增量插入能力需按实际输出策略分别验收
 - ⌨️ 支持键盘模拟、剪贴板粘贴/仅复制、Windows SendInput 和输出失败诊断
 - 📝 Ask/润色可读取选中文本，用来提问、总结、改写或翻译
 - 🌐 翻译模式：说中文，输出英文（或其他 20+ 语言）
@@ -155,7 +173,7 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 | 平台 | 文件 |
 |------|------|
 | Windows | `.msi` 安装包或 `.exe` 安装程序 |
-| macOS | Apple Silicon 和 Intel 通用 `.dmg` |
+| macOS | `.dmg`；请核对具体产物的 CPU 架构 |
 | Linux | `.AppImage` / `.deb` / `.rpm` |
 
 ## 安装说明
@@ -164,26 +182,19 @@ Linux 暂时保持 `Ctrl+/` 和 `Ctrl+.` 作为默认热键，因为不同桌面
 
 ### Windows
 
-如果 Windows SmartScreen 提示“Windows 已保护你的电脑”：
-
-1. 点击 **更多信息**
-2. 点击 **仍要运行**
-
-如果安装包出现发布者验证提示：
-
-1. 右键 `.msi` 文件，选择 **属性**
-2. 勾选底部的 **解除锁定**，点击 **应用**
-3. 重新运行安装包
+如果 Windows SmartScreen 或发布者验证阻止安装，请先停止，核对产物来源、
+公开校验值和签名状态，并向维护者反馈具体提示及版本。内部未签名测试安装包
+不属于稳定发行版本，不应关闭系统防护来将其视为已验证的正式产物。
 
 ### macOS
 
-macOS 构建使用 Developer ID 签名。如果首次启动仍被 Gatekeeper 拦截，可以执行：
+请核对具体产物的架构、最低 macOS 版本、Developer ID 签名和公证状态。
+签名有效不等于已公证或通过 Gatekeeper 检查。如果首次启动被阻止，请保留
+系统防护并反馈具体提示、版本和产物校验值，不通过移除隔离属性绕过检查。
 
-```bash
-xattr -cr /Applications/OpenTypeless.app
-```
-
-然后正常打开应用。
+2026-11-15 的内部 Mac2050 测试应用仅包含 arm64，主程序实际最低要求为
+macOS 11.0，不是已验证支持 Intel Mac 的通用正式版本。其他产物也需要分别
+核对架构与实际安装兼容性。
 
 ### Linux
 
@@ -214,6 +225,8 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 ./OpenTypeless
 - [Rust](https://rustup.rs/)（stable 工具链）
 - Tauri 平台依赖：参见 [Tauri 前置要求](https://v2.tauri.app/start/prerequisites/)
 
+项目声明使用 Rust 1.90 或更新版本，以满足修补后的桌面运行时与更新插件依赖。本地验证使用 Rust 1.96；仍需独立构建验证 Rust 1.90 是否为完整支持的最低版本。
+
 ## 快速开始
 
 ```bash
@@ -231,11 +244,11 @@ npm run tauri build
 
 ## 配置
 
-所有设置均可在应用内的设置面板中访问：
+语音识别和 AI 润色配置位于侧边栏首页下方的**模型**页；通用偏好仍在设置中，词典、场景和账户保留各自入口。
 
 - **语音识别** — 选择 STT 服务商并输入 API 密钥
 - **AI 润色** — 选择 LLM 服务商、模型、API 密钥、润色风格、自定义提示词、翻译和选中文本上下文
-- **通用** — 听写热键、Ask 热键、输出模式、开机自启和胶囊空闲隐藏
+- **通用** — 口述、随便问和翻译的多快捷键配置、输出模式、开机自启和胶囊空闲隐藏；主要快捷键也可以直接在首页修改
 - **词典** — 添加自定义术语和本地纠错规则
 - **场景** — 内置/本地提示词模板，支持导入导出
 - **账户 / Upgrade** — 登录、查看 cloud words、管理 Pro 或 Lifetime Starter 权益
@@ -263,7 +276,7 @@ OpenTypeless 还提供可选的托管云端能力，这样你不需要自己配�
 
 无需任何云依赖即可运行 OpenTypeless：
 
-1. 在设置中选择任意非 Cloud 的 STT 和 LLM 服务商
+1. 在**模型**页选择任意非 Cloud 的 STT 和 LLM 服务商
 2. 输入你自己的 API 密钥
 3. 完成 — 无需账户或连接 www.opentypeless.com
 

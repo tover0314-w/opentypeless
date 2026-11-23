@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { HistoryEntry } from '../../stores/appStore'
+import { Modal } from '../shared/Modal'
 
 interface CreateCorrectionDialogProps {
   entry: HistoryEntry
@@ -23,21 +24,6 @@ export function CreateCorrectionDialog({ entry, onCancel, onSave }: CreateCorrec
   const [pattern, setPattern] = useState(canUseSource ? entry.raw_text.trim() : '')
   const [replacement, setReplacement] = useState(canUseSource ? entry.polished_text.trim() : '')
   const [saving, setSaving] = useState(false)
-  const patternRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    patternRef.current?.focus()
-  }, [])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || saving) return
-      event.preventDefault()
-      onCancel()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onCancel, saving])
 
   const save = async () => {
     const nextPattern = pattern.trim()
@@ -46,20 +32,22 @@ export function CreateCorrectionDialog({ entry, onCancel, onSave }: CreateCorrec
     setSaving(true)
     try {
       await onSave(nextPattern, nextReplacement)
+    } catch {
+      return
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 px-5">
-      <div className="fixed inset-0" onClick={saving ? undefined : onCancel} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('history.createCorrection')}
-        className="relative z-10 w-full max-w-[420px] rounded-[10px] border border-border bg-bg-primary shadow-float"
-      >
+    <Modal
+      title={t('history.createCorrection')}
+      onClose={onCancel}
+      dismissible={!saving}
+      width={420}
+      bare
+    >
+      <div aria-busy={saving}>
         <div className="border-b border-border px-4 py-3">
           <h3 className="text-[14px] font-medium text-text-primary">
             {t('history.createCorrection')}
@@ -69,8 +57,9 @@ export function CreateCorrectionDialog({ entry, onCancel, onSave }: CreateCorrec
           <label className="block text-[11px] text-text-secondary">
             {t('dictionary.wrongPhrase')}
             <input
-              ref={patternRef}
+              data-autofocus
               value={pattern}
+              disabled={saving}
               onChange={(event) => setPattern(clampCorrectionText(event.target.value))}
               className="mt-1 w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[13px] text-text-primary outline-none focus:border-border-focus"
             />
@@ -79,6 +68,7 @@ export function CreateCorrectionDialog({ entry, onCancel, onSave }: CreateCorrec
             {t('dictionary.correctPhrase')}
             <input
               value={replacement}
+              disabled={saving}
               onChange={(event) => setReplacement(clampCorrectionText(event.target.value))}
               className="mt-1 w-full rounded-[8px] border border-border bg-bg-secondary px-3 py-2 text-[13px] text-text-primary outline-none focus:border-border-focus"
             />
@@ -103,6 +93,6 @@ export function CreateCorrectionDialog({ entry, onCancel, onSave }: CreateCorrec
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

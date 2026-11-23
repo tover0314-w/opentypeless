@@ -173,6 +173,38 @@ impl std::fmt::Display for VoiceIntentError {
 impl std::error::Error for VoiceIntentError {}
 
 impl VoiceIntent {
+    pub fn translation_target<'target>(&'target self, configured: &'target str) -> &'target str {
+        if self.kind == VoiceIntentKind::TranslateSelection {
+            if let Some(target) = self.payload.as_deref().filter(|target| {
+                matches!(
+                    *target,
+                    "en" | "zh"
+                        | "ja"
+                        | "ko"
+                        | "fr"
+                        | "de"
+                        | "es"
+                        | "pt"
+                        | "ru"
+                        | "ar"
+                        | "hi"
+                        | "th"
+                        | "vi"
+                        | "it"
+                        | "nl"
+                        | "tr"
+                        | "pl"
+                        | "uk"
+                        | "id"
+                        | "ms"
+                )
+            }) {
+                return target;
+            }
+        }
+        configured
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         kind: VoiceIntentKind,

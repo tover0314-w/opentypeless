@@ -1,5 +1,13 @@
-export function PageContainer({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto w-full max-w-[1080px] px-6 pb-10 pt-6">{children}</div>
+export function PageContainer({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`mx-auto w-full max-w-[1080px] px-6 pb-10 pt-6 ${className}`}>{children}</div>
+  )
 }
 
 export function PageHeader({

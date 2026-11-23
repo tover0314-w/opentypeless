@@ -69,6 +69,46 @@ describe('capsule centering while expanding', () => {
 })
 
 describe('getCapsuleVisibility', () => {
+  it('hides an idle Windows capsule even when the old auto-hide setting is disabled', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+    try {
+      expect(
+        getCapsuleVisibility({
+          capsuleAutoHide: false,
+          capsuleExpanded: false,
+          hasError: false,
+          pipelineState: 'idle',
+        }),
+      ).toBe(false)
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('does not let a stale expanded state keep an idle Windows window visible', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+    try {
+      expect(
+        getCapsuleVisibility({
+          capsuleAutoHide: false,
+          capsuleExpanded: true,
+          hasError: false,
+          pipelineState: 'idle',
+        }),
+      ).toBe(false)
+      expect(
+        getCapsuleVisibility({
+          capsuleAutoHide: false,
+          capsuleExpanded: true,
+          hasError: true,
+          pipelineState: 'idle',
+        }),
+      ).toBe(true)
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
   it('hides idle capsule when auto-hide is enabled', () => {
     expect(
       getCapsuleVisibility({
@@ -420,14 +460,14 @@ describe('useCapsuleResize async updates', () => {
       useAppStore.setState({ translationTargetMenuOpen: false })
     })
 
-    await waitFor(() => {
-      expect(windowApiMocks.setPosition).toHaveBeenCalledTimes(1)
-      expect(windowApiMocks.hide).toHaveBeenCalledTimes(1)
-    })
-
     await act(async () => {
       resolveFirstMonitor(monitor)
       await delayedFirstMonitor
+    })
+
+    await waitFor(() => {
+      expect(windowApiMocks.setPosition).toHaveBeenCalledTimes(1)
+      expect(windowApiMocks.hide).toHaveBeenCalledTimes(1)
     })
 
     expect(windowApiMocks.setSize.mock.calls.map(([size]) => [size.width, size.height])).toEqual([
@@ -452,5 +492,74 @@ describe('useCapsuleResize async updates', () => {
         expect.objectContaining({ y: 100 + 56 - 104 }),
       )
     })
+  })
+
+  it('finishes an in-flight resize before computing the next bottom anchor', async () => {
+    let rectangle = { x: 900, y: 984, width: 120, height: 56 }
+    windowApiMocks.outerPosition.mockImplementation(async () => ({
+      x: rectangle.x,
+      y: rectangle.y,
+    }))
+    windowApiMocks.outerSize.mockImplementation(async () => ({
+      width: rectangle.width,
+      height: rectangle.height,
+    }))
+    windowApiMocks.setSize.mockImplementation(async (size) => {
+      rectangle = { ...rectangle, width: size.width, height: size.height }
+    })
+    windowApiMocks.setPosition.mockImplementation(async (position) => {
+      rectangle = { ...rectangle, x: position.x, y: position.y }
+    })
+    render(createElement(HookHarness))
+    await waitFor(() => expect(windowApiMocks.hide).toHaveBeenCalledOnce())
+    rectangle = { x: 900, y: 500, width: 120, height: 56 }
+    let finishResize: () => void = () => {}
+    windowApiMocks.setSize.mockImplementationOnce((size) => {
+      rectangle = { ...rectangle, width: size.width, height: size.height }
+      return new Promise<void>((resolve) => {
+        finishResize = resolve
+      })
+    })
+    act(() => useAppStore.setState({ translationTargetMenuOpen: true }))
+    await waitFor(() => expect(rectangle.height).toBe(300))
+    act(() => useAppStore.setState({ translationTargetMenuOpen: false }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    await act(async () => {
+      finishResize()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(rectangle.height).toBe(56))
+    expect(rectangle.x + rectangle.width / 2).toBe(960)
+    expect(rectangle.y + rectangle.height).toBe(556)
+  })
+
+  it('keeps a manually placed capsule anchored through repeated recording and menu transitions', async () => {
+    let rectangle = { x: 900, y: 984, width: 120, height: 56 }
+    windowApiMocks.outerPosition.mockImplementation(async () => ({
+      x: rectangle.x,
+      y: rectangle.y,
+    }))
+    windowApiMocks.outerSize.mockImplementation(async () => ({
+      width: rectangle.width,
+      height: rectangle.height,
+    }))
+    windowApiMocks.setSize.mockImplementation(async (size) => {
+      rectangle = { ...rectangle, width: size.width, height: size.height }
+    })
+    windowApiMocks.setPosition.mockImplementation(async (position) => {
+      rectangle = { ...rectangle, x: position.x, y: position.y }
+    })
+    render(createElement(HookHarness))
+    await waitFor(() => expect(windowApiMocks.hide).toHaveBeenCalledOnce())
+    rectangle = { x: 500, y: 500, width: 120, height: 56 }
+    for (const pipelineState of ['recording', 'idle', 'preparing', 'recording', 'idle'] as const) {
+      windowApiMocks.setPosition.mockClear()
+      act(() => useAppStore.setState({ pipelineState }))
+      await waitFor(() => expect(windowApiMocks.setPosition).toHaveBeenCalledOnce())
+      expect(rectangle.x + rectangle.width / 2).toBe(560)
+      expect(rectangle.y + rectangle.height).toBe(556)
+    }
   })
 })

@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionsStep } from '../PermissionsStep'
+import { checkAccessibilityPermission } from '../../../lib/tauri'
 
 const mockConfig = {
   hotkey: 'Fn',
@@ -67,6 +68,77 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('PermissionsStep', () => {
+  it('keeps a retry action after hotkey registration fails without requesting permission again', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.resumeHotkey).mockRejectedValueOnce(new Error('Synthetic registration failure'))
+    render(<PermissionsStep />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Fix' }))
+    await screen.findByRole('alert')
+    const requests = vi.mocked(tauri.requestAccessibilityPermission).mock.calls.length
+    const registrations = vi.mocked(tauri.resumeHotkey).mock.calls.length
+    vi.mocked(checkAccessibilityPermission).mockResolvedValueOnce(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Fix' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(vi.mocked(tauri.requestAccessibilityPermission).mock.calls.length).toBe(requests)
+    expect(vi.mocked(tauri.resumeHotkey).mock.calls.length).toBe(registrations + 1)
+  })
+
+  it('does not treat a malformed permission check as granted', async () => {
+    vi.mocked(checkAccessibilityPermission).mockResolvedValueOnce('false' as unknown as boolean)
+    render(<PermissionsStep />)
+    expect(await screen.findByRole('button', { name: 'Fix' })).toBeInTheDocument()
+    const row = screen.getByText('Text output').parentElement!.parentElement!
+    expect(within(row).queryByText('Ready')).toBeNull()
+  })
+
+  it('shows readable permission explanations in source-backed padded cards', async () => {
+    render(<PermissionsStep />)
+    const description = screen.getByText('Type into the app you are using.')
+    expect(description.className).not.toContain('truncate')
+    expect(description.className).toContain('text-[14px]')
+    const card = description.parentElement!.parentElement!
+    expect(card.className).toContain('p-6')
+    expect(card.className).toContain('rounded-[12px]')
+    await screen.findByRole('button', { name: 'Fix' })
+  })
+
+  it('reports a failed permission request without claiming readiness', async () => {
+    const tauri = await import('../../../lib/tauri')
+    vi.mocked(tauri.requestAccessibilityPermission).mockRejectedValueOnce(
+      new Error('Synthetic permission failure'),
+    )
+    render(<PermissionsStep />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Fix' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('common.saveFailed')
+    expect(screen.getByRole('button', { name: 'Fix' })).toBeEnabled()
+  })
+
+  it('does not claim text output is ready while its permission check is pending', () => {
+    vi.mocked(checkAccessibilityPermission).mockReturnValueOnce(new Promise(() => {}))
+    render(<PermissionsStep />)
+    const row = screen.getByText('Text output').closest('div')!.parentElement!
+    expect(within(row).queryByText('Ready')).toBeNull()
+    expect(within(row).queryByRole('button', { name: 'Fix' })).toBeNull()
+  })
+
+  it('ignores a late denied check after switching to copy-only output', async () => {
+    let finishCheck: (trusted: boolean) => void = () => {}
+    vi.mocked(checkAccessibilityPermission).mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        finishCheck = resolve
+      }),
+    )
+    const { rerender } = render(<PermissionsStep />)
+    Object.assign(mockConfig, {
+      hotkey: 'Ctrl+/',
+      insertion_strategy: 'clipboardCopyOnly',
+      hotkeys: { dictation: { primary: '/', modifiers: ['Ctrl'] } },
+    })
+    rerender(<PermissionsStep />)
+    await act(async () => finishCheck(false))
+    expect(screen.queryByRole('button', { name: 'Fix' })).toBeNull()
+  })
+
   it('shows compact relevant permissions without a settings-style dashboard', async () => {
     render(<PermissionsStep />)
 

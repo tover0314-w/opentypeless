@@ -16,7 +16,7 @@ let context: AudioContext | null = null
 
 function audioContext(): AudioContext | null {
   if (typeof window === 'undefined' || typeof window.AudioContext === 'undefined') return null
-  context ??= new window.AudioContext()
+  if (!context || context.state === 'closed') context = new window.AudioContext()
   return context
 }
 

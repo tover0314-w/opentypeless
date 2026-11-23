@@ -3,159 +3,23 @@ use crate::native_hotkey::NativeHotkeyTrigger;
 use crate::pipeline;
 use crate::storage;
 use crate::AskHotkeyCache;
-use crate::HotkeyModeCache;
 use crate::HotkeyRoleCache;
 use crate::SessionTokenStore;
-use std::sync::{Arc, Mutex};
+#[cfg(test)]
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
-pub const HOTKEY_SUPERVISOR_RETRY_DELAY_SECS: u64 = 3;
-pub const HOTKEY_SUPERVISOR_FAST_RETRY_LIMIT: u8 = 3;
+#[derive(Default)]
+pub struct HotkeyConfigTransaction(pub tokio::sync::Mutex<()>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HotkeySupervisorState {
-    Starting,
-    Installed,
-    Failed,
-    Disabled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HotkeySupervisorSnapshot {
-    pub generation: u64,
-    pub state: HotkeySupervisorState,
-    pub retry_attempts: u8,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug)]
-struct HotkeySupervisorInner {
-    generation: u64,
-    state: HotkeySupervisorState,
-    retry_attempts: u8,
-    last_error: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct HotkeySupervisor(Arc<Mutex<HotkeySupervisorInner>>);
-
-impl Default for HotkeySupervisor {
-    fn default() -> Self {
-        Self(Arc::new(Mutex::new(HotkeySupervisorInner {
-            generation: 1,
-            state: HotkeySupervisorState::Starting,
-            retry_attempts: 0,
-            last_error: None,
-        })))
-    }
-}
-
-impl HotkeySupervisor {
-    pub fn snapshot(&self) -> HotkeySupervisorSnapshot {
-        let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        HotkeySupervisorSnapshot {
-            generation: guard.generation,
-            state: guard.state,
-            retry_attempts: guard.retry_attempts,
-            last_error: guard.last_error.clone(),
-        }
-    }
-
-    pub fn begin_registration_attempt(&self) -> u64 {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        guard.state = HotkeySupervisorState::Starting;
-        guard.generation
-    }
-
-    pub fn begin_retry_registration_attempt(&self) -> Option<u64> {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.state != HotkeySupervisorState::Failed
-            || guard.retry_attempts > HOTKEY_SUPERVISOR_FAST_RETRY_LIMIT
-        {
-            return None;
-        }
-        guard.state = HotkeySupervisorState::Starting;
-        Some(guard.generation)
-    }
-
-    pub fn wake_for_settings_change(&self) -> u64 {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        guard.generation = guard.generation.saturating_add(1);
-        guard.state = HotkeySupervisorState::Starting;
-        guard.retry_attempts = 0;
-        guard.last_error = None;
-        guard.generation
-    }
-
-    pub fn is_current_generation(&self, generation: u64) -> bool {
-        let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        guard.generation == generation
-    }
-
-    pub fn run_if_current_generation<R>(
-        &self,
-        generation: u64,
-        f: impl FnOnce() -> R,
-    ) -> Option<R> {
-        let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.generation != generation {
-            return None;
-        }
-        Some(f())
-    }
-
-    pub fn record_registration_success(&self, generation: u64) {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.generation != generation {
-            return;
-        }
-        guard.state = HotkeySupervisorState::Installed;
-        guard.retry_attempts = 0;
-        guard.last_error = None;
-    }
-
-    pub fn record_registration_failure(&self, generation: u64, message: String) {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.generation != generation {
-            return;
-        }
-        guard.state = HotkeySupervisorState::Failed;
-        guard.retry_attempts = guard.retry_attempts.saturating_add(1);
-        guard.last_error = Some(message);
-    }
-
-    pub fn record_disabled(&self, generation: u64) {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.generation != generation {
-            return;
-        }
-        guard.state = HotkeySupervisorState::Disabled;
-        guard.last_error = None;
-    }
-
-    pub fn disable(&self) -> u64 {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        guard.generation = guard.generation.saturating_add(1);
-        guard.state = HotkeySupervisorState::Disabled;
-        guard.retry_attempts = 0;
-        guard.last_error = None;
-        guard.generation
-    }
-
-    pub fn next_retry_delay(&self) -> Option<Duration> {
-        let guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.state == HotkeySupervisorState::Failed
-            && guard.retry_attempts <= HOTKEY_SUPERVISOR_FAST_RETRY_LIMIT
-        {
-            Some(Duration::from_secs(HOTKEY_SUPERVISOR_RETRY_DELAY_SECS))
-        } else {
-            None
-        }
-    }
-}
+pub use crate::hotkey_controller::{
+    HotkeySupervisor, HotkeySupervisorSnapshot, HotkeySupervisorState,
+    HOTKEY_SUPERVISOR_FAST_RETRY_LIMIT, HOTKEY_SUPERVISOR_RETRY_DELAY_SECS,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HotkeyPairError {
@@ -413,12 +277,14 @@ pub fn native_trigger_supported_on_platform(trigger: NativeHotkeyTrigger, platfo
             NativeHotkeyTrigger::Fn
                 | NativeHotkeyTrigger::FnSpace
                 | NativeHotkeyTrigger::FnLeftShift
+                | NativeHotkeyTrigger::FnKey(_)
         ),
         "windows" => matches!(
             trigger,
             NativeHotkeyTrigger::RightAlt
                 | NativeHotkeyTrigger::RightAltSpace
                 | NativeHotkeyTrigger::RightAltLeftShift
+                | NativeHotkeyTrigger::RightAltRightShift
         ),
         _ => false,
     }
@@ -444,6 +310,11 @@ pub fn native_trigger_from_binding(
     let modifier = binding.modifiers[0].trim().to_lowercase();
     let primary = binding.primary.trim().to_lowercase();
     match (modifier.as_str(), primary.as_str()) {
+        ("fn" | "function", key) if key.len() == 1 && key.as_bytes()[0].is_ascii_alphanumeric() => {
+            Some(NativeHotkeyTrigger::FnKey(
+                key.chars().next()?.to_ascii_uppercase(),
+            ))
+        }
         ("fn" | "function", "space") => Some(NativeHotkeyTrigger::FnSpace),
         ("fn" | "function", "leftshift" | "left_shift" | "left-shift") => {
             Some(NativeHotkeyTrigger::FnLeftShift)
@@ -456,6 +327,10 @@ pub fn native_trigger_from_binding(
             "rightalt" | "right_alt" | "right-alt" | "altright" | "alt_right" | "alt-right",
             "leftshift" | "left_shift" | "left-shift",
         ) => Some(NativeHotkeyTrigger::RightAltLeftShift),
+        (
+            "rightalt" | "right_alt" | "right-alt" | "altright" | "alt_right" | "alt-right",
+            "rightshift" | "right_shift" | "right-shift" | "shiftright",
+        ) => Some(NativeHotkeyTrigger::RightAltRightShift),
         _ => None,
     }
 }
@@ -701,7 +576,10 @@ fn show_ask_result_window(handle: &tauri::AppHandle, result: &commands::ask::Ask
     }
 }
 
-fn show_ask_error_window(handle: &tauri::AppHandle, message: String) {
+fn show_ask_error_window<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, message: String) {
+    if message == commands::ask::ASK_CANCELLED {
+        return;
+    }
     handle
         .state::<commands::ask::AskDictationState>()
         .set_pending_error(message.clone());
@@ -715,34 +593,11 @@ fn show_ask_error_window(handle: &tauri::AppHandle, message: String) {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AskShortcutAction {
-    Start,
-    Stop,
-    StopAfterStart,
-    Ignore,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RecordingShortcutAction {
-    Start {
-        options: pipeline::PipelineStartOptions,
-    },
-    Stop,
-    /// Auto mode: the key was released after the long-press threshold but before the guide
-    /// timer fired, so the take is discarded silently.
-    CancelLongPress,
-    /// Auto mode: the long-press guide is on screen and the key was released, so hide it.
-    DismissLongPressGuide,
-    /// The key was pressed while the previous take is still being processed.
-    PreviousPending,
-    Ignore,
-}
-
 /// Holding a voice key longer than this in auto mode is treated as a mistaken push-to-talk
 /// attempt rather than a tap (Typeless `LONG_PRESS_MS`).
 pub const AUTO_MODE_LONG_PRESS: Duration = Duration::from_millis(600);
 
+#[cfg(test)]
 #[derive(Default)]
 struct AutoPress {
     generation: u64,
@@ -754,8 +609,10 @@ struct AutoPress {
 
 /// OS auto-repeat fires every ~30–100 ms; a longer gap means a release was lost and the
 /// key-down is a genuine new press.
+#[cfg(test)]
 const KEY_REPEAT_WINDOW: Duration = Duration::from_millis(1000);
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PressRelease {
     pub held: Duration,
@@ -765,9 +622,11 @@ pub struct PressRelease {
 
 /// Tracks the press that started an auto-mode session so the long-press timer and the release
 /// are classified against the same press.
+#[cfg(test)]
 #[derive(Default)]
 pub struct AutoPressTracker(Mutex<AutoPress>);
 
+#[cfg(test)]
 impl AutoPressTracker {
     fn lock(&self) -> std::sync::MutexGuard<'_, AutoPress> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
@@ -802,6 +661,15 @@ impl AutoPressTracker {
         true
     }
 
+    fn publish_long_hold(&self, generation: u64, publish: impl FnOnce()) -> bool {
+        let press = self.lock();
+        if press.generation != generation || press.pressed_at.is_none() || !press.long_held {
+            return false;
+        }
+        publish();
+        true
+    }
+
     pub fn take_release(&self, now: std::time::Instant) -> Option<PressRelease> {
         let mut press = self.lock();
         press.last_key_down = None;
@@ -817,248 +685,47 @@ impl AutoPressTracker {
         press.pressed_at = None;
         press.long_held = false;
     }
-}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LongPressTarget {
-    Dictation,
-    Ask,
+    pub fn reset_for_lifecycle(&self) {
+        let mut press = self.lock();
+        press.generation = press.generation.wrapping_add(1);
+        press.last_key_down = None;
+        press.pressed_at = None;
+        press.long_held = false;
+    }
 }
 
 fn emit_capsule_alert(handle: &tauri::AppHandle, kind: &str) {
     let _ = handle.emit("capsule:alert", serde_json::json!({ "kind": kind }));
 }
 
-fn dismiss_capsule_alert(handle: &tauri::AppHandle, kind: &str) {
-    let _ = handle.emit("capsule:alert_dismiss", serde_json::json!({ "kind": kind }));
-}
-
-fn abort_long_press_session(handle: &tauri::AppHandle, target: LongPressTarget) {
-    match target {
-        LongPressTarget::Dictation => handle.state::<pipeline::PipelineHandle>().abort(),
-        LongPressTarget::Ask => {
-            let _ = commands::ask::abort_ask_dictation(handle.clone(), handle.state());
-        }
-    }
-}
-
-/// Typeless shows its shortcut table as soon as a hold crosses the threshold, while the key is
-/// still down, and discards the take; the table goes away on release.
-fn arm_long_press_guide(handle: tauri::AppHandle, generation: u64, target: LongPressTarget) {
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(AUTO_MODE_LONG_PRESS).await;
-        if handle
-            .state::<AutoPressTracker>()
-            .claim_long_hold(generation)
-        {
-            abort_long_press_session(&handle, target);
-            emit_capsule_alert(&handle, "shortcut_guide");
-        }
-    });
-}
-
-fn current_hotkey_mode(handle: &tauri::AppHandle) -> String {
-    handle
-        .state::<HotkeyModeCache>()
-        .0
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-}
-
-/// Auto-mode press bookkeeping shared by every voice shortcut.
-enum AutoPressEvent {
-    /// Another key-down while the key is still held; the OS is auto-repeating.
-    Repeat,
-    Pressed,
-    Released(Option<PressRelease>),
-}
-
-fn track_auto_press(
-    handle: &tauri::AppHandle,
-    event_state: ShortcutState,
-    starts_session: bool,
-    target: LongPressTarget,
-) -> AutoPressEvent {
-    let tracker = handle.state::<AutoPressTracker>();
-    let now = std::time::Instant::now();
-    match event_state {
-        ShortcutState::Pressed => {
-            if tracker.begin_press(now) {
-                return AutoPressEvent::Repeat;
-            }
-            if starts_session {
-                let generation = tracker.mark_pressed(now);
-                arm_long_press_guide(handle.clone(), generation, target);
-            } else {
-                tracker.clear();
-            }
-            AutoPressEvent::Pressed
-        }
-        ShortcutState::Released => AutoPressEvent::Released(tracker.take_release(now)),
-    }
-}
-
-fn ask_shortcut_action(
-    event_state: ShortcutState,
-    is_recording: bool,
-    is_starting: bool,
-    is_busy: bool,
-) -> AskShortcutAction {
-    if event_state == ShortcutState::Released {
-        return AskShortcutAction::Ignore;
-    }
-
-    if is_recording {
-        return AskShortcutAction::Stop;
-    }
-
-    if is_starting {
-        return AskShortcutAction::StopAfterStart;
-    }
-
-    if is_busy {
-        return AskShortcutAction::Ignore;
-    }
-
-    AskShortcutAction::Start
-}
-
-/// Auto mode: a tap starts hands-free recording and the next tap finishes it. A press held
-/// past [`AUTO_MODE_LONG_PRESS`] discards the take instead of acting as push-to-talk.
-fn auto_recording_shortcut_action(
-    event_state: ShortcutState,
-    pipeline_state: pipeline::PipelineState,
-    release: Option<PressRelease>,
-    options: pipeline::PipelineStartOptions,
-) -> RecordingShortcutAction {
-    use pipeline::PipelineState as S;
-    match (event_state, pipeline_state) {
-        (ShortcutState::Pressed, S::Idle) => RecordingShortcutAction::Start { options },
-        (ShortcutState::Pressed, S::Transcribing | S::Polishing | S::Outputting) => {
-            RecordingShortcutAction::PreviousPending
-        }
-        (ShortcutState::Pressed, _) => RecordingShortcutAction::Stop,
-        (ShortcutState::Released, _) => match release {
-            Some(PressRelease {
-                long_held: true, ..
-            }) => RecordingShortcutAction::DismissLongPressGuide,
-            Some(PressRelease { held, .. }) if held >= AUTO_MODE_LONG_PRESS => {
-                RecordingShortcutAction::CancelLongPress
-            }
-            _ => RecordingShortcutAction::Ignore,
-        },
-    }
-}
-
-fn recording_shortcut_action(
-    hotkey_mode: &str,
-    event_state: ShortcutState,
-    pipeline_state: pipeline::PipelineState,
-    options: pipeline::PipelineStartOptions,
-) -> RecordingShortcutAction {
-    let is_toggle_mode = hotkey_mode == "toggle";
-
-    match (is_toggle_mode, event_state, pipeline_state) {
-        (true, ShortcutState::Released, _) => RecordingShortcutAction::Ignore,
-        (true, ShortcutState::Pressed, pipeline::PipelineState::Idle) => {
-            RecordingShortcutAction::Start { options }
-        }
-        (true, ShortcutState::Pressed, _) => RecordingShortcutAction::Stop,
-        (false, ShortcutState::Pressed, pipeline::PipelineState::Idle) => {
-            RecordingShortcutAction::Start { options }
-        }
-        (false, ShortcutState::Pressed, _) => RecordingShortcutAction::Ignore,
-        (false, ShortcutState::Released, _) => RecordingShortcutAction::Stop,
-    }
-}
-
-async fn stop_ask_shortcut(handle: tauri::AppHandle) {
-    if !handle
-        .state::<commands::ask::AskDictationState>()
-        .is_recording()
-    {
-        return;
-    }
-
+async fn stop_ask_shortcut(handle: tauri::AppHandle, session_id: u64) {
     let ask_state = handle.state::<commands::ask::AskDictationState>();
-    let config_state = handle.state::<storage::ConfigManager>();
     let token_store = handle.state::<SessionTokenStore>();
     let client = handle.state::<reqwest::Client>();
 
-    match commands::ask::stop_ask_dictation(
+    match commands::ask::stop_owned_ask_dictation(
         handle.clone(),
         ask_state,
-        config_state,
         token_store,
         client,
+        session_id,
     )
     .await
     {
         Ok(result) if result.should_show_window() => show_ask_result_window(&handle, &result),
         Ok(_) => {}
-        Err(message) if message == "Ask dictation is not recording" => {}
+        Err(message)
+            if message == "Ask dictation is not recording"
+                || message == commands::ask::ASK_CANCELLED => {}
         Err(message) => show_ask_error_window(&handle, message),
-    }
-}
-
-fn start_ask_shortcut(handle: tauri::AppHandle) {
-    let did_reserve_start = {
-        let ask_state = handle.state::<commands::ask::AskDictationState>();
-        ask_state.try_begin_starting()
-    };
-    if !did_reserve_start {
-        return;
-    }
-
-    tauri::async_runtime::spawn(async move {
-        let ask_state = handle.state::<commands::ask::AskDictationState>();
-        let config_state = handle.state::<storage::ConfigManager>();
-        let token_store = handle.state::<SessionTokenStore>();
-        let client = handle.state::<reqwest::Client>();
-
-        if let Err(message) = commands::ask::start_reserved_ask_dictation(
-            handle.clone(),
-            ask_state,
-            config_state,
-            token_store,
-            client,
-            true,
-        )
-        .await
-        {
-            show_ask_error_window(&handle, message);
-            return;
-        }
-
-        if handle
-            .state::<commands::ask::AskDictationState>()
-            .take_stop_after_start()
-        {
-            stop_ask_shortcut(handle).await;
-        }
-    });
-}
-
-fn handle_ask_shortcut(handle: tauri::AppHandle, action: AskShortcutAction) {
-    match action {
-        AskShortcutAction::Start => start_ask_shortcut(handle),
-        AskShortcutAction::Stop => {
-            tauri::async_runtime::spawn(stop_ask_shortcut(handle));
-        }
-        AskShortcutAction::StopAfterStart => {
-            let _ = handle
-                .state::<commands::ask::AskDictationState>()
-                .request_stop_after_start();
-        }
-        AskShortcutAction::Ignore => {}
     }
 }
 
 /// Typeless shows a narrow waveform-only bar for push-to-talk and adds the cancel / finish
 /// buttons only for hands-free takes, where the user needs a way to end the recording.
-fn emit_recording_style(handle: &tauri::AppHandle) {
-    let style = if current_hotkey_mode(handle) == "hold" {
+fn emit_recording_style(handle: &tauri::AppHandle, mode: crate::input_session::InputMode) {
+    let style = if mode == crate::input_session::InputMode::Hold {
         "pushToTalk"
     } else {
         "handsFree"
@@ -1066,112 +733,860 @@ fn emit_recording_style(handle: &tauri::AppHandle) {
     let _ = handle.emit("capsule:recording_style", style);
 }
 
-fn handle_recording_shortcut(handle: tauri::AppHandle, action: RecordingShortcutAction) {
-    match action {
-        RecordingShortcutAction::Start { options } => {
-            emit_recording_style(&handle);
-            tauri::async_runtime::spawn(async move {
-                if handle.state::<commands::ask::AskDictationState>().is_busy() {
-                    return;
-                }
+enum RecordingCommand {
+    Start {
+        session_id: u64,
+        binding: crate::input_session::InputBinding,
+        config: Box<storage::AppConfig>,
+    },
+    Stop {
+        session_id: u64,
+    },
+    Cancel {
+        session_id: u64,
+    },
+    ExternalAskStop {
+        snapshot: commands::ask::AskShortcutSnapshot,
+    },
+}
 
-                let pipeline = handle.state::<pipeline::PipelineHandle>();
-                if let Err(e) = pipeline.start_with_options(options).await {
-                    tracing::error!("Failed to start recording: {}", e);
-                    let _ = handle.emit("pipeline:error", e.to_string());
-                }
-            });
-        }
-        RecordingShortcutAction::Stop => {
-            tauri::async_runtime::spawn(async move {
-                if handle.state::<commands::ask::AskDictationState>().is_busy() {
-                    return;
-                }
+pub(crate) struct RecordingCommandQueue {
+    queue: crate::input_command_queue::InputCommandQueue<RecordingCommand>,
+    session: std::sync::Arc<
+        Mutex<
+            crate::input_configuration::InputConfiguration<
+                storage::HotkeyConfig,
+                storage::AppConfig,
+            >,
+        >,
+    >,
+    executing_session: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    ask_owner: std::sync::Arc<Mutex<Option<(u64, u64)>>>,
+    queued_operation:
+        std::sync::Arc<Mutex<Option<(u64, crate::voice_operation::VoiceOperationToken)>>>,
+    clock: std::time::Instant,
+}
 
-                let pipeline = handle.state::<pipeline::PipelineHandle>();
-                if let Err(e) = pipeline.stop().await {
-                    tracing::error!("Failed to stop recording: {}", e);
-                    let _ = handle.emit("pipeline:error", e.to_string());
-                }
-            });
+impl RecordingCommandQueue {
+    fn invalidate(&self) {
+        self.queue.invalidate();
+        let mut session = self
+            .session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(session_id) = session.session_id() {
+            session.cancel(session_id);
         }
-        RecordingShortcutAction::CancelLongPress => {
-            abort_long_press_session(&handle, LongPressTarget::Dictation);
-        }
-        RecordingShortcutAction::DismissLongPressGuide => {
-            dismiss_capsule_alert(&handle, "shortcut_guide");
-        }
-        RecordingShortcutAction::PreviousPending => {
-            emit_capsule_alert(&handle, "previous_pending");
-        }
-        RecordingShortcutAction::Ignore => {}
+    }
+
+    pub(crate) fn shutdown(&self) {
+        self.queue.shutdown();
+        self.session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .shutdown();
     }
 }
 
-/// Resolves a dictation/translate key event, honouring the auto press/hold mode.
-fn dictation_shortcut_action(
-    handle: &tauri::AppHandle,
-    event_state: ShortcutState,
-    options: pipeline::PipelineStartOptions,
-) -> RecordingShortcutAction {
-    let hotkey_mode = current_hotkey_mode(handle);
-    let pipeline_state = handle.state::<pipeline::PipelineHandle>().current_state();
-    if hotkey_mode != "auto" {
-        return recording_shortcut_action(&hotkey_mode, event_state, pipeline_state, options);
+pub(crate) fn invalidate_pending_recording_commands(app: &tauri::AppHandle) {
+    if let Some(queue) = app.try_state::<RecordingCommandQueue>() {
+        queue.invalidate();
+        let session_id = queue
+            .ask_owner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .map(|(session_id, _)| session_id);
+        if let Some(session_id) = session_id {
+            cancel_queued_ask(app, session_id, &queue.ask_owner);
+        }
     }
+}
 
-    let starts_session = pipeline_state == pipeline::PipelineState::Idle
-        && !handle.state::<commands::ask::AskDictationState>().is_busy();
-    let release = match track_auto_press(
-        handle,
-        event_state,
-        starts_session,
-        LongPressTarget::Dictation,
-    ) {
-        AutoPressEvent::Repeat => return RecordingShortcutAction::Ignore,
-        AutoPressEvent::Pressed => None,
-        AutoPressEvent::Released(release) => release,
+pub(crate) fn stage_input_installation(
+    app: &tauri::AppHandle,
+    generation: u64,
+    hotkeys: storage::HotkeyConfig,
+    plan: &HotkeyRegistrationPlan,
+    results: &[crate::hotkey_controller::BindingRegistration],
+) {
+    use crate::input_session::{InputBinding, InputMode, VoiceRole};
+    let Some(runtime) = app.try_state::<RecordingCommandQueue>() else {
+        return;
     };
-    auto_recording_shortcut_action(event_state, pipeline_state, release, options)
-}
-
-/// Ask shortcuts always toggle; in auto mode a long hold additionally discards the take and
-/// shows the shortcut guide, like the dictation key.
-fn handle_ask_role_event(handle: tauri::AppHandle, event_state: ShortcutState) {
-    let action = {
-        let ask_state = handle.state::<commands::ask::AskDictationState>();
-        ask_shortcut_action(
-            event_state,
-            ask_state.is_recording(),
-            ask_state.is_starting(),
-            ask_state.is_busy(),
+    let Some(mode) = InputMode::from_config(&hotkeys.dictation_mode) else {
+        return;
+    };
+    let mut bindings = Vec::new();
+    let mut installed = Vec::new();
+    for (role, index, binding_id) in plan
+        .global
+        .iter()
+        .map(|binding| {
+            (
+                binding.role,
+                binding.index,
+                format!("{:?}", binding.shortcut),
+            )
+        })
+        .chain(
+            plan.native
+                .iter()
+                .map(|binding| (binding.role, binding.index, binding.trigger.canonical())),
         )
+    {
+        let voice_role = match role {
+            HotkeyRole::Dictation => VoiceRole::Dictation,
+            HotkeyRole::TranslateSelection => VoiceRole::Translate,
+            HotkeyRole::Ask => VoiceRole::Ask,
+            HotkeyRole::EditSelection => VoiceRole::EditSelection,
+            _ => continue,
+        };
+        if results.iter().any(|result| {
+            result.role == role.as_str() && result.index == index && result.error.is_none()
+        }) {
+            installed.push(binding_id.clone());
+        }
+        bindings.push(InputBinding {
+            role: voice_role,
+            binding_id,
+            mode,
+            revision: 0,
+        });
+    }
+    runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .stage_installation(generation, hotkeys, bindings, installed);
+}
+
+pub(crate) fn publish_saved_input_configuration<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    generation: u64,
+) {
+    let Some(runtime) = app.try_state::<RecordingCommandQueue>() else {
+        return;
     };
-    if current_hotkey_mode(&handle) == "auto" {
-        match track_auto_press(
-            &handle,
-            event_state,
-            action == AskShortcutAction::Start,
-            LongPressTarget::Ask,
+    let Some(manager) = app.try_state::<storage::ConfigManager>() else {
+        return;
+    };
+    let Ok((saved_revision, config)) = manager.cached_input_commit() else {
+        return;
+    };
+    let hotkeys = crate::commands::misc::effective_hotkey_config(&config);
+    let mut session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let recovery_actions;
+    if session.requires_release_observation() {
+        #[cfg(target_os = "macos")]
+        {
+            recovery_actions = session
+                .observe_physical_keys(crate::shortcut_release::physical_key_snapshot().ok());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            recovery_actions = Vec::new();
+        }
+        session.resume();
+    } else {
+        recovery_actions = Vec::new();
+    }
+    let published = session.publish_saved_revision(generation, saved_revision, &hotkeys, config);
+    drop(session);
+    emit_input_guides(app, recovery_actions);
+    if published {
+        if let (Some(cache), Ok(plan)) = (
+            app.try_state::<HotkeyRoleCache>(),
+            hotkey_registration_plan_from_config(&hotkeys),
         ) {
-            AutoPressEvent::Repeat => return,
-            AutoPressEvent::Pressed => {}
-            AutoPressEvent::Released(Some(PressRelease {
-                long_held: true, ..
-            })) => {
-                dismiss_capsule_alert(&handle, "shortcut_guide");
-                return;
-            }
-            AutoPressEvent::Released(Some(PressRelease { held, .. }))
-                if held >= AUTO_MODE_LONG_PRESS =>
-            {
-                abort_long_press_session(&handle, LongPressTarget::Ask);
-                return;
-            }
-            AutoPressEvent::Released(_) => {}
+            *cache.0.lock().unwrap_or_else(|error| error.into_inner()) = plan;
         }
     }
-    handle_ask_shortcut(handle, action);
+}
+
+pub(crate) fn suspend_input_session<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    #[cfg(target_os = "macos")]
+    if let Some(runtime) = app.try_state::<RecordingCommandQueue>() {
+        runtime
+            .session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .suspend();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn observe_input_physical_keys(app: &tauri::AppHandle, keys: Option<Vec<u16>>) {
+    if let Some(runtime) = app.try_state::<RecordingCommandQueue>() {
+        let mut session = runtime
+            .session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let actions = if session.requires_release_observation() {
+            session.observe_physical_keys(keys)
+        } else {
+            Vec::new()
+        };
+        drop(session);
+        emit_input_guides(app, actions);
+    }
+}
+
+fn emit_input_guides<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    actions: Vec<crate::input_session::InputAction>,
+) {
+    for action in actions {
+        if let crate::input_session::InputAction::HideGuide { press_id } = action {
+            let _ = app.emit(
+                "capsule:alert_dismiss",
+                serde_json::json!({"kind":"shortcut_guide", "pressId":press_id}),
+            );
+        }
+    }
+}
+
+pub(crate) fn refresh_committed_input_configuration(
+    app: &tauri::AppHandle,
+    saved_revision: u64,
+    config: &storage::AppConfig,
+) {
+    let Some(runtime) = app.try_state::<RecordingCommandQueue>() else {
+        return;
+    };
+    let snapshot = config.clone();
+    let hotkeys = crate::commands::misc::effective_hotkey_config(&snapshot);
+    runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .refresh_saved_snapshot(saved_revision, &hotkeys, snapshot);
+}
+
+pub(crate) fn input_configuration_busy(app: &tauri::AppHandle) -> bool {
+    if app
+        .try_state::<commands::ask::AskDictationState>()
+        .is_some_and(|ask| ask.is_busy())
+    {
+        return true;
+    }
+    app.try_state::<RecordingCommandQueue>()
+        .is_some_and(|runtime| {
+            let session = runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            session.session_id().is_some() || session.press_id().is_some()
+        })
+}
+
+pub(crate) fn input_monitor_lost(app: &tauri::AppHandle) {
+    let Some(runtime) = app.try_state::<RecordingCommandQueue>() else {
+        return;
+    };
+    let mut session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(revision) = session.active_revision() {
+        session.monitor_lost(revision);
+    }
+}
+
+pub(crate) fn input_configuration_needs_installation(
+    app: &tauri::AppHandle,
+    config: &storage::AppConfig,
+) -> bool {
+    app.try_state::<RecordingCommandQueue>()
+        .is_some_and(|runtime| {
+            runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .needs_installation(&crate::commands::misc::effective_hotkey_config(config))
+        })
+}
+
+pub(crate) fn saved_input_revision_is_active(
+    app: &tauri::AppHandle,
+    revision: u64,
+    config: &storage::AppConfig,
+) -> bool {
+    app.try_state::<RecordingCommandQueue>()
+        .is_some_and(|runtime| {
+            runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .saved_revision_is_active(
+                    revision,
+                    &crate::commands::misc::effective_hotkey_config(config),
+                )
+        })
+}
+
+pub(crate) fn pending_input_configuration_publication(
+    app: &tauri::AppHandle,
+    config: &storage::AppConfig,
+) -> Option<u64> {
+    let runtime = app.try_state::<RecordingCommandQueue>()?;
+    let session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    session.pending_publication(&crate::commands::misc::effective_hotkey_config(config))
+}
+
+type SharedInputConfiguration = std::sync::Arc<
+    Mutex<
+        crate::input_configuration::InputConfiguration<storage::HotkeyConfig, storage::AppConfig>,
+    >,
+>;
+type SharedAskOwner = std::sync::Arc<Mutex<Option<(u64, u64)>>>;
+
+pub(crate) struct InputInstallationReservation {
+    session: SharedInputConfiguration,
+    identity: u64,
+    voice_start_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for InputInstallationReservation {
+    fn drop(&mut self) {
+        let mut session = self
+            .session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        drop(self.voice_start_guard.take());
+        session.release_installation(self.identity);
+    }
+}
+
+pub(crate) fn reserve_input_installation(
+    app: &tauri::AppHandle,
+) -> Option<InputInstallationReservation> {
+    let runtime = app.try_state::<RecordingCommandQueue>()?;
+    let pipeline = app.state::<pipeline::PipelineHandle>();
+    let voice_start_guard = pipeline.try_voice_start_guard().ok()?;
+    let mut session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if app.state::<commands::ask::AskDictationState>().is_busy()
+        || pipeline.current_state() != pipeline::PipelineState::Idle
+    {
+        return None;
+    }
+    let identity = session.reserve_installation()?;
+    Some(InputInstallationReservation {
+        session: runtime.session.clone(),
+        identity,
+        voice_start_guard: Some(voice_start_guard),
+    })
+}
+
+fn cancel_queued_ask(handle: &tauri::AppHandle, session_id: u64, owner: &SharedAskOwner) {
+    let generation = {
+        let mut owner = owner.lock().unwrap_or_else(|error| error.into_inner());
+        if owner.is_none_or(|(current, _)| current != session_id) {
+            return;
+        }
+        owner.take().map(|(_, generation)| generation)
+    };
+    if let Some(generation) = generation {
+        if handle
+            .state::<commands::ask::AskDictationState>()
+            .abort_owned_startup(generation)
+        {
+            commands::ask::emit_capsule_state(handle, pipeline::PipelineState::Idle);
+        }
+    }
+}
+
+fn cancel_queued_input(handle: &tauri::AppHandle, session_id: u64) {
+    let runtime = handle.state::<RecordingCommandQueue>();
+    cancel_queued_ask(handle, session_id, &runtime.ask_owner);
+    let operation = runtime
+        .queued_operation
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+        .filter(|(owner, _)| *owner == session_id)
+        .map(|(_, operation)| operation.clone());
+    if let Some(operation) = operation {
+        handle
+            .state::<pipeline::PipelineHandle>()
+            .abort_owned_input(&operation);
+    }
+}
+
+async fn stop_queued_ask(
+    handle: &tauri::AppHandle,
+    session_id: u64,
+    session: &SharedInputConfiguration,
+    owner: &SharedAskOwner,
+) {
+    let generation = owner
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .filter(|(current, _)| *current == session_id)
+        .map(|(_, generation)| generation);
+    let Some(generation) = generation else {
+        return;
+    };
+    if let Some(recording_id) = handle
+        .state::<commands::ask::AskDictationState>()
+        .recording_session_id_for_startup(generation)
+    {
+        stop_ask_shortcut(handle.clone(), recording_id).await;
+    }
+    session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .finish(session_id);
+    let mut owner = owner.lock().unwrap_or_else(|error| error.into_inner());
+    if owner.is_some_and(|(current, _)| current == session_id) {
+        *owner = None;
+    }
+}
+
+async fn start_queued_ask(
+    handle: &tauri::AppHandle,
+    session_id: u64,
+    binding: crate::input_session::InputBinding,
+    config: storage::AppConfig,
+    session: &SharedInputConfiguration,
+    owner: &SharedAskOwner,
+) {
+    let generation = {
+        let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+        if session.session_id() != Some(session_id) {
+            return;
+        }
+        let ask_state = handle.state::<commands::ask::AskDictationState>();
+        let Some(generation) = ask_state.reserve_startup() else {
+            session.finish(session_id);
+            return;
+        };
+        *owner.lock().unwrap_or_else(|error| error.into_inner()) = Some((session_id, generation));
+        generation
+    };
+    emit_recording_style(handle, crate::input_session::InputMode::Toggle);
+    let result = commands::ask::start_reserved_ask_with_config(
+        handle.clone(),
+        handle.state(),
+        config,
+        handle.state(),
+        handle.state(),
+        true,
+        generation,
+    )
+    .await;
+    if let Err(message) = result {
+        session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .finish(session_id);
+        let mut owner = owner.lock().unwrap_or_else(|error| error.into_inner());
+        if owner.is_some_and(|(current, _)| current == session_id) {
+            *owner = None;
+        }
+        drop(owner);
+        if message != commands::ask::ASK_CANCELLED {
+            show_ask_error_window(handle, message);
+        }
+        return;
+    }
+    let actions = {
+        let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+        if !session.owns_session_binding(&binding.binding_id, crate::input_session::VoiceRole::Ask)
+            || session.session_id() != Some(session_id)
+        {
+            drop(session);
+            cancel_queued_ask(handle, session_id, owner);
+            return;
+        }
+        session.ready(session_id)
+    };
+    let input_stop_requested = actions.iter().any(|action| {
+        matches!(action, crate::input_session::InputAction::Stop { session_id: current } if *current == session_id)
+    });
+    let external_stop_requested = handle
+        .state::<commands::ask::AskDictationState>()
+        .take_stop_after_start_for(generation);
+    if input_stop_requested || external_stop_requested {
+        stop_queued_ask(handle, session_id, session, owner).await;
+    }
+}
+
+pub(crate) fn ask_input_finished(handle: &tauri::AppHandle, generation: u64) {
+    let Some(runtime) = handle.try_state::<RecordingCommandQueue>() else {
+        return;
+    };
+    let mut session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut owner = runtime
+        .ask_owner
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some((session_id, current)) = *owner {
+        if current == generation {
+            *owner = None;
+            session.finish(session_id);
+        }
+    }
+}
+
+pub(crate) fn install_recording_command_queue(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    let session = std::sync::Arc::new(Mutex::new(
+        crate::input_configuration::InputConfiguration::default(),
+    ));
+    let worker_session = session.clone();
+    let executing_session = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let worker_executing = executing_session.clone();
+    let ask_owner = std::sync::Arc::new(Mutex::new(None));
+    let worker_ask_owner = ask_owner.clone();
+    let queued_operation = std::sync::Arc::new(Mutex::new(
+        None::<(u64, crate::voice_operation::VoiceOperationToken)>,
+    ));
+    let worker_queued_operation = queued_operation.clone();
+    let queue = tauri::async_runtime::block_on(async {
+        crate::input_command_queue::InputCommandQueue::new(32, move |command| {
+            let handle = handle.clone();
+            let queued_operation = worker_queued_operation.clone();
+            let session = worker_session.clone();
+            let executing_session = worker_executing.clone();
+            let ask_owner = worker_ask_owner.clone();
+            async move {
+                let pipeline = handle.state::<pipeline::PipelineHandle>();
+                let result = match command {
+                    RecordingCommand::Start {
+                        session_id,
+                        binding,
+                        config,
+                    } => {
+                        if binding.role == crate::input_session::VoiceRole::Ask {
+                            start_queued_ask(
+                                &handle, session_id, binding, *config, &session, &ask_owner,
+                            )
+                            .await;
+                            return;
+                        }
+                        if session
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .session_id()
+                            != Some(session_id)
+                        {
+                            return;
+                        }
+                        if handle.state::<commands::ask::AskDictationState>().is_busy()
+                            || pipeline.current_state() != pipeline::PipelineState::Idle
+                        {
+                            session
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .finish(session_id);
+                            return;
+                        }
+                        executing_session.store(session_id, std::sync::atomic::Ordering::SeqCst);
+                        *queued_operation
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner()) = None;
+                        emit_recording_style(&handle, binding.mode);
+                        let claimed_operation = queued_operation.clone();
+                        let claimed_session = session.clone();
+                        let result = pipeline
+                            .start_with_owned_config(
+                                *config,
+                                pipeline::PipelineStartOptions {
+                                    force_translate: binding.role
+                                        == crate::input_session::VoiceRole::Translate,
+                                    edit_selection: binding.role
+                                        == crate::input_session::VoiceRole::EditSelection,
+                                },
+                                move |operation| {
+                                    let session = claimed_session
+                                        .lock()
+                                        .unwrap_or_else(|error| error.into_inner());
+                                    if session.session_id() != Some(session_id) {
+                                        return false;
+                                    }
+                                    *claimed_operation
+                                        .lock()
+                                        .unwrap_or_else(|error| error.into_inner()) =
+                                        Some((session_id, operation));
+                                    true
+                                },
+                            )
+                            .await;
+                        let operation = if result.is_ok() {
+                            queued_operation
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .as_ref()
+                                .filter(|(owner, operation)| {
+                                    *owner == session_id && !operation.is_cancelled()
+                                })
+                                .map(|(_, operation)| operation.clone())
+                        } else {
+                            None
+                        };
+                        if let Some(operation) = operation {
+                            let ready_actions = session
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .ready(session_id);
+                            if ready_actions.iter().any(|action| matches!(
+                                action, crate::input_session::InputAction::Stop { session_id: stop_id } if *stop_id == session_id
+                            )) {
+                                let stopped = pipeline.stop_operation(operation).await;
+                                session.lock().unwrap_or_else(|error| error.into_inner()).finish(session_id);
+                                stopped
+                            } else {
+                                result
+                            }
+                        } else {
+                            session
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .finish(session_id);
+                            result
+                        }
+                    }
+                    RecordingCommand::Stop { session_id } => {
+                        if ask_owner
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .is_some_and(|(owner, _)| owner == session_id)
+                        {
+                            stop_queued_ask(&handle, session_id, &session, &ask_owner).await;
+                            return;
+                        }
+                        let operation = queued_operation
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .as_ref()
+                            .filter(|(owner, _)| *owner == session_id)
+                            .map(|(_, operation)| operation.clone());
+                        match operation {
+                            Some(operation) => {
+                                let result = pipeline.stop_operation(operation).await;
+                                session
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .finish(session_id);
+                                result
+                            }
+                            None => Ok(()),
+                        }
+                    }
+                    RecordingCommand::Cancel { session_id } => {
+                        cancel_queued_input(&handle, session_id);
+                        Ok(())
+                    }
+                    RecordingCommand::ExternalAskStop { snapshot } => {
+                        let recording_id = if let Some(generation) = snapshot.startup_generation {
+                            match handle
+                                .state::<commands::ask::AskDictationState>()
+                                .request_owned_stop(generation)
+                            {
+                                crate::ask_stop_request::AskStopDisposition::Recording(
+                                    recording_id,
+                                ) => Some(recording_id),
+                                _ => None,
+                            }
+                        } else {
+                            snapshot.recording_session_id
+                        };
+                        if let Some(recording_id) = recording_id {
+                            stop_ask_shortcut(handle.clone(), recording_id).await;
+                        }
+                        Ok(())
+                    }
+                };
+                if let Err(error) = result {
+                    tracing::error!("Recording command failed");
+                    let _ = handle.emit("pipeline:error", error.to_string());
+                }
+            }
+        })
+    });
+    app.manage(RecordingCommandQueue {
+        queue,
+        session,
+        executing_session,
+        ask_owner,
+        queued_operation,
+        clock: std::time::Instant::now(),
+    });
+}
+
+fn dispatch_input_actions(
+    handle: &tauri::AppHandle,
+    actions: Vec<crate::input_session::InputAction>,
+) -> bool {
+    let mut accepted = true;
+    use crate::input_session::InputAction;
+    for action in actions {
+        let command = match action {
+            InputAction::Start {
+                session_id,
+                binding,
+            } => {
+                let runtime = handle.state::<RecordingCommandQueue>();
+                let config = {
+                    let session = runtime
+                        .session
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    if session.session_id() != Some(session_id) {
+                        accepted = false;
+                        continue;
+                    }
+                    session
+                        .owned_snapshot(session_id, binding.revision)
+                        .cloned()
+                };
+                let Some(config) = config else {
+                    accepted = false;
+                    invalidate_pending_recording_commands(handle);
+                    let _ = handle.emit("pipeline:error", "Recording configuration is unavailable");
+                    continue;
+                };
+                RecordingCommand::Start {
+                    session_id,
+                    binding,
+                    config: Box::new(config),
+                }
+            }
+            InputAction::Stop { session_id } => RecordingCommand::Stop { session_id },
+            InputAction::Cancel { session_id } => {
+                cancel_queued_input(handle, session_id);
+                RecordingCommand::Cancel { session_id }
+            }
+            InputAction::ShowGuide { press_id } | InputAction::HideGuide { press_id } => {
+                let showing = matches!(action, InputAction::ShowGuide { .. });
+                let _ = handle.emit(
+                    if showing {
+                        "capsule:alert"
+                    } else {
+                        "capsule:alert_dismiss"
+                    },
+                    serde_json::json!({"kind":"shortcut_guide", "pressId":press_id}),
+                );
+                continue;
+            }
+        };
+        if let Err(error) = handle
+            .state::<RecordingCommandQueue>()
+            .queue
+            .submit(command)
+        {
+            accepted = false;
+            invalidate_pending_recording_commands(handle);
+            let _ = handle.emit("pipeline:error", error);
+        }
+    }
+    accepted
+}
+
+pub(crate) fn recording_input_finished(handle: &tauri::AppHandle) {
+    if let Some(runtime) = handle.try_state::<RecordingCommandQueue>() {
+        let session_id = runtime
+            .executing_session
+            .swap(0, std::sync::atomic::Ordering::SeqCst);
+        if session_id != 0 {
+            runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .finish(session_id);
+        }
+    }
+}
+
+fn handle_dictation_input(
+    handle: &tauri::AppHandle,
+    role: HotkeyRole,
+    binding_id: &str,
+    event_state: ShortcutState,
+    occurred_at: std::time::Instant,
+    parent_binding_id: Option<&str>,
+) -> bool {
+    use crate::input_session::VoiceRole;
+    let runtime = handle.state::<RecordingCommandQueue>();
+    let now_ms = occurred_at
+        .saturating_duration_since(runtime.clock)
+        .as_millis() as u64;
+    let mut session = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if event_state == ShortcutState::Pressed
+        && session.session_id().is_none()
+        && (handle.state::<pipeline::PipelineHandle>().current_state()
+            != pipeline::PipelineState::Idle
+            || handle.state::<commands::ask::AskDictationState>().is_busy())
+    {
+        drop(session);
+        emit_capsule_alert(handle, "previous_pending");
+        return false;
+    }
+    let previous_press = session.press_id();
+    let actions = match event_state {
+        ShortcutState::Pressed => {
+            let voice_role = match role {
+                HotkeyRole::TranslateSelection => VoiceRole::Translate,
+                HotkeyRole::Ask => VoiceRole::Ask,
+                HotkeyRole::EditSelection => VoiceRole::EditSelection,
+                _ => VoiceRole::Dictation,
+            };
+            match parent_binding_id {
+                Some(parent) => {
+                    session.press_combo_committed(parent, binding_id, voice_role, now_ms)
+                }
+                None => session.press_committed(binding_id, voice_role, now_ms),
+            }
+        }
+        ShortcutState::Released => session.release(binding_id, now_ms),
+    };
+    let accepted = !actions.is_empty()
+        || (event_state == ShortcutState::Pressed
+            && session.press_id().is_some()
+            && session.press_id() != previous_press)
+        || (event_state == ShortcutState::Released
+            && previous_press.is_some()
+            && session.press_id() != previous_press);
+    let guide_timer = session.press_id().and_then(|press_id| {
+        session
+            .guide_delay(press_id, runtime.clock.elapsed().as_millis() as u64)
+            .map(|delay_ms| (press_id, delay_ms))
+    });
+    drop(session);
+    let dispatched = dispatch_input_actions(handle, actions);
+    if event_state == ShortcutState::Pressed {
+        if let Some((press_id, delay_ms)) = guide_timer {
+            let handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                let runtime = handle.state::<RecordingCommandQueue>();
+                let actions = runtime
+                    .session
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .long_press_due(press_id, runtime.clock.elapsed().as_millis() as u64);
+                dispatch_input_actions(&handle, actions);
+            });
+        }
+    }
+    accepted && dispatched
 }
 
 fn handle_advanced_role_shortcut(
@@ -1179,10 +1594,80 @@ fn handle_advanced_role_shortcut(
     role: HotkeyRole,
     event_state: ShortcutState,
 ) {
+    dispatch_advanced_role_shortcut(
+        role,
+        event_state,
+        || crate::restore_main_window(&handle),
+        |role| {
+            if role == HotkeyRole::SwitchScene {
+                let app = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = commands::config::cycle_scene_from_shortcut(&app).await {
+                        tracing::warn!("Shortcut scene switch failed: {error}");
+                    }
+                });
+                return;
+            }
+            let _ = handle.emit("hotkey:role", role.as_str());
+        },
+    );
+}
+
+fn dispatch_advanced_role_shortcut(
+    role: HotkeyRole,
+    event_state: ShortcutState,
+    open_main: impl FnOnce(),
+    emit_role: impl FnOnce(HotkeyRole),
+) {
     if event_state != ShortcutState::Pressed {
         return;
     }
-    let _ = handle.emit("hotkey:role", role.as_str());
+    if role == HotkeyRole::OpenApp {
+        open_main();
+        return;
+    }
+    emit_role(role);
+}
+
+fn handle_active_ask_input(
+    handle: &tauri::AppHandle,
+    event_state: ShortcutState,
+    occurred_at: std::time::Instant,
+) -> Option<bool> {
+    let snapshot = handle
+        .state::<commands::ask::AskDictationState>()
+        .shortcut_snapshot();
+    if snapshot.recording_session_id.is_none() && snapshot.startup_generation.is_none() {
+        return None;
+    }
+    let runtime = handle.state::<RecordingCommandQueue>();
+    let owned_binding = runtime
+        .session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .session_binding()
+        .filter(|binding| binding.role == crate::input_session::VoiceRole::Ask)
+        .map(|binding| binding.binding_id.clone());
+    if let Some(owned_binding) = owned_binding {
+        return Some(handle_dictation_input(
+            handle,
+            HotkeyRole::Ask,
+            &owned_binding,
+            event_state,
+            occurred_at,
+            None,
+        ));
+    } else if event_state == ShortcutState::Pressed && snapshot.busy {
+        if let Err(error) = runtime
+            .queue
+            .submit(RecordingCommand::ExternalAskStop { snapshot })
+        {
+            let _ = handle.emit("pipeline:error", error);
+            return Some(false);
+        }
+        return Some(true);
+    }
+    Some(false)
 }
 
 pub fn handle_hotkey_role_event(
@@ -1190,34 +1675,180 @@ pub fn handle_hotkey_role_event(
     role: HotkeyRole,
     event_state: ShortcutState,
 ) {
-    match role {
-        HotkeyRole::Ask => handle_ask_role_event(handle, event_state),
-        HotkeyRole::TranslateSelection => {
-            let action = dictation_shortcut_action(
+    handle_hotkey_binding_event(handle, role, role.as_str(), event_state);
+}
+
+pub(crate) fn handle_hotkey_binding_event(
+    handle: tauri::AppHandle,
+    role: HotkeyRole,
+    binding_id: &str,
+    event_state: ShortcutState,
+) {
+    handle_hotkey_binding_event_at(
+        handle,
+        role,
+        binding_id,
+        event_state,
+        std::time::Instant::now(),
+    );
+}
+
+pub(crate) fn handle_hotkey_binding_event_at(
+    handle: tauri::AppHandle,
+    role: HotkeyRole,
+    binding_id: &str,
+    event_state: ShortcutState,
+    occurred_at: std::time::Instant,
+) {
+    handle_input_binding_event_at(handle, role, binding_id, event_state, occurred_at, None);
+}
+
+pub(crate) fn handle_input_binding_event_at(
+    handle: tauri::AppHandle,
+    role: HotkeyRole,
+    binding_id: &str,
+    event_state: ShortcutState,
+    occurred_at: std::time::Instant,
+    parent_binding_id: Option<&str>,
+) -> bool {
+    if event_state == ShortcutState::Pressed {
+        if let Some(runtime) = handle.try_state::<RecordingCommandQueue>() {
+            if runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .block_installation_press(binding_id)
+            {
+                return false;
+            }
+        }
+    }
+    if event_state == ShortcutState::Released {
+        if let Some(runtime) = handle.try_state::<RecordingCommandQueue>() {
+            let mut session = runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if session.owns_installation_blocked_release(binding_id) {
+                session.release(
+                    binding_id,
+                    occurred_at
+                        .saturating_duration_since(runtime.clock)
+                        .as_millis() as u64,
+                );
+                return false;
+            }
+        }
+        let owned_release = handle
+            .try_state::<RecordingCommandQueue>()
+            .is_some_and(|runtime| {
+                let voice_role = match role {
+                    HotkeyRole::Dictation => crate::input_session::VoiceRole::Dictation,
+                    HotkeyRole::TranslateSelection => crate::input_session::VoiceRole::Translate,
+                    HotkeyRole::Ask => crate::input_session::VoiceRole::Ask,
+                    HotkeyRole::EditSelection => crate::input_session::VoiceRole::EditSelection,
+                    _ => return false,
+                };
+                runtime
+                    .session
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .owns_suppressed_release(binding_id, voice_role)
+            });
+        if owned_release {
+            handle_dictation_input(
                 &handle,
+                role,
+                binding_id,
                 event_state,
-                pipeline::PipelineStartOptions {
-                    force_translate: true,
-                },
+                occurred_at,
+                parent_binding_id,
             );
-            handle_recording_shortcut(handle, action);
+            return false;
+        }
+    }
+    let owned_completion = handle
+        .try_state::<RecordingCommandQueue>()
+        .is_some_and(|runtime| {
+            let voice_role = match role {
+                HotkeyRole::Dictation => crate::input_session::VoiceRole::Dictation,
+                HotkeyRole::TranslateSelection => crate::input_session::VoiceRole::Translate,
+                HotkeyRole::Ask => crate::input_session::VoiceRole::Ask,
+                HotkeyRole::EditSelection => crate::input_session::VoiceRole::EditSelection,
+                _ => return false,
+            };
+            runtime
+                .session
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .owns_session_binding(binding_id, voice_role)
+        });
+    if handle
+        .try_state::<HotkeySupervisor>()
+        .is_some_and(|supervisor| {
+            !(supervisor.role_actions_allowed(role.as_str())
+                || owned_completion && supervisor.session_completion_allowed())
+        })
+    {
+        tracing::debug!(
+            role = role.as_str(),
+            "Shortcut blocked by registration state"
+        );
+        return false;
+    }
+    tracing::debug!(role = role.as_str(), "Dispatching configured shortcut");
+    if let Some(accepted) = crate::practice_shortcut::route(&handle, role, event_state) {
+        return accepted;
+    }
+    match role {
+        HotkeyRole::Ask => {
+            if !owned_completion {
+                if let Some(accepted) = handle_active_ask_input(&handle, event_state, occurred_at) {
+                    return accepted;
+                }
+            }
+            return handle_dictation_input(
+                &handle,
+                role,
+                binding_id,
+                event_state,
+                occurred_at,
+                parent_binding_id,
+            );
+        }
+        HotkeyRole::TranslateSelection | HotkeyRole::EditSelection => {
+            return handle_dictation_input(
+                &handle,
+                role,
+                binding_id,
+                event_state,
+                occurred_at,
+                parent_binding_id,
+            );
         }
         HotkeyRole::Dictation => {
-            let ask_active = {
-                let ask_state = handle.state::<commands::ask::AskDictationState>();
-                ask_state.is_recording() || ask_state.is_starting()
-            };
-            if ask_active {
-                handle_ask_role_event(handle, event_state);
-                return;
+            if owned_completion {
+                return handle_dictation_input(
+                    &handle,
+                    role,
+                    binding_id,
+                    event_state,
+                    occurred_at,
+                    parent_binding_id,
+                );
+            }
+            if let Some(accepted) = handle_active_ask_input(&handle, event_state, occurred_at) {
+                return accepted;
             }
 
-            let action = dictation_shortcut_action(
+            return handle_dictation_input(
                 &handle,
+                role,
+                binding_id,
                 event_state,
-                pipeline::PipelineStartOptions::default(),
+                occurred_at,
+                parent_binding_id,
             );
-            handle_recording_shortcut(handle, action);
         }
         HotkeyRole::PasteLast => {
             if event_state == ShortcutState::Pressed {
@@ -1226,6 +1857,7 @@ pub fn handle_hotkey_role_event(
         }
         role => handle_advanced_role_shortcut(handle, role, event_state),
     }
+    event_state == ShortcutState::Pressed
 }
 
 pub fn build_shortcut_handler(
@@ -1236,8 +1868,11 @@ pub fn build_shortcut_handler(
        + 'static {
     move |_app, shortcut, event| {
         let handle = app_handle.clone();
+        if crate::escape_cancel::handle_shortcut(&handle, shortcut, event.state) {
+            return;
+        }
         let role = hotkey_role_for_shortcut(&handle, shortcut);
-        handle_hotkey_role_event(handle, role, event.state);
+        handle_hotkey_binding_event(handle, role, &format!("{shortcut:?}"), event.state);
     }
 }
 
@@ -1349,6 +1984,101 @@ pub fn parse_hotkey(s: &str) -> Option<Shortcut> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advanced_open_app_runs_only_on_press_and_keeps_other_role_events() {
+        let opened = std::cell::Cell::new(0);
+        for edge in [ShortcutState::Pressed, ShortcutState::Released] {
+            dispatch_advanced_role_shortcut(
+                HotkeyRole::OpenApp,
+                edge,
+                || opened.set(opened.get() + 1),
+                |_| panic!("OpenApp must execute instead of emitting an unhandled role"),
+            );
+        }
+        assert_eq!(opened.get(), 1);
+        for role in [HotkeyRole::SwitchScene, HotkeyRole::EditSelection] {
+            let emitted = std::cell::Cell::new(None);
+            dispatch_advanced_role_shortcut(
+                role,
+                ShortcutState::Pressed,
+                || panic!("other roles must not open the application"),
+                |received| emitted.set(Some(received)),
+            );
+            assert_eq!(emitted.get(), Some(role));
+        }
+    }
+
+    #[test]
+    fn lost_monitor_enters_recovery_only_for_current_installed_generation() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.snapshot().generation;
+        assert!(!supervisor.record_monitor_failure(generation, "not installed".to_string()));
+        supervisor.record_registration_success(generation);
+        assert!(supervisor.record_monitor_failure(generation, "monitor exited".to_string()));
+        assert_eq!(supervisor.snapshot().state, HotkeySupervisorState::Failed);
+        assert_eq!(
+            supervisor.snapshot().last_error.as_deref(),
+            Some("monitor exited")
+        );
+        assert!(supervisor.next_retry_delay().is_some());
+        assert!(!supervisor.record_monitor_failure(generation, "duplicate".to_string()));
+        supervisor.record_registration_success(generation);
+        let new_generation = supervisor.disable();
+        assert!(!supervisor.record_monitor_failure(generation, "old monitor".to_string()));
+        assert!(!supervisor.record_monitor_failure(new_generation, "editor paused".to_string()));
+        assert_eq!(supervisor.snapshot().state, HotkeySupervisorState::Disabled);
+    }
+
+    #[tokio::test]
+    async fn configuration_transaction_blocks_recovery_until_save_finishes() {
+        let transaction = Arc::new(HotkeyConfigTransaction::default());
+        let saving = transaction.0.lock().await;
+        assert!(transaction.0.try_lock().is_err());
+        let current = Arc::new(Mutex::new("old"));
+        let recovery_transaction = Arc::clone(&transaction);
+        let recovery_current = Arc::clone(&current);
+        let recovery = tokio::spawn(async move {
+            let _guard = recovery_transaction.0.lock().await;
+            *recovery_current.lock().unwrap()
+        });
+        tokio::task::yield_now().await;
+        assert!(!recovery.is_finished());
+        *current.lock().unwrap() = "saved";
+        drop(saving);
+        assert_eq!(recovery.await.unwrap(), "saved");
+    }
+
+    #[test]
+    fn cancelled_ask_shortcut_does_not_create_popup_but_real_failure_does() {
+        use tauri::Listener;
+
+        let app = tauri::test::mock_builder()
+            .manage(commands::ask::AskDictationState::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let received = Arc::new(Mutex::new(Vec::<String>::new()));
+        let captured = received.clone();
+        let listener = app.listen_any("ask:error", move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
+        show_ask_error_window(app.handle(), commands::ask::ASK_CANCELLED.into());
+        assert!(app.get_webview_window("ask").is_none());
+        assert!(received.lock().unwrap().is_empty());
+
+        show_ask_error_window(app.handle(), "Synthetic genuine failure".into());
+        assert!(app.get_webview_window("ask").is_some());
+        assert_eq!(
+            *received.lock().unwrap(),
+            vec!["Synthetic genuine failure".to_string()]
+        );
+        show_ask_error_window(app.handle(), commands::ask::ASK_CANCELLED.into());
+        assert_eq!(received.lock().unwrap().len(), 1);
+        app.unlisten(listener);
+    }
 
     #[test]
     fn test_parse_hotkey_ctrl_slash() {
@@ -1501,6 +2231,16 @@ mod tests {
         );
         assert_eq!(plan.global.len(), 1);
         assert_eq!(plan.global[0].role, HotkeyRole::Ask);
+    }
+
+    #[test]
+    fn fn_alphanumeric_bindings_use_native_registration_only_on_macos() {
+        for key in ["K", "A", "Z", "0", "9"] {
+            let binding = storage::ShortcutBinding::from_hotkey(&format!("Fn+{key}")).unwrap();
+            assert!(native_trigger_from_binding(&binding).is_some());
+            assert!(binding_is_valid_for_platform(&binding, "macos"));
+            assert!(!binding_is_valid_for_platform(&binding, "windows"));
+        }
     }
 
     #[test]
@@ -1760,153 +2500,97 @@ mod tests {
     }
 
     #[test]
-    fn ask_shortcut_is_toggle_only_and_ignores_release() {
-        assert_eq!(
-            ask_shortcut_action(ShortcutState::Pressed, false, false, false),
-            AskShortcutAction::Start
-        );
-        assert_eq!(
-            ask_shortcut_action(ShortcutState::Pressed, true, false, true),
-            AskShortcutAction::Stop
-        );
-        assert_eq!(
-            ask_shortcut_action(ShortcutState::Pressed, false, true, true),
-            AskShortcutAction::StopAfterStart
-        );
-        assert_eq!(
-            ask_shortcut_action(ShortcutState::Released, true, false, true),
-            AskShortcutAction::Ignore
-        );
-        assert_eq!(
-            ask_shortcut_action(ShortcutState::Pressed, false, false, true),
-            AskShortcutAction::Ignore
-        );
-    }
-
-    #[test]
     fn translation_shortcut_starts_recording_with_translate_override() {
-        assert_eq!(
-            recording_shortcut_action(
-                "hold",
-                ShortcutState::Pressed,
-                pipeline::PipelineState::Idle,
-                pipeline::PipelineStartOptions {
-                    force_translate: true,
-                },
-            ),
-            RecordingShortcutAction::Start {
-                options: pipeline::PipelineStartOptions {
-                    force_translate: true,
-                },
-            }
+        use crate::input_session::{InputAction, InputBinding, InputMode, InputSession, VoiceRole};
+        let mut session = InputSession::default();
+        session.commit_bindings(
+            1,
+            vec![InputBinding {
+                role: VoiceRole::Translate,
+                binding_id: "Fn+LeftShift".into(),
+                mode: InputMode::Hold,
+                revision: 1,
+            }],
         );
-
+        session.confirm_installation(1);
+        let actions = session.press_committed("Fn+LeftShift", VoiceRole::Translate, 10);
+        let [InputAction::Start {
+            session_id,
+            binding,
+        }] = actions.as_slice()
+        else {
+            panic!("expected translation start");
+        };
+        assert_eq!(binding.role, VoiceRole::Translate);
+        session.ready(*session_id);
         assert_eq!(
-            recording_shortcut_action(
-                "hold",
-                ShortcutState::Released,
-                pipeline::PipelineState::Recording,
-                pipeline::PipelineStartOptions {
-                    force_translate: true,
-                },
-            ),
-            RecordingShortcutAction::Stop
+            session.release("Fn+LeftShift", 20),
+            vec![InputAction::Stop {
+                session_id: *session_id
+            }]
         );
-    }
-
-    fn release(held_ms: u64, long_held: bool) -> Option<PressRelease> {
-        Some(PressRelease {
-            held: Duration::from_millis(held_ms),
-            long_held,
-        })
     }
 
     #[test]
     fn auto_mode_tap_starts_hands_free_and_next_tap_finishes() {
-        let options = pipeline::PipelineStartOptions::default();
-        assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Pressed,
-                pipeline::PipelineState::Idle,
-                None,
-                options,
-            ),
-            RecordingShortcutAction::Start { options }
+        use crate::input_session::{InputAction, InputBinding, InputMode, InputSession, VoiceRole};
+        let mut session = InputSession::default();
+        session.commit_bindings(
+            1,
+            vec![InputBinding {
+                role: VoiceRole::Dictation,
+                binding_id: "Fn".into(),
+                mode: InputMode::Auto,
+                revision: 1,
+            }],
         );
+        session.confirm_installation(1);
+        assert!(session
+            .press_committed("Fn", VoiceRole::Dictation, 10)
+            .is_empty());
+        let actions = session.release("Fn", 190);
+        let [InputAction::Start { session_id, .. }] = actions.as_slice() else {
+            panic!("expected tap start");
+        };
+        session.ready(*session_id);
+        assert!(session
+            .press_committed("Fn", VoiceRole::Dictation, 200)
+            .is_empty());
         assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Released,
-                pipeline::PipelineState::Recording,
-                release(180, false),
-                options,
-            ),
-            RecordingShortcutAction::Ignore
+            session.release("Fn", 300),
+            vec![InputAction::Stop {
+                session_id: *session_id
+            }]
         );
-        assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Pressed,
-                pipeline::PipelineState::Recording,
-                None,
-                options,
-            ),
-            RecordingShortcutAction::Stop
-        );
-    }
-
-    #[test]
-    fn auto_mode_press_while_processing_reports_previous_pending() {
-        for state in [
-            pipeline::PipelineState::Transcribing,
-            pipeline::PipelineState::Polishing,
-            pipeline::PipelineState::Outputting,
-        ] {
-            assert_eq!(
-                auto_recording_shortcut_action(
-                    ShortcutState::Pressed,
-                    state,
-                    None,
-                    pipeline::PipelineStartOptions::default(),
-                ),
-                RecordingShortcutAction::PreviousPending
-            );
-        }
     }
 
     #[test]
     fn auto_mode_long_press_release_hides_guide_or_discards_the_take() {
-        let options = pipeline::PipelineStartOptions::default();
+        use crate::input_session::{InputAction, InputBinding, InputMode, InputSession, VoiceRole};
+        let mut session = InputSession::default();
+        session.commit_bindings(
+            1,
+            vec![InputBinding {
+                role: VoiceRole::Dictation,
+                binding_id: "Fn".into(),
+                mode: InputMode::Auto,
+                revision: 1,
+            }],
+        );
+        session.confirm_installation(1);
+        session.press_committed("Fn", VoiceRole::Dictation, 10);
+        let press_id = session.press_id().unwrap();
         assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Released,
-                pipeline::PipelineState::Idle,
-                release(900, true),
-                options,
-            ),
-            RecordingShortcutAction::DismissLongPressGuide
+            session.long_press_due(press_id, 610),
+            vec![InputAction::ShowGuide { press_id }]
         );
         assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Released,
-                pipeline::PipelineState::Preparing,
-                release(600, false),
-                options,
-            ),
-            RecordingShortcutAction::CancelLongPress
+            session.release("Fn", 900),
+            vec![InputAction::HideGuide { press_id }]
         );
-    }
-
-    #[test]
-    fn auto_mode_release_of_the_stopping_press_is_ignored() {
-        // The finishing press clears its tracker entry, so its release carries no duration.
-        assert_eq!(
-            auto_recording_shortcut_action(
-                ShortcutState::Released,
-                pipeline::PipelineState::Transcribing,
-                None,
-                pipeline::PipelineStartOptions::default(),
-            ),
-            RecordingShortcutAction::Ignore
-        );
+        session.press_committed("Fn", VoiceRole::Dictation, 1000);
+        assert!(session.release("Fn", 1600).is_empty());
+        assert_eq!(session.session_id(), None);
     }
 
     #[test]
@@ -1922,6 +2606,28 @@ mod tests {
             })
         );
         assert_eq!(tracker.take_release(pressed + Duration::from_secs(2)), None);
+    }
+
+    #[test]
+    fn lifecycle_reset_accepts_the_first_press_without_a_previous_release() {
+        let tracker = AutoPressTracker::default();
+        let pressed = std::time::Instant::now();
+        assert!(!tracker.begin_press(pressed));
+        let old_generation = tracker.mark_pressed(pressed);
+        tracker.reset_for_lifecycle();
+        assert!(!tracker.begin_press(pressed + Duration::from_millis(100)));
+        assert!(!tracker.claim_long_hold(old_generation));
+    }
+
+    #[test]
+    fn stopping_press_clear_preserves_repeat_suppression_until_release() {
+        let tracker = AutoPressTracker::default();
+        let pressed = std::time::Instant::now();
+        assert!(!tracker.begin_press(pressed));
+        tracker.clear();
+        assert!(tracker.begin_press(pressed + Duration::from_millis(100)));
+        tracker.take_release(pressed + Duration::from_millis(150));
+        assert!(!tracker.begin_press(pressed + Duration::from_millis(200)));
     }
 
     #[test]
@@ -1941,6 +2647,65 @@ mod tests {
                 .map(|r| r.long_held),
             Some(true)
         );
+    }
+
+    #[test]
+    fn long_hold_publication_finishes_before_a_concurrent_release() {
+        let tracker = Arc::new(AutoPressTracker::default());
+        let pressed = std::time::Instant::now();
+        let generation = tracker.mark_pressed(pressed);
+        assert!(tracker.claim_long_hold(generation));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (entered_sender, entered_receiver) = std::sync::mpsc::channel();
+        let (continue_sender, continue_receiver) = std::sync::mpsc::channel();
+        let publisher_tracker = Arc::clone(&tracker);
+        let publisher_events = Arc::clone(&events);
+        let publisher = std::thread::spawn(move || {
+            publisher_tracker.publish_long_hold(generation, || {
+                entered_sender.send(()).unwrap();
+                continue_receiver
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+                publisher_events.lock().unwrap().push("show");
+            })
+        });
+        entered_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        let release_tracker = Arc::clone(&tracker);
+        let release_events = Arc::clone(&events);
+        let release = std::thread::spawn(move || {
+            let result = release_tracker
+                .take_release(pressed + Duration::from_millis(601))
+                .unwrap();
+            if result.long_held {
+                release_events.lock().unwrap().push("dismiss");
+            }
+        });
+        continue_sender.send(()).unwrap();
+        assert!(publisher.join().unwrap());
+        release.join().unwrap();
+        assert_eq!(*events.lock().unwrap(), ["show", "dismiss"]);
+        assert!(!tracker.publish_long_hold(generation, || {
+            events.lock().unwrap().push("late show");
+        }));
+    }
+
+    #[test]
+    fn released_or_replaced_long_hold_cannot_publish_its_guide() {
+        let tracker = AutoPressTracker::default();
+        let pressed = std::time::Instant::now();
+        let generation = tracker.mark_pressed(pressed);
+        assert!(tracker.claim_long_hold(generation));
+        let _ = tracker.take_release(pressed + Duration::from_millis(601));
+        let mut published = false;
+        assert!(!tracker.publish_long_hold(generation, || published = true));
+        assert!(!published);
+        let current = tracker.mark_pressed(pressed + Duration::from_secs(1));
+        assert!(tracker.claim_long_hold(current));
+        assert!(!tracker.publish_long_hold(generation, || published = true));
+        assert!(tracker.publish_long_hold(current, || published = true));
+        assert!(published);
     }
 
     #[test]
@@ -1976,14 +2741,28 @@ mod tests {
 
     #[test]
     fn hold_release_queues_stop_even_when_start_is_still_pending() {
+        use crate::input_session::{InputAction, InputBinding, InputMode, InputSession, VoiceRole};
+        let mut session = InputSession::default();
+        session.commit_bindings(
+            1,
+            vec![InputBinding {
+                role: VoiceRole::Dictation,
+                binding_id: "Fn".into(),
+                mode: InputMode::Hold,
+                revision: 1,
+            }],
+        );
+        session.confirm_installation(1);
+        let actions = session.press_committed("Fn", VoiceRole::Dictation, 10);
+        let [InputAction::Start { session_id, .. }] = actions.as_slice() else {
+            panic!("expected hold start");
+        };
+        assert!(session.release("Fn", 20).is_empty());
         assert_eq!(
-            recording_shortcut_action(
-                "hold",
-                ShortcutState::Released,
-                pipeline::PipelineState::Idle,
-                pipeline::PipelineStartOptions::default(),
-            ),
-            RecordingShortcutAction::Stop
+            session.ready(*session_id),
+            vec![InputAction::Stop {
+                session_id: *session_id
+            }]
         );
     }
 
@@ -2071,6 +2850,22 @@ mod tests {
                 HOTKEY_SUPERVISOR_RETRY_DELAY_SECS
             ))
         );
+    }
+
+    #[test]
+    fn focus_reopens_failed_retry_without_resuming_an_editor_pause() {
+        let supervisor = HotkeySupervisor::default();
+        let generation = supervisor.snapshot().generation;
+        for _ in 0..=HOTKEY_SUPERVISOR_FAST_RETRY_LIMIT {
+            supervisor.record_registration_failure(generation, "registration failed".to_string());
+        }
+        assert_eq!(supervisor.next_retry_delay(), None);
+        assert!(supervisor.retry_failed_on_focus());
+        assert!(supervisor.next_retry_delay().is_some());
+        assert_eq!(supervisor.snapshot().generation, generation);
+        supervisor.disable();
+        assert!(!supervisor.retry_failed_on_focus());
+        assert_eq!(supervisor.next_retry_delay(), None);
     }
 
     #[test]

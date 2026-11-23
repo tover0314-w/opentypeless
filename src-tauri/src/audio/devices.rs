@@ -58,23 +58,66 @@ pub fn list_input_devices() -> Vec<InputDeviceInfo> {
 /// no longer connected. Returns the device and whether a fallback happened.
 pub(crate) fn select_input_device(preferred: Option<&str>) -> Option<(cpal::Device, bool)> {
     let host = cpal::default_host();
+    select_with_fallback(
+        preferred,
+        |preferred| {
+            host.input_devices().ok().and_then(|mut devices| {
+                devices.find(|device| device_name(device).as_deref() == Some(preferred))
+            })
+        },
+        || host.default_input_device(),
+    )
+}
+
+fn select_with_fallback<Device>(
+    preferred: Option<&str>,
+    find_preferred: impl FnOnce(&str) -> Option<Device>,
+    default_device: impl FnOnce() -> Option<Device>,
+) -> Option<(Device, bool)> {
     let preferred = preferred.map(str::trim).filter(|name| !name.is_empty());
     if let Some(preferred) = preferred {
-        let matched = host.input_devices().ok().and_then(|mut devices| {
-            devices.find(|device| device_name(device).as_deref() == Some(preferred))
-        });
-        if let Some(device) = matched {
+        if let Some(device) = find_preferred(preferred) {
             return Some((device, false));
         }
         tracing::warn!("Preferred microphone '{preferred}' is unavailable; using the default");
     }
-    host.default_input_device()
-        .map(|device| (device, preferred.is_some()))
+    default_device().map(|device| (device, preferred.is_some()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_selection_preserves_preference_and_uses_default_only_when_needed() {
+        assert_eq!(
+            select_with_fallback(
+                Some(" USB "),
+                |name| {
+                    assert_eq!(name, "USB");
+                    Some("preferred")
+                },
+                || panic!("available preferred device must not fall back"),
+            ),
+            Some(("preferred", false))
+        );
+        assert_eq!(
+            select_with_fallback(Some("missing"), |_| None, || Some("default")),
+            Some(("default", true))
+        );
+        assert_eq!(
+            select_with_fallback(
+                Some(" "),
+                |_| panic!("blank preference must not be queried"),
+                || Some("default"),
+            ),
+            Some(("default", false))
+        );
+        assert_eq!(
+            select_with_fallback::<&str>(Some("missing"), |_| None, || None),
+            None
+        );
+    }
 
     #[test]
     fn connection_kind_groups_interfaces_for_the_picker() {

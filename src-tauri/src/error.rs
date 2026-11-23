@@ -22,6 +22,7 @@ pub enum AppError {
     Quota(String),
     LlmQuota(String),
     Output(String),
+    OutputUnconfirmed(String),
     Config(String),
     CloudSessionInvalid,
 }
@@ -63,6 +64,24 @@ pub fn emit_cloud_session_invalid(app_handle: &tauri::AppHandle, error: &AppErro
     })
 }
 
+pub fn emit_owned_cloud_session_invalid<R: tauri::Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    error: &AppError,
+    session_epoch: &str,
+) -> bool {
+    if !matches!(error, AppError::CloudSessionInvalid)
+        || uuid::Uuid::parse_str(session_epoch).is_err()
+    {
+        return false;
+    }
+    app_handle
+        .emit(
+            "auth:session-invalid-owned",
+            serde_json::json!({ "sessionEpoch": session_epoch }),
+        )
+        .is_ok()
+}
+
 impl AppError {
     pub fn is_retryable(&self) -> bool {
         match self {
@@ -73,6 +92,7 @@ impl AppError {
             AppError::Quota(_) => false,
             AppError::LlmQuota(_) => false,
             AppError::Output(_) => false,
+            AppError::OutputUnconfirmed(_) => false,
             AppError::Config(_) => false,
             AppError::CloudSessionInvalid => false,
         }
@@ -93,7 +113,31 @@ impl AppError {
             AppError::Quota(msg) => ("stt_quota_exceeded".to_string(), Some(msg.clone())),
             AppError::LlmQuota(msg) => ("llm_quota_exceeded".to_string(), Some(msg.clone())),
             AppError::Output(msg) => ("output_fallback_clipboard".to_string(), Some(msg.clone())),
-            AppError::Config(msg) => ("stt_failed".to_string(), Some(msg.clone())),
+            AppError::OutputUnconfirmed(msg) => {
+                ("output_fallback_clipboard".to_string(), Some(msg.clone()))
+            }
+            AppError::Config(msg) => {
+                let normalized = msg.to_ascii_lowercase();
+                let code = if normalized.contains("speech recognition is restricted") {
+                    "speech_permission_restricted"
+                } else if normalized.contains("speech recognition")
+                    && (normalized.contains("permission")
+                        || normalized.contains("not authorized")
+                        || normalized.contains("waiting for")
+                        || normalized.contains("authorization status"))
+                {
+                    "speech_permission_required"
+                } else if normalized
+                    .contains("apple speech recognizer could not be created for this language")
+                    || normalized
+                        .contains("apple speech is not currently available for this language")
+                {
+                    "speech_language_unavailable"
+                } else {
+                    "stt_failed"
+                };
+                (code.to_string(), Some(msg.clone()))
+            }
             AppError::CloudSessionInvalid => ("stt_failed".to_string(), None),
         };
         UserError {
@@ -120,6 +164,7 @@ impl std::fmt::Display for AppError {
             AppError::Quota(msg) => write!(f, "Quota error: {}", msg),
             AppError::LlmQuota(msg) => write!(f, "LLM quota error: {}", msg),
             AppError::Output(msg) => write!(f, "Output error: {}", msg),
+            AppError::OutputUnconfirmed(msg) => write!(f, "Output result unconfirmed: {}", msg),
             AppError::Config(msg) => write!(f, "Config error: {}", msg),
             AppError::CloudSessionInvalid => write!(f, "Managed cloud session is invalid"),
         }
@@ -128,8 +173,13 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
+pub fn request_error_message(error: reqwest::Error) -> String {
+    error.without_url().to_string()
+}
+
 impl From<reqwest::Error> for AppError {
     fn from(e: reqwest::Error) -> Self {
+        let e = e.without_url();
         if e.is_timeout() {
             AppError::Timeout(Duration::from_secs(30))
         } else if let Some(status) = e.status() {
@@ -190,8 +240,134 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn websocket_http_display_omits_response_headers_and_body() {
+        for status in [400, 401, 403, 429, 503] {
+            let response = tokio_tungstenite::tungstenite::http::Response::builder()
+                .status(status)
+                .header("x-private-marker", "synthetic-header-secret")
+                .body(Some(b"synthetic-api-key private spoken words".to_vec()))
+                .unwrap();
+            let websocket_error = tokio_tungstenite::tungstenite::Error::Http(response);
+            let formatted = websocket_error.to_string();
+            assert!(formatted.contains(&status.to_string()));
+            assert!(!formatted.contains("synthetic-header-secret"));
+            assert!(!formatted.contains("synthetic-api-key"));
+            assert!(!formatted.contains("private spoken words"));
+            let mapped = super::AppError::Network(formatted);
+            assert!(!mapped.to_string().contains("synthetic-api-key"));
+        }
+    }
+
     use super::*;
     use std::time::Duration;
+
+    #[tokio::test]
+    async fn request_url_removal_preserves_http_status_and_retry_classification() {
+        use std::io::{Read, Write};
+        for (status, retryable, code) in
+            [(401, false, "stt_invalid_key"), (503, true, "stt_failed")]
+        {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = [0_u8; 4096];
+                assert!(socket.read(&mut request).unwrap() > 0);
+                let response = format!(
+                    "HTTP/1.1 {status} Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = socket.write_all(response.as_bytes());
+            });
+            let response = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap()
+                .get(format!("http://{address}/?api_key=private-status-secret"))
+                .send()
+                .await
+                .unwrap();
+            let failure = response.error_for_status().unwrap_err();
+            assert!(failure.url().is_some());
+            let error = AppError::from(failure);
+            assert!(matches!(&error, AppError::Api { status: actual, .. } if *actual == status));
+            assert_eq!(error.is_retryable(), retryable);
+            assert_eq!(error.to_user_error().code, code);
+            assert!(!error.to_string().contains("private-status-secret"));
+            assert!(!error.to_string().contains(&address.to_string()));
+        }
+    }
+
+    #[tokio::test]
+    async fn diagnostic_request_errors_preserve_the_reason_without_the_url() {
+        let failure = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get("ftp://example.invalid/private-model?api_key=diagnostic-secret")
+            .send()
+            .await
+            .unwrap_err();
+        let expected = failure.to_string();
+        let message = request_error_message(failure);
+        assert!(expected.contains("diagnostic-secret"));
+        assert!(!message.contains("diagnostic-secret"));
+        assert!(!message.contains("example.invalid"));
+        assert!(!message.is_empty());
+    }
+
+    #[tokio::test]
+    async fn request_errors_do_not_expose_endpoint_query_secrets() {
+        let failure = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get("ftp://example.invalid/private-model?api_key=private-query-secret")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(failure.url().is_some());
+        let error = AppError::from(failure);
+        assert!(matches!(error, AppError::Network(_)));
+        assert!(error.is_retryable());
+        assert!(!error.to_string().contains("private-query-secret"));
+        assert!(!error.to_string().contains("example.invalid"));
+        assert!(!format!("{:?}", error.to_user_error()).contains("private-query-secret"));
+    }
+
+    #[test]
+    fn speech_permission_errors_keep_their_specific_reason() {
+        assert_eq!(
+            AppError::Config("Speech Recognition permission is denied for OpenTypeless".into())
+                .to_user_error()
+                .code,
+            "speech_permission_required"
+        );
+        assert_eq!(
+            AppError::Config("Speech Recognition is restricted on this Mac".into())
+                .to_user_error()
+                .code,
+            "speech_permission_restricted"
+        );
+        assert_eq!(
+            AppError::Config(
+                "Apple Speech recognizer could not be created for this language".into()
+            )
+            .to_user_error()
+            .code,
+            "speech_language_unavailable"
+        );
+        assert_eq!(
+            AppError::Config("Unknown recognition failure".into())
+                .to_user_error()
+                .code,
+            "stt_failed"
+        );
+    }
 
     #[test]
     fn test_network_error_is_retryable() {
@@ -326,6 +502,66 @@ mod tests {
             byok_events.push(event.to_string());
         }));
         assert!(byok_events.is_empty());
+    }
+
+    #[test]
+    fn owned_session_invalidation_preserves_request_identity_without_exposing_token() {
+        use tauri::Listener;
+
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let received = std::sync::Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let captured = received.clone();
+        let listener = app.listen_any("auth:session-invalid-owned", move |event| {
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
+        let epoch = uuid::Uuid::new_v4().to_string();
+        assert!(emit_owned_cloud_session_invalid(
+            app.handle(),
+            &AppError::CloudSessionInvalid,
+            &epoch,
+        ));
+        assert_eq!(
+            *received.lock().unwrap(),
+            vec![serde_json::json!({ "sessionEpoch": epoch })]
+        );
+        let byok = AppError::Api {
+            status: 401,
+            body: "synthetic-provider-secret".into(),
+        };
+        assert!(!emit_owned_cloud_session_invalid(
+            app.handle(),
+            &byok,
+            &epoch
+        ));
+        assert_eq!(received.lock().unwrap().len(), 1);
+        app.unlisten(listener);
+    }
+
+    #[test]
+    fn polish_failure_uses_its_captured_session_epoch() {
+        let source = include_str!("pipeline.rs");
+        let polish = source
+            .split("async fn polish_text(&self, input: PolishTextInput<'_>)")
+            .nth(1)
+            .unwrap()
+            .split("pub async fn")
+            .next()
+            .unwrap();
+        assert!(polish.contains("emit_owned_cloud_session_invalid"));
+        assert!(polish.contains("session_epoch.as_deref()"));
+        assert!(!polish.contains("emit_cloud_session_invalid("));
+    }
+
+    #[test]
+    fn pipeline_stt_failures_do_not_emit_unowned_session_invalidation() {
+        let source = include_str!("pipeline.rs");
+        assert!(!source.contains("emit_cloud_session_invalid("));
+        assert!(source.contains("stt_session_epoch.as_deref()"));
     }
 
     #[test]

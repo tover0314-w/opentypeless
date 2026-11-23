@@ -1,0 +1,68 @@
+{
+  "accountId": "synthetic-account",
+  "mutation": {
+    "recordId": "11111111-1111-4111-8111-111111111111",
+    "mutationId": "22222222-2222-4222-8222-222222222222",
+    "clientRevision": 1,
+    "baseServerRevision": 0,
+    "deleted": false,
+    "payload": {
+      "rawText": "Synthetic text",
+      "polishedText": "",
+      "mode": "dictate",
+      "answerText": null,
+      "createdAt": "2026-11-19T10:00:00",
+      "durationMs": null,
+      "language": null
+    }
+  },
+  "acknowledgement": {
+    "version": 1,
+    "accountId": "synthetic-account",
+    "acknowledgements": [{
+      "recordId": "11111111-1111-4111-8111-111111111111",
+      "mutationId": "22222222-2222-4222-8222-222222222222",
+      "clientRevision": 1,
+      "result": "accepted",
+      "serverRevision": 1
+    }]
+  },
+  "page": {
+    "version": 1,
+    "accountId": "synthetic-account",
+    "fromCursor": 0,
+    "nextCursor": 1,
+    "hasMore": false,
+    "changeSequences": [1],
+    "records": [{
+      "changeSequence": 1,
+      "recordId": "11111111-1111-4111-8111-111111111111",
+      "serverRevision": 1,
+      "deleted": false,
+      "payload": {
+        "rawText": "Synthetic text",
+        "polishedText": "",
+        "mode": "dictate",
+        "answerText": null,
+        "createdAt": "2026-11-19T10:00:00",
+        "durationMs": null,
+        "language": null
+      }
+    }]
+  },
+  "tombstone": {
+    "version": 1,
+    "accountId": "synthetic-account",
+    "fromCursor": 1,
+    "nextCursor": 2,
+    "hasMore": false,
+    "changeSequences": [2],
+    "records": [{
+      "changeSequence": 2,
+      "recordId": "11111111-1111-4111-8111-111111111111",
+      "serverRevision": 2,
+      "deleted": true,
+      "payload": null
+    }]
+  }
+}

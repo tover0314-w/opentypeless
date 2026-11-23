@@ -6,6 +6,12 @@ afterEach(() => {
 })
 
 describe('desktop route parsing', () => {
+  it('redirects the old dictionary settings link to the dictionary page', () => {
+    window.location.hash = '#/settings?pane=dictionary'
+    expect(parseHash()).toBe('dictionary')
+    expect(parseLocation()).toEqual({ page: 'dictionary', modal: null })
+  })
+
   it('redirects old model deep links to the sidebar Models page', () => {
     for (const pane of ['stt', 'llm', 'models']) {
       window.location.hash = `#/settings?pane=${pane}`

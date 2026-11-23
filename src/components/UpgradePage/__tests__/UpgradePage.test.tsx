@@ -73,7 +73,7 @@ vi.mock('../../../stores/authStore', () => ({
   useAuthStore: Object.assign(
     (selector: ((state: typeof mockAuthState) => unknown) | undefined) =>
       typeof selector === 'function' ? selector(mockAuthState) : mockAuthState,
-    { setState: mocks.setState },
+    { getState: () => mockAuthState, setState: mocks.setState },
   ),
 }))
 
@@ -148,6 +148,36 @@ afterEach(() => {
 })
 
 describe('UpgradePage', () => {
+  it('presents lifetime first without starting a checkout on page open', () => {
+    render(<UpgradePage />)
+
+    const planHeadings = screen.getAllByRole('heading', { level: 2 })
+    expect(planHeadings[0]).toHaveTextContent('Lifetime Starter')
+    expect(planHeadings[1]).toHaveTextContent('Pro Monthly')
+    expect(mocks.createCheckout).not.toHaveBeenCalled()
+    expect(readPendingDesktopCheckout(localStorage)).toBeNull()
+  })
+
+  it('shows the explicit monthly allowance on each purchase choice', () => {
+    render(<UpgradePage />)
+
+    expect(screen.getAllByText('upgrade.monthlyAllowance')).toHaveLength(2)
+    expect(screen.getByText('upgrade.allowancePending')).toBeInTheDocument()
+  })
+
+  it('does not substitute provider time and tokens when a customer quota is unavailable', () => {
+    Object.assign(mockAuthState, {
+      user: { id: 'user-1', email: 'user@example.com', name: null },
+      plan: 'pro',
+      sttSecondsLimit: 36_000,
+      llmTokensLimit: 5_000_000,
+    })
+    render(<UpgradePage />)
+
+    expect(screen.queryByText('upgrade.stt')).not.toBeInTheDocument()
+    expect(screen.queryByText('upgrade.llm')).not.toBeInTheDocument()
+  })
+
   it('keeps both free-user purchase choices concise', () => {
     render(<UpgradePage />)
 

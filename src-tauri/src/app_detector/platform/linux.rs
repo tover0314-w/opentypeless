@@ -31,6 +31,27 @@ pub(crate) fn restore_target_application(target: &TargetAppGuard) -> bool {
 }
 
 impl ContextSignalSource for LinuxContextSource {
+    fn target_identity(&self) -> Option<TargetAppGuard> {
+        if crate::platform::is_wayland_session() {
+            return None;
+        }
+        let window_id = command_output(&["getactivewindow"])?;
+        let process_id = command_output(&["getwindowpid", window_id.trim()])?
+            .trim()
+            .parse::<u32>()
+            .ok()?;
+        let native_identity = std::fs::read_link(PathBuf::from(format!("/proc/{process_id}/exe")))
+            .ok()
+            .and_then(|path| {
+                path.file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+            });
+        Some(TargetAppGuard {
+            process_id: Some(process_id),
+            native_identity,
+        })
+    }
+
     fn collect(&self) -> Option<ContextSignals> {
         if crate::platform::is_wayland_session() {
             return None;

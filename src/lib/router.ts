@@ -17,6 +17,9 @@ let lastPage: Page = 'home'
 
 function routeFromHash(): Route {
   const [path, query] = window.location.hash.replace('#/', '').split('?')
+  if (path === 'settings' && query && new URLSearchParams(query).get('pane') === 'dictionary') {
+    return 'dictionary'
+  }
   // Model settings moved from the Settings modal to their own page; keep old deep links working.
   if (
     path === 'settings' &&

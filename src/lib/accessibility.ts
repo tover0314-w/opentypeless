@@ -4,22 +4,35 @@ export function isMacPlatform() {
   return typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
 }
 
-function isFnDictationHotkey(config: AppConfig) {
-  const legacyHotkey = config.hotkey?.trim().toLowerCase()
-  const dictationBindings = config.hotkeys?.dictationBindings?.length
-    ? config.hotkeys.dictationBindings
-    : config.hotkeys?.dictation
-      ? [config.hotkeys.dictation]
-      : []
+function usesFnHotkey(config: AppConfig) {
+  const legacyUsesFn = [config.hotkey, config.ask_hotkey].some((hotkey) =>
+    hotkey?.split('+').some((part) => part.trim().toLowerCase() === 'fn'),
+  )
+  const hotkeys = config.hotkeys
+  const bindings = [
+    ...(hotkeys?.dictationBindings?.length
+      ? hotkeys.dictationBindings
+      : hotkeys?.dictation
+        ? [hotkeys.dictation]
+        : []),
+    ...(hotkeys?.translateBindings?.length
+      ? hotkeys.translateBindings
+      : hotkeys?.translate
+        ? [hotkeys.translate]
+        : []),
+    ...(hotkeys?.askBindings?.length ? hotkeys.askBindings : hotkeys?.ask ? [hotkeys.ask] : []),
+  ]
   return (
-    legacyHotkey === 'fn' ||
-    dictationBindings.some(
-      (binding) => binding.primary?.trim().toLowerCase() === 'fn' && binding.modifiers.length === 0,
+    legacyUsesFn ||
+    bindings.some(
+      (binding) =>
+        binding.primary?.trim().toLowerCase() === 'fn' ||
+        binding.modifiers.some((modifier) => modifier.trim().toLowerCase() === 'fn'),
     )
   )
 }
 
 export function needsMacAccessibility(config: AppConfig) {
   const usesAutomatedInput = config.insertion_strategy !== 'clipboardCopyOnly'
-  return isMacPlatform() && (usesAutomatedInput || isFnDictationHotkey(config))
+  return isMacPlatform() && (usesAutomatedInput || usesFnHotkey(config))
 }

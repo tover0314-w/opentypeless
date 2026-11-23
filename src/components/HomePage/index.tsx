@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ArrowUpRight, Clock3, Gauge, Github, Hourglass, Mic, Server, Share } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { Clock3, Gauge, Hourglass, Mic, Pencil, Server } from 'lucide-react'
-import { hotkeyFromBinding, useAppStore } from '../../stores/appStore'
-import { useVoiceShortcuts, type VoiceShortcutRole } from '../../hooks/useVoiceShortcuts'
-import { ShortcutRecorderBox } from '../Settings/ShortcutKeycapInput'
+import { useAppStore } from '../../stores/appStore'
 import { getUsageStats, type UsageStats } from '../../lib/tauri'
 import { buildHeatmap } from '../../lib/heatmap'
-import { LLM_PROVIDERS, STT_PROVIDERS } from '../../lib/constants'
+import { APP_REPO_URL, LLM_PROVIDERS, STT_PROVIDERS } from '../../lib/constants'
+import { useRoute } from '../../lib/router'
+import { useAppVersion } from '../../hooks/useAppVersion'
+import { CheckUpdateDialog } from '../Settings/CheckUpdateDialog'
 import { APP_ICON_BY_KEY } from '../../assets/app-icons/manifest'
 import { PageContainer } from '../shared/Page'
-import { Keycaps } from '../shared/Keycaps'
+import { ShortcutsCard } from './ShortcutsCard'
+import { ShareInsightsDialog } from './ShareInsightsDialog'
+import { useUseCaseVoiceHint } from '../../hooks/useUseCaseVoiceHint'
+import { QuickSettings } from './QuickSettings'
+import { ProviderLogo } from '../shared/ProviderLogo'
 
 const USE_CASES = [
   { key: 'gmail', icon: 'gmail', url: 'https://mail.google.com/' },
@@ -33,10 +38,14 @@ const LEVEL_CLASS = [
 ] as const
 
 export function HomePage() {
+  const { navigate } = useRoute()
+  const version = useAppVersion()
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const config = useAppStore((s) => s.config)
-  const historyCount = useAppStore((s) => s.history.length)
+  const history = useAppStore((s) => s.history)
   const { t } = useTranslation()
   const [stats, setStats] = useState<UsageStats | null>(null)
+  const [sharing, setSharing] = useState<UsageStats | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -48,44 +57,93 @@ export function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [historyCount])
+  }, [history])
 
   const sttLabel = STT_PROVIDERS.find((item) => item.value === config.stt_provider)?.labelKey
   const llmLabel = LLM_PROVIDERS.find((item) => item.value === config.llm_provider)?.labelKey
 
   return (
-    <PageContainer>
-      <h1 className="mb-6 text-[48px] font-bold leading-[56px] tracking-tight text-text-primary">
-        {t('home.title')}
-      </h1>
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div data-home-scroll="" className="min-h-0 flex-1 overflow-y-auto">
+        <PageContainer className="pb-[140px]">
+          <h1 className="mb-6 text-[48px] font-bold leading-[56px] tracking-tight text-text-primary">
+            {t('home.title')}
+          </h1>
 
-      <div className="flex gap-6">
-        <div className="min-w-0 flex-1 space-y-6">
-          <ShortcutsCard />
-          <InsightsCard stats={stats} />
-          <ActivityCard stats={stats} />
-          <UseCases />
-        </div>
+          <div className="flex gap-6">
+            <div className="min-w-0 flex-1 space-y-6">
+              <ShortcutsCard />
+              <InsightsCard stats={stats} onShare={() => stats && setSharing(stats)} />
+              <ActivityCard stats={stats} />
+              <UseCases />
+            </div>
 
-        <aside className="w-[220px] shrink-0 space-y-4">
-          <section className="surface-muted space-y-3 p-4">
-            <h2 className="text-[13px] font-medium text-text-tertiary">
-              {t('home.currentConfig')}
-            </h2>
-            <ConfigRow icon={Mic} label={t('home.sttProvider')}>
-              {sttLabel ? t(sttLabel) : config.stt_provider}
-            </ConfigRow>
-            <ConfigRow icon={Server} label={t('home.llmProvider')}>
-              {config.polish_enabled
-                ? llmLabel
-                  ? t(llmLabel)
-                  : config.llm_provider
-                : t('home.disabled')}
-            </ConfigRow>
-          </section>
-        </aside>
+            <aside className="w-[220px] shrink-0 space-y-4">
+              <section className="surface-muted space-y-3 p-4">
+                <h2 className="text-[13px] font-medium text-text-tertiary">
+                  {t('home.currentConfig')}
+                </h2>
+                <QuickSettings />
+                <ConfigRow
+                  icon={Mic}
+                  provider={config.stt_provider}
+                  label={t('home.sttProvider')}
+                  onClick={() => navigate('models')}
+                >
+                  {sttLabel ? t(sttLabel) : config.stt_provider}
+                </ConfigRow>
+                <ConfigRow
+                  icon={Server}
+                  provider={config.llm_provider}
+                  label={t('home.llmProvider')}
+                  onClick={() => navigate('models')}
+                  status={
+                    !config.polish_enabled
+                      ? `${t('settings.enableAiPolish')} · ${t('home.disabled')}`
+                      : undefined
+                  }
+                >
+                  {llmLabel ? t(llmLabel) : config.llm_provider}
+                </ConfigRow>
+              </section>
+            </aside>
+          </div>
+        </PageContainer>
       </div>
-    </PageContainer>
+      <footer
+        data-home-footer=""
+        className="absolute bottom-4 right-6 w-max max-w-[calc(100%-48px)]"
+      >
+        <div className="flex flex-col items-end gap-2">
+          <button
+            type="button"
+            onClick={() => void openUrl(APP_REPO_URL).catch(() => {})}
+            className="group flex min-h-9 cursor-pointer items-center gap-2 rounded-[8px] border border-border bg-fill-thin px-3 py-2 text-[13px] font-medium text-text-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            <Github
+              size={15}
+              aria-hidden="true"
+              className="shrink-0 transition-colors group-hover:text-accent"
+            />
+            <span>{t('home.starOnGitHub')}</span>
+            <ArrowUpRight size={14} aria-hidden="true" className="text-text-tertiary" />
+          </button>
+          <div className="flex items-center gap-2 rounded-[6px] bg-bg-primary px-1 py-0.5 text-[12px] text-text-tertiary">
+            <span>v{version}</span>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() => setCheckingUpdate(true)}
+              className="cursor-pointer border-none bg-transparent p-0 text-text-secondary hover:text-accent"
+            >
+              {t('settings.aboutPage.checkUpdates')}
+            </button>
+          </div>
+        </div>
+      </footer>
+      {sharing ? <ShareInsightsDialog stats={sharing} onClose={() => setSharing(null)} /> : null}
+      {checkingUpdate ? <CheckUpdateDialog onClose={() => setCheckingUpdate(false)} /> : null}
+    </div>
   )
 }
 
@@ -93,94 +151,37 @@ function ConfigRow({
   icon: Icon,
   label,
   children,
+  onClick,
+  status,
+  provider,
 }: {
   icon: typeof Mic
   label: string
   children: React.ReactNode
+  onClick: () => void
+  status?: string
+  provider?: string
 }) {
   return (
-    <div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="group block w-full cursor-pointer border-none bg-transparent p-0 text-left"
+    >
       <div className="flex items-center gap-1.5 text-[12px] text-text-tertiary">
         <Icon size={13} />
         {label}
       </div>
-      <div className="mt-0.5 truncate text-[14px] font-medium text-text-primary">{children}</div>
-    </div>
+      <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[14px] font-medium text-text-primary group-hover:text-accent">
+        {provider && <ProviderLogo provider={provider} />}
+        <span className="min-w-0 truncate">{children}</span>
+      </div>
+      {status && <div className="mt-0.5 text-[12px] text-text-tertiary">{status}</div>}
+    </button>
   )
 }
 
-const SHORTCUT_ROWS: Array<{ key: string; role: VoiceShortcutRole; accent: string }> = [
-  { key: 'dictate', role: 'dictation', accent: '' },
-  { key: 'translate', role: 'translate', accent: 'bg-accent/10' },
-  { key: 'ask', role: 'ask', accent: 'bg-[rgba(120,214,255,0.14)]' },
-]
-
-/** Typeless home shortcuts card; each shortcut can be re-recorded in place. */
-function ShortcutsCard() {
-  const { t } = useTranslation()
-  const { bindings, otherBindings, specialOptions, setBindings } = useVoiceShortcuts()
-  const [editing, setEditing] = useState<VoiceShortcutRole | null>(null)
-
-  return (
-    <section
-      aria-label={t('home.shortcutHint')}
-      className="surface-card divide-y divide-border-thin px-5"
-    >
-      {SHORTCUT_ROWS.map((row) => {
-        const current = bindings[row.role][0]
-        const hotkey = current ? hotkeyFromBinding(current) : null
-        return (
-          <div key={row.key} className="flex items-center justify-between gap-6 py-4">
-            <div>
-              <div className="text-[16px] font-semibold text-text-primary">
-                {t(`home.modes.${row.key}.title`)}
-              </div>
-              <div className="mt-0.5 text-[14px] text-text-tertiary">
-                {t(`home.modes.${row.key}.description`)}
-              </div>
-            </div>
-            {editing === row.role ? (
-              <div className="w-[260px]" data-shortcut-editor={row.role}>
-                <ShortcutRecorderBox
-                  binding={current ?? null}
-                  presets={specialOptions[row.role]}
-                  otherBindings={[...otherBindings(row.role), ...bindings[row.role].slice(1)]}
-                  onCancel={() => setEditing(null)}
-                  onSave={(binding) => {
-                    setEditing(null)
-                    setBindings(row.role, [binding, ...bindings[row.role].slice(1)])
-                  }}
-                />
-              </div>
-            ) : (
-              <button
-                type="button"
-                aria-label={`${t('home.editShortcut')}: ${t(`home.modes.${row.key}.title`)}`}
-                title={t('home.editShortcut')}
-                onClick={() => setEditing(row.role)}
-                className={`group flex cursor-pointer items-center rounded-[10px] border border-transparent bg-transparent p-1 transition-colors hover:border-border hover:bg-fill-hover ${row.accent}`}
-              >
-                {hotkey ? (
-                  <Keycaps hotkey={hotkey} />
-                ) : (
-                  <span className="px-2 text-[13px] text-text-tertiary">
-                    {t('home.shortcutOff')}
-                  </span>
-                )}
-                <Pencil
-                  size={13}
-                  className="ml-0 w-0 text-text-tertiary opacity-0 transition-all group-hover:ml-2 group-hover:mr-1 group-hover:w-[13px] group-hover:opacity-100"
-                />
-              </button>
-            )}
-          </div>
-        )
-      })}
-    </section>
-  )
-}
-
-function InsightsCard({ stats }: { stats: UsageStats | null }) {
+function InsightsCard({ stats, onShare }: { stats: UsageStats | null; onShare: () => void }) {
   const { t, i18n } = useTranslation()
   const number = new Intl.NumberFormat(i18n.language)
   const placeholder = '--'
@@ -213,11 +214,22 @@ function InsightsCard({ stats }: { stats: UsageStats | null }) {
   ]
 
   return (
-    <section>
-      <h2 className="mb-3 text-[24px] font-medium leading-7 text-text-tertiary">
-        {t('home.insights')}
-      </h2>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <section className="@container">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-[24px] font-medium leading-7 text-text-tertiary">
+          {t('home.insights')}
+        </h2>
+        <button
+          type="button"
+          disabled={stats === null}
+          onClick={onShare}
+          className="flex h-8 cursor-pointer items-center gap-1.5 rounded-full border border-border-thin bg-bg-primary px-3 py-1.5 text-[14px] leading-4 text-text-primary transition-colors hover:bg-fill-hover disabled:cursor-default disabled:text-text-disabled disabled:hover:bg-bg-primary"
+        >
+          <Share size={14} />
+          {t('home.share.button')}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 @min-[880px]:grid-cols-4">
         {items.map(({ key, icon: Icon, value, unit }) => (
           <div key={key} className="surface-muted p-4">
             <div className="flex items-baseline gap-1">
@@ -296,6 +308,7 @@ function ActivityCard({ stats }: { stats: UsageStats | null }) {
 
 function UseCases() {
   const { t } = useTranslation()
+  const openUseCase = useUseCaseVoiceHint()
   return (
     <section>
       <h2 className="mb-3 text-[20px] font-semibold text-text-primary">
@@ -306,7 +319,7 @@ function UseCases() {
           <button
             key={useCase.key}
             type="button"
-            onClick={() => openUrl(useCase.url)}
+            onClick={() => void openUseCase(useCase.key, useCase.url)}
             className="surface-card flex cursor-pointer flex-col items-start gap-3 p-5 text-left transition-colors hover:bg-fill-thin"
           >
             <img

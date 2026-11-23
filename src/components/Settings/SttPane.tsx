@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isMacPlatform, useAppStore } from '../../stores/appStore'
 import { hasManagedCloudAccess, useAuthStore } from '../../stores/authStore'
@@ -15,13 +15,15 @@ import {
   benchSttConnection,
   getSttRecordingCapability,
   getSttProviderDiagnostics,
-  readCredential,
-  setCredential,
   type ResolvedSttRecordingLimit,
   type SttProviderDiagnostics,
 } from '../../lib/tauri'
-import { SettingsRow } from './shared/SettingsRow'
+import { SettingsControlGroup, SettingsRow } from './shared/SettingsRow'
 import { Select } from '../shared/Select'
+import { ProviderLogo } from '../shared/ProviderLogo'
+import { useProviderCredential } from '../../hooks/useProviderCredential'
+import { credentialErrorDetails } from '../../lib/credentialErrorDetails'
+import { providerErrorMessage } from '../../lib/providerErrorMessage'
 import { CheckCircle2, XCircle, Loader2, Crown } from 'lucide-react'
 
 const RECORDING_LIMIT_PRESETS = [30, 60, 120, 300, 600, 1800, 3600]
@@ -38,7 +40,7 @@ function formatRecordingDuration(
   return t('recordingLimits.durationSeconds', { count: seconds })
 }
 
-export function SttPane() {
+export function SttPane({ grouped = false }: { grouped?: boolean }) {
   const config = useAppStore((s) => s.config)
   const updateConfig = useAppStore((s) => s.updateConfig)
   const sttTestStatus = useAppStore((s) => s.sttTestStatus)
@@ -50,7 +52,37 @@ export function SttPane() {
   const hasCloudAccess = useAuthStore(hasManagedCloudAccess)
   const { t } = useTranslation()
   const [testErrorMessage, setTestErrorMessage] = useState<string | null>(null)
-  const [credentialErrorMessage, setCredentialErrorMessage] = useState<string | null>(null)
+  const testRequestId = useRef(0)
+  const testPending = useRef(false)
+  const serviceIdentity = JSON.stringify([
+    config.stt_provider,
+    config.stt_api_key,
+    config.stt_custom_api_key,
+    config.stt_custom_base_url,
+    config.stt_custom_model,
+    config.stt_volcengine_resource_id,
+    config.stt_aliyun_qwen_region,
+  ])
+  const previousServiceIdentity = useRef(serviceIdentity)
+  useEffect(() => {
+    if (previousServiceIdentity.current === serviceIdentity) return
+    previousServiceIdentity.current = serviceIdentity
+    testRequestId.current += 1
+    testPending.current = false
+    setSttTestStatus('idle')
+    setSttLatencyMs(null)
+    setTestErrorMessage(null)
+  }, [serviceIdentity, setSttTestStatus, setSttLatencyMs])
+  useEffect(
+    () => () => {
+      testRequestId.current += 1
+      if (testPending.current) {
+        testPending.current = false
+        setSttTestStatus('idle')
+      }
+    },
+    [setSttTestStatus],
+  )
   const [recordingLimit, setRecordingLimit] = useState<ResolvedSttRecordingLimit | null>(null)
   const [customDurationEntryRequested, setCustomDurationEntryRequested] = useState(false)
 
@@ -59,12 +91,29 @@ export function SttPane() {
   const isCustomWhisper = config.stt_provider === CUSTOM_WHISPER_PROVIDER
   const isVolcengineDoubao = config.stt_provider === 'volcengine-doubao'
   const isAliyunQwen3 = config.stt_provider === 'aliyun-qwen3-asr'
+  const officialEndpoints: Record<string, string> = {
+    deepgram: 'wss://api.deepgram.com/v1/listen',
+    assemblyai: 'wss://streaming.assemblyai.com/v3/ws',
+    'volcengine-doubao': 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async',
+    'glm-asr': 'https://open.bigmodel.cn/api/paas/v4/audio/transcriptions',
+    'openai-whisper': 'https://api.openai.com/v1/audio/transcriptions',
+    'groq-whisper': 'https://api.groq.com/openai/v1/audio/transcriptions',
+    siliconflow: 'https://api.siliconflow.cn/v1/audio/transcriptions',
+    'aliyun-qwen3-asr':
+      config.stt_aliyun_qwen_region === 'international'
+        ? 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime'
+        : 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+  }
   const credentialProvider = isCustomWhisper ? CUSTOM_WHISPER_PROVIDER : config.stt_provider
   const legacyApiKey = isCustomWhisper ? config.stt_custom_api_key : config.stt_api_key
   const volcengineResourceId =
     config.stt_volcengine_resource_id || VOLCENGINE_STT_RESOURCES[0].value
-  const credentialSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [apiKeyDraft, setApiKeyDraft] = useState(legacyApiKey)
+  const {
+    value: apiKeyDraft,
+    error: credentialErrorMessage,
+    edit: editCredential,
+    flush: flushCredential,
+  } = useProviderCredential('stt', credentialProvider, legacyApiKey, !isCloud && !isAppleSpeech)
   const [sttDiagnostics, setSttDiagnostics] = useState<SttProviderDiagnostics | null>(null)
   const supportsAppleSpeech = platformCapabilities
     ? platformCapabilities.os === 'macos'
@@ -78,35 +127,14 @@ export function SttPane() {
     ? appleSpeechReady
     : isCustomWhisper
       ? Boolean(config.stt_custom_base_url.trim() && config.stt_custom_model.trim())
-      : Boolean(apiKeyDraft)
+      : Boolean(apiKeyDraft.trim())
   const goUpgrade = () => {
     window.location.hash = '#/upgrade'
   }
 
   useEffect(() => {
-    if (isCloud || isAppleSpeech) {
-      setApiKeyDraft('')
-      setCredentialErrorMessage(null)
-      return
-    }
-
-    let cancelled = false
-    setApiKeyDraft(legacyApiKey)
-    setCredentialErrorMessage(null)
-    readCredential('stt', credentialProvider)
-      .then((secret) => {
-        if (!cancelled) setApiKeyDraft(secret ?? legacyApiKey)
-      })
-      .catch((error) => console.error('[credentials] failed to read STT credential', error))
-
-    return () => {
-      cancelled = true
-    }
-  }, [credentialProvider, isAppleSpeech, isCloud, legacyApiKey])
-
-  useEffect(() => {
+    setSttDiagnostics(null)
     if (!isCustomWhisper && !isAppleSpeech) {
-      setSttDiagnostics(null)
       return
     }
 
@@ -173,25 +201,24 @@ export function SttPane() {
     }
   }, [config.recording_limit_mode])
 
-  const persistSttCredential = useCallback(
-    (value: string, delayMs = 350) => {
-      if (isCloud || isAppleSpeech) return
-      if (credentialSaveRef.current) clearTimeout(credentialSaveRef.current)
-      credentialSaveRef.current = setTimeout(() => {
-        credentialSaveRef.current = null
-        setCredential('stt', credentialProvider, value)
-          .then(() => setCredentialErrorMessage(null))
-          .catch((error) => {
-            const message = error instanceof Error ? error.message : String(error)
-            setCredentialErrorMessage(message)
-            console.error('[credentials] failed to save STT credential', error)
-          })
-      }, delayMs)
-    },
-    [credentialProvider, isAppleSpeech, isCloud],
-  )
-
   const handleTest = async () => {
+    const isCurrentConfig = () => {
+      const currentConfig = useAppStore.getState().config
+      return (
+        JSON.stringify([
+          currentConfig.stt_provider,
+          currentConfig.stt_api_key,
+          currentConfig.stt_custom_api_key,
+          currentConfig.stt_custom_base_url,
+          currentConfig.stt_custom_model,
+          currentConfig.stt_volcengine_resource_id,
+          currentConfig.stt_aliyun_qwen_region,
+        ]) === serviceIdentity
+      )
+    }
+    if (testPending.current || !canTest || !isCurrentConfig()) return
+    const requestId = ++testRequestId.current
+    testPending.current = true
     setSttTestStatus('testing')
     setSttLatencyMs(null)
     setTestErrorMessage(null)
@@ -224,12 +251,15 @@ export function SttPane() {
       } else {
         ms = await benchSttConnection(apiKeyDraft, config.stt_provider)
       }
-      console.log('[STT Test] Received latency:', ms, 'type:', typeof ms)
+      if (requestId !== testRequestId.current || !isCurrentConfig()) return
+      testPending.current = false
       setSttLatencyMs(ms)
       setSttTestStatus('success')
     } catch (err) {
-      console.error('[STT Test] Error:', err)
-      setTestErrorMessage(err instanceof Error ? err.message : typeof err === 'string' ? err : null)
+      if (requestId !== testRequestId.current || !isCurrentConfig()) return
+      testPending.current = false
+      console.error('[STT Test] Connection failed')
+      setTestErrorMessage(providerErrorMessage(err, apiKeyDraft, t('settings.connectionFailed')))
       setSttTestStatus('error')
     }
   }
@@ -338,6 +368,8 @@ export function SttPane() {
   }
 
   const resetTest = () => {
+    testRequestId.current += 1
+    testPending.current = false
     setSttTestStatus('idle')
     setSttLatencyMs(null)
     setTestErrorMessage(null)
@@ -378,7 +410,16 @@ export function SttPane() {
         <Select
           aria-label={t('settings.provider')}
           value={config.stt_provider}
-          options={visibleSttProviders.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
+          options={[...visibleSttProviders]
+            .sort((left, right) => Number(right.value === 'cloud') - Number(left.value === 'cloud'))
+            .map((provider) => ({
+              value: provider.value,
+              label:
+                provider.value === 'cloud'
+                  ? `${t(provider.labelKey)} · ${t('modelsPage.recommended')}`
+                  : t(provider.labelKey),
+              leading: <ProviderLogo provider={provider.value} />,
+            }))}
           onChange={(next) => {
             const provider = next as typeof config.stt_provider
             updateConfig({
@@ -451,7 +492,10 @@ export function SttPane() {
       </SettingsRow>
 
       {isAppleSpeech && (
-        <SettingsRow title={t('modelsPage.connection')}>
+        <SettingsRow
+          title={t('modelsPage.connection')}
+          description={t('onboarding.permissions.appleSpeechDesc')}
+        >
           <div className="flex justify-end">{testButton}</div>
           {testFeedback}
         </SettingsRow>
@@ -459,7 +503,10 @@ export function SttPane() {
 
       {isCustomWhisper && (
         <>
-          <SettingsRow title={t('settings.customSttPreset')}>
+          <SettingsRow
+            title={t('settings.customSttPreset')}
+            description={t('modelsPage.sttPresetDesc')}
+          >
             <Select
               aria-label={t('settings.customSttPreset')}
               value={config.stt_custom_preset}
@@ -499,7 +546,10 @@ export function SttPane() {
               className="field-control"
             />
           </SettingsRow>
-          <SettingsRow title={t('settings.customSttModel')}>
+          <SettingsRow
+            title={t('settings.customSttModel')}
+            description={t('modelsPage.sttModelDesc')}
+          >
             <input
               aria-label={t('settings.customSttModel')}
               value={config.stt_custom_model}
@@ -511,19 +561,11 @@ export function SttPane() {
               className="field-control"
             />
             {sttDiagnostics && (
-              <p
-                className={`m-0 flex min-w-0 items-center gap-1.5 text-[11px] ${
-                  sttDiagnostics.ready ? 'text-success' : 'text-text-tertiary'
-                }`}
-              >
-                {sttDiagnostics.ready ? (
-                  <CheckCircle2 size={12} className="flex-shrink-0" />
-                ) : (
-                  <XCircle size={12} className="flex-shrink-0" />
-                )}
+              <p className="m-0 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary">
+                {!sttDiagnostics.ready && <XCircle size={12} className="flex-shrink-0" />}
                 <span className="flex-shrink-0">
                   {sttDiagnostics.ready
-                    ? t('settings.localSttReady')
+                    ? t('settings.localSttConfigured')
                     : t('settings.localSttNeedsSetup')}
                 </span>
                 {sttDiagnostics.endpoint && (
@@ -539,7 +581,10 @@ export function SttPane() {
       )}
 
       {isVolcengineDoubao && (
-        <SettingsRow title={t('settings.volcengineResourceId')}>
+        <SettingsRow
+          title={t('settings.volcengineResourceId')}
+          description={t('settings.volcengineResourceDesc')}
+        >
           <Select
             aria-label={t('settings.volcengineResourceId')}
             value={volcengineResourceId}
@@ -550,7 +595,6 @@ export function SttPane() {
             onChange={(next) => {
               updateConfig({ stt_volcengine_resource_id: next })
               resetTest()
-              setCredentialErrorMessage(null)
             }}
           />
         </SettingsRow>
@@ -573,7 +617,6 @@ export function SttPane() {
                 stt_aliyun_qwen_region: next as typeof config.stt_aliyun_qwen_region,
               })
               resetTest()
-              setCredentialErrorMessage(null)
             }}
           />
         </SettingsRow>
@@ -586,7 +629,7 @@ export function SttPane() {
             isVolcengineDoubao ? t('settings.volcengineSttKeyHint') : t('modelsPage.apiKeyDesc')
           }
         >
-          <div className="flex gap-2">
+          <SettingsControlGroup action={testButton}>
             <input
               type="password"
               aria-label={
@@ -594,87 +637,112 @@ export function SttPane() {
               }
               value={apiKeyDraft}
               onChange={(e) => {
-                setApiKeyDraft(e.target.value)
-                persistSttCredential(e.target.value)
+                editCredential(e.target.value)
                 resetTest()
               }}
-              onBlur={() => persistSttCredential(apiKeyDraft, 0)}
+              onBlur={() => void flushCredential()}
               placeholder={t('settings.enterApiKey')}
-              className="field-control flex-1"
+              className="field-control"
             />
-            {testButton}
-          </div>
+          </SettingsControlGroup>
           {testFeedback}
           {credentialErrorMessage && (
             <p className="m-0 text-[11px] text-error">
-              {t('settings.credentialSaveFailed', { details: credentialErrorMessage })}
+              {credentialErrorMessage === 'Could not read credential from the system vault'
+                ? t('common.loadFailed')
+                : t('settings.credentialSaveFailed', {
+                    details: credentialErrorDetails(credentialErrorMessage),
+                  })}
             </p>
           )}
         </SettingsRow>
       )}
 
-      <SettingsRow title={t('settings.sttLanguage')} description={t('modelsPage.sttLanguageDesc')}>
-        <Select
-          aria-label={t('settings.sttLanguage')}
-          value={config.stt_language}
-          options={LANGUAGES.map((l) => ({
-            value: l.value,
-            label: l.labelKey ? t(l.labelKey) : (l.label ?? l.value),
-          }))}
-          onChange={(next) => updateConfig({ stt_language: next })}
-        />
-      </SettingsRow>
-
-      <SettingsRow
-        title={t('settings.maxRecordingDuration')}
-        description={recordingLimitHelper ?? t('modelsPage.durationDesc')}
-      >
-        {recordingLimit ? (
-          <>
-            <Select
-              aria-label={t('settings.maxRecordingDuration')}
-              value={recordingDurationValue}
-              options={recordingDurationOptions}
-              onChange={(next) => handleRecordingDurationChange(next)}
-            />
-
-            {showCustomDurationEntry && (
-              <div className="field-control flex items-center gap-2 px-0 pr-3">
-                <input
-                  id="custom-recording-duration"
-                  aria-label={t('recordingLimits.customDuration')}
-                  type="number"
-                  min={MIN_CUSTOM_RECORDING_SECONDS}
-                  max={recordingLimit.capability.hardMaxSeconds}
-                  step={1}
-                  value={config.custom_recording_limit_seconds}
-                  onChange={(event) => {
-                    const seconds = Number(event.target.value)
-                    if (Number.isFinite(seconds) && seconds >= 0) {
-                      updateConfig({ custom_recording_limit_seconds: Math.floor(seconds) })
-                    }
-                  }}
-                  className="h-full min-w-0 flex-1 border-none bg-transparent px-3 text-[14px] text-text-primary outline-none"
-                />
-                <span className="text-[12px] text-text-secondary" aria-hidden="true">
-                  {t('recordingLimits.secondsUnit')}
-                </span>
-              </div>
-            )}
-
-            {config.recording_limit_mode === 'custom' &&
-              recordingLimit.requestedSeconds !== recordingLimit.effectiveMaxSeconds && (
-                <p className="m-0 text-[12px] text-warning">
-                  {t('recordingLimits.corrected', {
-                    duration: formatRecordingDuration(recordingLimit.effectiveMaxSeconds, t),
-                  })}
-                </p>
-              )}
-          </>
-        ) : (
-          <p className="m-0 text-[12px] text-text-tertiary">{t('recordingLimits.loading')}</p>
+      <details open={!grouped} className={grouped ? 'mt-3 border-t border-border-thin pt-4' : ''}>
+        {grouped && (
+          <summary className="w-fit cursor-pointer text-[13px] text-text-secondary">
+            {t('modelsPage.advanced')}
+          </summary>
         )}
-      </SettingsRow>
+        {grouped && officialEndpoints[config.stt_provider] && (
+          <SettingsRow
+            title={t('settings.baseUrl')}
+            description={t('modelsPage.speechEndpointDesc')}
+          >
+            <input
+              aria-label={t('settings.baseUrl')}
+              value={officialEndpoints[config.stt_provider]}
+              readOnly
+              className="field-control text-text-secondary"
+            />
+          </SettingsRow>
+        )}
+        <SettingsRow
+          title={t('settings.sttLanguage')}
+          description={t('modelsPage.sttLanguageDesc')}
+        >
+          <Select
+            aria-label={t('settings.sttLanguage')}
+            value={config.stt_language}
+            options={LANGUAGES.map((l) => ({
+              value: l.value,
+              label: l.labelKey ? t(l.labelKey) : (l.label ?? l.value),
+            }))}
+            onChange={(next) => updateConfig({ stt_language: next })}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          title={t('settings.maxRecordingDuration')}
+          description={recordingLimitHelper ?? t('modelsPage.durationDesc')}
+        >
+          {recordingLimit ? (
+            <>
+              <Select
+                aria-label={t('settings.maxRecordingDuration')}
+                value={recordingDurationValue}
+                options={recordingDurationOptions}
+                onChange={(next) => handleRecordingDurationChange(next)}
+              />
+
+              {showCustomDurationEntry && (
+                <div className="field-control flex items-center gap-2 px-0 pr-3">
+                  <input
+                    id="custom-recording-duration"
+                    aria-label={t('recordingLimits.customDuration')}
+                    type="number"
+                    min={MIN_CUSTOM_RECORDING_SECONDS}
+                    max={recordingLimit.capability.hardMaxSeconds}
+                    step={1}
+                    value={config.custom_recording_limit_seconds}
+                    onChange={(event) => {
+                      const seconds = Number(event.target.value)
+                      if (Number.isFinite(seconds) && seconds >= 0) {
+                        updateConfig({ custom_recording_limit_seconds: Math.floor(seconds) })
+                      }
+                    }}
+                    className="h-full min-w-0 flex-1 border-none bg-transparent px-3 text-[14px] text-text-primary outline-none"
+                  />
+                  <span className="text-[12px] text-text-secondary" aria-hidden="true">
+                    {t('recordingLimits.secondsUnit')}
+                  </span>
+                </div>
+              )}
+
+              {config.recording_limit_mode === 'custom' &&
+                recordingLimit.requestedSeconds !== recordingLimit.effectiveMaxSeconds && (
+                  <p className="m-0 text-[12px] text-warning">
+                    {t('recordingLimits.corrected', {
+                      duration: formatRecordingDuration(recordingLimit.effectiveMaxSeconds, t),
+                    })}
+                  </p>
+                )}
+            </>
+          ) : (
+            <p className="m-0 text-[12px] text-text-tertiary">{t('recordingLimits.loading')}</p>
+          )}
+        </SettingsRow>
+      </details>
     </div>
   )
 }

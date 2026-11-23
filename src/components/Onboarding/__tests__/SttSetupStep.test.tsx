@@ -1,6 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SttSetupStep } from '../SttSetupStep'
+import { selectOptions } from '../../shared/__tests__/selectTestUtils'
+import { testSttConnection } from '../../../lib/tauri'
+import { STT_PROVIDERS } from '../../../lib/constants'
 
 const mockStore = {
   config: {
@@ -9,6 +12,8 @@ const mockStore = {
     stt_custom_api_key: '',
     stt_custom_base_url: 'http://localhost:8000/v1',
     stt_custom_model: 'Systran/faster-whisper-large-v3',
+    stt_aliyun_qwen_region: 'international',
+    stt_volcengine_resource_id: 'volc.bigasr.sauc.duration',
   },
   updateConfig: vi.fn(),
   sttTestStatus: 'idle',
@@ -33,6 +38,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('../../../stores/appStore', () => ({
+  isMacPlatform: () => navigator.platform.toUpperCase().includes('MAC'),
   useAppStore: (selector: any) => selector(mockStore),
 }))
 
@@ -41,12 +47,15 @@ vi.mock('../../../lib/tauri', () => ({
 }))
 
 beforeEach(() => {
+  vi.clearAllMocks()
   mockStore.config = {
     stt_provider: 'deepgram',
     stt_api_key: '',
     stt_custom_api_key: '',
     stt_custom_base_url: 'http://localhost:8000/v1',
     stt_custom_model: 'Systran/faster-whisper-large-v3',
+    stt_aliyun_qwen_region: 'international',
+    stt_volcengine_resource_id: 'volc.bigasr.sauc.duration',
   }
   mockStore.updateConfig = vi.fn()
   mockStore.sttTestStatus = 'idle'
@@ -56,11 +65,169 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('SttSetupStep', () => {
+  it.each(STT_PROVIDERS.filter((provider) => provider.value !== 'cloud'))(
+    'preserves the existing $value provider and custom fields on mount',
+    ({ value }) => {
+      mockStore.config.stt_provider = value
+      mockStore.config.stt_custom_base_url = 'http://127.0.0.1:8123/v1'
+      mockStore.config.stt_custom_model = 'synthetic-local-model'
+      const previous = { ...mockStore.config }
+      render(<SttSetupStep />)
+      expect(mockStore.updateConfig).not.toHaveBeenCalled()
+      expect(mockStore.config).toEqual(previous)
+      expect(testSttConnection).not.toHaveBeenCalled()
+    },
+  )
+
+  it('names its credential input using the existing translated label', () => {
+    render(<SttSetupStep />)
+    expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password')
+  })
+
+  it('uses the shared field and secondary test-button styles', () => {
+    const { container } = render(<SttSetupStep />)
+    expect(container.querySelector('input[type="password"]')).toHaveClass('field-control')
+    expect(screen.getByRole('button', { name: 'Test' })).toHaveClass('btn-outline')
+  })
+
+  it('preserves an existing Apple Speech setup and tests it without a key', async () => {
+    mockStore.config.stt_provider = 'apple-speech'
+    render(<SttSetupStep />)
+    expect(mockStore.updateConfig).not.toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText('API key')).toBeNull()
+    const button = screen.getByRole('button', { name: 'Test' })
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    await waitFor(() => expect(testSttConnection).toHaveBeenCalledWith('', 'apple-speech'))
+  })
+
+  it.each([
+    {
+      provider: 'aliyun-qwen3-asr',
+      change: { stt_aliyun_qwen_region: 'china-mainland' },
+    },
+    {
+      provider: 'volcengine-doubao',
+      change: { stt_volcengine_resource_id: 'volc.seedasr.sauc.duration' },
+    },
+  ])('ignores a pending result after $provider settings change', async ({ provider, change }) => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(testSttConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockStore.config.stt_provider = provider
+    mockStore.config.stt_api_key = 'test-key'
+    const { rerender } = render(<SttSetupStep />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    mockStore.config = { ...mockStore.config, ...change }
+    rerender(<SttSetupStep />)
+    await act(async () => finish(true))
+    expect(mockStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+    expect(mockStore.setSttTestStatus).toHaveBeenLastCalledWith('idle')
+  })
+
+  it.each(['aliyun-qwen3-asr', 'volcengine-doubao'])(
+    'tests %s with the configured regional or resource setting',
+    async (provider) => {
+      mockStore.config.stt_provider = provider
+      mockStore.config.stt_api_key = 'test-key'
+      render(<SttSetupStep />)
+      fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+      await waitFor(() =>
+        expect(testSttConnection).toHaveBeenCalledWith(
+          'test-key',
+          provider,
+          undefined,
+          undefined,
+          provider === 'volcengine-doubao' ? 'volc.bigasr.sauc.duration' : undefined,
+          provider === 'aliyun-qwen3-asr' ? 'international' : undefined,
+        ),
+      )
+    },
+  )
+
+  it('ignores a connection result after the credential changes', async () => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(testSttConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockStore.config.stt_api_key = 'old-key'
+    const { rerender } = render(<SttSetupStep />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    mockStore.config = { ...mockStore.config, stt_api_key: 'new-key' }
+    rerender(<SttSetupStep />)
+    await act(async () => finish(true))
+    expect(mockStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+    expect(mockStore.setSttTestStatus).toHaveBeenLastCalledWith('idle')
+  })
+
+  it('ignores a connection result after leaving setup', async () => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(testSttConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockStore.config.stt_api_key = 'test-key'
+    const { unmount } = render(<SttSetupStep />)
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    unmount()
+    await act(async () => finish(true))
+    expect(mockStore.setSttTestStatus).not.toHaveBeenCalledWith('success')
+    expect(mockStore.setSttTestStatus).toHaveBeenLastCalledWith('idle')
+  })
+
+  it('starts only one pending connection test', async () => {
+    let finish: (value: boolean) => void = () => {}
+    vi.mocked(testSttConnection).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    mockStore.config.stt_api_key = 'test-key'
+    render(<SttSetupStep />)
+    const button = screen.getByRole('button', { name: 'Test' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    const calls = vi.mocked(testSttConnection).mock.calls.length
+    await act(async () => finish(true))
+    expect(calls).toBe(1)
+  })
+
   it('does not offer managed Cloud inside BYOK provider setup', () => {
     render(<SttSetupStep />)
 
     const providerSelect = screen.getByRole('combobox')
-    expect(providerSelect.querySelector('option[value="cloud"]')).toBeNull()
+    expect(selectOptions(providerSelect).map((option) => option.value)).not.toContain('cloud')
+  })
+
+  it('offers Custom Whisper and platform-supported Apple Speech during first setup', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+    try {
+      render(<SttSetupStep />)
+      const options = selectOptions(screen.getByRole('combobox')).map((option) => option.value)
+      expect(options).toContain('custom-whisper')
+      expect(options).toContain('apple-speech')
+      expect(options).not.toContain('cloud')
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('does not offer Apple Speech on Windows', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32')
+    try {
+      render(<SttSetupStep />)
+      const options = selectOptions(screen.getByRole('combobox')).map((option) => option.value)
+      expect(options).toContain('custom-whisper')
+      expect(options).not.toContain('apple-speech')
+    } finally {
+      platform.mockRestore()
+    }
   })
 
   it('preserves an existing Custom Whisper setup instead of switching providers', () => {

@@ -1,9 +1,670 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { AppConfig } from '../../stores/appStore'
 import { useAppStore } from '../../stores/appStore'
 import { createBackupSettings, mergeBackupSettings } from '../backup-settings'
+import { isHotkeyConfigurationConsistent } from '../appConfigSnapshot'
+import { BUILTIN_SCENES } from '../scenes/builtinScenes'
+
+it.each([...BUILTIN_SCENES.map((scene) => scene.id), 'system_email', 'system_prompt_or_code'])(
+  'rejects a backup introducing a custom scene with reserved identifier %s',
+  (id) => {
+    const current = useAppStore.getInitialState().config
+    expect(() =>
+      mergeBackupSettings(current, {
+        custom_scenes: [
+          {
+            id,
+            name: 'Synthetic custom scene',
+            description: '',
+            prompt_template: 'Synthetic instructions',
+            created_at: '2026-11-16',
+            updated_at: '2026-11-16',
+          },
+        ],
+      }),
+    ).toThrow('Backup custom scene identifier is reserved')
+    expect(current.custom_scenes).toEqual([])
+  },
+)
+
+it('preserves existing historical reserved custom identifiers without migrating user data', () => {
+  const current = structuredClone(useAppStore.getInitialState().config)
+  current.custom_scenes = [
+    {
+      id: 'system_email',
+      name: 'Historical scene',
+      description: '',
+      prompt_template: 'Historical instructions',
+      created_at: '2026-11-16',
+      updated_at: '2026-11-16',
+    },
+  ]
+  expect(mergeBackupSettings(current, createBackupSettings(current)).custom_scenes).toEqual(
+    current.custom_scenes,
+  )
+})
+
+it.each([
+  { identifiers: ['same', 'same'] },
+  { identifiers: [' same ', 'same'] },
+  { identifiers: ['same\0', 'same'] },
+])('rejects ambiguous backup scene identifiers after normalization: %j', ({ identifiers }) => {
+  const current = useAppStore.getInitialState().config
+  const scenes = identifiers.map((id, index) => ({
+    id,
+    name: `Scene ${index}`,
+    description: '',
+    prompt_template: `Instructions ${index}`,
+    created_at: '2026-11-16',
+    updated_at: '2026-11-16',
+  }))
+  expect(() =>
+    mergeBackupSettings(current, {
+      custom_scenes: scenes,
+      active_scene: {
+        id: 'same',
+        source: 'custom',
+        name: 'Scene',
+        prompt_template: 'Instructions',
+      },
+    }),
+  ).toThrow('Backup scene identifier is ambiguous')
+  expect(current.custom_scenes).toEqual([])
+})
+
+it('restores a legacy target language into a consistent current translation configuration', () => {
+  const current = structuredClone(useAppStore.getInitialState().config)
+  current.translation = { targets: ['en', 'ja', 'ko', 'de', 'es'], active_target: 'en' }
+  current.target_lang = 'en'
+  const restored = mergeBackupSettings(current, { target_lang: ' FR ' })
+  expect(restored.target_lang).toBe('fr')
+  expect(restored.translation).toEqual({
+    targets: ['fr', 'en', 'ja', 'ko', 'de'],
+    active_target: 'fr',
+  })
+  expect(current.translation.targets).toEqual(['en', 'ja', 'ko', 'de', 'es'])
+})
+
+it('ignores unsupported legacy translation targets without changing the current target', () => {
+  const current = useAppStore.getInitialState().config
+  for (const target_lang of ['unsupported', '', '   ']) {
+    const restored = mergeBackupSettings(current, { target_lang })
+    expect(restored.target_lang).toBe(current.target_lang)
+    expect(restored.translation).toEqual(current.translation)
+  }
+})
+
+it('keeps typed translation targets authoritative over a legacy target in mixed backups', () => {
+  const current = useAppStore.getInitialState().config
+  const restored = mergeBackupSettings(current, {
+    target_lang: 'fr',
+    translation: { targets: ['ja', 'en'], active_target: 'ja' },
+  })
+  expect(restored.target_lang).toBe('ja')
+  expect(restored.translation).toEqual({ targets: ['ja', 'en'], active_target: 'ja' })
+})
+
+it('migrates legacy shortcut-only backups into consistent typed bindings', () => {
+  const current = useAppStore.getInitialState().config
+  const restored = mergeBackupSettings(current, {
+    hotkey: 'control+j',
+    ask_hotkey: '',
+    hotkey_mode: 'hold',
+  })
+  expect(restored.hotkeys.dictation).toEqual({ primary: 'J', modifiers: ['Ctrl'] })
+  expect(restored.hotkeys.dictationBindings).toEqual([{ primary: 'J', modifiers: ['Ctrl'] }])
+  expect(restored.hotkeys.ask).toBeNull()
+  expect(restored.hotkeys.askBindings).toEqual([])
+  expect(restored.hotkeys.dictationMode).toBe('hold')
+  expect(restored.hotkey).toBe('Ctrl+J')
+  expect(isHotkeyConfigurationConsistent(restored)).toBe(true)
+  expect(restored.hotkeys.translateBindings).toEqual(current.hotkeys.translateBindings)
+})
+
+it('keeps valid typed backup shortcuts authoritative over contradictory legacy fields', () => {
+  const current = useAppStore.getInitialState().config
+  const binding = { primary: 'J', modifiers: ['Ctrl'] }
+  const restored = mergeBackupSettings(current, {
+    hotkey: 'Ctrl+K',
+    hotkey_mode: 'hold',
+    hotkeys: { dictation: binding, dictationBindings: [binding], dictationMode: 'toggle' },
+  })
+  expect(restored.hotkeys.dictation).toEqual(binding)
+  expect(restored.hotkey).toBe('Ctrl+J')
+  expect(restored.hotkey_mode).toBe('toggle')
+  expect(isHotkeyConfigurationConsistent(restored)).toBe(true)
+})
+
+it('ignores malformed legacy shortcuts without clearing current bindings', () => {
+  const current = useAppStore.getInitialState().config
+  const restored = mergeBackupSettings(current, {
+    hotkey: 'UnknownKey',
+    ask_hotkey: 'Ctrl+UnknownKey',
+    hotkey_mode: 'invalid',
+  })
+  expect(restored.hotkeys).toEqual(current.hotkeys)
+  expect(restored.hotkey).toBe(current.hotkey)
+  expect(restored.ask_hotkey).toBe(current.ask_hotkey)
+  expect(restored.hotkey_mode).toBe(current.hotkey_mode)
+})
+
+it('does not replace valid bindings with semantic duplicate modifiers from a backup', () => {
+  const current = useAppStore.getInitialState().config
+  const restored = mergeBackupSettings(current, {
+    hotkey: 'Command+Super+J',
+    hotkeys: {
+      dictationBindings: [{ primary: 'J', modifiers: ['Command', 'Super'] }],
+      ask: { primary: 'K', modifiers: ['Meta', 'Command'] },
+    },
+  })
+  expect(restored.hotkeys).toEqual(current.hotkeys)
+  expect(isHotkeyConfigurationConsistent(restored)).toBe(true)
+})
+
+it('deduplicates modifier aliases within restored lists while preserving distinct bindings', () => {
+  const current = useAppStore.getInitialState().config
+  const first = { primary: 'J', modifiers: ['Command'] }
+  const distinct = { primary: 'K', modifiers: ['Option'] }
+  const restored = mergeBackupSettings(current, {
+    hotkeys: {
+      dictationBindings: [
+        first,
+        { primary: 'j', modifiers: ['super'] },
+        distinct,
+        { primary: 'K', modifiers: ['Alt'] },
+      ],
+    },
+  })
+  expect(restored.hotkeys.dictationBindings).toEqual([first, distinct])
+  expect(isHotkeyConfigurationConsistent(restored)).toBe(true)
+})
+
+it('deduplicates a restored scalar binding against retained additional bindings', () => {
+  const current = structuredClone(useAppStore.getInitialState().config)
+  const retained = { primary: 'J', modifiers: ['Super'] }
+  current.hotkeys.dictationBindings.push(retained)
+  const restored = mergeBackupSettings(current, {
+    hotkeys: { dictation: { primary: 'J', modifiers: ['Command'] } },
+  })
+  expect(restored.hotkeys.dictationBindings).toEqual([{ primary: 'J', modifiers: ['Command'] }])
+  expect(isHotkeyConfigurationConsistent(restored)).toBe(true)
+})
+
+it('restores legacy Chinese script preferences through the current language variants', () => {
+  const current = {
+    ...useAppStore.getInitialState().config,
+    language_variants: { en: 'en-GB', zh: 'zh-HK' },
+  }
+  for (const [legacy, expected] of [
+    ['simplified', 'zh-CN'],
+    ['traditional', 'zh-TW'],
+  ]) {
+    const restored = mergeBackupSettings(current, { polish_chinese_script: legacy })
+    expect(restored.language_variants).toEqual({ en: 'en-GB', zh: expected })
+    expect(restored.polish_chinese_script).toBe('preserve')
+    expect(current.language_variants.zh).toBe('zh-HK')
+  }
+})
+
+it('keeps explicit backup variants authoritative over legacy script preferences', () => {
+  const current = useAppStore.getInitialState().config
+  for (const variants of [{}, { zh: 'zh-HK' }]) {
+    const restored = mergeBackupSettings(current, {
+      polish_chinese_script: 'simplified',
+      language_variants: variants,
+    })
+    expect(restored.language_variants).toEqual(variants)
+    expect(restored.polish_chinese_script).toBe('preserve')
+  }
+})
+
+afterEach(() => useAppStore.setState(useAppStore.getInitialState()))
 
 describe('createBackupSettings', () => {
+  it('restores a custom polish style with its instructions', () => {
+    const current = useAppStore.getInitialState().config
+    const restored = mergeBackupSettings(current, {
+      polish_style: 'custom',
+      polish_custom_prompt: 'Keep short sentences.',
+    })
+    expect(restored.polish_style).toBe('custom')
+    expect(restored.polish_custom_prompt).toBe('Keep short sentences.')
+  })
+
+  it.each([
+    'api_key',
+    'api-key',
+    'apiKey',
+    'access_token',
+    'Authorization',
+    '%61pi_key',
+    'token',
+    'password',
+    'secret',
+    'client_secret',
+    'signature',
+    'sig',
+    'key',
+    'API_KEY',
+  ])('keeps endpoint credentials named %s local during backup and restore', (parameter) => {
+    const endpoint = `https://example.com/v1?api-version=2026-01-01&${parameter}=private-secret`
+    const current = {
+      ...useAppStore.getInitialState().config,
+      llm_base_url: 'http://localhost:11434/v1',
+      stt_custom_base_url: 'http://localhost:8000/v1',
+    }
+    const draft = { ...current, llm_base_url: endpoint, stt_custom_base_url: endpoint }
+    const backup = createBackupSettings(draft)
+    expect(backup.llm_base_url).toBeUndefined()
+    expect(backup.stt_custom_base_url).toBeUndefined()
+    expect(JSON.stringify(backup)).not.toContain('private-secret')
+    expect(draft.llm_base_url).toBe(endpoint)
+    const restored = mergeBackupSettings(current, {
+      llm_base_url: endpoint,
+      stt_custom_base_url: endpoint,
+    })
+    expect(restored.llm_base_url).toBe(current.llm_base_url)
+    expect(restored.stt_custom_base_url).toBe(current.stt_custom_base_url)
+  })
+
+  it('rejects a credential parameter even when a harmless parameter precedes it twice', () => {
+    const current = useAppStore.getInitialState().config
+    const endpoint = 'https://example.com/v1?tenant=one&tenant=two&api_key=&api_key=private-secret'
+    const backup = createBackupSettings({ ...current, llm_base_url: endpoint })
+    expect(backup.llm_base_url).toBeUndefined()
+    expect(mergeBackupSettings(current, { llm_base_url: endpoint }).llm_base_url).toBe(
+      current.llm_base_url,
+    )
+  })
+
+  it.each([
+    'https://person:private-password@example.com/v1',
+    'https://person@example.com/v1',
+    'https://example.com/v1#private-fragment',
+    'file:///private/config',
+  ])('keeps unsafe endpoint %s out of backups and restores', (endpoint) => {
+    const current = useAppStore.getInitialState().config
+    const settings = createBackupSettings({
+      ...current,
+      llm_base_url: endpoint,
+      stt_custom_base_url: endpoint,
+    })
+    expect(settings.llm_base_url).toBeUndefined()
+    expect(settings.stt_custom_base_url).toBeUndefined()
+    const restored = mergeBackupSettings(current, {
+      llm_base_url: endpoint,
+      stt_custom_base_url: endpoint,
+    })
+    expect(restored.llm_base_url).toBe(current.llm_base_url)
+    expect(restored.stt_custom_base_url).toBe(current.stt_custom_base_url)
+  })
+
+  it('preserves valid self-hosted endpoints and their query parameters', () => {
+    const endpoint = 'http://localhost:8000/v1?tenant=example&api-version=2026-01-01'
+    const current = { ...useAppStore.getInitialState().config, stt_custom_base_url: endpoint }
+    const backup = createBackupSettings(current)
+    expect(backup.stt_custom_base_url).toBe(endpoint)
+    expect(
+      mergeBackupSettings(useAppStore.getInitialState().config, backup).stt_custom_base_url,
+    ).toBe(endpoint)
+  })
+
+  it('preserves complete Unicode characters at scene metadata limits', () => {
+    const current = useAppStore.getInitialState().config
+    const name = `${'a'.repeat(79)}😀`
+    const prompt = `${'b'.repeat(3999)}𠮷`
+    const sceneId = `${'c'.repeat(119)}😀`
+    const merged = mergeBackupSettings(current, {
+      active_scene: {
+        id: 'unicode',
+        name: `${name}tail`,
+        prompt_template: `${prompt}tail`,
+        source: 'custom',
+      },
+      system_scene_overrides: [{ id: 'system_email', prompt_template: `${prompt}tail` }],
+      family_scene_assignments: [{ family: 'email', scene_id: `${sceneId}tail` }],
+    })
+    expect(merged.active_scene?.name).toBe(name)
+    expect(merged.active_scene?.prompt_template).toBe(prompt)
+    expect(merged.system_scene_overrides[0].prompt_template).toBe(prompt)
+    expect(merged.family_scene_assignments[0].scene_id).toBe(sceneId)
+  })
+
+  it('keeps current provider and mode values when backup enums are unknown', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      stt_provider: 'unknown-service',
+      llm_provider: 'unknown-model-service',
+      output_mode: 'execute',
+      insertion_strategy: 'shell',
+      theme: 'invisible',
+      polish_style: 'invent',
+      hotkey_mode: 'invalid',
+      stt_aliyun_qwen_region: 'unknown-region',
+      paste_shortcut: 'unknown',
+      windows_sendinput_newline_mode: 'unknown',
+      polish_chinese_script: 'unknown',
+      recording_limit_mode: 'unknown',
+      ui_language: 'unknown',
+    })
+    for (const key of [
+      'stt_provider',
+      'llm_provider',
+      'output_mode',
+      'insertion_strategy',
+      'theme',
+      'polish_style',
+      'hotkey_mode',
+      'stt_aliyun_qwen_region',
+      'paste_shortcut',
+      'windows_sendinput_newline_mode',
+      'polish_chinese_script',
+      'recording_limit_mode',
+      'ui_language',
+    ] as const) {
+      expect(merged[key], key).toBe(current[key])
+    }
+  })
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'keeps current numeric limits when the backup value is invalid: %s',
+    (invalid) => {
+      const current = useAppStore.getInitialState().config
+      const merged = mergeBackupSettings(current, {
+        history_retention_days: invalid,
+        history_max_entries: invalid,
+        custom_recording_limit_seconds: invalid,
+        max_recording_seconds: invalid,
+      })
+      expect(merged.history_retention_days).toBe(current.history_retention_days)
+      expect(merged.history_max_entries).toBe(current.history_max_entries)
+      expect(merged.custom_recording_limit_seconds).toBe(current.custom_recording_limit_seconds)
+      expect(merged.max_recording_seconds).toBe(current.max_recording_seconds)
+    },
+  )
+
+  it('preserves zero as the unlimited history retention choice', () => {
+    const current = { ...useAppStore.getInitialState().config, history_retention_days: 7 }
+    expect(mergeBackupSettings(current, { history_retention_days: 0 }).history_retention_days).toBe(
+      0,
+    )
+  })
+
+  it('restores a complete safe backup through the real config store without losing original features', () => {
+    const defaults = useAppStore.getInitialState().config
+    const bindings = ['J', 'K', 'L', 'M'].map((primary) => ({
+      primary,
+      modifiers: ['Ctrl', 'Shift'],
+    }))
+    const scene = {
+      id: 'custom-notes',
+      name: 'Notes',
+      description: 'Personal notes style',
+      prompt_template: 'Keep my wording.',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
+    }
+    const source: AppConfig = {
+      ...defaults,
+      stt_provider: 'custom-whisper',
+      stt_custom_base_url: 'http://localhost:8000/v1',
+      stt_custom_model: 'local-model',
+      llm_provider: 'ollama',
+      llm_base_url: 'http://localhost:11434/v1',
+      llm_model: 'local-llm',
+      language_variants: { en: 'en-GB', zh: 'zh-TW' },
+      translation: { targets: ['ja', 'fr'], active_target: 'fr' },
+      target_lang: 'fr',
+      custom_scenes: [scene],
+      active_scene: {
+        id: scene.id,
+        source: 'custom',
+        name: scene.name,
+        prompt_template: scene.prompt_template,
+      },
+      family_scene_assignments: [{ family: 'document', scene_id: scene.id }],
+      system_scene_overrides: [{ id: 'system_email', prompt_template: 'Use a warm tone.' }],
+      hotkeys: {
+        ...defaults.hotkeys,
+        dictation: bindings[0],
+        dictationBindings: bindings,
+        ask: null,
+        askBindings: [],
+        pasteLast: { primary: 'V', modifiers: ['Ctrl', 'Shift'] },
+      },
+      save_recording_audio: false,
+      auto_learn_dictionary: false,
+      restore_clipboard_after_paste: false,
+      interaction_sounds: false,
+      mute_background_audio: false,
+      show_in_dock: false,
+    }
+    const destination = {
+      ...defaults,
+      stt_api_key: 'device-stt-secret',
+      stt_custom_api_key: 'device-custom-secret',
+      llm_api_key: 'device-llm-secret',
+      microphone_device: 'Device microphone',
+      interaction_sounds: true,
+      mute_background_audio: true,
+      show_in_dock: true,
+    }
+    const backup = JSON.parse(JSON.stringify(createBackupSettings(source)))
+    useAppStore.getState().setConfig(mergeBackupSettings(destination, backup))
+    const restored = useAppStore.getState().config
+    expect(restored.hotkeys.dictationBindings).toEqual(bindings)
+    expect(restored.hotkey).toBe('Ctrl+Shift+J')
+    expect(restored.hotkeys.askBindings).toEqual([])
+    expect(restored.ask_hotkey).toBe('')
+    expect(restored.translation).toEqual(source.translation)
+    expect(restored.target_lang).toBe('fr')
+    expect(restored.language_variants).toEqual(source.language_variants)
+    expect(restored.custom_scenes).toEqual([scene])
+    expect(restored.active_scene).toEqual(source.active_scene)
+    expect(restored.family_scene_assignments).toEqual(source.family_scene_assignments)
+    expect(restored.system_scene_overrides).toEqual(source.system_scene_overrides)
+    expect(restored.stt_custom_model).toBe('local-model')
+    expect(restored.llm_model).toBe('local-llm')
+    expect(restored.save_recording_audio).toBe(false)
+    expect(restored.auto_learn_dictionary).toBe(false)
+    expect(restored.restore_clipboard_after_paste).toBe(false)
+    expect(restored.interaction_sounds).toBe(false)
+    expect(restored.mute_background_audio).toBe(false)
+    expect(restored.show_in_dock).toBe(false)
+    expect(restored.microphone_device).toBe('Device microphone')
+    expect(restored.stt_api_key).toBe('device-stt-secret')
+    expect(restored.stt_custom_api_key).toBe('device-custom-secret')
+    expect(restored.llm_api_key).toBe('device-llm-secret')
+  })
+
+  it('ignores malformed active scenes and scene assignments', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      active_scene: { id: 42, source: 'unknown', name: [], prompt_template: null },
+      family_scene_assignments: [null, { family: 'unknown', scene_id: 42 }],
+      system_scene_overrides: [null, { id: 'unknown', prompt_template: [] }],
+    })
+    expect(merged.active_scene).toEqual(current.active_scene)
+    expect(merged.family_scene_assignments).toEqual(current.family_scene_assignments)
+    expect(merged.system_scene_overrides).toEqual(current.system_scene_overrides)
+  })
+
+  it('restores valid scene metadata without unknown fields', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      active_scene: {
+        id: ' custom-one ',
+        source: 'custom',
+        name: ' One ',
+        prompt_template: ' Clear ',
+        privateField: 'ignored',
+      },
+      family_scene_assignments: [
+        { family: 'email', scene_id: ' builtin_professional_email ', privateField: 'ignored' },
+      ],
+      system_scene_overrides: [
+        { id: 'system_email', prompt_template: ' Clear ', privateField: 'ignored' },
+      ],
+    })
+    expect(merged.active_scene).toEqual({
+      id: 'custom-one',
+      source: 'custom',
+      name: 'One',
+      prompt_template: 'Clear',
+    })
+    expect(merged.family_scene_assignments).toEqual([
+      { family: 'email', scene_id: 'builtin_professional_email' },
+    ])
+    expect(merged.system_scene_overrides).toEqual([
+      { id: 'system_email', prompt_template: 'Clear' },
+    ])
+  })
+
+  it('preserves valid custom scene identifiers and content on a backup round trip', () => {
+    const current = useAppStore.getInitialState().config
+    const scene = {
+      id: 'custom-existing',
+      name: 'Existing',
+      description: 'A custom writing style',
+      prompt_template: 'Write clearly.',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
+    }
+    const configured = { ...current, custom_scenes: [scene] }
+    expect(mergeBackupSettings(current, createBackupSettings(configured)).custom_scenes).toEqual([
+      scene,
+    ])
+    expect(mergeBackupSettings(configured, { custom_scenes: [] }).custom_scenes).toEqual([])
+  })
+
+  it('keeps current scenes when the backup contains no valid scene records', () => {
+    const scene = {
+      id: 'custom-existing',
+      name: 'Existing',
+      description: '',
+      prompt_template: 'Write clearly.',
+      created_at: '2026-11-01T00:00:00Z',
+      updated_at: '2026-11-01T00:00:00Z',
+    }
+    const current = { ...useAppStore.getInitialState().config, custom_scenes: [scene] }
+    const merged = mergeBackupSettings(current, {
+      custom_scenes: [null, { id: 'invalid', name: 42, prompt_template: [] }],
+    })
+    expect(merged.custom_scenes).toEqual([scene])
+  })
+
+  it('restores valid scenes through the existing bounded scene import rules', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      custom_scenes: [
+        {
+          id: 'custom-restored',
+          name: ' Restored ',
+          description: '',
+          prompt_template: ` Clear\0${'x'.repeat(5000)} `,
+          created_at: '2026-11-01T00:00:00Z',
+          updated_at: '2026-11-01T00:00:00Z',
+          privateField: 'ignored',
+        },
+      ],
+    })
+    expect(merged.custom_scenes[0].id).toBe('custom-restored')
+    expect(merged.custom_scenes[0].name).toBe('Restored')
+    expect(merged.custom_scenes[0].prompt_template).toHaveLength(4000)
+    expect(merged.custom_scenes[0].prompt_template).not.toContain('\0')
+    expect(merged.custom_scenes[0]).not.toHaveProperty('privateField')
+  })
+
+  it('preserves required and optional shortcuts when a backup binding is malformed', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      hotkeys: {
+        dictation: { primary: 'Fn', modifiers: 'Ctrl' },
+        dictationBindings: [null],
+        ask: { primary: 42, modifiers: [] },
+        pasteLast: { primary: 'UnknownKey', modifiers: [] },
+      },
+    })
+    expect(merged.hotkeys).toEqual(current.hotkeys)
+    expect(() => useAppStore.getState().setConfig(merged)).not.toThrow()
+  })
+
+  it('restores a partial shortcut backup without clearing unrelated voice bindings', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      hotkeys: { pasteLast: { primary: 'V', modifiers: ['Ctrl', 'Shift'] }, unknown: 'ignored' },
+    })
+    expect(merged.hotkeys).toEqual({
+      ...current.hotkeys,
+      pasteLast: { primary: 'V', modifiers: ['Ctrl', 'Shift'] },
+    })
+  })
+
+  it('keeps all four voice bindings through a safe backup round trip', () => {
+    const current = useAppStore.getInitialState().config
+    const bindings = ['J', 'K', 'L', 'M'].map((primary) => ({
+      primary,
+      modifiers: ['Ctrl', 'Shift'],
+    }))
+    const configured = {
+      ...current,
+      hotkeys: { ...current.hotkeys, dictation: bindings[0], dictationBindings: bindings },
+    }
+    const merged = mergeBackupSettings(current, createBackupSettings(configured))
+    expect(merged.hotkeys.dictationBindings).toEqual(bindings)
+    expect(merged.hotkeys.dictation).toEqual(bindings[0])
+  })
+
+  it.each([
+    { targets: 'en', active_target: 'en' },
+    { targets: [42], active_target: 'en' },
+    { targets: [], active_target: null },
+  ])('preserves current translation when the backup structure is invalid', (translation) => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, { translation })
+    expect(merged.translation).toEqual(current.translation)
+    expect(() => useAppStore.getState().setConfig(merged)).not.toThrow()
+  })
+
+  it('normalizes supported translation targets and repairs an absent active target', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      translation: { targets: [' JA ', 'ja', 'unsupported', 'fr'], active_target: 'de' },
+    })
+    expect(merged.translation).toEqual({ targets: ['ja', 'fr'], active_target: 'ja' })
+    expect(merged.target_lang).toBe('ja')
+  })
+
+  it('restores only known boolean voice routing flags without discarding current settings', () => {
+    const current = useAppStore.getInitialState().config
+    const merged = mergeBackupSettings(current, {
+      voice_routing_flags: {
+        search: false,
+        rewrite_selection: 'true',
+        unknown_action: true,
+      },
+    })
+    expect(merged.voice_routing_flags).toEqual({
+      ...current.voice_routing_flags,
+      search: false,
+    })
+    expect(current.voice_routing_flags.search).toBe(true)
+  })
+
+  it('backs up and restores recognized language variants without accepting injected values', () => {
+    const current = useAppStore.getInitialState().config
+    const backup = createBackupSettings({
+      ...current,
+      language_variants: { en: 'en-GB', zh: 'zh-TW' },
+    })
+    expect(backup.language_variants).toEqual({ en: 'en-GB', zh: 'zh-TW' })
+    expect(mergeBackupSettings(current, backup).language_variants).toEqual(backup.language_variants)
+    expect(
+      mergeBackupSettings(current, { language_variants: { en: '<prompt>', pt: 'pt-BR' } })
+        .language_variants,
+    ).toEqual({ pt: 'pt-BR' })
+  })
+
   it('uses an explicit allow list and keeps only sync-safe family scene assignments', () => {
     const malicious = {
       stt_provider: 'glm-asr',

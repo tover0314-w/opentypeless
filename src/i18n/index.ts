@@ -11,8 +11,15 @@ import pt from './locales/pt.json'
 import ru from './locales/ru.json'
 import it from './locales/it.json'
 
-const savedLang =
-  typeof localStorage !== 'undefined' ? localStorage.getItem('ui_language') || 'en' : 'en'
+function cachedLanguage(): string {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem('ui_language') || 'en' : 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+const savedLang = cachedLanguage()
 
 i18n.use(initReactI18next).init({
   resources: {
@@ -32,5 +39,14 @@ i18n.use(initReactI18next).init({
   supportedLngs: ['en', 'zh', 'ja', 'ko', 'fr', 'de', 'es', 'pt', 'ru', 'it'],
   interpolation: { escapeValue: false },
 })
+
+function syncDocumentLanguage() {
+  if (typeof document === 'undefined') return
+  document.documentElement.lang = i18n.resolvedLanguage || 'en'
+}
+
+i18n.on('languageChanged', syncDocumentLanguage)
+i18n.on('initialized', syncDocumentLanguage)
+syncDocumentLanguage()
 
 export default i18n

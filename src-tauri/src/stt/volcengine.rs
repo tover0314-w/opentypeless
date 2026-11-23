@@ -31,6 +31,7 @@ const JSON_SERIALIZATION: u8 = 0x1;
 const NO_SERIALIZATION: u8 = 0x0;
 const GZIP_COMPRESSION: u8 = 0x1;
 const INITIAL_RESPONSE_TIMEOUT_SECS: u64 = 5;
+const MAX_RESPONSE_BYTES: usize = 1_048_576;
 
 pub struct VolcengineDoubaoProvider {
     ws: Option<WsStream>,
@@ -74,11 +75,17 @@ fn gzip_payload(payload: &[u8]) -> Result<Vec<u8>, AppError> {
 }
 
 fn ungzip_payload(payload: &[u8]) -> Result<Vec<u8>, AppError> {
-    let mut decoder = GzDecoder::new(payload);
+    let decoder = GzDecoder::new(payload);
     let mut out = Vec::new();
     decoder
+        .take((MAX_RESPONSE_BYTES + 1) as u64)
         .read_to_end(&mut out)
         .map_err(|e| AppError::Config(e.to_string()))?;
+    if out.len() > MAX_RESPONSE_BYTES {
+        return Err(AppError::Config(
+            "Volcengine ASR response limit exceeded".to_string(),
+        ));
+    }
     Ok(out)
 }
 
@@ -202,6 +209,11 @@ fn parse_response_frame(frame: &[u8]) -> Result<Option<TranscriptEvent>, AppErro
         ));
     }
 
+    if frame[0] >> 4 != 1 || frame[0] & 0x0f == 0 {
+        return Err(AppError::Config(
+            "Unsupported Volcengine ASR protocol header".to_string(),
+        ));
+    }
     let header_size = ((frame[0] & 0x0f) as usize) * 4;
     if frame.len() < header_size + 4 {
         return Err(AppError::Config(
@@ -213,6 +225,11 @@ fn parse_response_frame(frame: &[u8]) -> Result<Option<TranscriptEvent>, AppErro
     let flags = frame[1] & 0x0f;
     let serialization = frame[2] >> 4;
     let compression = frame[2] & 0x0f;
+    if !matches!(compression, 0 | GZIP_COMPRESSION) {
+        return Err(AppError::Config(
+            "Unsupported Volcengine ASR response compression".to_string(),
+        ));
+    }
 
     let mut offset = header_size;
     let sequence = if flags & POS_SEQUENCE != 0 {
@@ -258,6 +275,12 @@ fn parse_response_frame(frame: &[u8]) -> Result<Option<TranscriptEvent>, AppErro
     }
     let payload_size = u32::from_be_bytes(frame[offset..offset + 4].try_into().unwrap()) as usize;
     offset += 4;
+
+    if payload_size > MAX_RESPONSE_BYTES {
+        return Err(AppError::Config(
+            "Volcengine ASR response limit exceeded".to_string(),
+        ));
+    }
 
     if payload_size == 0 && message_type == ERROR_RESPONSE {
         let message = error_code
@@ -375,11 +398,7 @@ fn map_connect_error(error: WsError) -> AppError {
         }
         WsError::Http(response) => AppError::Api {
             status: response.status().as_u16(),
-            body: response
-                .body()
-                .as_ref()
-                .and_then(|body| String::from_utf8(body.clone()).ok())
-                .unwrap_or_else(|| response.status().to_string()),
+            body: String::new(),
         },
         other => AppError::Network(other.to_string()),
     }
@@ -569,6 +588,68 @@ mod tests {
     use tokio_tungstenite::accept_async;
 
     use super::*;
+
+    #[test]
+    fn unrelated_message_types_do_not_publish_transcripts() {
+        let payload = gzip_payload(br#"{"result":{"text":"synthetic unrelated text"}}"#).unwrap();
+        for message_type in 0u8..=15 {
+            if matches!(message_type, FULL_SERVER_RESPONSE | ERROR_RESPONSE) {
+                continue;
+            }
+            let mut frame = build_test_server_response_frame(-1, &payload);
+            frame[1] = (message_type << 4) | NEG_WITH_SEQUENCE;
+            assert!(
+                parse_response_frame(&frame).unwrap().is_none(),
+                "unexpected transcript from message type {message_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_compression_cannot_be_parsed_as_plain_json() {
+        let payload = br#"{"result":{"text":"synthetic transcript"}}"#;
+        let mut frame = vec![
+            0x11,
+            FULL_SERVER_RESPONSE << 4,
+            (JSON_SERIALIZATION << 4) | 0x02,
+            0,
+        ];
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(payload);
+        assert!(parse_response_frame(&frame).is_err());
+    }
+
+    #[test]
+    fn unsupported_protocol_version_is_rejected_before_transcript_parsing() {
+        let payload = gzip_payload(br#"{"result":{"text":"synthetic transcript"}}"#).unwrap();
+        let mut frame = build_test_server_response_frame(-1, &payload);
+        frame[0] = 0x21;
+        assert!(parse_response_frame(&frame).is_err());
+    }
+
+    #[test]
+    fn compressed_response_cannot_expand_past_response_budget() {
+        let compressed = gzip_payload(&vec![b' '; 1_048_577]).unwrap();
+        assert!(compressed.len() < 4096);
+        assert!(ungzip_payload(&compressed).is_err());
+    }
+
+    #[test]
+    fn response_at_budget_remains_readable() {
+        let original = vec![b' '; 1_048_576];
+        let compressed = gzip_payload(&original).unwrap();
+        assert_eq!(ungzip_payload(&compressed).unwrap(), original);
+    }
+
+    #[test]
+    fn uncompressed_response_is_rejected_before_copying_oversized_payload() {
+        let payload = vec![b' '; 1_048_577];
+        let mut frame = vec![0x11, FULL_SERVER_RESPONSE << 4, JSON_SERIALIZATION << 4, 0];
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&payload);
+        let error = parse_response_frame(&frame).unwrap_err();
+        assert!(error.to_string().contains("response limit"));
+    }
 
     fn test_config(language: Option<&str>) -> SttConfig {
         SttConfig {
@@ -768,6 +849,91 @@ mod tests {
                 assert!(message.contains("Ark LLM keys"));
             }
             other => panic!("expected auth error, got {other}"),
+        }
+    }
+
+    #[test]
+    fn handshake_errors_preserve_status_without_echoing_private_response_body() {
+        for status in [400, 429, 500, 503] {
+            let response = http::Response::builder()
+                .status(status)
+                .body(Some(b"synthetic-api-key private spoken words".to_vec()))
+                .unwrap();
+            let error = map_connect_error(WsError::Http(response));
+            assert!(!error.to_string().contains("synthetic-api-key"));
+            assert!(!error.to_string().contains("private spoken words"));
+            assert_eq!(error.is_retryable(), status >= 500);
+            match error {
+                AppError::Api {
+                    status: actual,
+                    body,
+                } => {
+                    assert_eq!(actual, status);
+                    assert!(body.is_empty());
+                }
+                other => panic!("expected API status, got {other}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_logs_exclude_http_handshake_response_body() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tracing::instrument::WithSubscriber;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let private_body = "synthetic-api-key private spoken words";
+        let server = tokio::spawn(async move {
+            for _attempt in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0u8; 1];
+                    socket.read_exact(&mut byte).await.unwrap();
+                    request.push(byte[0]);
+                }
+                let response = format!(
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    private_body.len(),
+                    private_body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || TestLogWriter(writer.clone()))
+            .finish();
+        let mut provider = VolcengineDoubaoProvider::with_url(format!("ws://{address}"));
+        let error = provider
+            .connect(&test_config(None))
+            .with_subscriber(subscriber)
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        let text = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+        assert_eq!(text.matches("connect failed").count(), 2);
+        assert!(text.contains("503"));
+        assert!(!text.contains(private_body));
+        assert!(!text.contains("synthetic-api-key"));
+        assert!(!error.to_string().contains(private_body));
+    }
+
+    struct TestLogWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Write for TestLogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
         }
     }
 }

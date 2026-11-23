@@ -36,6 +36,7 @@ vi.mock('framer-motion', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'en' },
     t: (key: string) =>
       ({
         'app.name': 'OpenTypeless',

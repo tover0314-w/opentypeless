@@ -4,6 +4,7 @@ pub mod model_capabilities;
 pub mod openai;
 pub mod prompt;
 pub mod protocol;
+mod sse;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,8 @@ impl Default for LlmConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolishRequest {
+    #[serde(default)]
+    pub language_variants: std::collections::BTreeMap<String, String>,
     pub raw_text: String,
     pub context: ContextProfileSummary,
     pub dictionary: Vec<String>,
@@ -49,6 +52,35 @@ pub struct PolishRequest {
     pub selected_text: Option<String>,
     pub operation_id: Option<String>,
     pub voice_intent: crate::voice_intent::VoiceIntent,
+}
+
+impl PolishRequest {
+    pub fn translation_enabled(&self) -> bool {
+        translation_required(self.translate_enabled, Some(&self.voice_intent))
+    }
+
+    pub fn apply_language_variants(&self, prompt: &mut String) {
+        crate::language_variants::append_prompt(
+            prompt,
+            &self.language_variants,
+            self.translation_enabled()
+                .then_some(self.voice_intent.translation_target(&self.target_lang)),
+        );
+    }
+}
+
+pub(crate) fn translation_required(
+    configured: bool,
+    intent: Option<&crate::voice_intent::VoiceIntent>,
+) -> bool {
+    configured
+        || intent.is_some_and(|intent| {
+            matches!(
+                intent.kind,
+                crate::voice_intent::VoiceIntentKind::TranslateInsert
+                    | crate::voice_intent::VoiceIntentKind::TranslateSelection
+            )
+        })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,6 +157,37 @@ pub fn create_provider(
 #[cfg(test)]
 mod provider_capability_tests {
     use super::*;
+
+    #[test]
+    fn every_upstream_llm_identifier_has_a_provider_factory_route() {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        for identifier in [
+            "zhipu",
+            "deepseek",
+            "siliconflow",
+            "openai",
+            "gemini",
+            "moonshot",
+            "doubao",
+            "qwen",
+            "groq",
+            "claude",
+            "ollama",
+            "openrouter",
+            "cloud",
+        ] {
+            let provider = create_provider(identifier, Some(client.clone()));
+            assert_eq!(
+                provider.name(),
+                if identifier == "cloud" {
+                    "Cloud"
+                } else {
+                    "OpenAI"
+                },
+                "{identifier}"
+            );
+        }
+    }
 
     #[test]
     fn ollama_is_keyless_and_remote_providers_require_keys() {
@@ -237,6 +300,132 @@ mod context_prompt_contract_tests {
         assert!(prompt.contains("keep the original order"));
         assert!(prompt.contains("uncertain names"));
         assert!(prompt.contains("Do not search"));
+    }
+
+    #[test]
+    fn explicit_translation_intent_overrides_disabled_global_translation_policy() {
+        let intent = crate::voice_intent::VoiceIntent::from_parts(
+            crate::voice_intent::VoiceIntentKind::TranslateSelection,
+            crate::voice_intent::VoiceOutputPlacement::ReplaceSelection,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let prompt = build_context_system_prompt(ContextPromptOptions {
+            context: &context(ContextFamily::Email, None),
+            dictionary: &[],
+            correction_rules: &[],
+            polish_style: "clean",
+            personal_style_prompt: "",
+            mapped_scene_prompt: "",
+            active_scene_prompt: "",
+            polish_custom_prompt: "",
+            translate_enabled: false,
+            target_lang: "ja",
+            has_selected_text: true,
+            voice_intent: Some(&intent),
+        });
+        assert!(prompt.contains("translate the final result into Japanese"));
+        assert!(!prompt.contains("\nPreserve the user's language, including mixed languages."));
+    }
+
+    #[test]
+    fn spoken_target_overrides_default_in_translation_prompt() {
+        let intent = crate::voice_intent::VoiceIntent::from_parts(
+            crate::voice_intent::VoiceIntentKind::TranslateSelection,
+            crate::voice_intent::VoiceOutputPlacement::ReplaceSelection,
+            1.0,
+            None,
+            Some("ja".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        let prompt = build_context_system_prompt(ContextPromptOptions {
+            context: &context(ContextFamily::Email, None),
+            dictionary: &[],
+            correction_rules: &[],
+            polish_style: "clean",
+            personal_style_prompt: "",
+            mapped_scene_prompt: "",
+            active_scene_prompt: "",
+            polish_custom_prompt: "",
+            translate_enabled: false,
+            target_lang: "en",
+            has_selected_text: true,
+            voice_intent: Some(&intent),
+        });
+        assert!(prompt.contains("translate the final result into Japanese"));
+        assert!(!prompt.contains("translate the final result into English"));
+    }
+
+    #[test]
+    fn translation_policy_preserves_normal_dictation_and_limits_language_variants_to_target() {
+        let mut request = super::PolishRequest {
+            language_variants: std::collections::BTreeMap::from([
+                ("en".into(), "en-GB".into()),
+                ("pt".into(), "pt-BR".into()),
+            ]),
+            raw_text: "Synthetic content".into(),
+            context: context(ContextFamily::General, None),
+            dictionary: vec![],
+            correction_rules: vec![],
+            polish_style: "clean".into(),
+            mapped_scene_prompt: String::new(),
+            active_scene_prompt: String::new(),
+            polish_custom_prompt: String::new(),
+            translate_enabled: false,
+            target_lang: "en".into(),
+            selected_text: None,
+            operation_id: None,
+            voice_intent: crate::voice_intent::VoiceIntent::from_parts(
+                crate::voice_intent::VoiceIntentKind::DictateInsert,
+                crate::voice_intent::VoiceOutputPlacement::InsertAtCursor,
+                1.0,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+        };
+        assert!(!request.translation_enabled());
+        request.translate_enabled = true;
+        assert!(request.translation_enabled());
+        request.translate_enabled = false;
+        request.voice_intent = crate::voice_intent::VoiceIntent::from_parts(
+            crate::voice_intent::VoiceIntentKind::TranslateInsert,
+            crate::voice_intent::VoiceOutputPlacement::InsertAtCursor,
+            1.0,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(request.translation_enabled());
+        let mut prompt = String::new();
+        request.apply_language_variants(&mut prompt);
+        assert!(prompt.contains("UK English"));
+        assert!(!prompt.contains("Brazilian Portuguese"));
+        request.voice_intent = crate::voice_intent::VoiceIntent::from_parts(
+            crate::voice_intent::VoiceIntentKind::TranslateSelection,
+            crate::voice_intent::VoiceOutputPlacement::ReplaceSelection,
+            1.0,
+            None,
+            Some("pt".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        let mut spoken_prompt = String::new();
+        request.apply_language_variants(&mut spoken_prompt);
+        assert!(spoken_prompt.contains("Brazilian Portuguese"));
+        assert!(!spoken_prompt.contains("UK English"));
+        assert_eq!(request.target_lang, "en");
     }
 
     #[test]

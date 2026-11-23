@@ -56,6 +56,27 @@ unsafe fn restore_process_window(process_id: u32) -> bool {
 }
 
 impl ContextSignalSource for WindowsContextSource {
+    fn target_identity(&self) -> Option<TargetAppGuard> {
+        unsafe {
+            let window = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            if window.is_null() {
+                return None;
+            }
+            let mut process_id = 0u32;
+            windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+                window,
+                &mut process_id,
+            );
+            if process_id == 0 {
+                return None;
+            }
+            Some(TargetAppGuard {
+                process_id: Some(process_id),
+                native_identity: process_name(process_id),
+            })
+        }
+    }
+
     fn collect(&self) -> Option<ContextSignals> {
         unsafe { collect_foreground_context() }
     }

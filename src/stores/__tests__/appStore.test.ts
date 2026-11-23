@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useAppStore } from '../appStore'
+import { bindingFromHotkey, useAppStore } from '../appStore'
 import type { HistoryEntry, DictionaryEntry, CorrectionRule } from '../appStore'
 
 function getState() {
@@ -7,10 +7,87 @@ function getState() {
 }
 
 describe('appStore', () => {
+  it.each(['Command+Super+J', 'Meta+Cmd+J', 'win+command+j', 'Option+Alt+J'])(
+    'rejects semantic duplicate modifiers in %s',
+    (shortcut) => {
+      expect(bindingFromHotkey(shortcut)).toBeNull()
+    },
+  )
+
   beforeEach(() => {
     // Reset store to initial state
     useAppStore.setState(useAppStore.getInitialState())
   })
+
+  it.each(['\\', "'", '`'])(
+    'preserves the %s binding when configuration is reloaded',
+    (primary) => {
+      const original = getState().config
+      const binding = { primary, modifiers: ['Ctrl', 'Shift'] }
+      const bindings = [binding, { primary: '9', modifiers: ['Ctrl', 'Alt'] }]
+      const config = {
+        ...original,
+        hotkey: `Ctrl+Shift+${primary}`,
+        hotkeys: {
+          ...original.hotkeys,
+          dictation: binding,
+          dictationBindings: bindings,
+        },
+      }
+      getState().setConfig(JSON.parse(JSON.stringify(config)))
+      expect(getState().config.hotkeys.dictationBindings).toEqual(bindings)
+      expect(getState().config.hotkeys.dictation).toEqual(binding)
+      expect(getState().config.hotkey).toBe(`Ctrl+Shift+${primary}`)
+    },
+  )
+
+  it.each([
+    { volume: Number.NaN, expected: 0 },
+    { volume: Number.POSITIVE_INFINITY, expected: 0 },
+    { volume: -0.5, expected: 0 },
+    { volume: 1.5, expected: 1 },
+    { volume: 0.025, expected: 0.025 },
+  ])('normalizes microphone volume $volume without amplifying audio', ({ volume, expected }) => {
+    getState().setAudioVolume(volume)
+    expect(getState().audioVolume).toBe(expected)
+  })
+
+  it.each(['setConfig', 'updateConfig', 'applyPersistedConfigPatch'] as const)(
+    'clears model cache and connection status on endpoint changes through %s',
+    (action) => {
+      useAppStore.setState({
+        llmModels: ['old-endpoint-model'],
+        llmTestStatus: 'success',
+        llmLatencyMs: 100,
+      })
+      const config = { ...getState().config, llm_base_url: 'https://new.example/v1' }
+      getState()[action](config)
+      expect(getState().llmModels).toEqual([])
+      expect(getState().llmTestStatus).toBe('idle')
+      expect(getState().llmLatencyMs).toBeNull()
+    },
+  )
+
+  it('preserves model cache and test results for unrelated appearance changes', () => {
+    useAppStore.setState({
+      llmModels: ['current-model'],
+      llmTestStatus: 'success',
+      llmLatencyMs: 100,
+    })
+    getState().updateConfig({ theme: 'dark' })
+    expect(getState().llmModels).toEqual(['current-model'])
+    expect(getState().llmTestStatus).toBe('success')
+  })
+
+  it.each(['setConfig', 'updateConfig', 'applyPersistedConfigPatch'] as const)(
+    'clears STT connection results when service configuration changes through %s',
+    (action) => {
+      useAppStore.setState({ sttTestStatus: 'success', sttLatencyMs: 100 })
+      getState()[action]({ ...getState().config, stt_provider: 'openai-whisper' })
+      expect(getState().sttTestStatus).toBe('idle')
+      expect(getState().sttLatencyMs).toBeNull()
+    },
+  )
 
   describe('pipeline state', () => {
     it('defaults to idle', () => {
@@ -190,6 +267,7 @@ describe('appStore', () => {
         { primary: 'D', modifiers: ['Ctrl', 'Shift'] },
         { primary: 'F8', modifiers: [] },
         { primary: 'F9', modifiers: [] },
+        { primary: 'F10', modifiers: [] },
       ])
       expect(config.hotkeys.dictation).toEqual(config.hotkeys.dictationBindings[0])
       expect(config.hotkey).toBe('Ctrl+Shift+D')
@@ -316,6 +394,45 @@ describe('appStore', () => {
   })
 
   describe('savedConfig / resetConfig', () => {
+    it('merges persisted untouched roles while retaining local dictation edits', () => {
+      const original = getState().config
+      getState().setSavedConfig(original)
+      getState().updateConfig({ hotkey: 'Ctrl+Shift+K' })
+      const ask = { primary: 'J', modifiers: ['Ctrl', 'Shift'] }
+      getState().applyPersistedConfigPatch({
+        hotkeys: { ...original.hotkeys, ask, askBindings: [ask] },
+        ask_hotkey: 'Ctrl+Shift+J',
+      })
+      expect(getState().config.hotkeys.dictation.primary).toBe('K')
+      expect(getState().config.hotkeys.ask).toEqual(ask)
+      expect(getState().config.hotkeys.askBindings).toEqual([ask])
+      expect(getState().config.ask_hotkey).toBe('Ctrl+Shift+J')
+      expect(getState().savedConfig?.hotkeys.dictation).toEqual(original.hotkeys.dictation)
+      expect(getState().savedConfig?.hotkeys.ask).toEqual(ask)
+    })
+
+    it('preserves dirty shortcut edits while advancing persisted shortcuts', () => {
+      const original = getState().config
+      getState().setSavedConfig(original)
+      getState().updateConfig({ hotkey: 'Ctrl+Shift+K' })
+      const local = getState().config
+      const incoming = {
+        ...original.hotkeys,
+        dictation: { primary: 'J', modifiers: ['Ctrl', 'Shift'] },
+        dictationBindings: [{ primary: 'J', modifiers: ['Ctrl', 'Shift'] }],
+      }
+      getState().applyPersistedConfigPatch({
+        hotkeys: incoming,
+        hotkey: 'Ctrl+Shift+J',
+        history_enabled: false,
+      })
+      expect(getState().config.hotkeys).toEqual(local.hotkeys)
+      expect(getState().config.hotkey).toBe('Ctrl+Shift+K')
+      expect(getState().savedConfig?.hotkey).toBe('Ctrl+Shift+J')
+      expect(getState().savedConfig?.hotkeys.dictation.primary).toBe('J')
+      expect(getState().config.history_enabled).toBe(false)
+    })
+
     it('applyPersistedConfigPatch updates config and savedConfig for patched fields', () => {
       const saved = { ...getState().config, capsule_auto_hide: false }
       getState().setSavedConfig(saved)

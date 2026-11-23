@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-updater",
+  "description": "Update and process control for the main window",
+  "windows": ["main"],
+  "permissions": ["process:default", "updater:allow-download", "updater:allow-install"]
+}

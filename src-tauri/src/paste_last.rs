@@ -3,13 +3,17 @@
 use crate::{output, pipeline, storage};
 use tauri::{Emitter, Manager};
 
-/// Rows scanned for the newest insertable transcript; Ask answers in between are skipped.
-const LOOKBACK: u32 = 20;
+async fn latest_transcript(store: &storage::HistoryStore) -> anyhow::Result<Option<String>> {
+    store.latest_insertable_transcript().await
+}
 
 /// The text a dictation or translation row inserted: the polished output, else the raw transcript.
 /// Ask rows hold a question and an answer card, not inserted text, so they are skipped.
 pub fn transcript_text(entry: &storage::HistoryEntry) -> Option<&str> {
-    if entry.mode == "ask" {
+    if entry.mode == "ask" || storage::is_recording_only_status(entry.output_status.as_deref()) {
+        return None;
+    }
+    if entry.output_status.as_deref() == Some("fallback") && entry.polished_text.trim().is_empty() {
         return None;
     }
     [entry.polished_text.as_str(), entry.raw_text.as_str()]
@@ -19,18 +23,14 @@ pub fn transcript_text(entry: &storage::HistoryEntry) -> Option<&str> {
 }
 
 pub async fn paste_last_transcript(handle: tauri::AppHandle) {
-    let entries = match handle
-        .state::<storage::HistoryStore>()
-        .list(LOOKBACK, 0)
-        .await
-    {
-        Ok(entries) => entries,
+    let text = match latest_transcript(handle.state::<storage::HistoryStore>().inner()).await {
+        Ok(text) => text,
         Err(error) => {
             tracing::warn!("Paste last transcript: failed to read history: {error}");
             return;
         }
     };
-    let Some(text) = entries.iter().find_map(transcript_text).map(str::to_owned) else {
+    let Some(text) = text else {
         tracing::info!("Paste last transcript: history is empty");
         return;
     };
@@ -68,7 +68,10 @@ pub async fn paste_last_transcript(handle: tauri::AppHandle) {
 
     match result {
         Ok(outcome) => {
-            let _ = handle.emit("pipeline:insert_result", &outcome.insert_result);
+            let _ = handle.emit(
+                "history:paste-result",
+                serde_json::json!({ "text": text, "result": outcome.insert_result }),
+            );
         }
         Err(error) => tracing::warn!("Paste last transcript failed: {error}"),
     }
@@ -105,6 +108,96 @@ mod tests {
         .expect("history entry fixture")
     }
 
+    #[tokio::test]
+    async fn failed_generation_without_output_does_not_replace_last_transcript() {
+        let store = storage::HistoryStore::new(":memory:".into()).unwrap();
+        store
+            .add(entry("dictate", "Earlier", "Valid output"))
+            .await
+            .unwrap();
+        for mode in ["translate", "dictate"] {
+            let mut failed = entry(mode, "Untranslated source", "\u{3000}");
+            failed.output_status = Some("fallback".into());
+            assert_eq!(transcript_text(&failed), None);
+            store.add(failed).await.unwrap();
+            assert_eq!(
+                latest_transcript(&store).await.unwrap().as_deref(),
+                Some("Valid output")
+            );
+        }
+        let mut recovered = entry("dictate", "Raw", "Raw");
+        recovered.output_status = Some("fallback".into());
+        assert_eq!(transcript_text(&recovered), Some("Raw"));
+        store.add(recovered).await.unwrap();
+        assert_eq!(
+            latest_transcript(&store).await.unwrap().as_deref(),
+            Some("Raw")
+        );
+    }
+
+    #[tokio::test]
+    async fn only_failed_generation_has_no_pasteable_transcript() {
+        let store = storage::HistoryStore::new(":memory:".into()).unwrap();
+        for mode in ["translate", "dictate"] {
+            for empty_output in ["", " \t\n", "\u{3000}\u{a0}"] {
+                let mut failed = entry(mode, "Untranslated source", empty_output);
+                failed.output_status = Some("fallback".into());
+                assert_eq!(transcript_text(&failed), None);
+                store.add(failed).await.unwrap();
+                assert_eq!(latest_transcript(&store).await.unwrap(), None);
+            }
+        }
+        store
+            .add(entry("dictate", "Normal raw dictation", ""))
+            .await
+            .unwrap();
+        assert_eq!(
+            latest_transcript(&store).await.unwrap().as_deref(),
+            Some("Normal raw dictation")
+        );
+    }
+
+    #[tokio::test]
+    async fn finds_last_dictation_beyond_twenty_newer_ask_rows() {
+        let path = std::env::temp_dir().join(format!("paste-last-{}.db", uuid::Uuid::new_v4()));
+        let store = storage::HistoryStore::new(path.clone()).unwrap();
+        store
+            .add(entry("dictate", "Original", "Last dictation"))
+            .await
+            .unwrap();
+        for _index in 0..205 {
+            store.add(entry("ask", "Question", "Answer")).await.unwrap();
+        }
+        let result = latest_transcript(&store).await.unwrap();
+        drop(store);
+        let _ = std::fs::remove_file(path);
+        assert_eq!(result.as_deref(), Some("Last dictation"));
+    }
+
+    #[tokio::test]
+    async fn single_query_skips_failed_and_unicode_whitespace_rows() {
+        let path = std::env::temp_dir().join(format!("paste-query-{}.db", uuid::Uuid::new_v4()));
+        let store = storage::HistoryStore::new(path.clone()).unwrap();
+        store
+            .add(entry("translate", "raw", " Final text "))
+            .await
+            .unwrap();
+        for status in ["dismissed", "silent", "recognition_failed"] {
+            let mut failed = entry("dictate", "partial text", "");
+            failed.output_status = Some(status.to_string());
+            store.add(failed).await.unwrap();
+        }
+        store
+            .add(entry("dictate", "\u{3000}", "\u{a0}"))
+            .await
+            .unwrap();
+        store.add(entry("ask", "Question", "Answer")).await.unwrap();
+        let result = store.latest_insertable_transcript().await.unwrap();
+        drop(store);
+        let _ = std::fs::remove_file(path);
+        assert_eq!(result.as_deref(), Some("Final text"));
+    }
+
     #[test]
     fn prefers_the_polished_text_that_was_inserted() {
         assert_eq!(
@@ -125,5 +218,14 @@ mod tests {
     fn skips_ask_rows_and_empty_rows() {
         assert_eq!(transcript_text(&entry("ask", "What time is it?", "")), None);
         assert_eq!(transcript_text(&entry("dictate", " ", "")), None);
+    }
+
+    #[test]
+    fn skips_failed_recordings_even_if_partial_text_exists() {
+        for status in ["recognition_failed", "dismissed", "silent"] {
+            let mut failed = entry("dictate", "incomplete words", "");
+            failed.output_status = Some(status.to_string());
+            assert_eq!(transcript_text(&failed), None, "{status}");
+        }
     }
 }
